@@ -7,10 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0A81963A9F600E19F5F698ED /* ModelsSettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AD764C83EECDAD9A42F5993 /* ModelsSettingsScreen.swift */; };
 		2FDE1F7065F222E3906F5122 /* JobsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8762704F4A827AAB342E6E05 /* JobsView.swift */; };
 		32B148C17ADF330AB64F25B9 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B5AC231318E9580ADB309B /* AppState.swift */; };
+		3428B3A8DAFDF0891C460E3C /* ModelGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6128A7DC3799D329B8DB2FE /* ModelGroup.swift */; };
 		4540437FF944A6BA6E754CE5 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ADAB55B66952EE3BC6D9B2E /* ContentView.swift */; };
 		50A7C19DA8252ABCC743D2F2 /* ModelInstallService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B92B3F0C81C97B847246777 /* ModelInstallService.swift */; };
+		517B8995017388C7FC8E3644 /* ModelsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAB646F914C2425E3CBEE33D /* ModelsSettingsView.swift */; };
 		593A5B1DA131934EE90B4F7D /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E01B42C4D525868024537572 /* SettingsView.swift */; };
 		6C07E0AE252F7D34AF16F2C2 /* BookmarkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27994768D463D730435539F3 /* BookmarkStore.swift */; };
 		71945CF7DD78D3B6644C4EC7 /* WorkspaceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DED532C3817A6E0B1536EE8C /* WorkspaceService.swift */; };
@@ -32,6 +35,7 @@
 		22E362F775C935EB29AE832A /* ScribermanApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScribermanApp.swift; sourceTree = "<group>"; };
 		27994768D463D730435539F3 /* BookmarkStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = BookmarkStore.swift; path = Persistence/BookmarkStore.swift; sourceTree = "<group>"; };
 		5542239A238BB9A1883C5B5A /* Scriberman.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Scriberman.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		5AD764C83EECDAD9A42F5993 /* ModelsSettingsScreen.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ModelsSettingsScreen.swift; path = UI/ModelsSettingsScreen.swift; sourceTree = "<group>"; };
 		5BB3D5811B6745E46A81D7DE /* AppShellView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AppShellView.swift; path = UI/AppShellView.swift; sourceTree = "<group>"; };
 		7ADAB55B66952EE3BC6D9B2E /* ContentView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		7B92B3F0C81C97B847246777 /* ModelInstallService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ModelInstallService.swift; path = Services/ModelInstallService.swift; sourceTree = "<group>"; };
@@ -41,7 +45,9 @@
 		95199C39E12ED82DCA4C4932 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
 		A7C1BF32211A4FE21342466B /* Scriberman.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = Scriberman.entitlements; sourceTree = "<group>"; };
 		A8F3DE0F4D65F9DD94E5DEFC /* SettingsViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SettingsViewModel.swift; path = ViewModels/SettingsViewModel.swift; sourceTree = "<group>"; };
+		AAB646F914C2425E3CBEE33D /* ModelsSettingsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ModelsSettingsView.swift; path = UI/ModelsSettingsView.swift; sourceTree = "<group>"; };
 		ADD6117B43940D993554EB33 /* ServiceContainer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ServiceContainer.swift; path = Services/ServiceContainer.swift; sourceTree = "<group>"; };
+		B6128A7DC3799D329B8DB2FE /* ModelGroup.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ModelGroup.swift; path = Domain/ModelGroup.swift; sourceTree = "<group>"; };
 		BA65604F12187C96E37A1413 /* WorkspacePicker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WorkspacePicker.swift; path = UI/WorkspacePicker.swift; sourceTree = "<group>"; };
 		C4F2C579DEA6DCCA2A080BC3 /* JobsViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = JobsViewModel.swift; path = ViewModels/JobsViewModel.swift; sourceTree = "<group>"; };
 		DB0AB1FDEB9B0DFCA6700F39 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -117,6 +123,9 @@
 				E01B42C4D525868024537572 /* SettingsView.swift */,
 				5BB3D5811B6745E46A81D7DE /* AppShellView.swift */,
 				BA65604F12187C96E37A1413 /* WorkspacePicker.swift */,
+				B6128A7DC3799D329B8DB2FE /* ModelGroup.swift */,
+				AAB646F914C2425E3CBEE33D /* ModelsSettingsView.swift */,
+				5AD764C83EECDAD9A42F5993 /* ModelsSettingsScreen.swift */,
 			);
 			name = Scriberman;
 			path = Scriberman;
@@ -208,6 +217,9 @@
 				593A5B1DA131934EE90B4F7D /* SettingsView.swift in Sources */,
 				A0313B452C3199D5A6118FB9 /* AppShellView.swift in Sources */,
 				BE05D8275352276E509B5A6A /* WorkspacePicker.swift in Sources */,
+				3428B3A8DAFDF0891C460E3C /* ModelGroup.swift in Sources */,
+				517B8995017388C7FC8E3644 /* ModelsSettingsView.swift in Sources */,
+				0A81963A9F600E19F5F698ED /* ModelsSettingsScreen.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

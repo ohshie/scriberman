@@ -1,0 +1,316 @@
+import FluidAudio
+import Foundation
+
+enum ModelInstallError: LocalizedError {
+    case workspaceNotWritable
+    case stagingUnavailable
+    case downloadFailed(ModelGroup, reason: String)
+    case stagedRepositoryNotFound(ModelGroup, searched: [String])
+    case validationFailed(ModelGroup, path: URL)
+
+    var errorDescription: String? {
+        switch self {
+        case .workspaceNotWritable:
+            return "Workspace is not writable. Please re-authorize your workspace folder."
+        case .stagingUnavailable:
+            return "Could not resolve a writable FluidAudio staging directory."
+        case .downloadFailed(let group, let reason):
+            return "Failed to download \(group.title) models.\n\(reason)"
+        case .stagedRepositoryNotFound(let group, let searched):
+            let searchSummary = searched.joined(separator: "\n")
+            return "Could not locate staged model repo for \(group.title).\nSearched:\n\(searchSummary)"
+        case .validationFailed(let group, let path):
+            return "Installed files for \(group.title) are incomplete at \(path.path)."
+        }
+    }
+}
+
+actor ModelInstallService {
+    private let workspaceService: WorkspaceService
+    private let fileManager = FileManager.default
+
+    init(workspaceService: WorkspaceService) {
+        self.workspaceService = workspaceService
+    }
+
+    func ensureWorkspaceWriteAccess() async throws -> Workspace {
+        try await workspaceService.requireWritableWorkspace()
+    }
+
+    func canInstallModels() async -> Bool {
+        do {
+            _ = try await ensureWorkspaceWriteAccess()
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    func state(for group: ModelGroup) async -> ModelGroupReadinessState {
+        guard let workspace = await workspaceService.currentWorkspace() else {
+            return .missing
+        }
+
+        let repoURL = workspace.modelsURL.appendingPathComponent(group.repoFolderName, isDirectory: true)
+        do {
+            return try validateInstalledRepo(for: group, at: repoURL) ? .ready : .missing
+        } catch {
+            return .error
+        }
+    }
+
+    @discardableResult
+    func installModelGroup(
+        _ group: ModelGroup,
+        progress: (@Sendable (ModelGroupReadinessState) -> Void)? = nil
+    ) async throws -> URL {
+        let workspace: Workspace
+        do {
+            workspace = try await ensureWorkspaceWriteAccess()
+        } catch {
+            throw ModelInstallError.workspaceNotWritable
+        }
+
+        // Best-effort pre-cleanup so stale staged repos never short-circuit a fresh install.
+        cleanupStagingCache(for: group)
+
+        progress?(.downloading)
+        do {
+            try await triggerFluidAudioDownload(for: group)
+        } catch {
+            throw mapDownloadError(error, for: group)
+        }
+
+        let stagingLookup = locateStagedRepository(for: group)
+        guard let stagedRepoURL = stagingLookup.repoURL else {
+            throw ModelInstallError.stagedRepositoryNotFound(group, searched: stagingLookup.searchedPaths)
+        }
+
+        progress?(.installing)
+        let installedURL = try installAtomically(
+            group: group,
+            stagedRepoURL: stagedRepoURL,
+            workspaceModelsURL: workspace.modelsURL
+        )
+
+        let isValid = try validateInstalledRepo(for: group, at: installedURL)
+        guard isValid else {
+            throw ModelInstallError.validationFailed(group, path: installedURL)
+        }
+
+        cleanupStagingCache(for: group)
+        return installedURL
+    }
+
+    private func mapDownloadError(_ error: Error, for group: ModelGroup) -> Error {
+        let nsError = error as NSError
+
+        if nsError.domain == NSURLErrorDomain {
+            let failingHost = (nsError.userInfo[NSURLErrorFailingURLErrorKey] as? URL)?
+                .host ?? (nsError.userInfo[NSURLErrorFailingURLStringErrorKey] as? String)
+
+            let urlError = URLError.Code(rawValue: nsError.code)
+            switch urlError {
+            case .cannotFindHost, .dnsLookupFailed:
+                return ModelInstallError.downloadFailed(
+                    group,
+                    reason: "DNS lookup failed for \(failingHost ?? "remote host"). Check internet access, DNS, VPN/proxy settings, then retry."
+                )
+            case .notConnectedToInternet, .networkConnectionLost, .cannotConnectToHost, .timedOut:
+                return ModelInstallError.downloadFailed(
+                    group,
+                    reason: "Network connection to model host failed (\(failingHost ?? "unknown host")). Check connectivity and retry."
+                )
+            default:
+                break
+            }
+        }
+
+        return ModelInstallError.downloadFailed(group, reason: error.localizedDescription)
+    }
+
+    // MARK: - Download (FluidAudio helpers)
+
+    private func triggerFluidAudioDownload(for group: ModelGroup) async throws {
+        let stagingRoot = try preparePrimaryStagingRoot()
+
+        switch group {
+        case .asrParakeetV3:
+            try await DownloadUtils.downloadRepo(.parakeet, to: stagingRoot)
+
+        case .vadSilero:
+            try await DownloadUtils.downloadRepo(.vad, to: stagingRoot)
+
+        case .diarization:
+            try await DownloadUtils.downloadRepo(.diarizer, to: stagingRoot)
+        }
+    }
+
+    private func preparePrimaryStagingRoot() throws -> URL {
+        guard let root = stagingSearchRoots().first else {
+            throw ModelInstallError.stagingUnavailable
+        }
+
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    // MARK: - Staging lookup (task 5.2 spike)
+
+    private struct StagingLookupResult {
+        let repoURL: URL?
+        let searchedPaths: [String]
+    }
+
+    private func locateStagedRepository(for group: ModelGroup) -> StagingLookupResult {
+        var searched: [String] = []
+
+        for root in stagingSearchRoots() {
+            let candidate = root.appendingPathComponent(group.repoFolderName, isDirectory: true)
+            searched.append(candidate.path)
+
+            var isDirectory: ObjCBool = false
+            if fileManager.fileExists(atPath: candidate.path, isDirectory: &isDirectory), isDirectory.boolValue {
+                return StagingLookupResult(repoURL: candidate, searchedPaths: searched)
+            }
+        }
+
+        return StagingLookupResult(repoURL: nil, searchedPaths: searched)
+    }
+
+    private func stagingSearchRoots() -> [URL] {
+        var roots: [URL] = []
+
+        if let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            roots.append(appSupport.appendingPathComponent("FluidAudio", isDirectory: true).appendingPathComponent("Models", isDirectory: true))
+        }
+
+        if let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            roots.append(caches.appendingPathComponent("FluidAudio", isDirectory: true).appendingPathComponent("Models", isDirectory: true))
+        }
+
+        return roots
+    }
+
+    // MARK: - Atomic install
+
+    private func installAtomically(
+        group: ModelGroup,
+        stagedRepoURL: URL,
+        workspaceModelsURL: URL
+    ) throws -> URL {
+        try fileManager.createDirectory(at: workspaceModelsURL, withIntermediateDirectories: true)
+
+        let finalURL = workspaceModelsURL.appendingPathComponent(group.repoFolderName, isDirectory: true)
+        let partialURL = workspaceModelsURL.appendingPathComponent("\(group.repoFolderName).partial", isDirectory: true)
+        let backupURL = workspaceModelsURL.appendingPathComponent("\(group.repoFolderName).backup", isDirectory: true)
+
+        try removeIfExists(partialURL)
+        try removeIfExists(backupURL)
+
+        do {
+            try fileManager.copyItem(at: stagedRepoURL, to: partialURL)
+
+            guard try validateInstalledRepo(for: group, at: partialURL) else {
+                throw ModelInstallError.validationFailed(group, path: partialURL)
+            }
+
+            if fileManager.fileExists(atPath: finalURL.path) {
+                try fileManager.moveItem(at: finalURL, to: backupURL)
+            }
+
+            try fileManager.moveItem(at: partialURL, to: finalURL)
+            try removeIfExists(backupURL)
+        } catch {
+            try? removeIfExists(partialURL)
+
+            if fileManager.fileExists(atPath: backupURL.path), !fileManager.fileExists(atPath: finalURL.path) {
+                try? fileManager.moveItem(at: backupURL, to: finalURL)
+            }
+
+            throw error
+        }
+
+        return finalURL
+    }
+
+    private func removeIfExists(_ url: URL) throws {
+        if fileManager.fileExists(atPath: url.path) {
+            try fileManager.removeItem(at: url)
+        }
+    }
+
+    // MARK: - Validation
+
+    private func validateInstalledRepo(for group: ModelGroup, at repoURL: URL) throws -> Bool {
+        switch group {
+        case .asrParakeetV3:
+            let modelFilesPresent = requiredFilesExist(in: repoURL, required: ModelNames.ASR.requiredModels)
+            let vocabName = ModelNames.ASR.vocabulary(for: .parakeet)
+            let vocabPresent = fileManager.fileExists(
+                atPath: repoURL.appendingPathComponent(vocabName, isDirectory: false).path
+            )
+            return modelFilesPresent && vocabPresent
+
+        case .vadSilero:
+            return requiredFilesExist(in: repoURL, required: ModelNames.VAD.requiredModels)
+
+        case .diarization:
+            return requiredFilesExist(in: repoURL, required: ModelNames.Diarizer.requiredModels)
+        }
+    }
+
+    private func requiredFilesExist(in repoURL: URL, required: Set<String>) -> Bool {
+        required.allSatisfy { relativePath in
+            let candidate = repoURL.appendingPathComponent(relativePath, isDirectory: true)
+            return fileManager.fileExists(atPath: candidate.path)
+        }
+    }
+
+    // MARK: - Cache cleanup
+
+    private func cleanupStagingCache(for group: ModelGroup) {
+        let roots = stagingSearchRoots()
+        guard !roots.isEmpty else { return }
+
+        let repoName: Repo
+        switch group {
+        case .asrParakeetV3:
+            repoName = .parakeet
+        case .vadSilero:
+            repoName = .vad
+        case .diarization:
+            repoName = .diarizer
+        }
+
+        for root in roots {
+            DownloadUtils.clearModelCache(forRepo: repoName, directory: root)
+
+            let directRepo = root.appendingPathComponent(group.repoFolderName, isDirectory: true)
+            let partialRepo = root.appendingPathComponent("\(group.repoFolderName).partial", isDirectory: true)
+            let backupRepo = root.appendingPathComponent("\(group.repoFolderName).backup", isDirectory: true)
+
+            do {
+                try removeIfExists(directRepo)
+            } catch {
+                NSLog("[ModelInstallService] Failed to remove staged repo at %@: %@", directRepo.path, String(describing: error))
+            }
+
+            do {
+                try removeIfExists(partialRepo)
+            } catch {
+                NSLog("[ModelInstallService] Failed to remove partial repo at %@: %@", partialRepo.path, String(describing: error))
+            }
+
+            do {
+                try removeIfExists(backupRepo)
+            } catch {
+                NSLog("[ModelInstallService] Failed to remove backup repo at %@: %@", backupRepo.path, String(describing: error))
+            }
+
+            if fileManager.fileExists(atPath: directRepo.path) {
+                NSLog("[ModelInstallService] Staged repo still exists after cleanup: %@", directRepo.path)
+            }
+        }
+    }
+}
