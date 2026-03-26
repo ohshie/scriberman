@@ -111,9 +111,9 @@ actor TranscriptionService {
         diarizedSegments: [TimedSpeakerSegment]
     ) -> Transcript {
         let cleanedWords = tokenTimings.compactMap { timing -> TimedWord? in
-            let token = normalizeToken(timing.token)
-            guard !token.isEmpty else { return nil }
-            return TimedWord(text: token, start: Float(timing.startTime), end: Float(timing.endTime))
+            let tokenPiece = normalizeTokenPiece(timing.token)
+            guard !tokenPiece.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return TimedWord(text: tokenPiece, start: Float(timing.startTime), end: Float(timing.endTime))
         }
 
         let sortedDiarized = diarizedSegments.sorted { $0.startTimeSeconds < $1.startTimeSeconds }
@@ -125,7 +125,7 @@ actor TranscriptionService {
                     .filter {
                         $0.end > segment.startTimeSeconds && $0.start < segment.endTimeSeconds
                     }
-                let text = words.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+                let text = stitchTokens(words.map(\.text))
                 guard !text.isEmpty else { return nil }
                 return TranscriptSegment(
                     speakerId: segment.speakerId,
@@ -184,10 +184,16 @@ actor TranscriptionService {
         )
     }
 
-    private func normalizeToken(_ token: String) -> String {
-        token
-            .replacingOccurrences(of: "▁", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+    private func normalizeTokenPiece(_ token: String) -> String {
+        token.replacingOccurrences(of: "▁", with: " ")
+    }
+
+    private func stitchTokens(_ tokens: [String]) -> String {
+        var text = tokens.joined()
+        text = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: "\\s+([,.!?;:])", with: "$1", options: .regularExpression)
+        text = text.replacingOccurrences(of: "(?<=\\p{L})\\s+'\\s*(?=\\p{L})", with: "'", options: .regularExpression)
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func speakerColorHex(at index: Int) -> String {
