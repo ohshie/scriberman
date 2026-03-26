@@ -21,7 +21,7 @@ struct StudioView: View {
 
             case .recording(let duration, let level):
                 VStack(spacing: 16) {
-                    AudioLevelWaveform(level: level)
+                    WaveformView(level: .constant(level))
                     Text(durationText(duration))
                         .font(.title3)
                         .monospacedDigit()
@@ -57,28 +57,5 @@ struct StudioView: View {
         let minutes = totalSeconds / 60
         let seconds = totalSeconds % 60
         return String(format: "%02d:%02d", minutes, seconds)
-    }
-}
-
-private struct AudioLevelWaveform: View {
-    let level: Float
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ForEach(0..<22, id: \.self) { index in
-                Capsule()
-                    .fill(Color.accentColor.opacity(0.25 + (Double(index) / 40.0)))
-                    .frame(width: 6, height: barHeight(for: index))
-            }
-        }
-        .frame(height: 72)
-        .padding(.horizontal, 4)
-    }
-
-    private func barHeight(for index: Int) -> CGFloat {
-        let normalizedLevel = max(0, min(1, CGFloat(level)))
-        let spread = abs(CGFloat(index - 11)) / 11
-        let emphasis = max(0.18, 1 - (spread * 0.8))
-        return 12 + (60 * normalizedLevel * emphasis)
     }
 }
