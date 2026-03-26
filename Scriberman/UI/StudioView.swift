@@ -42,9 +42,11 @@ struct StudioView: View {
                         .font(.headline)
 
                     Button("Transcribe (\(ctaSecondsRemaining)s)") {
-                        if let session = viewModel.consumeSessionForTranscribeCTA() {
-                            appState.jobsViewModel.transcribe(session: session, context: modelContext)
-                            appState.selectTab(.jobs)
+                        Task { @MainActor in
+                            if let session = viewModel.consumeSessionForTranscribeCTA() {
+                                appState.jobsViewModel.transcribe(session: session, context: modelContext)
+                                appState.selectTab(.jobs)
+                            }
                         }
                     }
                     .buttonStyle(.borderedProminent)

@@ -1,6 +1,5 @@
 import FluidAudio
 import Foundation
-import SwiftData
 
 enum TranscriptionError: LocalizedError {
     case missingAudioFile
@@ -65,26 +64,18 @@ actor TranscriptionService {
         }
     }
 
-    func transcribe(session: RecordingSession, workspace: Workspace, context: ModelContext) async {
-        do {
-            try await prepareModels(workspace: workspace)
-        } catch {
-            updateErrorState(for: session, in: context, message: error.localizedDescription)
-            return
-        }
+    func transcribe(audioURL: URL, workspace: Workspace) async throws -> Transcript {
+        try await prepareModels(workspace: workspace)
 
-        let audioURL = URL(fileURLWithPath: session.audioURL)
         guard fileManager.fileExists(atPath: audioURL.path) else {
-            updateErrorState(for: session, in: context, message: TranscriptionError.missingAudioFile.localizedDescription)
-            return
+            throw TranscriptionError.missingAudioFile
         }
 
         let samples: [Float]
         do {
             samples = try AudioConverter().resampleAudioFile(audioURL)
         } catch {
-            updateErrorState(for: session, in: context, message: error.localizedDescription)
-            return
+            throw TranscriptionError.failedToTranscribe(error.localizedDescription)
         }
 
         let asrResult: ASRResult
@@ -94,8 +85,7 @@ actor TranscriptionService {
             try await asrManager.initialize(models: asrModels)
             asrResult = try await asrManager.transcribe(samples, source: .system)
         } catch {
-            updateErrorState(for: session, in: context, message: error.localizedDescription)
-            return
+            throw TranscriptionError.failedToTranscribe(error.localizedDescription)
         }
 
         let diarizationResult: DiarizationResult
@@ -105,34 +95,14 @@ actor TranscriptionService {
             diarizerManager.initialize(models: diarizerModels)
             diarizationResult = try diarizerManager.performCompleteDiarization(samples, sampleRate: 16_000)
         } catch {
-            updateErrorState(for: session, in: context, message: error.localizedDescription)
-            return
+            throw TranscriptionError.failedToTranscribe(error.localizedDescription)
         }
 
-        let transcript = alignTranscript(
+        return alignTranscript(
             fullText: asrResult.text,
             tokenTimings: asrResult.tokenTimings ?? [],
             diarizedSegments: diarizationResult.segments
         )
-
-        session.transcript = transcript
-        session.status = .done
-        session.errorMessage = nil
-        do {
-            try context.save()
-        } catch {
-            updateErrorState(for: session, in: context, message: error.localizedDescription)
-        }
-    }
-
-    private func updateErrorState(for session: RecordingSession, in context: ModelContext, message: String) {
-        session.status = .error(message)
-        session.errorMessage = message
-        do {
-            try context.save()
-        } catch {
-            return
-        }
     }
 
     private func alignTranscript(

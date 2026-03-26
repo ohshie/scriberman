@@ -74,17 +74,12 @@ actor RecordingService {
             let inputNode = audioEngine.inputNode
             let inputFormat = inputNode.inputFormat(forBus: 0)
 
-            let outputSettings: [String: Any] = [
-                AVFormatIDKey: kAudioFormatLinearPCM,
-                AVSampleRateKey: 44_100.0,
-                AVNumberOfChannelsKey: 2,
-                AVLinearPCMBitDepthKey: 16,
-                AVLinearPCMIsFloatKey: false,
-                AVLinearPCMIsBigEndianKey: false,
-                AVLinearPCMIsNonInterleaved: false
-            ]
-
-            let audioFile = try AVAudioFile(forWriting: fileURL, settings: outputSettings)
+            let audioFile = try AVAudioFile(
+                forWriting: fileURL,
+                settings: inputFormat.settings,
+                commonFormat: inputFormat.commonFormat,
+                interleaved: inputFormat.isInterleaved
+            )
 
             inputNode.removeTap(onBus: 0)
             inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, _ in
