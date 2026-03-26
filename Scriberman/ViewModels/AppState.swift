@@ -13,7 +13,10 @@ final class AppState: ObservableObject {
 
     init(services: ServiceContainer = .live()) {
         self.services = services
-        self.studioViewModel = StudioViewModel(workspaceService: services.workspaceService)
+        self.studioViewModel = StudioViewModel(
+            workspaceService: services.workspaceService,
+            recordingService: services.recordingService
+        )
         self.jobsViewModel = JobsViewModel(workspaceService: services.workspaceService)
         self.settingsViewModel = SettingsViewModel(
             workspaceService: services.workspaceService,
