@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 enum TranscriptExportError: LocalizedError {
     case transcriptUnavailable
@@ -26,7 +27,7 @@ final class TranscriptExportService {
         panel.title = "Export Transcript"
         panel.prompt = "Export"
         panel.canCreateDirectories = true
-        panel.allowedFileTypes = ["md"]
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
         panel.nameFieldStringValue = defaultFileName(for: session.title)
 
         guard panel.runModal() == .OK, let destinationURL = panel.url else {
