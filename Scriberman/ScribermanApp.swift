@@ -4,7 +4,22 @@ import SwiftData
 
 @main
 struct ScribermanApp: App {
-    @StateObject private var appState = AppState()
+    @StateObject private var appState: AppState
+    private let modelContainer: ModelContainer
+
+    init() {
+        do {
+            let modelContainer = try ModelContainer(for: RecordingSession.self)
+            self.modelContainer = modelContainer
+            _appState = StateObject(
+                wrappedValue: AppState(
+                    services: ServiceContainer.live(modelContainer: modelContainer)
+                )
+            )
+        } catch {
+            fatalError("Failed to initialize app model container: \(error.localizedDescription)")
+        }
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -14,6 +29,6 @@ struct ScribermanApp: App {
                     await appState.bootstrapWorkspace()
                 }
         }
-        .modelContainer(for: [RecordingSession.self])
+        .modelContainer(modelContainer)
     }
 }
