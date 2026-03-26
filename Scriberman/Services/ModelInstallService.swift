@@ -107,7 +107,7 @@ actor ModelInstallService {
 
         if nsError.domain == NSURLErrorDomain {
             let failingHost = (nsError.userInfo[NSURLErrorFailingURLErrorKey] as? URL)?
-                .host ?? (nsError.userInfo[NSURLErrorFailingURLStringErrorKey] as? String)
+                .host ?? (nsError.userInfo[NSURLErrorFailingURLErrorKey] as? String)
 
             let urlError = URLError.Code(rawValue: nsError.code)
             switch urlError {
