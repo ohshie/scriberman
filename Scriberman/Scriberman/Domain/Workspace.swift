@@ -1,6 +1,13 @@
 import Foundation
 
 struct Workspace: Equatable {
-    let url: URL
-    let isAccessible: Bool
+    let rootURL: URL
+
+    var modelsURL: URL {
+        rootURL.appendingPathComponent("models", isDirectory: true)
+    }
+
+    var jobsURL: URL {
+        rootURL.appendingPathComponent("jobs", isDirectory: true)
+    }
 }

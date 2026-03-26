@@ -7,10 +7,12 @@ struct ServiceContainer {
 
     static func live() -> ServiceContainer {
         let bookmarkStore = UserDefaultsBookmarkStore()
+        let workspaceService = WorkspaceService(bookmarkStore: bookmarkStore)
+
         return ServiceContainer(
             bookmarkStore: bookmarkStore,
-            workspaceService: WorkspaceService(bookmarkStore: bookmarkStore),
-            modelInstallService: ModelInstallService()
+            workspaceService: workspaceService,
+            modelInstallService: ModelInstallService(workspaceService: workspaceService)
         )
     }
 }

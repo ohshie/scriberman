@@ -9,6 +9,9 @@ struct ScribermanApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(appState)
+                .task {
+                    await appState.bootstrapWorkspace()
+                }
         }
     }
 }

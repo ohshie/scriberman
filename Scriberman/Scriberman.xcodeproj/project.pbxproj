@@ -21,6 +21,7 @@
 		96AFFA802A8DCCDE404942A8 /* StudioViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B74C9A9619316097B8D3CF3 /* StudioViewModel.swift */; };
 		9B0A47F88ECCCF249F0581C9 /* ScribermanApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22E362F775C935EB29AE832A /* ScribermanApp.swift */; };
 		A0313B452C3199D5A6118FB9 /* AppShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BB3D5811B6745E46A81D7DE /* AppShellView.swift */; };
+		BE05D8275352276E509B5A6A /* WorkspacePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA65604F12187C96E37A1413 /* WorkspacePicker.swift */; };
 		C1FA647DFB390E0F7F423246 /* StudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2EF783126F2387C1A7C21F4 /* StudioView.swift */; };
 		C3EE37FB3F5E384076FF1B4E /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = DDA5336F2945D8E09B308BC2 /* FluidAudio */; };
 		EF15FDA2B169C6BE3CB9FB4A /* Workspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DFBA039128F2B74BE4BB578 /* Workspace.swift */; };
@@ -41,6 +42,7 @@
 		A7C1BF32211A4FE21342466B /* Scriberman.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = Scriberman.entitlements; sourceTree = "<group>"; };
 		A8F3DE0F4D65F9DD94E5DEFC /* SettingsViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SettingsViewModel.swift; path = ViewModels/SettingsViewModel.swift; sourceTree = "<group>"; };
 		ADD6117B43940D993554EB33 /* ServiceContainer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ServiceContainer.swift; path = Services/ServiceContainer.swift; sourceTree = "<group>"; };
+		BA65604F12187C96E37A1413 /* WorkspacePicker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WorkspacePicker.swift; path = UI/WorkspacePicker.swift; sourceTree = "<group>"; };
 		C4F2C579DEA6DCCA2A080BC3 /* JobsViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = JobsViewModel.swift; path = ViewModels/JobsViewModel.swift; sourceTree = "<group>"; };
 		DB0AB1FDEB9B0DFCA6700F39 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		DED532C3817A6E0B1536EE8C /* WorkspaceService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WorkspaceService.swift; path = Services/WorkspaceService.swift; sourceTree = "<group>"; };
@@ -114,6 +116,7 @@
 				8762704F4A827AAB342E6E05 /* JobsView.swift */,
 				E01B42C4D525868024537572 /* SettingsView.swift */,
 				5BB3D5811B6745E46A81D7DE /* AppShellView.swift */,
+				BA65604F12187C96E37A1413 /* WorkspacePicker.swift */,
 			);
 			name = Scriberman;
 			path = Scriberman;
@@ -204,6 +207,7 @@
 				2FDE1F7065F222E3906F5122 /* JobsView.swift in Sources */,
 				593A5B1DA131934EE90B4F7D /* SettingsView.swift in Sources */,
 				A0313B452C3199D5A6118FB9 /* AppShellView.swift in Sources */,
+				BE05D8275352276E509B5A6A /* WorkspacePicker.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
