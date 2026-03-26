@@ -13,9 +13,11 @@ final class StudioViewModel: ObservableObject {
     private var recordingMonitorTask: Task<Void, Never>?
     private var ctaCountdownTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
+    private var stoppedSessionForCTA: RecordingSession?
 
     @Published var recordingState: RecordingState = .idle
     @Published var errorMessage: String?
+    var onSessionStopped: ((RecordingSession) -> Void)?
 
     init(workspaceService: WorkspaceService, recordingService: RecordingService) {
         self.workspaceService = workspaceService
@@ -53,14 +55,19 @@ final class StudioViewModel: ObservableObject {
             return
         }
 
+        stoppedSessionForCTA = session
         recordingState = .stopped(session: session, ctaSecondsRemaining: 15)
+        onSessionStopped?(session)
         startCtaCountdown()
     }
 
-    func transcribeCTASelected() {
+    func consumeSessionForTranscribeCTA() -> RecordingSession? {
         ctaCountdownTask?.cancel()
         ctaCountdownTask = nil
+        let session = stoppedSessionForCTA
+        stoppedSessionForCTA = nil
         recordingState = .idle
+        return session
     }
 
     private func startRecordingMonitor() {
@@ -93,6 +100,7 @@ final class StudioViewModel: ObservableObject {
                     return
                 }
                 if remaining <= 0 {
+                    stoppedSessionForCTA = nil
                     recordingState = .idle
                 } else {
                     recordingState = .stopped(session: session, ctaSecondsRemaining: remaining)
