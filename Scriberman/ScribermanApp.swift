@@ -1,5 +1,6 @@
 import SwiftUI
 import FluidAudio
+import SwiftData
 
 @main
 struct ScribermanApp: App {
@@ -13,5 +14,6 @@ struct ScribermanApp: App {
                     await appState.bootstrapWorkspace()
                 }
         }
+        .modelContainer(for: [RecordingSession.self])
     }
 }

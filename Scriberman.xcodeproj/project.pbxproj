@@ -3,12 +3,17 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 46;
+	objectVersion = 54;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		0A81963A9F600E19F5F698ED /* ModelsSettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AD764C83EECDAD9A42F5993 /* ModelsSettingsScreen.swift */; };
 		2FDE1F7065F222E3906F5122 /* JobsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8762704F4A827AAB342E6E05 /* JobsView.swift */; };
+		2A2B3C4D5E6F708192A3B4C5 /* RecordingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4C5 /* RecordingSession.swift */; };
+		2A2B3C4D5E6F708192A3B4C6 /* RecordingStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4C6 /* RecordingStatus.swift */; };
+		2A2B3C4D5E6F708192A3B4C7 /* Transcript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4C7 /* Transcript.swift */; };
+		2A2B3C4D5E6F708192A3B4C8 /* TranscriptSegment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4C8 /* TranscriptSegment.swift */; };
+		2A2B3C4D5E6F708192A3B4C9 /* TranscriptSpeaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4C9 /* TranscriptSpeaker.swift */; };
 		32B148C17ADF330AB64F25B9 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B5AC231318E9580ADB309B /* AppState.swift */; };
 		3428B3A8DAFDF0891C460E3C /* ModelGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6128A7DC3799D329B8DB2FE /* ModelGroup.swift */; };
 		4540437FF944A6BA6E754CE5 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ADAB55B66952EE3BC6D9B2E /* ContentView.swift */; };
@@ -32,6 +37,11 @@
 
 /* Begin PBXFileReference section */
 		0B74C9A9619316097B8D3CF3 /* StudioViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = StudioViewModel.swift; path = ViewModels/StudioViewModel.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F708192A3B4C5 /* RecordingSession.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RecordingSession.swift; path = Domain/RecordingSession.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F708192A3B4C6 /* RecordingStatus.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RecordingStatus.swift; path = Domain/RecordingStatus.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F708192A3B4C7 /* Transcript.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = Transcript.swift; path = Domain/Transcript.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F708192A3B4C8 /* TranscriptSegment.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TranscriptSegment.swift; path = Domain/TranscriptSegment.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F708192A3B4C9 /* TranscriptSpeaker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TranscriptSpeaker.swift; path = Domain/TranscriptSpeaker.swift; sourceTree = "<group>"; };
 		22E362F775C935EB29AE832A /* ScribermanApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScribermanApp.swift; sourceTree = "<group>"; };
 		27994768D463D730435539F3 /* BookmarkStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = BookmarkStore.swift; path = Persistence/BookmarkStore.swift; sourceTree = "<group>"; };
 		5542239A238BB9A1883C5B5A /* Scriberman.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Scriberman.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -124,10 +134,14 @@
 				5BB3D5811B6745E46A81D7DE /* AppShellView.swift */,
 				BA65604F12187C96E37A1413 /* WorkspacePicker.swift */,
 				B6128A7DC3799D329B8DB2FE /* ModelGroup.swift */,
+				1A2B3C4D5E6F708192A3B4C5 /* RecordingSession.swift */,
+				1A2B3C4D5E6F708192A3B4C6 /* RecordingStatus.swift */,
+				1A2B3C4D5E6F708192A3B4C7 /* Transcript.swift */,
+				1A2B3C4D5E6F708192A3B4C8 /* TranscriptSegment.swift */,
+				1A2B3C4D5E6F708192A3B4C9 /* TranscriptSpeaker.swift */,
 				AAB646F914C2425E3CBEE33D /* ModelsSettingsView.swift */,
 				5AD764C83EECDAD9A42F5993 /* ModelsSettingsScreen.swift */,
 			);
-			name = Scriberman;
 			path = Scriberman;
 			sourceTree = "<group>";
 		};
@@ -172,11 +186,9 @@
 				Base,
 			);
 			mainGroup = 833D237DF391F82B6A6CE6E7;
-			minimizedProjectReferenceProxies = 0;
 			packageReferences = (
 				C9C9D7C4E41BA2318ED6E595 /* XCRemoteSwiftPackageReference "FluidAudio" */,
 			);
-			preferredProjectObjectVersion = 77;
 			productRefGroup = 43993D81DB3C75CD2DC1BB1F /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -218,6 +230,11 @@
 				A0313B452C3199D5A6118FB9 /* AppShellView.swift in Sources */,
 				BE05D8275352276E509B5A6A /* WorkspacePicker.swift in Sources */,
 				3428B3A8DAFDF0891C460E3C /* ModelGroup.swift in Sources */,
+				2A2B3C4D5E6F708192A3B4C5 /* RecordingSession.swift in Sources */,
+				2A2B3C4D5E6F708192A3B4C6 /* RecordingStatus.swift in Sources */,
+				2A2B3C4D5E6F708192A3B4C7 /* Transcript.swift in Sources */,
+				2A2B3C4D5E6F708192A3B4C8 /* TranscriptSegment.swift in Sources */,
+				2A2B3C4D5E6F708192A3B4C9 /* TranscriptSpeaker.swift in Sources */,
 				517B8995017388C7FC8E3644 /* ModelsSettingsView.swift in Sources */,
 				0A81963A9F600E19F5F698ED /* ModelsSettingsScreen.swift in Sources */,
 			);
@@ -289,7 +306,10 @@
 				CODE_SIGN_ENTITLEMENTS = Scriberman/Scriberman.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
 				INFOPLIST_FILE = Scriberman/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.scriberman.app;
 				PRODUCT_NAME = Scriberman;
@@ -370,7 +390,10 @@
 				CODE_SIGN_ENTITLEMENTS = Scriberman/Scriberman.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
 				INFOPLIST_FILE = Scriberman/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.scriberman.app;
 				PRODUCT_NAME = Scriberman;
