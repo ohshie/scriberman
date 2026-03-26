@@ -2,11 +2,18 @@ import Foundation
 
 @MainActor
 final class AppState: ObservableObject {
+    enum Tab: Hashable {
+        case studio
+        case jobs
+        case settings
+    }
+
     let services: ServiceContainer
     let studioViewModel: StudioViewModel
     let jobsViewModel: JobsViewModel
     let settingsViewModel: SettingsViewModel
 
+    @Published var selectedTab: Tab = .studio
     @Published private(set) var workspace: Workspace?
     @Published private(set) var workspaceErrorMessage: String?
     @Published var workspaceSelectionRequired = false
@@ -25,6 +32,13 @@ final class AppState: ObservableObject {
             workspaceService: services.workspaceService,
             modelInstallService: services.modelInstallService
         )
+        self.studioViewModel.onSessionStopped = { [weak self] _ in
+            self?.selectedTab = .jobs
+        }
+    }
+
+    func selectTab(_ tab: Tab) {
+        selectedTab = tab
     }
 
     func bootstrapWorkspace() async {

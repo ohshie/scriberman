@@ -1,7 +1,10 @@
+import SwiftData
 import SwiftUI
 
 struct StudioView: View {
     @ObservedObject var viewModel: StudioViewModel
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.modelContext) private var modelContext
 
     var body: some View {
         VStack(spacing: 20) {
@@ -39,7 +42,10 @@ struct StudioView: View {
                         .font(.headline)
 
                     Button("Transcribe (\(ctaSecondsRemaining)s)") {
-                        viewModel.transcribeCTASelected()
+                        if let session = viewModel.consumeSessionForTranscribeCTA() {
+                            appState.jobsViewModel.transcribe(session: session, context: modelContext)
+                            appState.selectTab(.jobs)
+                        }
                     }
                     .buttonStyle(.borderedProminent)
                 }
