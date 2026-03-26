@@ -4,8 +4,10 @@ import SwiftUI
 struct TranscriptDetailView: View {
     let session: RecordingSession
 
+    @EnvironmentObject private var appState: AppState
     @Environment(\.modelContext) private var modelContext
     @FocusState private var titleFocused: Bool
+    @State private var exportAlertMessage: String?
 
     var body: some View {
         List {
@@ -42,9 +44,24 @@ struct TranscriptDetailView: View {
 
             ToolbarItem(placement: .primaryAction) {
                 Button("Export") {
+                    Task {
+                        await exportTranscript()
+                    }
                 }
                 .disabled(!isDone)
             }
+        }
+        .alert("Transcript Export", isPresented: Binding(
+            get: { exportAlertMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    exportAlertMessage = nil
+                }
+            }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(exportAlertMessage ?? "")
         }
     }
 
@@ -72,5 +89,16 @@ struct TranscriptDetailView: View {
 
     private func saveTitleIfNeeded() {
         try? modelContext.save()
+    }
+
+    private func exportTranscript() async {
+        do {
+            try await appState.services.transcriptExportService.export(session: session)
+            exportAlertMessage = "Transcript exported successfully."
+        } catch TranscriptExportError.exportCancelled {
+            exportAlertMessage = nil
+        } catch {
+            exportAlertMessage = error.localizedDescription
+        }
     }
 }

@@ -21,6 +21,7 @@
 		2A2B3C4D5E6F708192A3B4CE /* TranscriptDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4CE /* TranscriptDetailView.swift */; };
 		2A2B3C4D5E6F708192A3B4CF /* TranscriptSegmentRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4CF /* TranscriptSegmentRow.swift */; };
 		2A2B3C4D5E6F708192A3B4D0 /* TimeFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4D0 /* TimeFormatter.swift */; };
+		2A2B3C4D5E6F708192A3B4D1 /* TranscriptExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4D1 /* TranscriptExportService.swift */; };
 		32B148C17ADF330AB64F25B9 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B5AC231318E9580ADB309B /* AppState.swift */; };
 		3428B3A8DAFDF0891C460E3C /* ModelGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6128A7DC3799D329B8DB2FE /* ModelGroup.swift */; };
 		4540437FF944A6BA6E754CE5 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ADAB55B66952EE3BC6D9B2E /* ContentView.swift */; };
@@ -56,6 +57,7 @@
 		1A2B3C4D5E6F708192A3B4CE /* TranscriptDetailView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TranscriptDetailView.swift; path = UI/TranscriptDetailView.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F708192A3B4CF /* TranscriptSegmentRow.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TranscriptSegmentRow.swift; path = UI/TranscriptSegmentRow.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F708192A3B4D0 /* TimeFormatter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TimeFormatter.swift; path = Helpers/TimeFormatter.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F708192A3B4D1 /* TranscriptExportService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TranscriptExportService.swift; path = Services/TranscriptExportService.swift; sourceTree = "<group>"; };
 		22E362F775C935EB29AE832A /* ScribermanApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScribermanApp.swift; sourceTree = "<group>"; };
 		27994768D463D730435539F3 /* BookmarkStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = BookmarkStore.swift; path = Persistence/BookmarkStore.swift; sourceTree = "<group>"; };
 		5542239A238BB9A1883C5B5A /* Scriberman.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Scriberman.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -139,6 +141,7 @@
 				7B92B3F0C81C97B847246777 /* ModelInstallService.swift */,
 				1A2B3C4D5E6F708192A3B4CA /* RecordingService.swift */,
 				1A2B3C4D5E6F708192A3B4CB /* TranscriptionService.swift */,
+				1A2B3C4D5E6F708192A3B4D1 /* TranscriptExportService.swift */,
 				ADD6117B43940D993554EB33 /* ServiceContainer.swift */,
 				0B74C9A9619316097B8D3CF3 /* StudioViewModel.swift */,
 				C4F2C579DEA6DCCA2A080BC3 /* JobsViewModel.swift */,
@@ -242,6 +245,7 @@
 				50A7C19DA8252ABCC743D2F2 /* ModelInstallService.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CA /* RecordingService.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CB /* TranscriptionService.swift in Sources */,
+				2A2B3C4D5E6F708192A3B4D1 /* TranscriptExportService.swift in Sources */,
 				8875A7B9DB44C4468FE50F93 /* ServiceContainer.swift in Sources */,
 				96AFFA802A8DCCDE404942A8 /* StudioViewModel.swift in Sources */,
 				89EB4800C21A7DBD573FE1B2 /* JobsViewModel.swift in Sources */,
