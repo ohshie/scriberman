@@ -20,6 +20,7 @@ final class JobsViewModel: ObservableObject {
             return
         }
 
+        let audioURL = URL(fileURLWithPath: session.audioURL)
         session.status = .transcribing
         session.errorMessage = nil
         try? context.save()
@@ -27,13 +28,15 @@ final class JobsViewModel: ObservableObject {
         Task {
             do {
                 let workspace = try await workspaceService.requireWritableWorkspace()
-                await transcriptionService.transcribe(session: session, workspace: workspace, context: context)
+                let transcript = try await transcriptionService.transcribe(audioURL: audioURL, workspace: workspace)
+                session.transcript = transcript
+                session.status = .done
+                session.errorMessage = nil
+                try? context.save()
             } catch {
-                await MainActor.run {
-                    session.status = .error(error.localizedDescription)
-                    session.errorMessage = error.localizedDescription
-                    try? context.save()
-                }
+                session.status = .error(error.localizedDescription)
+                session.errorMessage = error.localizedDescription
+                try? context.save()
             }
         }
     }
