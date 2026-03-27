@@ -26,14 +26,18 @@
 		2FDE1F7065F222E3906F5122 /* JobsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8762704F4A827AAB342E6E05 /* JobsView.swift */; };
 		32B148C17ADF330AB64F25B9 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B5AC231318E9580ADB309B /* AppState.swift */; };
 		3428B3A8DAFDF0891C460E3C /* ModelGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6128A7DC3799D329B8DB2FE /* ModelGroup.swift */; };
+		3830C38400DDAA2B16B70F67 /* StudioViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90CCAB4BCFF98EF0761577FF /* StudioViewModelTests.swift */; };
 		4540437FF944A6BA6E754CE5 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ADAB55B66952EE3BC6D9B2E /* ContentView.swift */; };
 		4D2F49C87EC43E5135DFBD8B /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 95199C39E12ED82DCA4C4932 /* Cocoa.framework */; };
 		50A7C19DA8252ABCC743D2F2 /* ModelInstallService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B92B3F0C81C97B847246777 /* ModelInstallService.swift */; };
 		517B8995017388C7FC8E3644 /* ModelsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAB646F914C2425E3CBEE33D /* ModelsSettingsView.swift */; };
 		593A5B1DA131934EE90B4F7D /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E01B42C4D525868024537572 /* SettingsView.swift */; };
+		65E0EE498B357398375D8185 /* JobsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63F7B7CE8A7FE4E0F6C5539F /* JobsViewModelTests.swift */; };
 		6C07E0AE252F7D34AF16F2C2 /* BookmarkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27994768D463D730435539F3 /* BookmarkStore.swift */; };
 		71945CF7DD78D3B6644C4EC7 /* WorkspaceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DED532C3817A6E0B1536EE8C /* WorkspaceService.swift */; };
 		72E17286721922EFD739F74A /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 95199C39E12ED82DCA4C4932 /* Cocoa.framework */; };
+		7ABB63E28F5C4843C5203244 /* MockTranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 533164BEA51E4E4A0EA33B0E /* MockTranscriptionService.swift */; };
+		86767BA4F9AF6E4E30782B9E /* MockRecordingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDB34ACA26BE9E4D8CC45D74 /* MockRecordingService.swift */; };
 		8875A7B9DB44C4468FE50F93 /* ServiceContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADD6117B43940D993554EB33 /* ServiceContainer.swift */; };
 		89EB4800C21A7DBD573FE1B2 /* JobsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4F2C579DEA6DCCA2A080BC3 /* JobsViewModel.swift */; };
 		90DE049E3F11EA2D720D1EE8 /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8F3DE0F4D65F9DD94E5DEFC /* SettingsViewModel.swift */; };
@@ -53,6 +57,7 @@
 		C4EC45D56DEE48C672BEE45A /* TimeFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98A016607CB87709B794542A /* TimeFormatterTests.swift */; };
 		C777A4877EC482FDA7D4659C /* TranscriptAligner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A0DE555D53428ABBBCE123E /* TranscriptAligner.swift */; };
 		C8BE5BFB9362549C53823350 /* TokenStitcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FF38F82AD4960A1C5B3E860 /* TokenStitcher.swift */; };
+		D0AD07DBAD50A6EF4CD90C2B /* MockWorkspaceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4A24E4069AF734D90C9236E /* MockWorkspaceService.swift */; };
 		EF15FDA2B169C6BE3CB9FB4A /* Workspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DFBA039128F2B74BE4BB578 /* Workspace.swift */; };
 /* End PBXBuildFile section */
 
@@ -83,9 +88,11 @@
 		1A2B3C4D5E6F708192A3B4D1 /* TranscriptExportService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TranscriptExportService.swift; path = Services/TranscriptExportService.swift; sourceTree = "<group>"; };
 		22E362F775C935EB29AE832A /* ScribermanApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScribermanApp.swift; sourceTree = "<group>"; };
 		27994768D463D730435539F3 /* BookmarkStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = BookmarkStore.swift; path = Persistence/BookmarkStore.swift; sourceTree = "<group>"; };
+		533164BEA51E4E4A0EA33B0E /* MockTranscriptionService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MockTranscriptionService.swift; path = MockTranscriptionService.swift; sourceTree = "<group>"; };
 		5542239A238BB9A1883C5B5A /* Scriberman.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Scriberman.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5AD764C83EECDAD9A42F5993 /* ModelsSettingsScreen.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ModelsSettingsScreen.swift; path = UI/ModelsSettingsScreen.swift; sourceTree = "<group>"; };
 		5BB3D5811B6745E46A81D7DE /* AppShellView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AppShellView.swift; path = UI/AppShellView.swift; sourceTree = "<group>"; };
+		63F7B7CE8A7FE4E0F6C5539F /* JobsViewModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = JobsViewModelTests.swift; path = ScribermanTests/JobsViewModelTests.swift; sourceTree = "<group>"; };
 		6A0DE555D53428ABBBCE123E /* TranscriptAligner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TranscriptAligner.swift; path = Helpers/TranscriptAligner.swift; sourceTree = "<group>"; };
 		7ADAB55B66952EE3BC6D9B2E /* ContentView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		7B92B3F0C81C97B847246777 /* ModelInstallService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ModelInstallService.swift; path = Services/ModelInstallService.swift; sourceTree = "<group>"; };
@@ -95,6 +102,7 @@
 		8A2AEE3DB783526C01DF1552 /* TranscriptionServiceProtocol.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TranscriptionServiceProtocol.swift; path = Services/TranscriptionServiceProtocol.swift; sourceTree = "<group>"; };
 		8E2E0F5F51DABC96146DE26B /* RecordingStatusTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RecordingStatusTests.swift; path = ScribermanTests/RecordingStatusTests.swift; sourceTree = "<group>"; };
 		8FF38F82AD4960A1C5B3E860 /* TokenStitcher.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TokenStitcher.swift; path = Helpers/TokenStitcher.swift; sourceTree = "<group>"; };
+		90CCAB4BCFF98EF0761577FF /* StudioViewModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = StudioViewModelTests.swift; path = ScribermanTests/StudioViewModelTests.swift; sourceTree = "<group>"; };
 		95199C39E12ED82DCA4C4932 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
 		98A016607CB87709B794542A /* TimeFormatterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TimeFormatterTests.swift; path = ScribermanTests/TimeFormatterTests.swift; sourceTree = "<group>"; };
 		99DAD2DC5D5DDF11D28D8BA5 /* WorkspaceServiceProtocol.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WorkspaceServiceProtocol.swift; path = Services/WorkspaceServiceProtocol.swift; sourceTree = "<group>"; };
@@ -108,6 +116,7 @@
 		B5871E10D502FAEB70EDC99F /* MarkdownRendererTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MarkdownRendererTests.swift; path = ScribermanTests/MarkdownRendererTests.swift; sourceTree = "<group>"; };
 		B6128A7DC3799D329B8DB2FE /* ModelGroup.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ModelGroup.swift; path = Domain/ModelGroup.swift; sourceTree = "<group>"; };
 		BA65604F12187C96E37A1413 /* WorkspacePicker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WorkspacePicker.swift; path = UI/WorkspacePicker.swift; sourceTree = "<group>"; };
+		C4A24E4069AF734D90C9236E /* MockWorkspaceService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MockWorkspaceService.swift; path = MockWorkspaceService.swift; sourceTree = "<group>"; };
 		C4F2C579DEA6DCCA2A080BC3 /* JobsViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = JobsViewModel.swift; path = ViewModels/JobsViewModel.swift; sourceTree = "<group>"; };
 		D4D635DCD4938EB7B6FA9A36 /* ScribermanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ScribermanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		DB0AB1FDEB9B0DFCA6700F39 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -115,6 +124,7 @@
 		E01B42C4D525868024537572 /* SettingsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SettingsView.swift; path = UI/SettingsView.swift; sourceTree = "<group>"; };
 		E6B44A3BD4A39AE7EB75ED6B /* TokenStitcherTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TokenStitcherTests.swift; path = ScribermanTests/TokenStitcherTests.swift; sourceTree = "<group>"; };
 		EAF40CE8A4DF89129232A39F /* PlaceholderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PlaceholderTests.swift; path = ScribermanTests/PlaceholderTests.swift; sourceTree = "<group>"; };
+		EDB34ACA26BE9E4D8CC45D74 /* MockRecordingService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MockRecordingService.swift; path = MockRecordingService.swift; sourceTree = "<group>"; };
 		F2EF783126F2387C1A7C21F4 /* StudioView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = StudioView.swift; path = UI/StudioView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -141,13 +151,16 @@
 /* Begin PBXGroup section */
 		07313C70AD2DAFE0C7770C81 /* ScribermanTests */ = {
 			isa = PBXGroup;
-				children = (
-					EAF40CE8A4DF89129232A39F /* PlaceholderTests.swift */,
-					B5871E10D502FAEB70EDC99F /* MarkdownRendererTests.swift */,
-					8E2E0F5F51DABC96146DE26B /* RecordingStatusTests.swift */,
-					98A016607CB87709B794542A /* TimeFormatterTests.swift */,
-					E6B44A3BD4A39AE7EB75ED6B /* TokenStitcherTests.swift */,
+			children = (
+				EAF40CE8A4DF89129232A39F /* PlaceholderTests.swift */,
+				B5871E10D502FAEB70EDC99F /* MarkdownRendererTests.swift */,
+				8E2E0F5F51DABC96146DE26B /* RecordingStatusTests.swift */,
+				98A016607CB87709B794542A /* TimeFormatterTests.swift */,
+				E6B44A3BD4A39AE7EB75ED6B /* TokenStitcherTests.swift */,
 				9D3289E92C029611DDA5CB75 /* TranscriptAlignerTests.swift */,
+				5C7FDED408995E8535F576A9 /* Mocks */,
+				90CCAB4BCFF98EF0761577FF /* StudioViewModelTests.swift */,
+				63F7B7CE8A7FE4E0F6C5539F /* JobsViewModelTests.swift */,
 			);
 			name = ScribermanTests;
 			sourceTree = "<group>";
@@ -159,6 +172,17 @@
 				D4D635DCD4938EB7B6FA9A36 /* ScribermanTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		5C7FDED408995E8535F576A9 /* Mocks */ = {
+			isa = PBXGroup;
+			children = (
+				EDB34ACA26BE9E4D8CC45D74 /* MockRecordingService.swift */,
+				C4A24E4069AF734D90C9236E /* MockWorkspaceService.swift */,
+				533164BEA51E4E4A0EA33B0E /* MockTranscriptionService.swift */,
+			);
+			name = Mocks;
+			path = ScribermanTests/Mocks;
 			sourceTree = "<group>";
 		};
 		7325EBCD5ECAB8FD6600F3A6 /* Frameworks */ = {
@@ -372,13 +396,18 @@
 		AD245F7EE9BCA2E71BBC7B87 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
-				files = (
-					A1B785F73B81438F88BA979E /* PlaceholderTests.swift in Sources */,
-					A0E794CEB3C68D77E20749D6 /* MarkdownRendererTests.swift in Sources */,
-					A2E8F18069EB9CB0F14A58BA /* RecordingStatusTests.swift in Sources */,
-					C4EC45D56DEE48C672BEE45A /* TimeFormatterTests.swift in Sources */,
-					BBDF7C9B39514CB1CAFE28C5 /* TokenStitcherTests.swift in Sources */,
+			files = (
+				A1B785F73B81438F88BA979E /* PlaceholderTests.swift in Sources */,
+				A0E794CEB3C68D77E20749D6 /* MarkdownRendererTests.swift in Sources */,
+				A2E8F18069EB9CB0F14A58BA /* RecordingStatusTests.swift in Sources */,
+				C4EC45D56DEE48C672BEE45A /* TimeFormatterTests.swift in Sources */,
+				BBDF7C9B39514CB1CAFE28C5 /* TokenStitcherTests.swift in Sources */,
 				0779163432BE273DD07FC2E9 /* TranscriptAlignerTests.swift in Sources */,
+				3830C38400DDAA2B16B70F67 /* StudioViewModelTests.swift in Sources */,
+				65E0EE498B357398375D8185 /* JobsViewModelTests.swift in Sources */,
+				86767BA4F9AF6E4E30782B9E /* MockRecordingService.swift in Sources */,
+				D0AD07DBAD50A6EF4CD90C2B /* MockWorkspaceService.swift in Sources */,
+				7ABB63E28F5C4843C5203244 /* MockTranscriptionService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
