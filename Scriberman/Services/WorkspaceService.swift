@@ -23,7 +23,7 @@ enum WorkspaceError: LocalizedError {
     }
 }
 
-actor WorkspaceService {
+actor WorkspaceService: WorkspaceServiceProtocol {
     private let bookmarkStore: BookmarkStore
     private let fileManager = FileManager.default
 
@@ -68,7 +68,7 @@ actor WorkspaceService {
         return workspace
     }
 
-    func currentWorkspace() -> Workspace? {
+    func currentWorkspace() async -> Workspace? {
         guard let activeWorkspaceURL, hasScopedAccess else {
             return nil
         }
@@ -76,8 +76,8 @@ actor WorkspaceService {
         return Workspace(rootURL: activeWorkspaceURL)
     }
 
-    func requireWritableWorkspace() throws -> Workspace {
-        guard let workspace = currentWorkspace() else {
+    func requireWritableWorkspace() async throws -> Workspace {
+        guard let workspace = await currentWorkspace() else {
             throw WorkspaceError.notConfigured
         }
 

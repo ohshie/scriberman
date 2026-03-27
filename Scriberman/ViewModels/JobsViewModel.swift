@@ -3,10 +3,10 @@ import SwiftData
 
 @MainActor
 final class JobsViewModel: ObservableObject {
-    private let workspaceService: WorkspaceService
-    private let transcriptionService: TranscriptionService
+    private let workspaceService: WorkspaceServiceProtocol
+    private let transcriptionService: TranscriptionServiceProtocol
 
-    init(workspaceService: WorkspaceService, transcriptionService: TranscriptionService) {
+    init(workspaceService: WorkspaceServiceProtocol, transcriptionService: TranscriptionServiceProtocol) {
         self.workspaceService = workspaceService
         self.transcriptionService = transcriptionService
     }
