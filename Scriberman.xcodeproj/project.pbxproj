@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		0A81963A9F600E19F5F698ED /* ModelsSettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AD764C83EECDAD9A42F5993 /* ModelsSettingsScreen.swift */; };
-		2FDE1F7065F222E3906F5122 /* JobsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8762704F4A827AAB342E6E05 /* JobsView.swift */; };
 		2A2B3C4D5E6F708192A3B4C5 /* RecordingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4C5 /* RecordingSession.swift */; };
 		2A2B3C4D5E6F708192A3B4C6 /* RecordingStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4C6 /* RecordingStatus.swift */; };
 		2A2B3C4D5E6F708192A3B4C7 /* Transcript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4C7 /* Transcript.swift */; };
@@ -22,9 +21,11 @@
 		2A2B3C4D5E6F708192A3B4CF /* TranscriptSegmentRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4CF /* TranscriptSegmentRow.swift */; };
 		2A2B3C4D5E6F708192A3B4D0 /* TimeFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4D0 /* TimeFormatter.swift */; };
 		2A2B3C4D5E6F708192A3B4D1 /* TranscriptExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4D1 /* TranscriptExportService.swift */; };
+		2FDE1F7065F222E3906F5122 /* JobsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8762704F4A827AAB342E6E05 /* JobsView.swift */; };
 		32B148C17ADF330AB64F25B9 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B5AC231318E9580ADB309B /* AppState.swift */; };
 		3428B3A8DAFDF0891C460E3C /* ModelGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6128A7DC3799D329B8DB2FE /* ModelGroup.swift */; };
 		4540437FF944A6BA6E754CE5 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ADAB55B66952EE3BC6D9B2E /* ContentView.swift */; };
+		4D2F49C87EC43E5135DFBD8B /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 95199C39E12ED82DCA4C4932 /* Cocoa.framework */; };
 		50A7C19DA8252ABCC743D2F2 /* ModelInstallService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B92B3F0C81C97B847246777 /* ModelInstallService.swift */; };
 		517B8995017388C7FC8E3644 /* ModelsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAB646F914C2425E3CBEE33D /* ModelsSettingsView.swift */; };
 		593A5B1DA131934EE90B4F7D /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E01B42C4D525868024537572 /* SettingsView.swift */; };
@@ -37,11 +38,22 @@
 		96AFFA802A8DCCDE404942A8 /* StudioViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B74C9A9619316097B8D3CF3 /* StudioViewModel.swift */; };
 		9B0A47F88ECCCF249F0581C9 /* ScribermanApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22E362F775C935EB29AE832A /* ScribermanApp.swift */; };
 		A0313B452C3199D5A6118FB9 /* AppShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BB3D5811B6745E46A81D7DE /* AppShellView.swift */; };
+		A1B785F73B81438F88BA979E /* PlaceholderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAF40CE8A4DF89129232A39F /* PlaceholderTests.swift */; };
 		BE05D8275352276E509B5A6A /* WorkspacePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA65604F12187C96E37A1413 /* WorkspacePicker.swift */; };
 		C1FA647DFB390E0F7F423246 /* StudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2EF783126F2387C1A7C21F4 /* StudioView.swift */; };
 		C3EE37FB3F5E384076FF1B4E /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = DDA5336F2945D8E09B308BC2 /* FluidAudio */; };
 		EF15FDA2B169C6BE3CB9FB4A /* Workspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DFBA039128F2B74BE4BB578 /* Workspace.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		9E2EA865A1B7CC837EC941E5 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A30F1B4CC53BB5B4571A7896 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2A43FB3B3983B44B6C1D4C3A;
+			remoteInfo = Scriberman;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		0B74C9A9619316097B8D3CF3 /* StudioViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = StudioViewModel.swift; path = ViewModels/StudioViewModel.swift; sourceTree = "<group>"; };
@@ -76,13 +88,23 @@
 		B6128A7DC3799D329B8DB2FE /* ModelGroup.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ModelGroup.swift; path = Domain/ModelGroup.swift; sourceTree = "<group>"; };
 		BA65604F12187C96E37A1413 /* WorkspacePicker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WorkspacePicker.swift; path = UI/WorkspacePicker.swift; sourceTree = "<group>"; };
 		C4F2C579DEA6DCCA2A080BC3 /* JobsViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = JobsViewModel.swift; path = ViewModels/JobsViewModel.swift; sourceTree = "<group>"; };
+		D4D635DCD4938EB7B6FA9A36 /* ScribermanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ScribermanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		DB0AB1FDEB9B0DFCA6700F39 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		DED532C3817A6E0B1536EE8C /* WorkspaceService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WorkspaceService.swift; path = Services/WorkspaceService.swift; sourceTree = "<group>"; };
 		E01B42C4D525868024537572 /* SettingsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SettingsView.swift; path = UI/SettingsView.swift; sourceTree = "<group>"; };
+		EAF40CE8A4DF89129232A39F /* PlaceholderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PlaceholderTests.swift; path = ScribermanTests/PlaceholderTests.swift; sourceTree = "<group>"; };
 		F2EF783126F2387C1A7C21F4 /* StudioView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = StudioView.swift; path = UI/StudioView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		6E992BAAAB76768A91CDDF60 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4D2F49C87EC43E5135DFBD8B /* Cocoa.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E2455305CF4AF25D9CA9A809 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -95,10 +117,19 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		07313C70AD2DAFE0C7770C81 /* ScribermanTests */ = {
+			isa = PBXGroup;
+			children = (
+				EAF40CE8A4DF89129232A39F /* PlaceholderTests.swift */,
+			);
+			name = ScribermanTests;
+			sourceTree = "<group>";
+		};
 		43993D81DB3C75CD2DC1BB1F /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				5542239A238BB9A1883C5B5A /* Scriberman.app */,
+				D4D635DCD4938EB7B6FA9A36 /* ScribermanTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -165,6 +196,7 @@
 				1A2B3C4D5E6F708192A3B4D0 /* TimeFormatter.swift */,
 				AAB646F914C2425E3CBEE33D /* ModelsSettingsView.swift */,
 				5AD764C83EECDAD9A42F5993 /* ModelsSettingsScreen.swift */,
+				07313C70AD2DAFE0C7770C81 /* ScribermanTests */,
 			);
 			path = Scriberman;
 			sourceTree = "<group>";
@@ -192,6 +224,24 @@
 			productReference = 5542239A238BB9A1883C5B5A /* Scriberman.app */;
 			productType = "com.apple.product-type.application";
 		};
+		EA1EEB3A39CED694132BA045 /* ScribermanTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 515E1F9DD7CB35E269E4D25B /* Build configuration list for PBXNativeTarget "ScribermanTests" */;
+			buildPhases = (
+				AD245F7EE9BCA2E71BBC7B87 /* Sources */,
+				6E992BAAAB76768A91CDDF60 /* Frameworks */,
+				7D935F48CD4EFE08FE28348F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9986278A43674BD493874AFC /* PBXTargetDependency */,
+			);
+			name = ScribermanTests;
+			productName = ScribermanTests;
+			productReference = D4D635DCD4938EB7B6FA9A36 /* ScribermanTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -218,11 +268,19 @@
 			projectRoot = "";
 			targets = (
 				2A43FB3B3983B44B6C1D4C3A /* Scriberman */,
+				EA1EEB3A39CED694132BA045 /* ScribermanTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		7D935F48CD4EFE08FE28348F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		F1C28994677F3B045F6BA6B4 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -272,7 +330,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AD245F7EE9BCA2E71BBC7B87 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1B785F73B81438F88BA979E /* PlaceholderTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		9986278A43674BD493874AFC /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = Scriberman;
+			target = 2A43FB3B3983B44B6C1D4C3A /* Scriberman */;
+			targetProxy = 9E2EA865A1B7CC837EC941E5 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		72D3DAA86769A54640400148 /* Release */ = {
@@ -329,6 +404,29 @@
 			};
 			name = Release;
 		};
+		8E8DDC0A398362AB620DB1CF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@loader_path/../Frameworks",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.scriberman.app.tests;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Scriberman.app/Contents/MacOS/Scriberman";
+				TEST_TARGET_NAME = Scriberman;
+			};
+			name = Release;
+		};
 		BFC6689C1B30B54207ED3847 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -349,6 +447,31 @@
 				SUPPORTED_PLATFORMS = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		D968D3A5543C0DA4848C8E5E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@loader_path/../Frameworks",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.scriberman.app.tests;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Scriberman.app/Contents/MacOS/Scriberman";
+				TEST_TARGET_NAME = Scriberman;
 			};
 			name = Debug;
 		};
@@ -444,6 +567,15 @@
 			buildConfigurations = (
 				FCE27734D063F318B7C5D5C7 /* Release */,
 				BFC6689C1B30B54207ED3847 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		515E1F9DD7CB35E269E4D25B /* Build configuration list for PBXNativeTarget "ScribermanTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8E8DDC0A398362AB620DB1CF /* Release */,
+				D968D3A5543C0DA4848C8E5E /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
