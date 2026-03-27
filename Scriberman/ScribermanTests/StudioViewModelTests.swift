@@ -233,6 +233,63 @@ final class StudioViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.errorMessage, "App audio capture unavailable. Falling back to microphone-only recording.")
     }
 
+    func testStartRecordingFallsBackToMicOnlyWhenAppStartAttemptFails() async {
+        let selectedMic = AudioInputDevice(id: 1, uid: "mic-1", name: "Mic")
+        let selectedApp = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
+        audioDeviceService.availableDevices = [selectedMic]
+        audioDeviceService.selectedDevice = selectedMic
+        appAudioService.runningApps = [selectedApp]
+        appAudioService.selectedApp = selectedApp
+        aggregateDeviceBuilder.tapResult = 77
+        aggregateDeviceBuilder.aggregateResult = 88
+        recordingService.startThrowSequence = [MockStartError.failed]
+
+        viewModel = StudioViewModel(
+            workspaceService: workspaceService,
+            recordingService: recordingService,
+            audioDeviceService: audioDeviceService,
+            appAudioService: appAudioService,
+            aggregateDeviceBuilder: aggregateDeviceBuilder
+        )
+
+        await viewModel.startRecording()
+
+        XCTAssertEqual(recordingService.startCalls.count, 2)
+        XCTAssertEqual(recordingService.startCalls.first?.tapID, 77)
+        XCTAssertNil(recordingService.startCalls.last?.tapID)
+        XCTAssertNil(recordingService.startCalls.last?.aggregateDeviceID)
+        XCTAssertEqual(aggregateDeviceBuilder.teardownCalls.count, 1)
+        XCTAssertEqual(viewModel.errorMessage, "App audio capture unavailable. Falling back to microphone-only recording.")
+        guard case .recording = viewModel.recordingState else {
+            return XCTFail("Expected recording state")
+        }
+    }
+
+    func testStartRecordingFallsBackToDefaultMicWhenSelectedMicStartFails() async {
+        let selectedMic = AudioInputDevice(id: 42, uid: "usb-mic", name: "USB Mic")
+        audioDeviceService.availableDevices = [selectedMic]
+        audioDeviceService.selectedDevice = selectedMic
+        recordingService.startThrowSequence = [MockStartError.failed]
+
+        viewModel = StudioViewModel(
+            workspaceService: workspaceService,
+            recordingService: recordingService,
+            audioDeviceService: audioDeviceService,
+            appAudioService: appAudioService,
+            aggregateDeviceBuilder: aggregateDeviceBuilder
+        )
+
+        await viewModel.startRecording()
+
+        XCTAssertEqual(recordingService.startCalls.count, 2)
+        XCTAssertEqual(recordingService.startCalls.first?.micDeviceID, 42)
+        XCTAssertNil(recordingService.startCalls.last?.micDeviceID)
+        XCTAssertEqual(viewModel.errorMessage, "Selected microphone unavailable. Falling back to system default microphone.")
+        guard case .recording = viewModel.recordingState else {
+            return XCTFail("Expected recording state")
+        }
+    }
+
     func testStartRecordingSkipsAppCaptureWhenSelectedAppDisappearsOnRefresh() async {
         let selectedMic = AudioInputDevice(id: 1, uid: "mic-1", name: "Mic")
         let selectedApp = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
