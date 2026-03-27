@@ -36,6 +36,7 @@ actor RecordingService: RecordingServiceProtocol {
 
     private var audioEngine: AVAudioEngine?
     private var audioFile: AVAudioFile?
+    private var audioRecorder: AVAudioRecorder?
     private var recordingStartedAt: Date?
     private var recordingURL: URL?
     private var hasScopedRecordingAccess = false
@@ -82,7 +83,15 @@ actor RecordingService: RecordingServiceProtocol {
     }
 
     func audioLevel() async -> Float {
-        audioLevelValue
+        if let audioRecorder {
+            audioRecorder.updateMeters()
+            let averagePower = audioRecorder.averagePower(forChannel: 0)
+            if averagePower.isFinite {
+                let normalized = powf(10, averagePower / 20)
+                audioLevelValue = min(max(normalized, 0), 1)
+            }
+        }
+        return audioLevelValue
     }
 
     func startRecording(
@@ -156,33 +165,44 @@ actor RecordingService: RecordingServiceProtocol {
                 }
             }
 
-            let inputFormat = inputNode.inputFormat(forBus: 0)
+            do {
+                let inputFormat = inputNode.inputFormat(forBus: 0)
+                let audioFile = try AVAudioFile(
+                    forWriting: fileURL,
+                    settings: inputFormat.settings,
+                    commonFormat: inputFormat.commonFormat,
+                    interleaved: inputFormat.isInterleaved
+                )
 
-            let audioFile = try AVAudioFile(
-                forWriting: fileURL,
-                settings: inputFormat.settings,
-                commonFormat: inputFormat.commonFormat,
-                interleaved: inputFormat.isInterleaved
-            )
+                inputNode.removeTap(onBus: 0)
+                inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, _ in
+                    do {
+                        try audioFile.write(from: buffer)
+                    } catch {
+                        return
+                    }
 
-            inputNode.removeTap(onBus: 0)
-            inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, _ in
-                do {
-                    try audioFile.write(from: buffer)
-                } catch {
-                    return
+                    Task { [weak self] in
+                        await self?.updateAudioLevel(from: buffer)
+                    }
                 }
 
-                Task { [weak self] in
-                    await self?.updateAudioLevel(from: buffer)
+                audioEngine.prepare()
+                try audioEngine.start()
+
+                self.audioEngine = audioEngine
+                self.audioFile = audioFile
+                self.audioRecorder = nil
+            } catch {
+                inputNode.removeTap(onBus: 0)
+                audioEngine.stop()
+
+                guard aggregateDeviceID == nil else {
+                    throw error
                 }
+
+                try startRecorderFallback(to: fileURL)
             }
-
-            audioEngine.prepare()
-            try audioEngine.start()
-
-            self.audioEngine = audioEngine
-            self.audioFile = audioFile
             self.recordingStartedAt = Date()
             self.recordingURL = fileURL
             self.isRecordingValue = true
@@ -211,6 +231,7 @@ actor RecordingService: RecordingServiceProtocol {
 
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
+        audioRecorder?.stop()
         cleanupAggregateCaptureIfNeeded()
 
         let startedAt = recordingStartedAt ?? Date()
@@ -306,6 +327,7 @@ actor RecordingService: RecordingServiceProtocol {
     private func cleanupRecordingState() {
         audioEngine = nil
         audioFile = nil
+        audioRecorder = nil
         recordingStartedAt = nil
         recordingURL = nil
         activeTapID = nil
@@ -345,11 +367,33 @@ actor RecordingService: RecordingServiceProtocol {
 
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
+        audioRecorder?.stop()
         cleanupAggregateCaptureIfNeeded()
         cleanupRecordingState()
         audioLevelValue = 0
         isRecordingValue = false
         pendingError = .captureInterrupted
         releaseRecordingScopeIfNeeded()
+    }
+
+    private func startRecorderFallback(to fileURL: URL) throws {
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: 44_100,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false
+        ]
+
+        let recorder = try AVAudioRecorder(url: fileURL, settings: settings)
+        recorder.isMeteringEnabled = true
+        guard recorder.record() else {
+            throw RecordingError.failedToStart("Unable to start recorder fallback.")
+        }
+
+        self.audioEngine = nil
+        self.audioFile = nil
+        self.audioRecorder = recorder
     }
 }
