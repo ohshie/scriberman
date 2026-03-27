@@ -19,6 +19,7 @@ struct StudioView: View {
                 VStack(spacing: 12) {
                     HStack {
                         microphonePicker
+                        appPicker
                         Spacer()
                     }
 
@@ -33,6 +34,11 @@ struct StudioView: View {
                 VStack(spacing: 16) {
                     if let selectedDeviceName = viewModel.selectedDevice?.name {
                         Text(selectedDeviceName)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let selectedAppName = viewModel.selectedApp?.name {
+                        Text("App: \(selectedAppName)")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -95,6 +101,55 @@ struct StudioView: View {
             }
         } label: {
             Label(viewModel.selectedDevice?.name ?? "Microphone", systemImage: "mic")
+        }
+    }
+
+    private var appPicker: some View {
+        Menu {
+            Button {
+                viewModel.selectedApp = nil
+            } label: {
+                if viewModel.selectedApp == nil {
+                    Label("No App", systemImage: "checkmark")
+                } else {
+                    Text("No App")
+                }
+            }
+
+            ForEach(viewModel.runningApps) { app in
+                Button {
+                    viewModel.selectedApp = app
+                } label: {
+                    HStack(spacing: 8) {
+                        if viewModel.selectedApp?.bundleID == app.bundleID {
+                            Image(systemName: "checkmark")
+                        }
+                        appMenuRow(for: app)
+                    }
+                }
+            }
+        } label: {
+            Label(viewModel.selectedApp?.name ?? "App", systemImage: "app")
+        }
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                viewModel.refreshApps()
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func appMenuRow(for app: CapturedApp) -> some View {
+        if let icon = app.icon {
+            Label {
+                Text(app.name)
+            } icon: {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: 14, height: 14)
+            }
+        } else {
+            Label(app.name, systemImage: "app")
         }
     }
 }
