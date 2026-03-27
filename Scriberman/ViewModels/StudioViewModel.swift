@@ -114,6 +114,8 @@ final class StudioViewModel: ObservableObject {
 
         do {
             let workspace = try await workspaceService.requireWritableWorkspace()
+            appAudioService.refreshRunningApps()
+
             var selectedTapID: AudioObjectID?
             var selectedAggregateDeviceID: AudioDeviceID?
 
