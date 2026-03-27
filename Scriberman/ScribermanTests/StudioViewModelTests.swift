@@ -9,6 +9,7 @@ final class StudioViewModelTests: XCTestCase {
     private var recordingService: MockRecordingService!
     private var audioDeviceService: MockAudioDeviceService!
     private var appAudioService: MockAppAudioService!
+    private var appAudioPermissionService: MockAppAudioPermissionService!
     private var aggregateDeviceBuilder: MockAggregateDeviceBuilder!
     private var viewModel: StudioViewModel!
     private var workspace: Workspace!
@@ -19,6 +20,7 @@ final class StudioViewModelTests: XCTestCase {
         recordingService = MockRecordingService()
         audioDeviceService = MockAudioDeviceService()
         appAudioService = MockAppAudioService()
+        appAudioPermissionService = MockAppAudioPermissionService()
         aggregateDeviceBuilder = MockAggregateDeviceBuilder()
         workspace = Workspace(rootURL: URL(fileURLWithPath: "/tmp/workspace"))
         workspaceService.requireWritableResult = .success(workspace)
@@ -27,6 +29,7 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
+            appAudioPermissionService: appAudioPermissionService,
             aggregateDeviceBuilder: aggregateDeviceBuilder
         )
     }
@@ -35,6 +38,7 @@ final class StudioViewModelTests: XCTestCase {
         viewModel = nil
         workspace = nil
         aggregateDeviceBuilder = nil
+        appAudioPermissionService = nil
         appAudioService = nil
         audioDeviceService = nil
         recordingService = nil
@@ -114,6 +118,7 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
+            appAudioPermissionService: appAudioPermissionService,
             aggregateDeviceBuilder: aggregateDeviceBuilder
         )
 
@@ -132,6 +137,7 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
+            appAudioPermissionService: appAudioPermissionService,
             aggregateDeviceBuilder: aggregateDeviceBuilder
         )
 
@@ -150,6 +156,7 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
+            appAudioPermissionService: appAudioPermissionService,
             aggregateDeviceBuilder: aggregateDeviceBuilder
         )
 
@@ -168,6 +175,7 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
+            appAudioPermissionService: appAudioPermissionService,
             aggregateDeviceBuilder: aggregateDeviceBuilder
         )
 
@@ -197,6 +205,7 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
+            appAudioPermissionService: appAudioPermissionService,
             aggregateDeviceBuilder: aggregateDeviceBuilder
         )
 
@@ -223,6 +232,7 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
+            appAudioPermissionService: appAudioPermissionService,
             aggregateDeviceBuilder: aggregateDeviceBuilder
         )
 
@@ -249,6 +259,7 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
+            appAudioPermissionService: appAudioPermissionService,
             aggregateDeviceBuilder: aggregateDeviceBuilder
         )
 
@@ -276,6 +287,7 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
+            appAudioPermissionService: appAudioPermissionService,
             aggregateDeviceBuilder: aggregateDeviceBuilder
         )
 
@@ -307,6 +319,7 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
+            appAudioPermissionService: appAudioPermissionService,
             aggregateDeviceBuilder: aggregateDeviceBuilder
         )
 
@@ -317,6 +330,34 @@ final class StudioViewModelTests: XCTestCase {
         XCTAssertNil(recordingService.startCalls.first?.tapID)
         XCTAssertNil(recordingService.startCalls.first?.aggregateDeviceID)
         XCTAssertNil(recordingService.startCalls.first?.capturedAppName)
+    }
+
+    func testStartRecordingRequestsAppAudioPermissionAndFallsBackWhenDenied() async {
+        let selectedMic = AudioInputDevice(id: 1, uid: "mic-1", name: "Mic")
+        let selectedApp = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
+        audioDeviceService.availableDevices = [selectedMic]
+        audioDeviceService.selectedDevice = selectedMic
+        appAudioService.runningApps = [selectedApp]
+        appAudioService.selectedApp = selectedApp
+        appAudioPermissionService.hasAccess = false
+        appAudioPermissionService.requestResult = false
+
+        viewModel = StudioViewModel(
+            workspaceService: workspaceService,
+            recordingService: recordingService,
+            audioDeviceService: audioDeviceService,
+            appAudioService: appAudioService,
+            appAudioPermissionService: appAudioPermissionService,
+            aggregateDeviceBuilder: aggregateDeviceBuilder
+        )
+
+        await viewModel.startRecording()
+
+        XCTAssertEqual(appAudioPermissionService.requestCalls, 1)
+        XCTAssertEqual(aggregateDeviceBuilder.createTapPIDs, [])
+        XCTAssertNil(recordingService.startCalls.first?.tapID)
+        XCTAssertNil(recordingService.startCalls.first?.aggregateDeviceID)
+        XCTAssertEqual(viewModel.errorMessage, "App audio capture permission denied. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording.")
     }
 
     func testRecordingMonitorSurfacesPendingInterruptionError() async {
@@ -348,6 +389,23 @@ enum MockStartError: LocalizedError {
         case .failed:
             return "start failed"
         }
+    }
+}
+
+@MainActor
+private final class MockAppAudioPermissionService: AppAudioPermissionProviding {
+    var hasAccess = true
+    var requestResult = false
+    var requestCalls = 0
+
+    func hasSystemAudioCaptureAccess() -> Bool {
+        hasAccess
+    }
+
+    func requestSystemAudioCaptureAccess() -> Bool {
+        requestCalls += 1
+        hasAccess = requestResult
+        return requestResult
     }
 }
 

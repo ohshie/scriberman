@@ -1,6 +1,24 @@
 import Combine
 import CoreAudio
 import Foundation
+import CoreGraphics
+
+@MainActor
+protocol AppAudioPermissionProviding {
+    func hasSystemAudioCaptureAccess() -> Bool
+    func requestSystemAudioCaptureAccess() -> Bool
+}
+
+@MainActor
+struct AppAudioPermissionService: AppAudioPermissionProviding {
+    func hasSystemAudioCaptureAccess() -> Bool {
+        CGPreflightScreenCaptureAccess()
+    }
+
+    func requestSystemAudioCaptureAccess() -> Bool {
+        CGRequestScreenCaptureAccess()
+    }
+}
 
 @MainActor
 final class StudioViewModel: ObservableObject {
@@ -14,6 +32,7 @@ final class StudioViewModel: ObservableObject {
     private let recordingService: RecordingServiceProtocol
     private let audioDeviceService: AudioDeviceServiceProtocol
     private let appAudioService: AppAudioServiceProtocol
+    private let appAudioPermissionService: AppAudioPermissionProviding
     private let aggregateDeviceBuilder: AggregateDeviceBuilding
     private var recordingMonitorTask: Task<Void, Never>?
     private var ctaCountdownTask: Task<Void, Never>?
@@ -50,12 +69,14 @@ final class StudioViewModel: ObservableObject {
         recordingService: RecordingServiceProtocol,
         audioDeviceService: AudioDeviceServiceProtocol,
         appAudioService: AppAudioServiceProtocol,
+        appAudioPermissionService: AppAudioPermissionProviding? = nil,
         aggregateDeviceBuilder: AggregateDeviceBuilding
     ) {
         self.workspaceService = workspaceService
         self.recordingService = recordingService
         self.audioDeviceService = audioDeviceService
         self.appAudioService = appAudioService
+        self.appAudioPermissionService = appAudioPermissionService ?? AppAudioPermissionService()
         self.aggregateDeviceBuilder = aggregateDeviceBuilder
         self.availableDevices = audioDeviceService.availableDevices
         self.selectedDevice = audioDeviceService.selectedDevice
@@ -118,8 +139,17 @@ final class StudioViewModel: ObservableObject {
 
             var selectedTapID: AudioObjectID?
             var selectedAggregateDeviceID: AudioDeviceID?
+            var selectedCapturedAppName: String?
 
             if let selectedApp, let selectedMicUID = selectedDevice?.uid {
+                if !appAudioPermissionService.hasSystemAudioCaptureAccess() {
+                    let granted = appAudioPermissionService.requestSystemAudioCaptureAccess()
+                    if !granted {
+                        errorMessage = "App audio capture permission denied. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording."
+                    }
+                }
+
+                if appAudioPermissionService.hasSystemAudioCaptureAccess() {
                 do {
                     let tapID = try aggregateDeviceBuilder.createTap(for: selectedApp.pid)
                     let aggregateDeviceID = try aggregateDeviceBuilder.createAggregateDevice(
@@ -128,16 +158,17 @@ final class StudioViewModel: ObservableObject {
                     )
                     selectedTapID = tapID
                     selectedAggregateDeviceID = aggregateDeviceID
+                    selectedCapturedAppName = selectedApp.name
                 } catch {
                     if let selectedTapID {
                         aggregateDeviceBuilder.destroyTap(selectedTapID)
                     }
                     errorMessage = "App audio capture unavailable. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording."
                 }
+                }
             }
 
             let selectedMicDeviceID = selectedDevice?.id
-            let selectedCapturedAppName = selectedApp?.name
 
             var startError: Error?
             var fallbackMessage: String?
