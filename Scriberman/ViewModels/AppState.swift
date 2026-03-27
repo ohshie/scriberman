@@ -33,11 +33,15 @@ final class AppState: ObservableObject {
             modelInstallService: services.modelInstallService
         )
         self.studioViewModel.onSessionStopped = { [weak self] _ in
+            self?.studioViewModel.clearStoppedCTAIfNeeded()
             self?.selectedTab = .jobs
         }
     }
 
     func selectTab(_ tab: Tab) {
+        if tab != .studio {
+            studioViewModel.clearStoppedCTAIfNeeded()
+        }
         selectedTab = tab
     }
 
