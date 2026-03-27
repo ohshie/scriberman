@@ -22,8 +22,8 @@ enum RecordingError: LocalizedError {
     }
 }
 
-actor RecordingService {
-    private let workspaceService: WorkspaceService
+actor RecordingService: RecordingServiceProtocol {
+    private let workspaceService: WorkspaceServiceProtocol
     private let modelContainer: ModelContainer
     private let fileManager = FileManager.default
 
@@ -37,16 +37,16 @@ actor RecordingService {
     private var isRecordingValue = false
     private var audioLevelValue: Float = 0
 
-    init(workspaceService: WorkspaceService, modelContainer: ModelContainer) {
+    init(workspaceService: WorkspaceServiceProtocol, modelContainer: ModelContainer) {
         self.workspaceService = workspaceService
         self.modelContainer = modelContainer
     }
 
-    func isRecording() -> Bool {
+    func isRecording() async -> Bool {
         isRecordingValue
     }
 
-    func audioLevel() -> Float {
+    func audioLevel() async -> Float {
         audioLevelValue
     }
 

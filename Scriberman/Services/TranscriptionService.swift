@@ -21,7 +21,7 @@ enum TranscriptionError: LocalizedError {
     }
 }
 
-actor TranscriptionService {
+actor TranscriptionService: TranscriptionServiceProtocol {
     private let fileManager = FileManager.default
     private let transcriptAligner = TranscriptAligner()
 

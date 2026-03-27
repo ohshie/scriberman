@@ -8,8 +8,8 @@ final class StudioViewModel: ObservableObject {
         case stopped(session: RecordingSession, ctaSecondsRemaining: Int)
     }
 
-    private let workspaceService: WorkspaceService
-    private let recordingService: RecordingService
+    private let workspaceService: WorkspaceServiceProtocol
+    private let recordingService: RecordingServiceProtocol
     private var recordingMonitorTask: Task<Void, Never>?
     private var ctaCountdownTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
@@ -19,7 +19,7 @@ final class StudioViewModel: ObservableObject {
     @Published var errorMessage: String?
     var onSessionStopped: ((RecordingSession) -> Void)?
 
-    init(workspaceService: WorkspaceService, recordingService: RecordingService) {
+    init(workspaceService: WorkspaceServiceProtocol, recordingService: RecordingServiceProtocol) {
         self.workspaceService = workspaceService
         self.recordingService = recordingService
     }
