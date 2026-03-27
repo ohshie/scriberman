@@ -56,6 +56,7 @@ final class StudioViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.errorMessage)
         XCTAssertEqual(recordingService.startCalls.count, 1)
         XCTAssertNil(recordingService.startCalls.first?.micDeviceID)
+        XCTAssertNil(recordingService.startCalls.first?.capturedAppName)
     }
 
     func testFailedStartSetsErrorAndStaysIdle() async {
@@ -205,6 +206,7 @@ final class StudioViewModelTests: XCTestCase {
         XCTAssertEqual(aggregateDeviceBuilder.createAggregateInputs.first?.micUID, "mic-1")
         XCTAssertEqual(recordingService.startCalls.first?.tapID, 77)
         XCTAssertEqual(recordingService.startCalls.first?.aggregateDeviceID, 88)
+        XCTAssertEqual(recordingService.startCalls.first?.capturedAppName, "Zoom")
     }
 
     func testStartRecordingFallsBackToMicOnlyWhenTapCreationFails() async {

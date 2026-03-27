@@ -138,7 +138,8 @@ final class StudioViewModel: ObservableObject {
                 in: workspace,
                 micDeviceID: selectedDevice?.id,
                 tapID: selectedTapID,
-                aggregateDeviceID: selectedAggregateDeviceID
+                aggregateDeviceID: selectedAggregateDeviceID,
+                capturedAppName: selectedApp?.name
             )
             recordingStartedAt = Date()
             recordingState = .recording(duration: 0, level: 0)

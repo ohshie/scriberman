@@ -27,4 +27,29 @@ final class RecordingStatusTests: XCTestCase {
             .recorded
         )
     }
+
+    func testRecordingSessionStoresCapturedAppNameWhenProvided() {
+        let session = RecordingSession(
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 10,
+            audioURL: "/tmp/audio.wav",
+            title: "Session",
+            capturedAppName: "Zoom",
+            status: .recorded
+        )
+
+        XCTAssertEqual(session.capturedAppName, "Zoom")
+    }
+
+    func testRecordingSessionCapturedAppNameDefaultsToNil() {
+        let session = RecordingSession(
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 10,
+            audioURL: "/tmp/audio.wav",
+            title: "Session",
+            status: .recorded
+        )
+
+        XCTAssertNil(session.capturedAppName)
+    }
 }
