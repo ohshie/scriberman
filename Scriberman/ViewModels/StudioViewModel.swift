@@ -70,6 +70,16 @@ final class StudioViewModel: ObservableObject {
         return session
     }
 
+    func clearStoppedCTAIfNeeded() {
+        guard case .stopped = recordingState else {
+            return
+        }
+        ctaCountdownTask?.cancel()
+        ctaCountdownTask = nil
+        stoppedSessionForCTA = nil
+        recordingState = .idle
+    }
+
     private func startRecordingMonitor() {
         recordingMonitorTask?.cancel()
         recordingMonitorTask = Task { [weak self] in
