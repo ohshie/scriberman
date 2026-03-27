@@ -151,8 +151,8 @@ actor RecordingService: RecordingServiceProtocol {
                     )
                 }
 
-                guard status == noErr else {
-                    throw RecordingError.failedToStart("Unable to configure selected microphone (OSStatus \(status)).")
+                if status != noErr {
+                    // On some sandboxed/runtime combinations explicit mic routing fails; continue on default input.
                 }
             }
 
