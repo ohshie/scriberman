@@ -230,7 +230,7 @@ final class StudioViewModelTests: XCTestCase {
 
         XCTAssertNil(recordingService.startCalls.first?.tapID)
         XCTAssertNil(recordingService.startCalls.first?.aggregateDeviceID)
-        XCTAssertEqual(viewModel.errorMessage, "App audio capture unavailable. Falling back to microphone-only recording.")
+        XCTAssertEqual(viewModel.errorMessage, "App audio capture unavailable. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording.")
     }
 
     func testStartRecordingFallsBackToMicOnlyWhenAppStartAttemptFails() async {
@@ -259,7 +259,7 @@ final class StudioViewModelTests: XCTestCase {
         XCTAssertNil(recordingService.startCalls.last?.tapID)
         XCTAssertNil(recordingService.startCalls.last?.aggregateDeviceID)
         XCTAssertEqual(aggregateDeviceBuilder.teardownCalls.count, 1)
-        XCTAssertEqual(viewModel.errorMessage, "App audio capture unavailable. Falling back to microphone-only recording.")
+        XCTAssertEqual(viewModel.errorMessage, "App audio capture unavailable. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording.")
         guard case .recording = viewModel.recordingState else {
             return XCTFail("Expected recording state")
         }

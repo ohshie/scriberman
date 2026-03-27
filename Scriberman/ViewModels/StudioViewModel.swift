@@ -132,7 +132,7 @@ final class StudioViewModel: ObservableObject {
                     if let selectedTapID {
                         aggregateDeviceBuilder.destroyTap(selectedTapID)
                     }
-                    errorMessage = "App audio capture unavailable. Falling back to microphone-only recording."
+                    errorMessage = "App audio capture unavailable. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording."
                 }
             }
 
@@ -158,7 +158,7 @@ final class StudioViewModel: ObservableObject {
                 aggregateDeviceBuilder.teardown(tapID: tapID, aggregateDeviceID: aggregateDeviceID)
                 selectedTapID = nil
                 selectedAggregateDeviceID = nil
-                fallbackMessage = "App audio capture unavailable. Falling back to microphone-only recording."
+                fallbackMessage = "App audio capture unavailable. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording."
 
                 do {
                     try await startRecordingAttempt(
