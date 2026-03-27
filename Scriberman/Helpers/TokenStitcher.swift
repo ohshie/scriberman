@@ -6,7 +6,7 @@ struct TokenStitcher {
     }
 
     func stitchTokens(_ tokens: [String]) -> String {
-        var text = tokens.joined()
+        var text = tokens.map(normalizeTokenPiece).joined()
         text = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
         text = text.replacingOccurrences(of: "\\s+([,.!?;:])", with: "$1", options: .regularExpression)
         text = text.replacingOccurrences(of: "(?<=\\p{L})\\s+'\\s*(?=\\p{L})", with: "'", options: .regularExpression)
