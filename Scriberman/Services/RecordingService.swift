@@ -364,9 +364,15 @@ actor RecordingService: RecordingServiceProtocol {
         guard isRecordingValue else {
             return
         }
+        guard let audioEngine else {
+            return
+        }
+        guard !audioEngine.isRunning else {
+            return
+        }
 
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        audioEngine?.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        audioEngine.stop()
         audioRecorder?.stop()
         cleanupAggregateCaptureIfNeeded()
         cleanupRecordingState()
