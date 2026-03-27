@@ -233,6 +233,35 @@ final class StudioViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.errorMessage, "App audio capture unavailable. Falling back to microphone-only recording.")
     }
 
+    func testStartRecordingSkipsAppCaptureWhenSelectedAppDisappearsOnRefresh() async {
+        let selectedMic = AudioInputDevice(id: 1, uid: "mic-1", name: "Mic")
+        let selectedApp = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
+        audioDeviceService.availableDevices = [selectedMic]
+        audioDeviceService.selectedDevice = selectedMic
+        appAudioService.runningApps = [selectedApp]
+        appAudioService.selectedApp = selectedApp
+        appAudioService.onRefresh = { [weak appAudioService] in
+            appAudioService?.runningApps = []
+            appAudioService?.selectedApp = nil
+        }
+
+        viewModel = StudioViewModel(
+            workspaceService: workspaceService,
+            recordingService: recordingService,
+            audioDeviceService: audioDeviceService,
+            appAudioService: appAudioService,
+            aggregateDeviceBuilder: aggregateDeviceBuilder
+        )
+
+        await viewModel.startRecording()
+
+        XCTAssertEqual(appAudioService.refreshCalls, 1)
+        XCTAssertEqual(aggregateDeviceBuilder.createTapPIDs, [])
+        XCTAssertNil(recordingService.startCalls.first?.tapID)
+        XCTAssertNil(recordingService.startCalls.first?.aggregateDeviceID)
+        XCTAssertNil(recordingService.startCalls.first?.capturedAppName)
+    }
+
     func testRecordingMonitorSurfacesPendingInterruptionError() async {
         recordingService.isRecordingOverride = false
         recordingService.pendingError = .captureInterrupted
@@ -270,6 +299,7 @@ private final class MockAppAudioService: AppAudioServiceProtocol {
     @Published var runningApps: [CapturedApp] = []
     @Published var selectedApp: CapturedApp?
     var refreshCalls = 0
+    var onRefresh: (() -> Void)?
 
     var runningAppsPublisher: AnyPublisher<[CapturedApp], Never> {
         $runningApps.eraseToAnyPublisher()
@@ -281,6 +311,7 @@ private final class MockAppAudioService: AppAudioServiceProtocol {
 
     func refreshRunningApps() {
         refreshCalls += 1
+        onRefresh?()
     }
 }
 
