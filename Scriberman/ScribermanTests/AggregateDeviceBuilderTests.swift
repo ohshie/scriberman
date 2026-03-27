@@ -6,12 +6,14 @@ final class AggregateDeviceBuilderTests: XCTestCase {
     func testCreateTapBuildsStereoMixdownTapAndReturnsID() throws {
         let hardware = MockAggregateHardware()
         hardware.createTapResult = 101
+        hardware.processObjectIDResult = 902
         let builder = AggregateDeviceBuilder(hardware: hardware)
 
         let tapID = try builder.createTap(for: 222)
 
         XCTAssertEqual(tapID, 101)
-        XCTAssertEqual(hardware.createdTapPIDs, [222])
+        XCTAssertEqual(hardware.requestedPIDs, [222])
+        XCTAssertEqual(hardware.createdTapProcessObjectIDs, [902])
     }
 
     func testCreateAggregateDeviceUpdatesTapList() throws {
@@ -48,19 +50,26 @@ final class AggregateDeviceBuilderTests: XCTestCase {
 }
 
 private final class MockAggregateHardware: AggregateDeviceHardwareProviding {
+    var processObjectIDResult: AudioObjectID = 0
     var createTapResult: AudioObjectID = 0
     var createAggregateResult: AudioDeviceID = 0
     var updateTapListError: Error?
 
-    var createdTapPIDs: [pid_t] = []
+    var requestedPIDs: [pid_t] = []
+    var createdTapProcessObjectIDs: [AudioObjectID] = []
     var createAggregateMicUIDs: [String] = []
     var tapListUpdates: [(aggregateDeviceID: AudioDeviceID, tapUID: String)] = []
     var destroyedTapIDs: [AudioObjectID] = []
     var destroyedAggregateIDs: [AudioDeviceID] = []
     var callOrder: [String] = []
 
+    func processObjectID(for pid: pid_t) throws -> AudioObjectID {
+        requestedPIDs.append(pid)
+        return processObjectIDResult
+    }
+
     func createProcessTap(description: CATapDescription) throws -> AudioObjectID {
-        createdTapPIDs.append(description.processes.map { pid_t($0) }.first ?? 0)
+        createdTapProcessObjectIDs.append(description.processes.first ?? 0)
         return createTapResult
     }
 

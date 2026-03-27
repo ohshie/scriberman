@@ -2,12 +2,15 @@ import CoreAudio
 import Foundation
 
 enum AggregateDeviceBuilderError: LocalizedError {
+    case failedToResolveProcessObject(OSStatus)
     case failedToCreateTap(OSStatus)
     case failedToCreateAggregateDevice(OSStatus)
     case failedToUpdateTapList(OSStatus)
 
     var errorDescription: String? {
         switch self {
+        case .failedToResolveProcessObject(let status):
+            return "Failed to resolve process object for tap creation (OSStatus \(status))."
         case .failedToCreateTap(let status):
             return "Failed to create process tap (OSStatus \(status))."
         case .failedToCreateAggregateDevice(let status):
@@ -19,6 +22,7 @@ enum AggregateDeviceBuilderError: LocalizedError {
 }
 
 protocol AggregateDeviceHardwareProviding {
+    func processObjectID(for pid: pid_t) throws -> AudioObjectID
     func createProcessTap(description: CATapDescription) throws -> AudioObjectID
     func createAggregateDevice(description: CFDictionary) throws -> AudioDeviceID
     func updateAggregateTapList(aggregateDeviceID: AudioDeviceID, tapUID: String) throws
@@ -27,6 +31,34 @@ protocol AggregateDeviceHardwareProviding {
 }
 
 struct AggregateDeviceHardware: AggregateDeviceHardwareProviding {
+    func processObjectID(for pid: pid_t) throws -> AudioObjectID {
+        var pidValue = pid
+        var processObjectID: AudioObjectID = 0
+        var dataSize = UInt32(MemoryLayout<AudioObjectID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let status = withUnsafePointer(to: &pidValue) { qualifier in
+            AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject),
+                &address,
+                UInt32(MemoryLayout<pid_t>.size),
+                qualifier,
+                &dataSize,
+                &processObjectID
+            )
+        }
+
+        guard status == noErr else {
+            throw AggregateDeviceBuilderError.failedToResolveProcessObject(status)
+        }
+
+        return processObjectID
+    }
+
     func createProcessTap(description: CATapDescription) throws -> AudioObjectID {
         var tapID: AudioObjectID = 0
         let status = AudioHardwareCreateProcessTap(description, &tapID)
@@ -97,8 +129,9 @@ struct AggregateDeviceBuilder: AggregateDeviceBuilding {
     }
 
     func createTap(for pid: pid_t) throws -> AudioObjectID {
+        let processObjectID = try hardware.processObjectID(for: pid)
         let tapDescription = CATapDescription(
-            stereoMixdownOfProcesses: [AudioObjectID(pid)]
+            stereoMixdownOfProcesses: [processObjectID]
         )
         return try hardware.createProcessTap(description: tapDescription)
     }
