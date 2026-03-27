@@ -136,13 +136,70 @@ final class StudioViewModel: ObservableObject {
                 }
             }
 
-            try await recordingService.startRecording(
-                in: workspace,
-                micDeviceID: selectedDevice?.id,
-                tapID: selectedTapID,
-                aggregateDeviceID: selectedAggregateDeviceID,
-                capturedAppName: selectedApp?.name
-            )
+            let selectedMicDeviceID = selectedDevice?.id
+            let selectedCapturedAppName = selectedApp?.name
+
+            var startError: Error?
+            var fallbackMessage: String?
+
+            do {
+                try await startRecordingAttempt(
+                    in: workspace,
+                    micDeviceID: selectedMicDeviceID,
+                    tapID: selectedTapID,
+                    aggregateDeviceID: selectedAggregateDeviceID,
+                    capturedAppName: selectedCapturedAppName
+                )
+            } catch {
+                startError = error
+            }
+
+            if startError != nil, let tapID = selectedTapID, let aggregateDeviceID = selectedAggregateDeviceID {
+                aggregateDeviceBuilder.teardown(tapID: tapID, aggregateDeviceID: aggregateDeviceID)
+                selectedTapID = nil
+                selectedAggregateDeviceID = nil
+                fallbackMessage = "App audio capture unavailable. Falling back to microphone-only recording."
+
+                do {
+                    try await startRecordingAttempt(
+                        in: workspace,
+                        micDeviceID: selectedMicDeviceID,
+                        tapID: nil,
+                        aggregateDeviceID: nil,
+                        capturedAppName: nil
+                    )
+                    startError = nil
+                } catch {
+                    startError = error
+                }
+            }
+
+            if startError != nil, selectedMicDeviceID != nil {
+                do {
+                    try await startRecordingAttempt(
+                        in: workspace,
+                        micDeviceID: nil,
+                        tapID: nil,
+                        aggregateDeviceID: nil,
+                        capturedAppName: nil
+                    )
+                    startError = nil
+                    if fallbackMessage == nil {
+                        fallbackMessage = "Selected microphone unavailable. Falling back to system default microphone."
+                    }
+                } catch {
+                    startError = error
+                }
+            }
+
+            if let startError {
+                throw startError
+            }
+
+            if let fallbackMessage {
+                errorMessage = fallbackMessage
+            }
+
             recordingStartedAt = Date()
             recordingState = .recording(duration: 0, level: 0)
             startRecordingMonitor()
@@ -208,6 +265,22 @@ final class StudioViewModel: ObservableObject {
                 try? await Task.sleep(for: .milliseconds(50))
             }
         }
+    }
+
+    private func startRecordingAttempt(
+        in workspace: Workspace,
+        micDeviceID: AudioDeviceID?,
+        tapID: AudioObjectID?,
+        aggregateDeviceID: AudioDeviceID?,
+        capturedAppName: String?
+    ) async throws {
+        try await recordingService.startRecording(
+            in: workspace,
+            micDeviceID: micDeviceID,
+            tapID: tapID,
+            aggregateDeviceID: aggregateDeviceID,
+            capturedAppName: capturedAppName
+        )
     }
 
     private func startCtaCountdown() {

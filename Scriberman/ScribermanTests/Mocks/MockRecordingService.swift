@@ -6,6 +6,7 @@ final class MockRecordingService: RecordingServiceProtocol {
     var isRecordingOverride = false
     var audioLevelOverride: Float = 0
     var startShouldThrow: Error?
+    var startThrowSequence: [Error] = []
     var stopReturns: RecordingSession?
     var startCalls: [(workspace: Workspace, micDeviceID: AudioDeviceID?, tapID: AudioObjectID?, aggregateDeviceID: AudioDeviceID?, capturedAppName: String?)] = []
     var pendingError: RecordingError?
@@ -32,6 +33,9 @@ final class MockRecordingService: RecordingServiceProtocol {
             aggregateDeviceID: aggregateDeviceID,
             capturedAppName: capturedAppName
         ))
+        if !startThrowSequence.isEmpty {
+            throw startThrowSequence.removeFirst()
+        }
         if let startShouldThrow {
             throw startShouldThrow
         }
