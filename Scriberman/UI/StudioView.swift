@@ -16,14 +16,27 @@ struct StudioView: View {
 
             switch viewModel.recordingState {
             case .idle:
-                Button("New Recording") {
-                    Task { await viewModel.startRecording() }
+                VStack(spacing: 12) {
+                    HStack {
+                        microphonePicker
+                        Spacer()
+                    }
+
+                    Button("New Recording") {
+                        Task { await viewModel.startRecording() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
 
             case .recording(let duration, let level):
                 VStack(spacing: 16) {
+                    if let selectedDeviceName = viewModel.selectedDevice?.name {
+                        Text(selectedDeviceName)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
                     WaveformView(level: .constant(level))
                     Text(durationText(duration))
                         .font(.title3)
@@ -65,5 +78,23 @@ struct StudioView: View {
         let minutes = totalSeconds / 60
         let seconds = totalSeconds % 60
         return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    private var microphonePicker: some View {
+        Menu {
+            ForEach(viewModel.availableDevices) { device in
+                Button {
+                    viewModel.selectedDevice = device
+                } label: {
+                    if viewModel.selectedDevice?.uid == device.uid {
+                        Label(device.name, systemImage: "checkmark")
+                    } else {
+                        Text(device.name)
+                    }
+                }
+            }
+        } label: {
+            Label(viewModel.selectedDevice?.name ?? "Microphone", systemImage: "mic")
+        }
     }
 }

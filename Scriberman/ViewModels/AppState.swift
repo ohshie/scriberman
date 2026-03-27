@@ -13,16 +13,29 @@ final class AppState: ObservableObject {
     let jobsViewModel: JobsViewModel
     let settingsViewModel: SettingsViewModel
 
-    @Published var selectedTab: Tab = .studio
+    @Published var selectedTab: Tab = .studio {
+        didSet {
+            if selectedTab == .studio {
+                studioViewModel.refreshApps()
+            }
+        }
+    }
     @Published private(set) var workspace: Workspace?
     @Published private(set) var workspaceErrorMessage: String?
     @Published var workspaceSelectionRequired = false
 
-    init(services: ServiceContainer = .live()) {
+    convenience init() {
+        self.init(services: .live())
+    }
+
+    init(services: ServiceContainer) {
         self.services = services
         self.studioViewModel = StudioViewModel(
             workspaceService: services.workspaceService,
-            recordingService: services.recordingService
+            recordingService: services.recordingService,
+            audioDeviceService: services.audioDeviceService,
+            appAudioService: services.appAudioService,
+            aggregateDeviceBuilder: AggregateDeviceBuilder()
         )
         self.jobsViewModel = JobsViewModel(
             workspaceService: services.workspaceService,
@@ -41,6 +54,8 @@ final class AppState: ObservableObject {
     func selectTab(_ tab: Tab) {
         if tab != .studio {
             studioViewModel.clearStoppedCTAIfNeeded()
+        } else {
+            studioViewModel.refreshApps()
         }
         selectedTab = tab
     }

@@ -1,4 +1,6 @@
 import AVFoundation
+import AudioToolbox
+import CoreAudio
 import Foundation
 import SwiftData
 
@@ -6,6 +8,7 @@ enum RecordingError: LocalizedError {
     case alreadyRecording
     case microphoneDenied
     case invalidWorkspaceAccess
+    case captureInterrupted
     case failedToStart(String)
 
     var errorDescription: String? {
@@ -16,6 +19,8 @@ enum RecordingError: LocalizedError {
             return "Microphone access is denied. Enable it in System Settings."
         case .invalidWorkspaceAccess:
             return "Workspace is not currently writable."
+        case .captureInterrupted:
+            return "Recording stopped because audio capture was interrupted."
         case .failedToStart(let reason):
             return "Failed to start recording: \(reason)"
         }
@@ -25,6 +30,8 @@ enum RecordingError: LocalizedError {
 actor RecordingService: RecordingServiceProtocol {
     private let workspaceService: WorkspaceServiceProtocol
     private let modelContainer: ModelContainer
+    private let aggregateDeviceBuilder: AggregateDeviceBuilding
+    private let notificationCenter: NotificationCenter
     private let fileManager = FileManager.default
 
     private var audioEngine: AVAudioEngine?
@@ -33,13 +40,40 @@ actor RecordingService: RecordingServiceProtocol {
     private var recordingURL: URL?
     private var hasScopedRecordingAccess = false
     private var recordingWorkspaceRootURL: URL?
+    private var activeTapID: AudioObjectID?
+    private var activeAggregateDeviceID: AudioDeviceID?
+    private var pendingError: RecordingError?
+    private var engineConfigurationObserver: NSObjectProtocol?
 
     private var isRecordingValue = false
     private var audioLevelValue: Float = 0
 
-    init(workspaceService: WorkspaceServiceProtocol, modelContainer: ModelContainer) {
+    init(
+        workspaceService: WorkspaceServiceProtocol,
+        modelContainer: ModelContainer,
+        aggregateDeviceBuilder: AggregateDeviceBuilding = AggregateDeviceBuilder(),
+        notificationCenter: NotificationCenter = .default
+    ) {
         self.workspaceService = workspaceService
         self.modelContainer = modelContainer
+        self.aggregateDeviceBuilder = aggregateDeviceBuilder
+        self.notificationCenter = notificationCenter
+
+        engineConfigurationObserver = notificationCenter.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            Task {
+                await self?.handleAudioEngineConfigurationChange()
+            }
+        }
+    }
+
+    deinit {
+        if let engineConfigurationObserver {
+            notificationCenter.removeObserver(engineConfigurationObserver)
+        }
     }
 
     func isRecording() async -> Bool {
@@ -50,7 +84,12 @@ actor RecordingService: RecordingServiceProtocol {
         audioLevelValue
     }
 
-    func startRecording(in workspace: Workspace) async throws {
+    func startRecording(
+        in workspace: Workspace,
+        micDeviceID: AudioDeviceID? = nil,
+        tapID: AudioObjectID? = nil,
+        aggregateDeviceID: AudioDeviceID? = nil
+    ) async throws {
         guard !isRecordingValue else {
             throw RecordingError.alreadyRecording
         }
@@ -72,6 +111,49 @@ actor RecordingService: RecordingServiceProtocol {
             let fileURL = workspace.recordingsURL.appendingPathComponent("\(recordingIdentifier).wav")
             let audioEngine = AVAudioEngine()
             let inputNode = audioEngine.inputNode
+
+            if let aggregateDeviceID {
+                guard let inputAudioUnit = inputNode.audioUnit else {
+                    throw RecordingError.failedToStart("Audio input unit is unavailable.")
+                }
+
+                var targetDeviceID = aggregateDeviceID
+                let status = withUnsafePointer(to: &targetDeviceID) { pointer in
+                    AudioUnitSetProperty(
+                        inputAudioUnit,
+                        kAudioOutputUnitProperty_CurrentDevice,
+                        kAudioUnitScope_Global,
+                        0,
+                        pointer,
+                        UInt32(MemoryLayout<AudioDeviceID>.size)
+                    )
+                }
+
+                guard status == noErr else {
+                    throw RecordingError.failedToStart("Unable to configure aggregate capture device (OSStatus \(status)).")
+                }
+            } else if let micDeviceID {
+                guard let inputAudioUnit = inputNode.audioUnit else {
+                    throw RecordingError.failedToStart("Audio input unit is unavailable.")
+                }
+
+                var targetDeviceID = micDeviceID
+                let status = withUnsafePointer(to: &targetDeviceID) { pointer in
+                    AudioUnitSetProperty(
+                        inputAudioUnit,
+                        kAudioOutputUnitProperty_CurrentDevice,
+                        kAudioUnitScope_Global,
+                        0,
+                        pointer,
+                        UInt32(MemoryLayout<AudioDeviceID>.size)
+                    )
+                }
+
+                guard status == noErr else {
+                    throw RecordingError.failedToStart("Unable to configure selected microphone (OSStatus \(status)).")
+                }
+            }
+
             let inputFormat = inputNode.inputFormat(forBus: 0)
 
             let audioFile = try AVAudioFile(
@@ -103,7 +185,11 @@ actor RecordingService: RecordingServiceProtocol {
             self.recordingURL = fileURL
             self.isRecordingValue = true
             self.audioLevelValue = 0
+            self.pendingError = nil
+            self.activeTapID = tapID
+            self.activeAggregateDeviceID = aggregateDeviceID
         } catch {
+            cleanupAggregateCaptureIfNeeded()
             releaseRecordingScopeIfNeeded()
             throw RecordingError.failedToStart(error.localizedDescription)
         }
@@ -122,6 +208,7 @@ actor RecordingService: RecordingServiceProtocol {
 
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
+        cleanupAggregateCaptureIfNeeded()
 
         let startedAt = recordingStartedAt ?? Date()
         let createdAt = Date()
@@ -150,6 +237,11 @@ actor RecordingService: RecordingServiceProtocol {
             cleanupRecordingState()
             return nil
         }
+    }
+
+    func consumePendingError() async -> RecordingError? {
+        defer { pendingError = nil }
+        return pendingError
     }
 
     private func ensureMicrophonePermission() async throws {
@@ -212,6 +304,8 @@ actor RecordingService: RecordingServiceProtocol {
         audioFile = nil
         recordingStartedAt = nil
         recordingURL = nil
+        activeTapID = nil
+        activeAggregateDeviceID = nil
     }
 
     private func releaseRecordingScopeIfNeeded() {
@@ -222,5 +316,35 @@ actor RecordingService: RecordingServiceProtocol {
         recordingWorkspaceRootURL.stopAccessingSecurityScopedResource()
         hasScopedRecordingAccess = false
         self.recordingWorkspaceRootURL = nil
+    }
+
+    private func cleanupAggregateCaptureIfNeeded() {
+        guard let activeTapID, let activeAggregateDeviceID else {
+            activeTapID = nil
+            activeAggregateDeviceID = nil
+            return
+        }
+
+        aggregateDeviceBuilder.teardown(
+            tapID: activeTapID,
+            aggregateDeviceID: activeAggregateDeviceID
+        )
+        self.activeTapID = nil
+        self.activeAggregateDeviceID = nil
+    }
+
+    private func handleAudioEngineConfigurationChange() async {
+        guard isRecordingValue else {
+            return
+        }
+
+        audioEngine?.inputNode.removeTap(onBus: 0)
+        audioEngine?.stop()
+        cleanupAggregateCaptureIfNeeded()
+        cleanupRecordingState()
+        audioLevelValue = 0
+        isRecordingValue = false
+        pendingError = .captureInterrupted
+        releaseRecordingScopeIfNeeded()
     }
 }

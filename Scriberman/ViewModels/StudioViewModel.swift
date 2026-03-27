@@ -1,3 +1,5 @@
+import Combine
+import CoreAudio
 import Foundation
 
 @MainActor
@@ -10,22 +12,99 @@ final class StudioViewModel: ObservableObject {
 
     private let workspaceService: WorkspaceServiceProtocol
     private let recordingService: RecordingServiceProtocol
+    private let audioDeviceService: AudioDeviceServiceProtocol
+    private let appAudioService: AppAudioServiceProtocol
+    private let aggregateDeviceBuilder: AggregateDeviceBuilding
     private var recordingMonitorTask: Task<Void, Never>?
     private var ctaCountdownTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
     private var stoppedSessionForCTA: RecordingSession?
+    private var cancellables = Set<AnyCancellable>()
+    private var isApplyingServiceSelection = false
+    private var isApplyingAppSelection = false
 
     @Published var recordingState: RecordingState = .idle
     @Published var errorMessage: String?
+    @Published var availableDevices: [AudioInputDevice]
+    @Published var selectedDevice: AudioInputDevice? {
+        didSet {
+            guard !isApplyingServiceSelection else {
+                return
+            }
+            audioDeviceService.selectedDevice = selectedDevice
+        }
+    }
+    @Published var runningApps: [CapturedApp]
+    @Published var selectedApp: CapturedApp? {
+        didSet {
+            guard !isApplyingAppSelection else {
+                return
+            }
+            appAudioService.selectedApp = selectedApp
+        }
+    }
     var onSessionStopped: ((RecordingSession) -> Void)?
 
-    init(workspaceService: WorkspaceServiceProtocol, recordingService: RecordingServiceProtocol) {
+    init(
+        workspaceService: WorkspaceServiceProtocol,
+        recordingService: RecordingServiceProtocol,
+        audioDeviceService: AudioDeviceServiceProtocol,
+        appAudioService: AppAudioServiceProtocol,
+        aggregateDeviceBuilder: AggregateDeviceBuilding
+    ) {
         self.workspaceService = workspaceService
         self.recordingService = recordingService
+        self.audioDeviceService = audioDeviceService
+        self.appAudioService = appAudioService
+        self.aggregateDeviceBuilder = aggregateDeviceBuilder
+        self.availableDevices = audioDeviceService.availableDevices
+        self.selectedDevice = audioDeviceService.selectedDevice
+        self.runningApps = appAudioService.runningApps
+        self.selectedApp = appAudioService.selectedApp
+
+        audioDeviceService.availableDevicesPublisher
+            .sink { [weak self] devices in
+                self?.availableDevices = devices
+            }
+            .store(in: &cancellables)
+
+        audioDeviceService.selectedDevicePublisher
+            .sink { [weak self] device in
+                self?.applySelectedDeviceFromService(device)
+            }
+            .store(in: &cancellables)
+
+        appAudioService.runningAppsPublisher
+            .sink { [weak self] apps in
+                self?.runningApps = apps
+            }
+            .store(in: &cancellables)
+
+        appAudioService.selectedAppPublisher
+            .sink { [weak self] app in
+                self?.applySelectedAppFromService(app)
+            }
+            .store(in: &cancellables)
     }
 
     func refresh() async {
         _ = await workspaceService.currentWorkspace()
+    }
+
+    private func applySelectedDeviceFromService(_ device: AudioInputDevice?) {
+        isApplyingServiceSelection = true
+        selectedDevice = device
+        isApplyingServiceSelection = false
+    }
+
+    private func applySelectedAppFromService(_ app: CapturedApp?) {
+        isApplyingAppSelection = true
+        selectedApp = app
+        isApplyingAppSelection = false
+    }
+
+    func refreshApps() {
+        appAudioService.refreshRunningApps()
     }
 
     func startRecording() async {
@@ -35,7 +114,32 @@ final class StudioViewModel: ObservableObject {
 
         do {
             let workspace = try await workspaceService.requireWritableWorkspace()
-            try await recordingService.startRecording(in: workspace)
+            var selectedTapID: AudioObjectID?
+            var selectedAggregateDeviceID: AudioDeviceID?
+
+            if let selectedApp, let selectedMicUID = selectedDevice?.uid {
+                do {
+                    let tapID = try aggregateDeviceBuilder.createTap(for: selectedApp.pid)
+                    let aggregateDeviceID = try aggregateDeviceBuilder.createAggregateDevice(
+                        micUID: selectedMicUID,
+                        tapID: tapID
+                    )
+                    selectedTapID = tapID
+                    selectedAggregateDeviceID = aggregateDeviceID
+                } catch {
+                    if let selectedTapID {
+                        aggregateDeviceBuilder.destroyTap(selectedTapID)
+                    }
+                    errorMessage = "App audio capture unavailable. Falling back to microphone-only recording."
+                }
+            }
+
+            try await recordingService.startRecording(
+                in: workspace,
+                micDeviceID: selectedDevice?.id,
+                tapID: selectedTapID,
+                aggregateDeviceID: selectedAggregateDeviceID
+            )
             recordingStartedAt = Date()
             recordingState = .recording(duration: 0, level: 0)
             startRecordingMonitor()
@@ -86,6 +190,10 @@ final class StudioViewModel: ObservableObject {
             while let self, !Task.isCancelled {
                 let isRecording = await recordingService.isRecording()
                 guard isRecording else {
+                    if let pendingError = await recordingService.consumePendingError() {
+                        errorMessage = pendingError.localizedDescription
+                        recordingState = .idle
+                    }
                     break
                 }
 

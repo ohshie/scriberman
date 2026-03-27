@@ -22,6 +22,8 @@
 	<string>26.0</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Scriberman needs microphone access to record audio for transcription.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Scriberman needs audio capture access to record selected app audio with your microphone.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>
