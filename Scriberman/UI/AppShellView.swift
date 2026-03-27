@@ -4,18 +4,21 @@ struct AppShellView: View {
     @EnvironmentObject private var appState: AppState
 
     var body: some View {
-        TabView {
+        TabView(selection: $appState.selectedTab) {
             StudioView(viewModel: appState.studioViewModel)
+                .tag(AppState.Tab.studio)
                 .tabItem {
                     Label("Studio", systemImage: "waveform")
                 }
 
             JobsView(viewModel: appState.jobsViewModel)
+                .tag(AppState.Tab.jobs)
                 .tabItem {
                     Label("Jobs", systemImage: "list.bullet.rectangle")
                 }
 
             SettingsView(viewModel: appState.settingsViewModel)
+                .tag(AppState.Tab.settings)
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
                 }
