@@ -7,7 +7,7 @@ final class MockRecordingService: RecordingServiceProtocol {
     var audioLevelOverride: Float = 0
     var startShouldThrow: Error?
     var stopReturns: RecordingSession?
-    var startCalls: [(workspace: Workspace, micDeviceID: AudioDeviceID?, tapID: AudioObjectID?, aggregateDeviceID: AudioDeviceID?)] = []
+    var startCalls: [(workspace: Workspace, micDeviceID: AudioDeviceID?, tapID: AudioObjectID?, aggregateDeviceID: AudioDeviceID?, capturedAppName: String?)] = []
     var pendingError: RecordingError?
 
     func isRecording() async -> Bool {
@@ -22,13 +22,15 @@ final class MockRecordingService: RecordingServiceProtocol {
         in workspace: Workspace,
         micDeviceID: AudioDeviceID?,
         tapID: AudioObjectID?,
-        aggregateDeviceID: AudioDeviceID?
+        aggregateDeviceID: AudioDeviceID?,
+        capturedAppName: String?
     ) async throws {
         startCalls.append((
             workspace: workspace,
             micDeviceID: micDeviceID,
             tapID: tapID,
-            aggregateDeviceID: aggregateDeviceID
+            aggregateDeviceID: aggregateDeviceID,
+            capturedAppName: capturedAppName
         ))
         if let startShouldThrow {
             throw startShouldThrow

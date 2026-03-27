@@ -42,6 +42,7 @@ actor RecordingService: RecordingServiceProtocol {
     private var recordingWorkspaceRootURL: URL?
     private var activeTapID: AudioObjectID?
     private var activeAggregateDeviceID: AudioDeviceID?
+    private var activeCapturedAppName: String?
     private var pendingError: RecordingError?
     private var engineConfigurationObserver: NSObjectProtocol?
 
@@ -88,7 +89,8 @@ actor RecordingService: RecordingServiceProtocol {
         in workspace: Workspace,
         micDeviceID: AudioDeviceID? = nil,
         tapID: AudioObjectID? = nil,
-        aggregateDeviceID: AudioDeviceID? = nil
+        aggregateDeviceID: AudioDeviceID? = nil,
+        capturedAppName: String? = nil
     ) async throws {
         guard !isRecordingValue else {
             throw RecordingError.alreadyRecording
@@ -188,6 +190,7 @@ actor RecordingService: RecordingServiceProtocol {
             self.pendingError = nil
             self.activeTapID = tapID
             self.activeAggregateDeviceID = aggregateDeviceID
+            self.activeCapturedAppName = capturedAppName
         } catch {
             cleanupAggregateCaptureIfNeeded()
             releaseRecordingScopeIfNeeded()
@@ -224,6 +227,7 @@ actor RecordingService: RecordingServiceProtocol {
             duration: duration,
             audioURL: recordingURL.path,
             title: makeSessionTitle(createdAt: createdAt),
+            capturedAppName: activeCapturedAppName,
             status: .recorded
         )
 
@@ -306,6 +310,7 @@ actor RecordingService: RecordingServiceProtocol {
         recordingURL = nil
         activeTapID = nil
         activeAggregateDeviceID = nil
+        activeCapturedAppName = nil
     }
 
     private func releaseRecordingScopeIfNeeded() {
