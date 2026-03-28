@@ -6,6 +6,8 @@ import XCTest
 final class JobsViewModelTests: XCTestCase {
     private var workspaceService: MockWorkspaceService!
     private var transcriptionService: MockTranscriptionService!
+    private var retranscriptionService: RetranscriptionService!
+    private var audioImportService: AudioImportService!
     private var viewModel: JobsViewModel!
     private var container: ModelContainer!
     private var context: ModelContext!
@@ -14,6 +16,26 @@ final class JobsViewModelTests: XCTestCase {
         try super.setUpWithError()
         workspaceService = MockWorkspaceService()
         transcriptionService = MockTranscriptionService()
+        retranscriptionService = RetranscriptionService(
+            transcriptionService: TranscriptionService(),
+            extractSamples: { _, _ in (mic: [0.1], app: nil) },
+            prepareModelsHandler: { _ in },
+            transcribePassFromSamplesHandler: { _, _, _ in [] }
+        )
+        audioImportService = AudioImportService(
+            retranscriptionService: retranscriptionService,
+            probeAudio: { url in
+                AudioImportProbeResult(
+                    title: url.deletingPathExtension().lastPathComponent,
+                    originalFileName: url.lastPathComponent,
+                    originalFormat: url.pathExtension.lowercased(),
+                    duration: 0
+                )
+            },
+            readChannelSamples: { _ in [[0.1]] },
+            writeMonoAAC: { _, _ in },
+            retranscribe: { _, _, _ in }
+        )
 
         container = try ModelContainer(
             for: RecordingSession.self, ImportedSession.self,
@@ -23,7 +45,9 @@ final class JobsViewModelTests: XCTestCase {
 
         viewModel = JobsViewModel(
             workspaceService: workspaceService,
-            transcriptionService: transcriptionService
+            transcriptionService: transcriptionService,
+            retranscriptionService: retranscriptionService,
+            audioImportService: audioImportService
         )
     }
 
@@ -33,6 +57,8 @@ final class JobsViewModelTests: XCTestCase {
         container = nil
         transcriptionService = nil
         workspaceService = nil
+        retranscriptionService = nil
+        audioImportService = nil
         super.tearDown()
     }
 

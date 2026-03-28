@@ -20,12 +20,12 @@ final class TranscriptExportService {
     private let markdownRenderer = MarkdownRenderer()
 
     @MainActor
-    func export(session: RecordingSession) async throws {
+    func export(session: any TranscribableSession) async throws {
         try await export(session: session, transcript: session.transcript)
     }
 
     @MainActor
-    func export(session: RecordingSession, transcript: Transcript?) async throws {
+    func export(session: any TranscribableSession, transcript: Transcript?) async throws {
         guard let transcript else {
             throw TranscriptExportError.transcriptUnavailable
         }

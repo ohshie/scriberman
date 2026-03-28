@@ -54,7 +54,9 @@ final class AppState: ObservableObject {
         )
         self.jobsViewModel = JobsViewModel(
             workspaceService: services.workspaceService,
-            transcriptionService: services.transcriptionService
+            transcriptionService: services.transcriptionService,
+            retranscriptionService: services.retranscriptionService,
+            audioImportService: services.audioImportService
         )
         self.settingsViewModel = SettingsViewModel(
             workspaceService: services.workspaceService,
