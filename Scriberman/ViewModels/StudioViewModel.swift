@@ -140,8 +140,9 @@ final class StudioViewModel: ObservableObject {
             var selectedTapID: AudioObjectID?
             var selectedAggregateDeviceID: AudioDeviceID?
             var selectedCapturedAppName: String?
+            var selectedAppProcessID: pid_t?
 
-            if let selectedApp, let selectedMicUID = selectedDevice?.uid {
+            if let selectedApp {
                 if !appAudioPermissionService.hasSystemAudioCaptureAccess() {
                     let granted = appAudioPermissionService.requestSystemAudioCaptureAccess()
                     if !granted {
@@ -150,21 +151,8 @@ final class StudioViewModel: ObservableObject {
                 }
 
                 if appAudioPermissionService.hasSystemAudioCaptureAccess() {
-                do {
-                    let tapID = try aggregateDeviceBuilder.createTap(for: selectedApp.pid)
-                    let aggregateDeviceID = try aggregateDeviceBuilder.createAggregateDevice(
-                        micUID: selectedMicUID,
-                        tapID: tapID
-                    )
-                    selectedTapID = tapID
-                    selectedAggregateDeviceID = aggregateDeviceID
                     selectedCapturedAppName = selectedApp.name
-                } catch {
-                    if let selectedTapID {
-                        aggregateDeviceBuilder.destroyTap(selectedTapID)
-                    }
-                    errorMessage = "App audio capture unavailable. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording."
-                }
+                    selectedAppProcessID = selectedApp.pid
                 }
             }
 
@@ -179,16 +167,14 @@ final class StudioViewModel: ObservableObject {
                     micDeviceID: selectedMicDeviceID,
                     tapID: selectedTapID,
                     aggregateDeviceID: selectedAggregateDeviceID,
-                    capturedAppName: selectedCapturedAppName
+                    capturedAppName: selectedCapturedAppName,
+                    appProcessID: selectedAppProcessID
                 )
             } catch {
                 startError = error
             }
 
-            if startError != nil, let tapID = selectedTapID, let aggregateDeviceID = selectedAggregateDeviceID {
-                aggregateDeviceBuilder.teardown(tapID: tapID, aggregateDeviceID: aggregateDeviceID)
-                selectedTapID = nil
-                selectedAggregateDeviceID = nil
+            if startError != nil, selectedAppProcessID != nil {
                 fallbackMessage = "App audio capture unavailable. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording."
 
                 do {
@@ -197,7 +183,8 @@ final class StudioViewModel: ObservableObject {
                         micDeviceID: selectedMicDeviceID,
                         tapID: nil,
                         aggregateDeviceID: nil,
-                        capturedAppName: nil
+                        capturedAppName: nil,
+                        appProcessID: nil
                     )
                     startError = nil
                 } catch {
@@ -212,7 +199,8 @@ final class StudioViewModel: ObservableObject {
                         micDeviceID: nil,
                         tapID: nil,
                         aggregateDeviceID: nil,
-                        capturedAppName: nil
+                        capturedAppName: nil,
+                        appProcessID: nil
                     )
                     startError = nil
                     if fallbackMessage == nil {
@@ -303,14 +291,16 @@ final class StudioViewModel: ObservableObject {
         micDeviceID: AudioDeviceID?,
         tapID: AudioObjectID?,
         aggregateDeviceID: AudioDeviceID?,
-        capturedAppName: String?
+        capturedAppName: String?,
+        appProcessID: pid_t?
     ) async throws {
         try await recordingService.startRecording(
             in: workspace,
             micDeviceID: micDeviceID,
             tapID: tapID,
             aggregateDeviceID: aggregateDeviceID,
-            capturedAppName: capturedAppName
+            capturedAppName: capturedAppName,
+            appProcessID: appProcessID
         )
     }
 

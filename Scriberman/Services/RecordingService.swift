@@ -1,7 +1,9 @@
 import AVFoundation
 import AudioToolbox
 import CoreAudio
+import CoreMedia
 import Foundation
+import ScreenCaptureKit
 import SwiftData
 
 enum RecordingError: LocalizedError {
@@ -44,6 +46,7 @@ actor RecordingService: RecordingServiceProtocol {
     private var activeTapID: AudioObjectID?
     private var activeAggregateDeviceID: AudioDeviceID?
     private var activeCapturedAppName: String?
+    private var appAudioCaptureSession: AppAudioCaptureSession?
     private var pendingError: RecordingError?
     private var engineConfigurationObserver: NSObjectProtocol?
 
@@ -83,6 +86,9 @@ actor RecordingService: RecordingServiceProtocol {
     }
 
     func audioLevel() async -> Float {
+        if let appAudioCaptureSession {
+            audioLevelValue = appAudioCaptureSession.audioLevel
+        }
         if let audioRecorder {
             audioRecorder.updateMeters()
             let averagePower = audioRecorder.averagePower(forChannel: 0)
@@ -99,7 +105,8 @@ actor RecordingService: RecordingServiceProtocol {
         micDeviceID: AudioDeviceID? = nil,
         tapID: AudioObjectID? = nil,
         aggregateDeviceID: AudioDeviceID? = nil,
-        capturedAppName: String? = nil
+        capturedAppName: String? = nil,
+        appProcessID: pid_t? = nil
     ) async throws {
         guard !isRecordingValue else {
             throw RecordingError.alreadyRecording
@@ -120,10 +127,33 @@ actor RecordingService: RecordingServiceProtocol {
 
             let recordingIdentifier = UUID().uuidString
             let fileURL = workspace.recordingsURL.appendingPathComponent("\(recordingIdentifier).wav")
+
+            if let appProcessID {
+                let session = AppAudioCaptureSession(
+                    fileURL: fileURL,
+                    processID: appProcessID,
+                    microphoneDeviceUID: micDeviceID.flatMap(deviceUID(for:))
+                )
+                try await session.start()
+                self.appAudioCaptureSession = session
+                self.audioEngine = nil
+                self.audioFile = nil
+                self.audioRecorder = nil
+                self.recordingStartedAt = Date()
+                self.recordingURL = fileURL
+                self.isRecordingValue = true
+                self.audioLevelValue = 0
+                self.pendingError = nil
+                self.activeTapID = nil
+                self.activeAggregateDeviceID = nil
+                self.activeCapturedAppName = capturedAppName
+                return
+            }
+
             let audioEngine = AVAudioEngine()
             let inputNode = audioEngine.inputNode
 
-            if let aggregateDeviceID {
+            if let aggregateDeviceID, aggregateDeviceID != 0 {
                 guard let inputAudioUnit = inputNode.audioUnit else {
                     throw RecordingError.failedToStart("Audio input unit is unavailable.")
                 }
@@ -143,7 +173,7 @@ actor RecordingService: RecordingServiceProtocol {
                 guard status == noErr else {
                     throw RecordingError.failedToStart("Unable to configure aggregate capture device (OSStatus \(status)).")
                 }
-            } else if let micDeviceID {
+            } else if let micDeviceID, micDeviceID != 0 {
                 guard let inputAudioUnit = inputNode.audioUnit else {
                     throw RecordingError.failedToStart("Audio input unit is unavailable.")
                 }
@@ -167,6 +197,21 @@ actor RecordingService: RecordingServiceProtocol {
 
             do {
                 let inputFormat = inputNode.inputFormat(forBus: 0)
+                guard isValidTapFormat(inputFormat) else {
+                    guard aggregateDeviceID == nil else {
+                        throw RecordingError.failedToStart("Aggregate capture input format is invalid.")
+                    }
+                    try startRecorderFallback(to: fileURL)
+                    self.recordingStartedAt = Date()
+                    self.recordingURL = fileURL
+                    self.isRecordingValue = true
+                    self.audioLevelValue = 0
+                    self.pendingError = nil
+                    self.activeTapID = tapID
+                    self.activeAggregateDeviceID = aggregateDeviceID
+                    self.activeCapturedAppName = capturedAppName
+                    return
+                }
                 let audioFile = try AVAudioFile(
                     forWriting: fileURL,
                     settings: inputFormat.settings,
@@ -232,6 +277,8 @@ actor RecordingService: RecordingServiceProtocol {
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioRecorder?.stop()
+        await appAudioCaptureSession?.stop()
+        appAudioCaptureSession = nil
         cleanupAggregateCaptureIfNeeded()
 
         let startedAt = recordingStartedAt ?? Date()
@@ -328,6 +375,7 @@ actor RecordingService: RecordingServiceProtocol {
         audioEngine = nil
         audioFile = nil
         audioRecorder = nil
+        appAudioCaptureSession = nil
         recordingStartedAt = nil
         recordingURL = nil
         activeTapID = nil
@@ -374,6 +422,8 @@ actor RecordingService: RecordingServiceProtocol {
         audioEngine.inputNode.removeTap(onBus: 0)
         audioEngine.stop()
         audioRecorder?.stop()
+        await appAudioCaptureSession?.stop()
+        appAudioCaptureSession = nil
         cleanupAggregateCaptureIfNeeded()
         cleanupRecordingState()
         audioLevelValue = 0
@@ -401,5 +451,351 @@ actor RecordingService: RecordingServiceProtocol {
         self.audioEngine = nil
         self.audioFile = nil
         self.audioRecorder = recorder
+    }
+
+    private func isValidTapFormat(_ format: AVAudioFormat) -> Bool {
+        format.sampleRate.isFinite && format.sampleRate > 0 && format.channelCount > 0
+    }
+
+    private func deviceUID(for deviceID: AudioDeviceID) -> String? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var cfString: CFString?
+        var dataSize = UInt32(MemoryLayout<CFString?>.size)
+        let status = AudioObjectGetPropertyData(
+            deviceID,
+            &address,
+            0,
+            nil,
+            &dataSize,
+            &cfString
+        )
+        guard status == noErr else {
+            return nil
+        }
+        return cfString as String?
+    }
+}
+
+final class AppAudioCaptureSession {
+    private let fileURL: URL
+    private let processID: pid_t
+    private let microphoneDeviceUID: String?
+    private let outputHandler = AppAudioStreamOutputHandler()
+    private let sampleQueue = DispatchQueue(label: "com.scriberman.app-audio.stream")
+    private var stream: SCStream?
+
+    var audioLevel: Float {
+        outputHandler.audioLevel
+    }
+
+    init(fileURL: URL, processID: pid_t, microphoneDeviceUID: String?) {
+        self.fileURL = fileURL
+        self.processID = processID
+        self.microphoneDeviceUID = microphoneDeviceUID
+    }
+
+    func start() async throws {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        guard let app = content.applications.first(where: { $0.processID == processID }) else {
+            throw RecordingError.failedToStart("Selected app is not available for audio capture.")
+        }
+        guard let window = content.windows.first(where: { $0.owningApplication == app }) else {
+            throw RecordingError.failedToStart("Selected app has no capturable window.")
+        }
+
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+        let configuration = SCStreamConfiguration()
+        configuration.capturesAudio = true
+        configuration.captureMicrophone = true
+        configuration.microphoneCaptureDeviceID = microphoneDeviceUID
+        configuration.sampleRate = 48_000
+        configuration.channelCount = 2
+        configuration.width = 1
+        configuration.height = 1
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+        configuration.queueDepth = 3
+
+        outputHandler.configureOutput(url: fileURL)
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
+        try stream.addStreamOutput(
+            outputHandler,
+            type: .audio,
+            sampleHandlerQueue: sampleQueue
+        )
+        try stream.addStreamOutput(
+            outputHandler,
+            type: .microphone,
+            sampleHandlerQueue: sampleQueue
+        )
+
+        var lastError: Error?
+        for attempt in 0..<3 {
+            do {
+                try await stream.startCapture()
+                self.stream = stream
+                return
+            } catch {
+                lastError = error
+                if attempt < 2 {
+                    try? await Task.sleep(for: .milliseconds(300))
+                }
+            }
+        }
+
+        throw RecordingError.failedToStart(lastError?.localizedDescription ?? "Failed to start app audio capture.")
+    }
+
+    func stop() async {
+        if let stream {
+            try? await stream.stopCapture()
+        }
+        self.stream = nil
+    }
+}
+
+final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
+    private let lock = NSLock()
+    private var fileURL: URL?
+    private var audioFile: AVAudioFile?
+    private var stereoFormat: AVAudioFormat?
+    private var appSamples: [Float] = []
+    private var micSamples: [Float] = []
+    private var currentLevel: Float = 0
+
+    var audioLevel: Float {
+        lock.lock()
+        defer { lock.unlock() }
+        return currentLevel
+    }
+
+    func configureOutput(url: URL) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.fileURL = url
+        self.audioFile = nil
+        self.stereoFormat = nil
+        self.appSamples.removeAll(keepingCapacity: false)
+        self.micSamples.removeAll(keepingCapacity: false)
+        self.currentLevel = 0
+    }
+
+    nonisolated func stream(
+        _ stream: SCStream,
+        didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
+        of outputType: SCStreamOutputType
+    ) {
+        guard outputType == .audio || outputType == .microphone else {
+            return
+        }
+        process(sampleBuffer, outputType: outputType)
+    }
+
+    private func process(_ sampleBuffer: CMSampleBuffer, outputType: SCStreamOutputType) {
+        guard let pcmBuffer = createPCMBuffer(from: sampleBuffer) else {
+            return
+        }
+        let monoSamples = downmixToMonoSamples(from: pcmBuffer)
+        guard !monoSamples.isEmpty else {
+            return
+        }
+
+        lock.lock()
+        defer { lock.unlock() }
+
+        if outputType == .audio {
+            appSamples.append(contentsOf: monoSamples)
+        } else {
+            micSamples.append(contentsOf: monoSamples)
+        }
+
+        if stereoFormat == nil {
+            stereoFormat = AVAudioFormat(
+                standardFormatWithSampleRate: pcmBuffer.format.sampleRate,
+                channels: 2
+            )
+        }
+
+        if audioFile == nil, let fileURL, let stereoFormat {
+            audioFile = try? AVAudioFile(
+                forWriting: fileURL,
+                settings: stereoFormat.settings,
+                commonFormat: stereoFormat.commonFormat,
+                interleaved: stereoFormat.isInterleaved
+            )
+        }
+
+        let availableFrames = max(appSamples.count, micSamples.count)
+        guard availableFrames > 0 else {
+            return
+        }
+
+        let framesToWrite = min(availableFrames, 1024)
+        guard
+            let stereoFormat,
+            let stereoBuffer = AVAudioPCMBuffer(
+                pcmFormat: stereoFormat,
+                frameCapacity: AVAudioFrameCount(framesToWrite)
+            ),
+            let channelData = stereoBuffer.floatChannelData
+        else {
+            return
+        }
+
+        stereoBuffer.frameLength = AVAudioFrameCount(framesToWrite)
+        let appChannel = channelData[0]
+        let micChannel = channelData[1]
+
+        let appCount = min(framesToWrite, appSamples.count)
+        if appCount > 0 {
+            appSamples.withUnsafeBufferPointer { source in
+                appChannel.initialize(from: source.baseAddress!, count: appCount)
+            }
+        }
+        if appCount < framesToWrite {
+            appChannel.advanced(by: appCount).initialize(repeating: 0, count: framesToWrite - appCount)
+        }
+        if appCount > 0 {
+            appSamples.removeFirst(appCount)
+        }
+
+        let micCount = min(framesToWrite, micSamples.count)
+        if micCount > 0 {
+            micSamples.withUnsafeBufferPointer { source in
+                micChannel.initialize(from: source.baseAddress!, count: micCount)
+            }
+        }
+        if micCount < framesToWrite {
+            micChannel.advanced(by: micCount).initialize(repeating: 0, count: framesToWrite - micCount)
+        }
+        if micCount > 0 {
+            micSamples.removeFirst(micCount)
+        }
+
+        try? audioFile?.write(from: stereoBuffer)
+        currentLevel = computeLevel(from: stereoBuffer)
+    }
+
+    private func computeLevel(from buffer: AVAudioPCMBuffer) -> Float {
+        guard let channelData = buffer.floatChannelData else {
+            return 0
+        }
+
+        let frameCount = Int(buffer.frameLength)
+        guard frameCount > 0 else {
+            return 0
+        }
+
+        let channelCount = Int(buffer.format.channelCount)
+        var sumSquares: Float = 0
+
+        for channel in 0..<channelCount {
+            let samples = channelData[channel]
+            for sampleIndex in 0..<frameCount {
+                let sample = samples[sampleIndex]
+                sumSquares += sample * sample
+            }
+        }
+
+        let meanSquare = sumSquares / Float(frameCount * max(channelCount, 1))
+        return min(max(sqrt(meanSquare), 0), 1)
+    }
+
+    private func createPCMBuffer(from sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else {
+            return nil
+        }
+        guard let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) else {
+            return nil
+        }
+        guard let format = AVAudioFormat(streamDescription: asbd) else {
+            return nil
+        }
+
+        let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
+        guard let pcmBuffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: AVAudioFrameCount(numSamples)
+        ) else {
+            return nil
+        }
+
+        pcmBuffer.frameLength = AVAudioFrameCount(numSamples)
+
+        var requiredSize = 0
+        let queryStatus = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer,
+            bufferListSizeNeededOut: &requiredSize,
+            bufferListOut: nil,
+            bufferListSize: 0,
+            blockBufferAllocator: nil,
+            blockBufferMemoryAllocator: nil,
+            flags: 0,
+            blockBufferOut: nil
+        )
+        guard queryStatus == noErr, requiredSize > 0 else {
+            return nil
+        }
+
+        let audioBufferListRawPtr = UnsafeMutableRawPointer.allocate(
+            byteCount: requiredSize,
+            alignment: MemoryLayout<AudioBufferList>.alignment
+        )
+        defer { audioBufferListRawPtr.deallocate() }
+
+        let audioBufferListPtr = audioBufferListRawPtr.bindMemory(to: AudioBufferList.self, capacity: 1)
+        let audioBufferList = UnsafeMutableAudioBufferListPointer(audioBufferListPtr)
+
+        var blockBuffer: CMBlockBuffer?
+        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer,
+            bufferListSizeNeededOut: nil,
+            bufferListOut: audioBufferListPtr,
+            bufferListSize: requiredSize,
+            blockBufferAllocator: nil,
+            blockBufferMemoryAllocator: nil,
+            flags: 0,
+            blockBufferOut: &blockBuffer
+        )
+        guard status == noErr else {
+            return nil
+        }
+
+        if let channelData = pcmBuffer.floatChannelData {
+            let channelCount = Int(format.channelCount)
+            for channel in 0..<min(audioBufferList.count, channelCount) {
+                let audioBuffer = audioBufferList[channel]
+                if let sourceData = audioBuffer.mData?.assumingMemoryBound(to: Float.self) {
+                    channelData[channel].initialize(from: sourceData, count: Int(pcmBuffer.frameLength))
+                }
+            }
+        }
+
+        return pcmBuffer
+    }
+
+    private func downmixToMonoSamples(from buffer: AVAudioPCMBuffer) -> [Float] {
+        guard let channelData = buffer.floatChannelData else {
+            return []
+        }
+
+        let frameCount = Int(buffer.frameLength)
+        let channelCount = Int(buffer.format.channelCount)
+        guard frameCount > 0, channelCount > 0 else {
+            return []
+        }
+
+        var mono = Array(repeating: Float(0), count: frameCount)
+        for frame in 0..<frameCount {
+            var sum: Float = 0
+            for channel in 0..<channelCount {
+                sum += channelData[channel][frame]
+            }
+            mono[frame] = sum / Float(channelCount)
+        }
+        return mono
     }
 }

@@ -9,7 +9,8 @@ protocol RecordingServiceProtocol {
         micDeviceID: AudioDeviceID?,
         tapID: AudioObjectID?,
         aggregateDeviceID: AudioDeviceID?,
-        capturedAppName: String?
+        capturedAppName: String?,
+        appProcessID: pid_t?
     ) async throws
     func stopRecording() async -> RecordingSession?
     func consumePendingError() async -> RecordingError?
