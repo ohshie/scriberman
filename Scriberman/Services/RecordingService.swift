@@ -131,8 +131,7 @@ actor RecordingService: RecordingServiceProtocol {
             if let appProcessID {
                 let session = AppAudioCaptureSession(
                     fileURL: fileURL,
-                    processID: appProcessID,
-                    microphoneDeviceUID: micDeviceID.flatMap(deviceUID(for:))
+                    processID: appProcessID
                 )
                 try await session.start()
                 self.appAudioCaptureSession = session
@@ -483,7 +482,6 @@ actor RecordingService: RecordingServiceProtocol {
 final class AppAudioCaptureSession {
     private let fileURL: URL
     private let processID: pid_t
-    private let microphoneDeviceUID: String?
     private let outputHandler = AppAudioStreamOutputHandler()
     private let sampleQueue = DispatchQueue(label: "com.scriberman.app-audio.stream")
     private var stream: SCStream?
@@ -492,10 +490,9 @@ final class AppAudioCaptureSession {
         outputHandler.audioLevel
     }
 
-    init(fileURL: URL, processID: pid_t, microphoneDeviceUID: String?) {
+    init(fileURL: URL, processID: pid_t) {
         self.fileURL = fileURL
         self.processID = processID
-        self.microphoneDeviceUID = microphoneDeviceUID
     }
 
     func start() async throws {
@@ -510,8 +507,7 @@ final class AppAudioCaptureSession {
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let configuration = SCStreamConfiguration()
         configuration.capturesAudio = true
-        configuration.captureMicrophone = true
-        configuration.microphoneCaptureDeviceID = microphoneDeviceUID
+        configuration.captureMicrophone = false
         configuration.sampleRate = 48_000
         configuration.channelCount = 2
         configuration.width = 1
@@ -524,11 +520,6 @@ final class AppAudioCaptureSession {
         try stream.addStreamOutput(
             outputHandler,
             type: .audio,
-            sampleHandlerQueue: sampleQueue
-        )
-        try stream.addStreamOutput(
-            outputHandler,
-            type: .microphone,
             sampleHandlerQueue: sampleQueue
         )
 
@@ -561,9 +552,7 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
     private let lock = NSLock()
     private var fileURL: URL?
     private var audioFile: AVAudioFile?
-    private var stereoFormat: AVAudioFormat?
-    private var appSamples: [Float] = []
-    private var micSamples: [Float] = []
+    private var monoFormat: AVAudioFormat?
     private var currentLevel: Float = 0
 
     var audioLevel: Float {
@@ -577,9 +566,7 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
         defer { lock.unlock() }
         self.fileURL = url
         self.audioFile = nil
-        self.stereoFormat = nil
-        self.appSamples.removeAll(keepingCapacity: false)
-        self.micSamples.removeAll(keepingCapacity: false)
+        self.monoFormat = nil
         self.currentLevel = 0
     }
 
@@ -588,13 +575,13 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
         didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
         of outputType: SCStreamOutputType
     ) {
-        guard outputType == .audio || outputType == .microphone else {
+        guard outputType == .audio else {
             return
         }
-        process(sampleBuffer, outputType: outputType)
+        process(sampleBuffer)
     }
 
-    private func process(_ sampleBuffer: CMSampleBuffer, outputType: SCStreamOutputType) {
+    private func process(_ sampleBuffer: CMSampleBuffer) {
         guard let pcmBuffer = createPCMBuffer(from: sampleBuffer) else {
             return
         }
@@ -606,77 +593,42 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
         lock.lock()
         defer { lock.unlock() }
 
-        if outputType == .audio {
-            appSamples.append(contentsOf: monoSamples)
-        } else {
-            micSamples.append(contentsOf: monoSamples)
-        }
-
-        if stereoFormat == nil {
-            stereoFormat = AVAudioFormat(
+        if monoFormat == nil {
+            monoFormat = AVAudioFormat(
                 standardFormatWithSampleRate: pcmBuffer.format.sampleRate,
-                channels: 2
+                channels: 1
             )
         }
 
-        if audioFile == nil, let fileURL, let stereoFormat {
+        if audioFile == nil, let fileURL, let monoFormat {
             audioFile = try? AVAudioFile(
                 forWriting: fileURL,
-                settings: stereoFormat.settings,
-                commonFormat: stereoFormat.commonFormat,
-                interleaved: stereoFormat.isInterleaved
+                settings: monoFormat.settings,
+                commonFormat: monoFormat.commonFormat,
+                interleaved: monoFormat.isInterleaved
             )
         }
 
-        let availableFrames = max(appSamples.count, micSamples.count)
-        guard availableFrames > 0 else {
-            return
-        }
-
-        let framesToWrite = min(availableFrames, 1024)
         guard
-            let stereoFormat,
-            let stereoBuffer = AVAudioPCMBuffer(
-                pcmFormat: stereoFormat,
-                frameCapacity: AVAudioFrameCount(framesToWrite)
+            let monoFormat,
+            let monoBuffer = AVAudioPCMBuffer(
+                pcmFormat: monoFormat,
+                frameCapacity: AVAudioFrameCount(monoSamples.count)
             ),
-            let channelData = stereoBuffer.floatChannelData
+            let channelData = monoBuffer.floatChannelData
         else {
             return
         }
 
-        stereoBuffer.frameLength = AVAudioFrameCount(framesToWrite)
-        let appChannel = channelData[0]
-        let micChannel = channelData[1]
-
-        let appCount = min(framesToWrite, appSamples.count)
-        if appCount > 0 {
-            appSamples.withUnsafeBufferPointer { source in
-                appChannel.initialize(from: source.baseAddress!, count: appCount)
+        monoBuffer.frameLength = AVAudioFrameCount(monoSamples.count)
+        monoSamples.withUnsafeBufferPointer { source in
+            if let sourceBaseAddress = source.baseAddress {
+                channelData[0].assign(from: sourceBaseAddress, count: monoSamples.count)
             }
         }
-        if appCount < framesToWrite {
-            appChannel.advanced(by: appCount).initialize(repeating: 0, count: framesToWrite - appCount)
-        }
-        if appCount > 0 {
-            appSamples.removeFirst(appCount)
-        }
 
-        let micCount = min(framesToWrite, micSamples.count)
-        if micCount > 0 {
-            micSamples.withUnsafeBufferPointer { source in
-                micChannel.initialize(from: source.baseAddress!, count: micCount)
-            }
-        }
-        if micCount < framesToWrite {
-            micChannel.advanced(by: micCount).initialize(repeating: 0, count: framesToWrite - micCount)
-        }
-        if micCount > 0 {
-            micSamples.removeFirst(micCount)
-        }
-
-        try? audioFile?.write(from: stereoBuffer)
-        currentLevel = computeLevel(from: stereoBuffer)
+        try? audioFile?.write(from: monoBuffer)
+        currentLevel = computeLevel(from: monoBuffer)
     }
 
     private func computeLevel(from buffer: AVAudioPCMBuffer) -> Float {
