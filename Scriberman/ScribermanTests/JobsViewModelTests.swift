@@ -70,6 +70,7 @@ final class JobsViewModelTests: XCTestCase {
             createdAt: Date(timeIntervalSince1970: 0),
             duration: 8,
             micAudioURL: "/tmp/audio.wav",
+            mixdownURL: nil,
             title: "Session",
             status: status
         )
