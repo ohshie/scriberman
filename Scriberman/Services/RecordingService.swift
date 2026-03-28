@@ -39,7 +39,7 @@ actor RecordingService: RecordingServiceProtocol {
     private var audioFile: AVAudioFile?
     private var audioRecorder: AVAudioRecorder?
     private var recordingStartedAt: Date?
-    private var recordingURL: URL?
+    private var recordingIdentifier: String?
     private var appAudioURL: URL?
     private var hasScopedRecordingAccess = false
     private var recordingWorkspaceRootURL: URL?
@@ -119,10 +119,12 @@ actor RecordingService: RecordingServiceProtocol {
 
         do {
             try fileManager.createDirectory(at: workspace.recordingsURL, withIntermediateDirectories: true)
+            try fileManager.createDirectory(at: workspace.tmpRecordingURL, withIntermediateDirectories: true)
 
             let recordingIdentifier = UUID().uuidString
-            let micFileURL = workspace.recordingsURL.appendingPathComponent("\(recordingIdentifier)_mic.wav")
-            let appFileURL = workspace.recordingsURL.appendingPathComponent("\(recordingIdentifier)_app.wav")
+            let fileURLs = Self.recordingFileURLs(in: workspace)
+            let micFileURL = fileURLs.mic
+            let appFileURL = fileURLs.app
 
             let audioEngine = AVAudioEngine()
             let inputNode = audioEngine.inputNode
@@ -187,7 +189,7 @@ actor RecordingService: RecordingServiceProtocol {
                 try startRecorderFallback(to: micFileURL)
             }
             self.recordingStartedAt = Date()
-            self.recordingURL = micFileURL
+            self.recordingIdentifier = recordingIdentifier
             self.isRecordingValue = true
             self.audioLevelValue = 0
             self.pendingError = nil
@@ -237,7 +239,21 @@ actor RecordingService: RecordingServiceProtocol {
         let createdAt = Date()
         let duration = max(0, createdAt.timeIntervalSince(startedAt))
 
-        guard let recordingURL else {
+        guard let recordingIdentifier, let recordingWorkspaceRootURL else {
+            cleanupRecordingState()
+            return nil
+        }
+
+        let workspace = Workspace(rootURL: recordingWorkspaceRootURL)
+        let finalRecordingURLs: (mic: URL, app: URL?)
+        do {
+            finalRecordingURLs = try Self.promoteTmpRecordingFolder(
+                in: workspace,
+                createdAt: createdAt,
+                recordingIdentifier: recordingIdentifier,
+                fileManager: fileManager
+            )
+        } catch {
             cleanupRecordingState()
             return nil
         }
@@ -245,8 +261,8 @@ actor RecordingService: RecordingServiceProtocol {
         let session = RecordingSession(
             createdAt: createdAt,
             duration: duration,
-            micAudioURL: recordingURL.path,
-            appAudioURL: appAudioURL?.path,
+            micAudioURL: finalRecordingURLs.mic.path,
+            appAudioURL: finalRecordingURLs.app?.path,
             title: makeSessionTitle(createdAt: createdAt),
             capturedAppName: activeCapturedAppName,
             status: .recorded
@@ -331,7 +347,7 @@ actor RecordingService: RecordingServiceProtocol {
         appAudioCaptureSession = nil
         appAudioURL = nil
         recordingStartedAt = nil
-        recordingURL = nil
+        recordingIdentifier = nil
         activeCapturedAppName = nil
     }
 
@@ -393,6 +409,39 @@ actor RecordingService: RecordingServiceProtocol {
         format.sampleRate.isFinite && format.sampleRate > 0 && format.channelCount > 0
     }
 
+}
+
+extension RecordingService {
+    static func recordingFileURLs(in workspace: Workspace) -> (mic: URL, app: URL) {
+        (
+            workspace.tmpRecordingURL.appendingPathComponent("mic.wav"),
+            workspace.tmpRecordingURL.appendingPathComponent("app.wav")
+        )
+    }
+
+    static func folderName(createdAt: Date, recordingIdentifier: String) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MMM dd 'at' HH-mm"
+        let suffix = String(recordingIdentifier.suffix(2))
+        return "Recording \(formatter.string(from: createdAt)) \(suffix)"
+    }
+
+    static func promoteTmpRecordingFolder(
+        in workspace: Workspace,
+        createdAt: Date,
+        recordingIdentifier: String,
+        fileManager: FileManager = .default
+    ) throws -> (mic: URL, app: URL?) {
+        let folderName = folderName(createdAt: createdAt, recordingIdentifier: recordingIdentifier)
+        let namedFolderURL = workspace.recordingsURL.appendingPathComponent(folderName, isDirectory: true)
+        try fileManager.moveItem(at: workspace.tmpRecordingURL, to: namedFolderURL)
+
+        let micURL = namedFolderURL.appendingPathComponent("mic.wav")
+        let appURL = namedFolderURL.appendingPathComponent("app.wav")
+        let finalAppURL = fileManager.fileExists(atPath: appURL.path) ? appURL : nil
+        return (micURL, finalAppURL)
+    }
 }
 
 final class AppAudioCaptureSession {
