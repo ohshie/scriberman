@@ -41,6 +41,8 @@ actor RecordingService: RecordingServiceProtocol {
     private var recordingStartedAt: Date?
     private var recordingIdentifier: String?
     private var appAudioURL: URL?
+    private var micStartHostTime: UInt64?
+    private var appStartHostTime: UInt64?
     private var hasScopedRecordingAccess = false
     private var recordingWorkspaceRootURL: URL?
     private var activeCapturedAppName: String?
@@ -125,6 +127,8 @@ actor RecordingService: RecordingServiceProtocol {
             let fileURLs = Self.recordingFileURLs(in: workspace)
             let micFileURL = fileURLs.mic
             let appFileURL = fileURLs.app
+            self.micStartHostTime = nil
+            self.appStartHostTime = nil
 
             let audioEngine = AVAudioEngine()
             let inputNode = audioEngine.inputNode
@@ -162,7 +166,13 @@ actor RecordingService: RecordingServiceProtocol {
                     )
 
                     inputNode.removeTap(onBus: 0)
-                    inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, _ in
+                    inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, audioTime in
+                        if audioTime.hostTime != 0 {
+                            Task { [weak self] in
+                                await self?.captureMicStartHostTimeIfNeeded(audioTime.hostTime)
+                            }
+                        }
+
                         do {
                             try audioFile.write(from: buffer)
                         } catch {
@@ -198,7 +208,12 @@ actor RecordingService: RecordingServiceProtocol {
             if let appProcessID {
                 let session = AppAudioCaptureSession(
                     fileURL: appFileURL,
-                    processID: appProcessID
+                    processID: appProcessID,
+                    onFirstBufferHostTime: { [weak self] hostTime in
+                        Task { [weak self] in
+                            await self?.captureAppStartHostTimeIfNeeded(hostTime)
+                        }
+                    }
                 )
                 try await session.start()
                 self.appAudioCaptureSession = session
@@ -349,6 +364,8 @@ actor RecordingService: RecordingServiceProtocol {
         recordingStartedAt = nil
         recordingIdentifier = nil
         activeCapturedAppName = nil
+        micStartHostTime = nil
+        appStartHostTime = nil
     }
 
     private func releaseRecordingScopeIfNeeded() {
@@ -409,6 +426,20 @@ actor RecordingService: RecordingServiceProtocol {
         format.sampleRate.isFinite && format.sampleRate > 0 && format.channelCount > 0
     }
 
+    private func captureMicStartHostTimeIfNeeded(_ hostTime: UInt64) {
+        guard micStartHostTime == nil else {
+            return
+        }
+        micStartHostTime = hostTime
+    }
+
+    private func captureAppStartHostTimeIfNeeded(_ hostTime: UInt64) {
+        guard appStartHostTime == nil else {
+            return
+        }
+        appStartHostTime = hostTime
+    }
+
 }
 
 extension RecordingService {
@@ -455,9 +486,14 @@ final class AppAudioCaptureSession {
         outputHandler.audioLevel
     }
 
-    init(fileURL: URL, processID: pid_t) {
+    init(
+        fileURL: URL,
+        processID: pid_t,
+        onFirstBufferHostTime: (@Sendable (UInt64) -> Void)? = nil
+    ) {
         self.fileURL = fileURL
         self.processID = processID
+        outputHandler.onFirstBufferHostTime = onFirstBufferHostTime
     }
 
     func start() async throws {
@@ -519,6 +555,8 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
     private var audioFile: AVAudioFile?
     private var monoFormat: AVAudioFormat?
     private var currentLevel: Float = 0
+    private var firstBufferHostTime: UInt64?
+    var onFirstBufferHostTime: (@Sendable (UInt64) -> Void)?
 
     var audioLevel: Float {
         lock.lock()
@@ -533,6 +571,7 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
         self.audioFile = nil
         self.monoFormat = nil
         self.currentLevel = 0
+        self.firstBufferHostTime = nil
     }
 
     nonisolated func stream(
@@ -547,6 +586,8 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
     }
 
     private func process(_ sampleBuffer: CMSampleBuffer) {
+        captureFirstBufferHostTimeIfNeeded(from: sampleBuffer)
+
         guard let pcmBuffer = createPCMBuffer(from: sampleBuffer) else {
             return
         }
@@ -714,5 +755,34 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
             mono[frame] = sum / Float(channelCount)
         }
         return mono
+    }
+
+    private func captureFirstBufferHostTimeIfNeeded(from sampleBuffer: CMSampleBuffer) {
+        let callback: (@Sendable (UInt64) -> Void)?
+        let hostTimeToEmit: UInt64?
+        var didCaptureFirstHostTime = false
+
+        lock.lock()
+        if firstBufferHostTime == nil {
+            let presentationTimestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            let hostTimeClock = CMClockGetHostTimeClock()
+            let hostTime = CMSyncConvertTime(
+                presentationTimestamp,
+                from: hostTimeClock,
+                to: hostTimeClock
+            )
+
+            if CMTIME_IS_VALID(hostTime), CMTIME_IS_NUMERIC(hostTime) {
+                firstBufferHostTime = CMClockConvertHostTimeToSystemUnits(hostTime)
+                didCaptureFirstHostTime = true
+            }
+        }
+        callback = onFirstBufferHostTime
+        hostTimeToEmit = didCaptureFirstHostTime ? firstBufferHostTime : nil
+        lock.unlock()
+
+        if let hostTimeToEmit {
+            callback?(hostTimeToEmit)
+        }
     }
 }
