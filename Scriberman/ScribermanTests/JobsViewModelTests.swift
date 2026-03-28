@@ -16,7 +16,7 @@ final class JobsViewModelTests: XCTestCase {
         transcriptionService = MockTranscriptionService()
 
         container = try ModelContainer(
-            for: RecordingSession.self,
+            for: RecordingSession.self, ImportedSession.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         context = ModelContext(container)

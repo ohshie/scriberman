@@ -10,7 +10,7 @@ final class RetranscriptionServiceTests: XCTestCase {
     override func setUpWithError() throws {
         try super.setUpWithError()
         container = try ModelContainer(
-            for: RecordingSession.self,
+            for: RecordingSession.self, ImportedSession.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         context = ModelContext(container)

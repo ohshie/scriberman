@@ -9,7 +9,7 @@ struct ScribermanApp: App {
 
     init() {
         do {
-            let modelContainer = try ModelContainer(for: RecordingSession.self)
+            let modelContainer = try ModelContainer(for: RecordingSession.self, ImportedSession.self)
             self.modelContainer = modelContainer
             _appState = StateObject(
                 wrappedValue: AppState(

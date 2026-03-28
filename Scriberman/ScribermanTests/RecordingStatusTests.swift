@@ -3,7 +3,7 @@ import XCTest
 
 final class RecordingStatusTests: XCTestCase {
     func testNonErrorStatusesRoundTripPersistence() {
-        let statuses: [RecordingStatus] = [.recorded, .transcribing, .retranscribing, .done]
+        let statuses: [RecordingStatus] = [.recorded, .converting, .transcribing, .retranscribing, .done]
 
         for status in statuses {
             let reconstructed = RecordingStatus(persistedValue: status.persistedValue, errorMessage: nil)
