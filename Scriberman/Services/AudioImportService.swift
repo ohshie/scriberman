@@ -15,6 +15,7 @@ actor AudioImportService {
     typealias ReadChannelSamples = @Sendable (URL) throws -> [[Float]]
     typealias CreateDirectory = @Sendable (URL) throws -> Void
     typealias WriteMonoAAC = @Sendable ([Float], URL) async throws -> Void
+    typealias MixToMonoM4A = @Sendable (URL, URL) async throws -> Void
     typealias Retranscribe = @Sendable (any TranscribableSession, Workspace, ModelContext) async -> Void
     typealias SaveContext = @Sendable (ModelContext) throws -> Void
 
@@ -22,6 +23,7 @@ actor AudioImportService {
     private let readChannelSamples: ReadChannelSamples
     private let createDirectory: CreateDirectory
     private let writeMonoAAC: WriteMonoAAC
+    private let mixToMonoM4A: MixToMonoM4A
     private let retranscribe: Retranscribe
     private let saveContext: SaveContext
 
@@ -31,6 +33,7 @@ actor AudioImportService {
         readChannelSamples: ReadChannelSamples? = nil,
         createDirectory: CreateDirectory? = nil,
         writeMonoAAC: WriteMonoAAC? = nil,
+        mixToMonoM4A: MixToMonoM4A? = nil,
         retranscribe: Retranscribe? = nil,
         saveContext: SaveContext? = nil
     ) {
@@ -46,6 +49,15 @@ actor AudioImportService {
         }
         self.writeMonoAAC = writeMonoAAC ?? { samples, outputURL in
             try await mixdownService.writeMonoAAC(samples: samples, to: outputURL)
+        }
+        self.mixToMonoM4A = mixToMonoM4A ?? { inputURL, outputURL in
+            try await mixdownService.mix(
+                micURL: inputURL,
+                appURL: nil,
+                micStartHostTime: 0,
+                appStartHostTime: nil,
+                into: outputURL
+            )
         }
         self.retranscribe = retranscribe ?? { session, workspace, context in
             await retranscriptionService.retranscribe(session: session, workspace: workspace, context: context)
@@ -101,9 +113,17 @@ actor AudioImportService {
             try createDirectory(importFolderURL)
 
             let outputURL = importFolderURL.appendingPathComponent("recording.m4a")
-            let channelSamples = try readChannelSamples(url)
-            let monoSamples = downmixToMono(channelSamples: channelSamples)
-            try await writeMonoAAC(monoSamples, outputURL)
+            do {
+                let channelSamples = try readChannelSamples(url)
+                let monoSamples = downmixToMono(channelSamples: channelSamples)
+                try await writeMonoAAC(monoSamples, outputURL)
+            } catch {
+                if shouldFallbackToMixdownService(for: error) {
+                    try await mixToMonoM4A(url, outputURL)
+                } else {
+                    throw error
+                }
+            }
 
             await MainActor.run {
                 session.mixdownURL = outputURL.path
@@ -241,5 +261,16 @@ actor AudioImportService {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "HH-mm"
         return formatter.string(from: date)
+    }
+
+    private func shouldFallbackToMixdownService(for error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain {
+            return true
+        }
+
+        let message = String(describing: error)
+        return message.contains("Foundation._GenericObjCError")
+            || message.contains("nilError")
     }
 }

@@ -179,6 +179,47 @@ final class AudioImportServiceTests: XCTestCase {
         }
     }
 
+    func testImportAudioFallsBackToMixdownServiceForSandboxDecodeError() async throws {
+        let workspace = Workspace(rootURL: workspaceRootURL)
+        let inputURL = workspaceRootURL.appendingPathComponent("sandboxed.mp3")
+
+        var fallbackCalled = false
+        let service = AudioImportService(
+            retranscriptionService: RetranscriptionService(transcriptionService: TranscriptionService()),
+            probeAudio: { _ in
+                AudioImportProbeResult(
+                    title: "sandboxed",
+                    originalFileName: "sandboxed.mp3",
+                    originalFormat: "mp3",
+                    duration: 5
+                )
+            },
+            readChannelSamples: { _ in
+                throw NSError(domain: NSCocoaErrorDomain, code: 0)
+            },
+            mixToMonoM4A: { _, outputURL in
+                fallbackCalled = true
+                try FileManager.default.createDirectory(
+                    at: outputURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                FileManager.default.createFile(atPath: outputURL.path, contents: Data("aac".utf8))
+            },
+            retranscribe: { session, _, context in
+                session.status = .done
+                try? context.save()
+            }
+        )
+
+        await service.importAudio(from: inputURL, workspace: workspace, context: context)
+
+        let imported = try XCTUnwrap(fetchImportedSession())
+        XCTAssertTrue(fallbackCalled)
+        XCTAssertEqual(imported.status, .done)
+        XCTAssertNotNil(imported.mixdownURL)
+        XCTAssertTrue(imported.mixdownURL?.hasSuffix("recording.m4a") == true)
+    }
+
     private func fetchImportedSession() -> ImportedSession? {
         var descriptor = FetchDescriptor<ImportedSession>()
         descriptor.fetchLimit = 1
