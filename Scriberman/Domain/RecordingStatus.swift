@@ -2,6 +2,7 @@ import Foundation
 
 enum RecordingStatus: Equatable, Codable {
     case recorded
+    case converting
     case transcribing
     case retranscribing
     case done
@@ -11,6 +12,8 @@ enum RecordingStatus: Equatable, Codable {
         switch self {
         case .recorded:
             return "recorded"
+        case .converting:
+            return "converting"
         case .transcribing:
             return "transcribing"
         case .retranscribing:
@@ -26,6 +29,8 @@ enum RecordingStatus: Equatable, Codable {
         switch persistedValue {
         case "recorded":
             self = .recorded
+        case "converting":
+            self = .converting
         case "transcribing":
             self = .transcribing
         case "retranscribing":

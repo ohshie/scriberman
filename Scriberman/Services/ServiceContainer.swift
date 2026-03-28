@@ -11,6 +11,7 @@ struct ServiceContainer {
     let permissionService: PermissionServiceProtocol
     let transcriptionService: TranscriptionService
     let retranscriptionService: RetranscriptionService
+    let audioImportService: AudioImportService
     let transcriptExportService: TranscriptExportService
 
     @MainActor
@@ -18,6 +19,8 @@ struct ServiceContainer {
         let bookmarkStore = UserDefaultsBookmarkStore()
         let workspaceService = WorkspaceService(bookmarkStore: bookmarkStore)
         let transcriptionService = TranscriptionService()
+        let retranscriptionService = RetranscriptionService(transcriptionService: transcriptionService)
+        let audioImportService = AudioImportService(retranscriptionService: retranscriptionService)
 
         return ServiceContainer(
             bookmarkStore: bookmarkStore,
@@ -31,14 +34,15 @@ struct ServiceContainer {
             appAudioService: AppAudioService(),
             permissionService: PermissionService(),
             transcriptionService: transcriptionService,
-            retranscriptionService: RetranscriptionService(transcriptionService: transcriptionService),
+            retranscriptionService: retranscriptionService,
+            audioImportService: audioImportService,
             transcriptExportService: TranscriptExportService()
         )
     }
 
     private static func defaultModelContainer() -> ModelContainer {
         do {
-            return try ModelContainer(for: RecordingSession.self)
+            return try ModelContainer(for: RecordingSession.self, ImportedSession.self)
         } catch {
             fatalError("Failed to initialize SwiftData container: \(error.localizedDescription)")
         }

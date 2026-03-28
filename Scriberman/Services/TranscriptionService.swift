@@ -22,7 +22,7 @@ enum TranscriptionError: LocalizedError {
     }
 }
 
-actor TranscriptionService: TranscriptionServiceProtocol {
+actor TranscriptionService: @preconcurrency TranscriptionServiceProtocol {
     typealias ResampleAudioFile = (URL) throws -> [Float]
     typealias SegmentSpeech = ([Float]) async throws -> [VadSegment]
     typealias ExtractSamples = (URL, Bool) throws -> (mic: [Float], app: [Float]?)

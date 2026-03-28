@@ -126,7 +126,7 @@ struct M4AChannelExtractor {
         inputBuffer.frameLength = AVAudioFrameCount(samples.count)
         samples.withUnsafeBufferPointer { pointer in
             guard let baseAddress = pointer.baseAddress else { return }
-            inputChannelData[0].assign(from: baseAddress, count: samples.count)
+            inputChannelData[0].update(from: baseAddress, count: samples.count)
         }
 
         var deliveredInput = false

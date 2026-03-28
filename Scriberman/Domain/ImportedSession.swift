@@ -2,15 +2,14 @@ import Foundation
 import SwiftData
 
 @Model
-final class RecordingSession {
+final class ImportedSession {
     @Attribute(.unique) var id: UUID
     var createdAt: Date
     var duration: TimeInterval
-    @Attribute(originalName: "audioURL") var micAudioURL: String
-    var appAudioURL: String?
     @Attribute var mixdownURL: String?
     var title: String
-    var capturedAppName: String?
+    var originalFileName: String
+    var originalFormat: String
     var statusRawValue: String
     var errorMessage: String?
     var transcriptData: Data?
@@ -61,12 +60,11 @@ final class RecordingSession {
         id: UUID = UUID(),
         createdAt: Date = .now,
         duration: TimeInterval,
-        micAudioURL: String,
-        appAudioURL: String? = nil,
         mixdownURL: String? = nil,
         title: String,
-        capturedAppName: String? = nil,
-        status: RecordingStatus = .recorded,
+        originalFileName: String,
+        originalFormat: String,
+        status: RecordingStatus = .converting,
         errorMessage: String? = nil,
         transcriptData: Data? = nil,
         retranscriptData: Data? = nil
@@ -74,11 +72,10 @@ final class RecordingSession {
         self.id = id
         self.createdAt = createdAt
         self.duration = duration
-        self.micAudioURL = micAudioURL
-        self.appAudioURL = appAudioURL
         self.mixdownURL = mixdownURL
         self.title = title
-        self.capturedAppName = capturedAppName
+        self.originalFileName = originalFileName
+        self.originalFormat = originalFormat
         self.statusRawValue = status.persistedValue
         self.errorMessage = errorMessage
         self.transcriptData = transcriptData
@@ -89,4 +86,4 @@ final class RecordingSession {
     }
 }
 
-extension RecordingSession: TranscribableSession {}
+extension ImportedSession: TranscribableSession {}

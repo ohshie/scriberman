@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import AudioToolbox
 import CoreMedia
 import Foundation
@@ -34,7 +34,8 @@ actor AudioMixdownService {
         appURL: URL?,
         micStartHostTime: UInt64,
         appStartHostTime: UInt64?,
-        into outputURL: URL
+        into outputURL: URL,
+        deleteSourceFiles: Bool = true
     ) async throws {
         logger.info(
             "Mix request received. mic=\(micURL.path, privacy: .public) app=\(appURL?.path ?? "nil", privacy: .public) out=\(outputURL.path, privacy: .public) format=\(String(describing: self.outputFormat), privacy: .public)"
@@ -82,7 +83,9 @@ actor AudioMixdownService {
         }
 
         logger.info("Mix completed. outputExists=\(self.fileManager.fileExists(atPath: outputURL.path), privacy: .public)")
-        deleteSourceWAVFiles(micURL: micURL, appURL: appURL)
+        if deleteSourceFiles {
+            deleteSourceWAVFiles(micURL: micURL, appURL: appURL)
+        }
     }
 
     private func deleteSourceWAVFiles(micURL: URL, appURL: URL?) {
@@ -167,53 +170,85 @@ actor AudioMixdownService {
             }
         }
         let inputFormat = inputFile.processingFormat
+        let channelCount = Int(inputFormat.channelCount)
+        guard channelCount > 0 else {
+            throw RecordingError.failedToStart("Invalid channel count while reading mixdown input.")
+        }
 
-        if inputFormat.sampleRate == outputSampleRate,
-           inputFormat.channelCount == 1 {
-            var directSamples: [Float] = []
-            while true {
-                guard let buffer = AVAudioPCMBuffer(
-                    pcmFormat: inputFormat,
-                    frameCapacity: processingChunkSize
-                ) else {
-                    throw RecordingError.failedToStart("Failed to allocate direct-read buffer.")
+        var monoSamplesAtSourceRate: [Float] = []
+        while true {
+            guard let buffer = AVAudioPCMBuffer(
+                pcmFormat: inputFormat,
+                frameCapacity: processingChunkSize
+            ) else {
+                throw RecordingError.failedToStart("Failed to allocate direct-read buffer.")
+            }
+
+            try inputFile.read(into: buffer, frameCount: processingChunkSize)
+            guard buffer.frameLength > 0 else {
+                break
+            }
+
+            let frameCount = Int(buffer.frameLength)
+            let writeStart = monoSamplesAtSourceRate.count
+            monoSamplesAtSourceRate.append(contentsOf: repeatElement(0, count: frameCount))
+            let channelScale = Float(1.0 / Double(channelCount))
+
+            switch inputFormat.commonFormat {
+            case .pcmFormatFloat32:
+                guard let channelData = buffer.floatChannelData else {
+                    throw RecordingError.failedToStart("Missing float channel data while reading mixdown input.")
                 }
-
-                try inputFile.read(into: buffer, frameCount: processingChunkSize)
-                guard buffer.frameLength > 0 else {
-                    return directSamples
-                }
-
-                let frameCount = Int(buffer.frameLength)
-                let sampleCountBeforeAppend = directSamples.count
-                switch inputFormat.commonFormat {
-                case .pcmFormatFloat32:
-                    if let channelData = buffer.floatChannelData {
-                        directSamples.append(contentsOf: UnsafeBufferPointer(start: channelData[0], count: frameCount))
+                for channelIndex in 0..<channelCount {
+                    let channel = UnsafeBufferPointer(start: channelData[channelIndex], count: frameCount)
+                    for sampleIndex in 0..<frameCount {
+                        monoSamplesAtSourceRate[writeStart + sampleIndex] += channel[sampleIndex] * channelScale
                     }
-                case .pcmFormatInt16:
-                    if let channelData = buffer.int16ChannelData {
-                        for index in 0..<frameCount {
-                            directSamples.append(Float(channelData[0][index]) / Float(Int16.max))
-                        }
-                    }
-                case .pcmFormatInt32:
-                    if let channelData = buffer.int32ChannelData {
-                        for index in 0..<frameCount {
-                            directSamples.append(Float(channelData[0][index]) / Float(Int32.max))
-                        }
-                    }
-                default:
-                    break
                 }
-
-                if directSamples.count - sampleCountBeforeAppend < frameCount {
-                    throw RecordingError.failedToStart("Unsupported direct-read format: \(inputFormat.commonFormat.rawValue)")
+            case .pcmFormatInt16:
+                guard let channelData = buffer.int16ChannelData else {
+                    throw RecordingError.failedToStart("Missing int16 channel data while reading mixdown input.")
                 }
+                let maxValue = Float(Int16.max)
+                for channelIndex in 0..<channelCount {
+                    let channel = UnsafeBufferPointer(start: channelData[channelIndex], count: frameCount)
+                    for sampleIndex in 0..<frameCount {
+                        monoSamplesAtSourceRate[writeStart + sampleIndex] += (Float(channel[sampleIndex]) / maxValue) * channelScale
+                    }
+                }
+            case .pcmFormatInt32:
+                guard let channelData = buffer.int32ChannelData else {
+                    throw RecordingError.failedToStart("Missing int32 channel data while reading mixdown input.")
+                }
+                let maxValue = Float(Int32.max)
+                for channelIndex in 0..<channelCount {
+                    let channel = UnsafeBufferPointer(start: channelData[channelIndex], count: frameCount)
+                    for sampleIndex in 0..<frameCount {
+                        monoSamplesAtSourceRate[writeStart + sampleIndex] += (Float(channel[sampleIndex]) / maxValue) * channelScale
+                    }
+                }
+            default:
+                throw RecordingError.failedToStart("Unsupported input common format for mixdown: \(inputFormat.commonFormat.rawValue)")
             }
         }
 
-        guard let targetFormat = AVAudioFormat(
+        if abs(inputFormat.sampleRate - outputSampleRate) < 0.0001 {
+            return monoSamplesAtSourceRate
+        }
+        return try resampleMonoSamples(
+            monoSamplesAtSourceRate,
+            sourceSampleRate: inputFormat.sampleRate
+        )
+    }
+
+    private func resampleMonoSamples(_ samples: [Float], sourceSampleRate: Double) throws -> [Float] {
+        guard !samples.isEmpty else { return [] }
+        guard let inputFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sourceSampleRate,
+            channels: 1,
+            interleaved: false
+        ), let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: outputSampleRate,
             channels: 1,
@@ -225,11 +260,20 @@ actor AudioMixdownService {
             throw RecordingError.failedToStart("Failed to create audio converter for mixdown.")
         }
 
-        var allSamples: [Float] = []
-        var reachedEndOfInput = false
-        var inputReadError: Error?
-        var sourceBuffer: AVAudioPCMBuffer?
+        guard let inputBuffer = AVAudioPCMBuffer(
+            pcmFormat: inputFormat,
+            frameCapacity: AVAudioFrameCount(samples.count)
+        ), let inputChannelData = inputBuffer.floatChannelData else {
+            throw RecordingError.failedToStart("Failed to allocate mixdown input buffer.")
+        }
+        inputBuffer.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { pointer in
+            guard let baseAddress = pointer.baseAddress else { return }
+            inputChannelData[0].update(from: baseAddress, count: samples.count)
+        }
 
+        var deliveredInput = false
+        var outputSamples: [Float] = []
         while true {
             guard let convertedBuffer = AVAudioPCMBuffer(
                 pcmFormat: targetFormat,
@@ -239,57 +283,29 @@ actor AudioMixdownService {
             }
 
             var conversionError: NSError?
-            let status = converter.convert(to: convertedBuffer, error: &conversionError) { [processingChunkSize] _, outputStatus in
-                if reachedEndOfInput {
+            let status = converter.convert(to: convertedBuffer, error: &conversionError) { _, outputStatus in
+                if deliveredInput {
                     outputStatus.pointee = .endOfStream
                     return nil
                 }
-
-                guard let readBuffer = AVAudioPCMBuffer(
-                    pcmFormat: inputFormat,
-                    frameCapacity: processingChunkSize
-                ) else {
-                    outputStatus.pointee = .noDataNow
-                    return nil
-                }
-
-                do {
-                    try inputFile.read(into: readBuffer, frameCount: processingChunkSize)
-                } catch {
-                    inputReadError = error
-                    reachedEndOfInput = true
-                    outputStatus.pointee = .endOfStream
-                    return nil
-                }
-
-                if readBuffer.frameLength == 0 {
-                    reachedEndOfInput = true
-                    outputStatus.pointee = .endOfStream
-                    return nil
-                }
-
-                sourceBuffer = readBuffer
+                deliveredInput = true
                 outputStatus.pointee = .haveData
-                return sourceBuffer
+                return inputBuffer
             }
 
-            if let inputReadError {
-                throw inputReadError
-            }
             if let conversionError {
                 throw conversionError
             }
-
             if convertedBuffer.frameLength > 0, let channelData = convertedBuffer.floatChannelData {
                 let frameCount = Int(convertedBuffer.frameLength)
-                allSamples.append(contentsOf: UnsafeBufferPointer(start: channelData[0], count: frameCount))
+                outputSamples.append(contentsOf: UnsafeBufferPointer(start: channelData[0], count: frameCount))
             }
 
             switch status {
             case .error:
                 throw RecordingError.failedToStart("Audio conversion failed during mixdown.")
             case .endOfStream:
-                return allSamples
+                return outputSamples
             default:
                 continue
             }
@@ -306,18 +322,34 @@ actor AudioMixdownService {
         }
         defer { ExtAudioFileDispose(extAudioFile) }
 
+        var fileFormat = AudioStreamBasicDescription()
+        var fileFormatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let fileFormatStatus = ExtAudioFileGetProperty(
+            extAudioFile,
+            kExtAudioFileProperty_FileDataFormat,
+            &fileFormatSize,
+            &fileFormat
+        )
+        guard fileFormatStatus == noErr else {
+            throw RecordingError.failedToStart(
+                "ExtAudioFileGetProperty(FileDataFormat) failed for \(label): \(fileFormatStatus)"
+            )
+        }
+        let sourceChannelCount = max(1, Int(fileFormat.mChannelsPerFrame))
+        let bytesPerFrame = sourceChannelCount * MemoryLayout<Float>.size
+
         var clientFormat = AudioStreamBasicDescription(
             mSampleRate: outputSampleRate,
             mFormatID: kAudioFormatLinearPCM,
-            mFormatFlags: kLinearPCMFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved,
-            mBytesPerPacket: 4,
+            mFormatFlags: kLinearPCMFormatFlagIsFloat | kAudioFormatFlagIsPacked,
+            mBytesPerPacket: UInt32(bytesPerFrame),
             mFramesPerPacket: 1,
-            mBytesPerFrame: 4,
-            mChannelsPerFrame: 1,
+            mBytesPerFrame: UInt32(bytesPerFrame),
+            mChannelsPerFrame: UInt32(sourceChannelCount),
             mBitsPerChannel: 32,
             mReserved: 0
         )
-        var clientFormatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let clientFormatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         let setFormatStatus = ExtAudioFileSetProperty(
             extAudioFile,
             kExtAudioFileProperty_ClientDataFormat,
@@ -332,7 +364,7 @@ actor AudioMixdownService {
 
         var samples: [Float] = []
         let chunkSize = Int(processingChunkSize)
-        var chunk = [Float](repeating: 0, count: chunkSize)
+        var chunk = [Float](repeating: 0, count: chunkSize * sourceChannelCount)
 
         while true {
             var frames = UInt32(chunkSize)
@@ -340,7 +372,7 @@ actor AudioMixdownService {
                 var audioBufferList = AudioBufferList(
                     mNumberBuffers: 1,
                     mBuffers: AudioBuffer(
-                        mNumberChannels: 1,
+                        mNumberChannels: UInt32(sourceChannelCount),
                         mDataByteSize: UInt32(buffer.count * MemoryLayout<Float>.size),
                         mData: buffer.baseAddress
                     )
@@ -353,7 +385,16 @@ actor AudioMixdownService {
             if frames == 0 {
                 break
             }
-            samples.append(contentsOf: chunk.prefix(Int(frames)))
+            let frameCount = Int(frames)
+            let channelScale = Float(1.0 / Double(sourceChannelCount))
+            for frameIndex in 0..<frameCount {
+                var mixed: Float = 0
+                let baseIndex = frameIndex * sourceChannelCount
+                for channelIndex in 0..<sourceChannelCount {
+                    mixed += chunk[baseIndex + channelIndex] * channelScale
+                }
+                samples.append(mixed)
+            }
         }
 
         logger.info(
@@ -374,7 +415,7 @@ actor AudioMixdownService {
         return Int((deltaNanoseconds / 1_000_000_000.0 * outputSampleRate).rounded())
     }
 
-    private func writeMonoAAC(samples: [Float], to outputURL: URL) throws {
+    func writeMonoAAC(samples: [Float], to outputURL: URL) throws {
         try removeOutputIfNeeded(outputURL)
 
         let outputFile = try makeOutputFile(url: outputURL, channelCount: 1)
@@ -396,7 +437,7 @@ actor AudioMixdownService {
             buffer.frameLength = AVAudioFrameCount(frameCount)
             samples[index..<(index + frameCount)].withUnsafeBufferPointer { pointer in
                 if let baseAddress = pointer.baseAddress {
-                    channelData[0].assign(from: baseAddress, count: frameCount)
+                    channelData[0].update(from: baseAddress, count: frameCount)
                 }
             }
 

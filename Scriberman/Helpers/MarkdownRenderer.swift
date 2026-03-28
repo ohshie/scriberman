@@ -1,7 +1,7 @@
 import Foundation
 
 struct MarkdownRenderer {
-    func renderMarkdown(session: RecordingSession, transcript: Transcript) -> String {
+    func renderMarkdown(session: any TranscribableSession, transcript: Transcript) -> String {
         var lines: [String] = []
         lines.append("# \(session.title)")
         lines.append("")

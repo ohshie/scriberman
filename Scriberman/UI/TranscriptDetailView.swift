@@ -2,7 +2,7 @@ import SwiftData
 import SwiftUI
 
 struct TranscriptDetailView: View {
-    let session: RecordingSession
+    let session: any TranscribableSession
 
     @EnvironmentObject private var appState: AppState
     @Environment(\.modelContext) private var modelContext
@@ -126,7 +126,7 @@ struct TranscriptDetailView: View {
 }
 
 struct TranscriptDetailViewState {
-    let session: RecordingSession
+    let session: any TranscribableSession
 
     var displayedTranscript: Transcript? {
         session.retranscript ?? session.transcript

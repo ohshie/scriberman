@@ -141,7 +141,7 @@ final class M4AChannelExtractorTests: XCTestCase {
             for channelIndex in 0..<channelCount {
                 channels[channelIndex][index..<(index + frames)].withUnsafeBufferPointer { pointer in
                     guard let baseAddress = pointer.baseAddress else { return }
-                    channelData[channelIndex].assign(from: baseAddress, count: frames)
+                    channelData[channelIndex].update(from: baseAddress, count: frames)
                 }
             }
 

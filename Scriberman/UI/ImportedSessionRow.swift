@@ -1,8 +1,7 @@
 import SwiftUI
 
-struct RecordingSessionRow: View {
-    let session: RecordingSession
-    let onTranscribe: () -> Void
+struct ImportedSessionRow: View {
+    let session: ImportedSession
     let onRetry: () -> Void
     let onOpen: () -> Void
 
@@ -12,12 +11,10 @@ struct RecordingSessionRow: View {
                 Text(session.title)
                     .font(.headline)
                     .lineLimit(1)
-                if let capturedAppName = session.capturedAppName {
-                    Text("Recorded from \(capturedAppName)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+                Text("Imported from \(session.originalFileName) (\(session.originalFormat))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
                 Text("\(dateText(session.createdAt)) • \(durationText(session.duration))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -45,36 +42,18 @@ struct RecordingSessionRow: View {
     private var statusAccessory: some View {
         switch session.status {
         case .recorded:
-            Button("Transcribe", action: onTranscribe)
-                .buttonStyle(.borderedProminent)
+            Button("Retry", action: onRetry)
+                .buttonStyle(.bordered)
                 .controlSize(.small)
 
         case .converting:
-            HStack(spacing: 6) {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Converting")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            progressLabel("Converting")
 
         case .transcribing:
-            HStack(spacing: 6) {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Transcribing")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            progressLabel("Transcribing")
 
         case .retranscribing:
-            HStack(spacing: 6) {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Retranscribing")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            progressLabel("Transcribing")
 
         case .done:
             HStack(spacing: 6) {
@@ -89,6 +68,16 @@ struct RecordingSessionRow: View {
             Button("Retry", action: onRetry)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+        }
+    }
+
+    private func progressLabel(_ text: String) -> some View {
+        HStack(spacing: 6) {
+            ProgressView()
+                .controlSize(.small)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

@@ -9,7 +9,7 @@ final class AppStateTests: XCTestCase {
     override func setUpWithError() throws {
         try super.setUpWithError()
         modelContainer = try ModelContainer(
-            for: RecordingSession.self,
+            for: RecordingSession.self, ImportedSession.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
     }
@@ -42,6 +42,7 @@ final class AppStateTests: XCTestCase {
         let bookmarkStore = TestBookmarkStore()
         let workspaceService = WorkspaceService(bookmarkStore: bookmarkStore)
         let transcriptionService = TranscriptionService()
+        let retranscriptionService = RetranscriptionService(transcriptionService: transcriptionService)
 
         return ServiceContainer(
             bookmarkStore: bookmarkStore,
@@ -55,7 +56,8 @@ final class AppStateTests: XCTestCase {
             appAudioService: AppAudioService(),
             permissionService: permissionService,
             transcriptionService: transcriptionService,
-            retranscriptionService: RetranscriptionService(transcriptionService: transcriptionService),
+            retranscriptionService: retranscriptionService,
+            audioImportService: AudioImportService(retranscriptionService: retranscriptionService),
             transcriptExportService: TranscriptExportService()
         )
     }
