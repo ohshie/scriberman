@@ -41,6 +41,8 @@
 		791009532F78184E00225294 /* AudioMixdownServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009522F78184E00225294 /* AudioMixdownServiceTests.swift */; };
 		791009552F78328500225294 /* M4AChannelExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009542F78328500225294 /* M4AChannelExtractor.swift */; };
 		791009572F7832AD00225294 /* M4AChannelExtractorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009562F7832AD00225294 /* M4AChannelExtractorTests.swift */; };
+		791009592F783E6300225294 /* RetranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009582F783E6300225294 /* RetranscriptionService.swift */; };
+		7910095B2F783E9B00225294 /* RetranscriptionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7910095A2F783E9B00225294 /* RetranscriptionServiceTests.swift */; };
 		79DCE41A2F77BC3D0024DC26 /* TranscriptionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */; };
 		79DCE41D2F77CC1E0024DC26 /* PermissionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */; };
 		79DCE41F2F77CDA90024DC26 /* PermissionsOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41E2F77CDA90024DC26 /* PermissionsOnboardingView.swift */; };
@@ -119,6 +121,8 @@
 		791009522F78184E00225294 /* AudioMixdownServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioMixdownServiceTests.swift; sourceTree = "<group>"; };
 		791009542F78328500225294 /* M4AChannelExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = M4AChannelExtractor.swift; sourceTree = "<group>"; };
 		791009562F7832AD00225294 /* M4AChannelExtractorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = M4AChannelExtractorTests.swift; sourceTree = "<group>"; };
+		791009582F783E6300225294 /* RetranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetranscriptionService.swift; sourceTree = "<group>"; };
+		7910095A2F783E9B00225294 /* RetranscriptionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetranscriptionServiceTests.swift; sourceTree = "<group>"; };
 		79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionServiceTests.swift; sourceTree = "<group>"; };
 		79DCE41B2F77CC0B0024DC26 /* Scriberman.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = Scriberman.xctestplan; sourceTree = "<group>"; };
 		79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionService.swift; sourceTree = "<group>"; };
@@ -210,6 +214,7 @@
 				7910094E2F78031A00225294 /* RecordingServiceTests.swift */,
 				791009522F78184E00225294 /* AudioMixdownServiceTests.swift */,
 				791009562F7832AD00225294 /* M4AChannelExtractorTests.swift */,
+				7910095A2F783E9B00225294 /* RetranscriptionServiceTests.swift */,
 			);
 			path = ScribermanTests;
 			sourceTree = "<group>";
@@ -292,6 +297,7 @@
 				79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */,
 				791009502F78184900225294 /* AudioMixdownService.swift */,
 				791009542F78328500225294 /* M4AChannelExtractor.swift */,
+				791009582F783E6300225294 /* RetranscriptionService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -489,6 +495,7 @@
 				C1FA647DFB390E0F7F423246 /* StudioView.swift in Sources */,
 				79E005D22F7673EF00D3EAD9 /* AudioInputDevice.swift in Sources */,
 				2FDE1F7065F222E3906F5122 /* JobsView.swift in Sources */,
+				791009592F783E6300225294 /* RetranscriptionService.swift in Sources */,
 				593A5B1DA131934EE90B4F7D /* SettingsView.swift in Sources */,
 				A0313B452C3199D5A6118FB9 /* AppShellView.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CC /* WaveformView.swift in Sources */,
@@ -538,6 +545,7 @@
 				65E0EE498B357398375D8185 /* JobsViewModelTests.swift in Sources */,
 				79DCE4232F77D03C0024DC26 /* AppStateTests.swift in Sources */,
 				79E005D82F76758000D3EAD9 /* AudioDeviceServiceTests.swift in Sources */,
+				7910095B2F783E9B00225294 /* RetranscriptionServiceTests.swift in Sources */,
 				86767BA4F9AF6E4E30782B9E /* MockRecordingService.swift in Sources */,
 				D0AD07DBAD50A6EF4CD90C2B /* MockWorkspaceService.swift in Sources */,
 				7ABB63E28F5C4843C5203244 /* MockTranscriptionService.swift in Sources */,
