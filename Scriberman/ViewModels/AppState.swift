@@ -9,6 +9,7 @@ final class AppState: ObservableObject {
     }
 
     let services: ServiceContainer
+    let permissionService: PermissionServiceProtocol
     let studioViewModel: StudioViewModel
     let jobsViewModel: JobsViewModel
     let settingsViewModel: SettingsViewModel
@@ -23,6 +24,7 @@ final class AppState: ObservableObject {
     @Published private(set) var workspace: Workspace?
     @Published private(set) var workspaceErrorMessage: String?
     @Published var workspaceSelectionRequired = false
+    @Published var showPermissionsOnboarding = false
 
     convenience init() {
         self.init(services: .live())
@@ -30,6 +32,7 @@ final class AppState: ObservableObject {
 
     init(services: ServiceContainer) {
         self.services = services
+        self.permissionService = services.permissionService
         self.studioViewModel = StudioViewModel(
             workspaceService: services.workspaceService,
             recordingService: services.recordingService,
@@ -74,6 +77,9 @@ final class AppState: ObservableObject {
             workspaceErrorMessage = error.localizedDescription
             workspaceSelectionRequired = true
         }
+
+        permissionService.checkAll()
+        showPermissionsOnboarding = !workspaceSelectionRequired && permissionService.needsOnboarding
 
         await settingsViewModel.refresh()
     }

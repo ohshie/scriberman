@@ -1,0 +1,29 @@
+{
+  "configurations" : [
+    {
+      "id" : "1C2D7155-217D-4507-B0E4-9DCBBAF39CDA",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "performanceAntipatternCheckerEnabled" : true,
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:Scriberman.xcodeproj",
+      "identifier" : "2A43FB3B3983B44B6C1D4C3A",
+      "name" : "Scriberman"
+    }
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:Scriberman.xcodeproj",
+        "identifier" : "EA1EEB3A39CED694132BA045",
+        "name" : "ScribermanTests"
+      }
+    }
+  ],
+  "version" : 1
+}
