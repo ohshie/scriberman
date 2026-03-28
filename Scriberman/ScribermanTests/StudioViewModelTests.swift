@@ -189,6 +189,7 @@ final class StudioViewModelTests: XCTestCase {
         audioDeviceService.selectedDevice = selectedMic
         appAudioService.runningApps = [selectedApp]
         appAudioService.selectedApp = selectedApp
+        permissionService.screenRecordingStatus = .granted
 
         viewModel = StudioViewModel(
             workspaceService: workspaceService,
@@ -212,6 +213,7 @@ final class StudioViewModelTests: XCTestCase {
         audioDeviceService.selectedDevice = selectedMic
         appAudioService.runningApps = [selectedApp]
         appAudioService.selectedApp = selectedApp
+        permissionService.screenRecordingStatus = .granted
         recordingService.startThrowSequence = [MockStartError.failed]
 
         viewModel = StudioViewModel(
@@ -319,6 +321,24 @@ final class StudioViewModelTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(100))
 
         XCTAssertEqual(viewModel.errorMessage, RecordingError.captureInterrupted.localizedDescription)
+    }
+
+    func testAppPickerEnabledTracksScreenRecordingStatus() {
+        permissionService.screenRecordingStatus = .denied
+
+        viewModel = StudioViewModel(
+            workspaceService: workspaceService,
+            recordingService: recordingService,
+            audioDeviceService: audioDeviceService,
+            appAudioService: appAudioService,
+            permissionService: permissionService
+        )
+
+        XCTAssertFalse(viewModel.appPickerEnabled)
+
+        permissionService.screenRecordingStatus = .granted
+
+        XCTAssertTrue(viewModel.appPickerEnabled)
     }
 
     private func makeSession(status: RecordingStatus) -> RecordingSession {

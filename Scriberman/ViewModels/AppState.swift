@@ -13,6 +13,8 @@ final class AppState: ObservableObject {
     let studioViewModel: StudioViewModel
     let jobsViewModel: JobsViewModel
     let settingsViewModel: SettingsViewModel
+    private let restoreWorkspaceHandler: () async throws -> Workspace
+    private let setWorkspaceHandler: (URL) async throws -> Workspace
 
     @Published var selectedTab: Tab = .studio {
         didSet {
@@ -30,9 +32,19 @@ final class AppState: ObservableObject {
         self.init(services: .live())
     }
 
-    init(services: ServiceContainer) {
+    init(
+        services: ServiceContainer,
+        restoreWorkspaceHandler: (() async throws -> Workspace)? = nil,
+        setWorkspaceHandler: ((URL) async throws -> Workspace)? = nil
+    ) {
         self.services = services
         self.permissionService = services.permissionService
+        self.restoreWorkspaceHandler = restoreWorkspaceHandler ?? {
+            try await services.workspaceService.restoreWorkspaceIfPossible()
+        }
+        self.setWorkspaceHandler = setWorkspaceHandler ?? { url in
+            try await services.workspaceService.setWorkspace(url: url)
+        }
         self.studioViewModel = StudioViewModel(
             workspaceService: services.workspaceService,
             recordingService: services.recordingService,
@@ -65,7 +77,7 @@ final class AppState: ObservableObject {
 
     func bootstrapWorkspace() async {
         do {
-            let restoredWorkspace = try await services.workspaceService.restoreWorkspaceIfPossible()
+            let restoredWorkspace = try await restoreWorkspaceHandler()
             workspace = restoredWorkspace
             workspaceErrorMessage = nil
             workspaceSelectionRequired = false
@@ -87,7 +99,7 @@ final class AppState: ObservableObject {
 
     func selectWorkspace(url: URL) async {
         do {
-            let configuredWorkspace = try await services.workspaceService.setWorkspace(url: url)
+            let configuredWorkspace = try await setWorkspaceHandler(url)
             workspace = configuredWorkspace
             workspaceErrorMessage = nil
             workspaceSelectionRequired = false

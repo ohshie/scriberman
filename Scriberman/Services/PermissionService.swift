@@ -3,7 +3,7 @@ import Combine
 import CoreGraphics
 import Foundation
 
-enum PermissionStatus {
+enum PermissionStatus: Equatable {
     case notDetermined
     case granted
     case denied
