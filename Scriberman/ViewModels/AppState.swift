@@ -5,7 +5,6 @@ final class AppState: ObservableObject {
     enum SidebarDestination: String, CaseIterable, Hashable, Identifiable {
         case studio
         case jobs
-        case settings
 
         var id: String { rawValue }
     }
