@@ -15,7 +15,8 @@ final class TranscriptAlignerTests: XCTestCase {
             diarizedSegments: [
                 segment("S1", start: 0.0, end: 0.5),
                 segment("S2", start: 0.5, end: 1.1)
-            ]
+            ],
+            source: .mic
         )
 
         XCTAssertEqual(transcript.segments.count, 2)
@@ -29,7 +30,8 @@ final class TranscriptAlignerTests: XCTestCase {
         let transcript = aligner.alignTranscript(
             fullText: "fallback text",
             tokenTimings: [],
-            diarizedSegments: []
+            diarizedSegments: [],
+            source: .mic
         )
 
         XCTAssertEqual(transcript.segments.count, 1)
@@ -44,7 +46,8 @@ final class TranscriptAlignerTests: XCTestCase {
             diarizedSegments: [
                 segment("S2", start: 10.0, end: 12.0),
                 segment("S3", start: 12.0, end: 16.0)
-            ]
+            ],
+            source: .mic
         )
 
         XCTAssertEqual(transcript.segments.count, 1)
@@ -60,7 +63,8 @@ final class TranscriptAlignerTests: XCTestCase {
             diarizedSegments: [
                 segment("S1", start: 0.0, end: 0.3),
                 segment("S2", start: 0.8, end: 1.2)
-            ]
+            ],
+            source: .mic
         )
 
         XCTAssertEqual(transcript.segments.count, 1)

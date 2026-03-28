@@ -4,7 +4,7 @@ import Foundation
 final class MockTranscriptionService: TranscriptionServiceProtocol {
     var transcribeResult: Result<Transcript, Error> = .failure(MockTranscriptionServiceError.notConfigured)
 
-    func transcribe(audioURL: URL, workspace: Workspace) async throws -> Transcript {
+    func transcribe(session: RecordingSession, workspace: Workspace) async throws -> Transcript {
         try transcribeResult.get()
     }
 }
