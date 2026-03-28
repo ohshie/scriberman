@@ -36,7 +36,7 @@ actor RetranscriptionService {
         }
     }
 
-    func retranscribe(session: RecordingSession, workspace: Workspace, context: ModelContext) async {
+    func retranscribe(session: any TranscribableSession, workspace: Workspace, context: ModelContext) async {
         guard let mixdownPath = session.mixdownURL else {
             session.status = .error("No mixdown available for retranscription")
             try? saveContext(context)
@@ -48,7 +48,8 @@ actor RetranscriptionService {
 
         do {
             let mixdownURL = URL(fileURLWithPath: mixdownPath)
-            let extracted = try extractSamples(mixdownURL, session.appAudioURL != nil)
+            let isStereo = (session as? RecordingSession)?.appAudioURL != nil
+            let extracted = try extractSamples(mixdownURL, isStereo)
             try await prepareModelsHandler(workspace)
 
             async let micSegments = transcribePassFromSamplesHandler(extracted.mic, .mic, workspace)
