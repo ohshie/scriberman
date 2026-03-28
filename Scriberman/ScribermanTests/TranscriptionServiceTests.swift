@@ -98,4 +98,59 @@ final class TranscriptionServiceTests: XCTestCase {
             }
         }
     }
+
+    func testTranscribeUsesM4AExtractionAndRunsMicAndAppPasses() async throws {
+        let recorder = SampleRecorder()
+        let service = TranscriptionService(
+            resampleAudioFile: { _ in
+                XCTFail("resampleAudioFile should not be used for M4A extraction path")
+                return []
+            },
+            segmentSpeech: { samples in
+                await recorder.record(samples)
+                return []
+            },
+            extractSamples: { _, _ in
+                (mic: [1.0, 2.0], app: [3.0, 4.0])
+            },
+            prepareModelsHandler: { _ in
+                await recorder.markPrepared()
+            }
+        )
+
+        let session = RecordingSession(
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 6,
+            micAudioURL: "/tmp/mic.wav",
+            appAudioURL: "/tmp/app.wav",
+            mixdownURL: "/tmp/recording.m4a",
+            title: "Session",
+            status: .recorded
+        )
+        let workspace = Workspace(rootURL: FileManager.default.temporaryDirectory)
+
+        let transcript = try await service.transcribe(session: session, workspace: workspace)
+
+        XCTAssertTrue(transcript.segments.isEmpty)
+        XCTAssertTrue(transcript.fullText.isEmpty)
+        let captured = await recorder.captured
+        XCTAssertEqual(captured.count, 2)
+        XCTAssertTrue(captured.contains { $0 == [1.0, 2.0] })
+        XCTAssertTrue(captured.contains { $0 == [3.0, 4.0] })
+        let prepared = await recorder.prepared
+        XCTAssertTrue(prepared)
+    }
+}
+
+private actor SampleRecorder {
+    private(set) var captured: [[Float]] = []
+    private(set) var prepared: Bool = false
+
+    func record(_ samples: [Float]) {
+        captured.append(samples)
+    }
+
+    func markPrepared() {
+        prepared = true
+    }
 }

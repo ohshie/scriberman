@@ -25,12 +25,16 @@ enum TranscriptionError: LocalizedError {
 actor TranscriptionService: TranscriptionServiceProtocol {
     typealias ResampleAudioFile = (URL) throws -> [Float]
     typealias SegmentSpeech = ([Float]) async throws -> [VadSegment]
+    typealias ExtractSamples = (URL, Bool) throws -> (mic: [Float], app: [Float]?)
+    typealias PrepareModelsHandler = (Workspace) async throws -> Void
 
     private let fileManager = FileManager.default
     private let transcriptAligner = TranscriptAligner()
     private let logger = Logger(subsystem: "Scriberman", category: "TranscriptionService")
     private let resampleAudioFile: ResampleAudioFile
     private let segmentSpeech: SegmentSpeech
+    private let extractSamples: ExtractSamples
+    private let prepareModelsHandler: PrepareModelsHandler?
     private let minimumChunkSamples = 16_000
 
     init(
@@ -40,10 +44,16 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         segmentSpeech: @escaping SegmentSpeech = { samples in
             let vadManager = try await VadManager(config: VadConfig(defaultThreshold: 0.75))
             return try await vadManager.segmentSpeech(samples, config: VadSegmentationConfig.default)
-        }
+        },
+        extractSamples: @escaping ExtractSamples = { url, isStereo in
+            try M4AChannelExtractor().extract(url: url, isStereo: isStereo)
+        },
+        prepareModelsHandler: PrepareModelsHandler? = nil
     ) {
         self.resampleAudioFile = resampleAudioFile
         self.segmentSpeech = segmentSpeech
+        self.extractSamples = extractSamples
+        self.prepareModelsHandler = prepareModelsHandler
     }
 
     func prepareModels(workspace: Workspace) async throws {
@@ -96,14 +106,15 @@ actor TranscriptionService: TranscriptionServiceProtocol {
             throw TranscriptionError.missingAudioFile
         }
         let mixdownURL = URL(fileURLWithPath: mixdownPath)
-        try await prepareModels(workspace: workspace)
+        if let prepareModelsHandler {
+            try await prepareModelsHandler(workspace)
+        } else {
+            try await prepareModels(workspace: workspace)
+        }
 
         let extractedSamples: (mic: [Float], app: [Float]?)
         do {
-            extractedSamples = try M4AChannelExtractor().extract(
-                url: mixdownURL,
-                isStereo: session.appAudioURL != nil
-            )
+            extractedSamples = try extractSamples(mixdownURL, session.appAudioURL != nil)
         } catch {
             throw TranscriptionError.failedToTranscribe("M4A extraction failed - \(error.localizedDescription)")
         }
