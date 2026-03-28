@@ -75,10 +75,7 @@ actor ModelInstallService {
         // Best-effort pre-cleanup so stale staged repos never short-circuit a fresh install.
         cleanupStagingCache(for: group)
 
-        let progressHandler: DownloadUtils.ProgressHandler? = { progress in
-            let normalizedProgress = min(progress.fractionCompleted * 2.0, 1.0)
-            downloadProgress?(normalizedProgress)
-        }
+        let progressHandler = Self.makeDownloadProgressHandler(downloadProgress: downloadProgress)
 
         progress?(.downloading)
         do {
@@ -136,6 +133,22 @@ actor ModelInstallService {
     }
 
     // MARK: - Download (FluidAudio helpers)
+
+    static func normalizedDownloadProgress(from fractionCompleted: Double) -> Double {
+        min(fractionCompleted * 2.0, 1.0)
+    }
+
+    static func makeDownloadProgressHandler(
+        downloadProgress: (@Sendable (Double) -> Void)?
+    ) -> DownloadUtils.ProgressHandler? {
+        guard let downloadProgress else {
+            return nil
+        }
+
+        return { progress in
+            downloadProgress(normalizedDownloadProgress(from: progress.fractionCompleted))
+        }
+    }
 
     private func triggerFluidAudioDownload(
         for group: ModelGroup,
