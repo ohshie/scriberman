@@ -1,4 +1,5 @@
 import AVFoundation
+import AudioToolbox
 import Foundation
 import XCTest
 @testable import Scriberman
@@ -121,6 +122,30 @@ final class AudioMixdownServiceTests: XCTestCase {
         XCTAssertGreaterThan(abs(right[24_000]), 0.3)
     }
 
+    func testMixDefaultFormatProducesAACM4AAt48kHz() async throws {
+        let service = AudioMixdownService()
+        let micURL = tempDirectoryURL.appendingPathComponent("mic.wav")
+        let outputURL = tempDirectoryURL.appendingPathComponent("recording.m4a")
+
+        try writeMonoWAV(samples: Array(repeating: Float(0.2), count: 24_000), to: micURL)
+        try ensureReadableAudioFile(at: micURL)
+
+        try await service.mix(
+            micURL: micURL,
+            appURL: nil,
+            micStartHostTime: 1_000_000_000,
+            appStartHostTime: nil,
+            into: outputURL
+        )
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outputURL.path))
+
+        let asbd = try readAudioStreamDescription(from: outputURL)
+        XCTAssertEqual(asbd.mFormatID, kAudioFormatMPEG4AAC)
+        XCTAssertEqual(asbd.mChannelsPerFrame, 1)
+        XCTAssertEqual(asbd.mSampleRate, 48_000, accuracy: 1.0)
+    }
+
     private struct DecodedPCM {
         let channelCount: Int
         let channelSamples: [[Float]]
@@ -229,5 +254,22 @@ final class AudioMixdownServiceTests: XCTestCase {
         let message = String(describing: error)
         return message.contains("Foundation._GenericObjCError")
             || message.contains("nilError")
+    }
+
+    private func readAudioStreamDescription(from url: URL) throws -> AudioStreamBasicDescription {
+        var fileID: AudioFileID?
+        let openStatus = AudioFileOpenURL(url as CFURL, .readPermission, 0, &fileID)
+        guard openStatus == noErr, let fileID else {
+            throw RecordingError.failedToStart("AudioFileOpenURL failed: \(openStatus)")
+        }
+        defer { AudioFileClose(fileID) }
+
+        var asbd = AudioStreamBasicDescription()
+        var dataSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let formatStatus = AudioFileGetProperty(fileID, kAudioFilePropertyDataFormat, &dataSize, &asbd)
+        guard formatStatus == noErr else {
+            throw RecordingError.failedToStart("AudioFileGetProperty(dataFormat) failed: \(formatStatus)")
+        }
+        return asbd
     }
 }

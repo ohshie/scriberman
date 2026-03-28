@@ -463,18 +463,22 @@ actor RecordingService: RecordingServiceProtocol {
         format.sampleRate.isFinite && format.sampleRate > 0 && format.channelCount > 0
     }
 
-    private func captureMicStartHostTimeIfNeeded(_ hostTime: UInt64) {
+    func captureMicStartHostTimeIfNeeded(_ hostTime: UInt64) {
         guard micStartHostTime == nil else {
             return
         }
         micStartHostTime = hostTime
     }
 
-    private func captureAppStartHostTimeIfNeeded(_ hostTime: UInt64) {
+    func captureAppStartHostTimeIfNeeded(_ hostTime: UInt64) {
         guard appStartHostTime == nil else {
             return
         }
         appStartHostTime = hostTime
+    }
+
+    func capturedHostTimes() -> (mic: UInt64?, app: UInt64?) {
+        (micStartHostTime, appStartHostTime)
     }
 
     func runMixdown(
