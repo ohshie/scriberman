@@ -2,10 +2,12 @@ import Foundation
 
 @MainActor
 final class AppState: ObservableObject {
-    enum Tab: Hashable {
+    enum SidebarDestination: String, CaseIterable, Hashable, Identifiable {
         case studio
         case jobs
         case settings
+
+        var id: String { rawValue }
     }
 
     let services: ServiceContainer
@@ -16,13 +18,7 @@ final class AppState: ObservableObject {
     private let restoreWorkspaceHandler: () async throws -> Workspace
     private let setWorkspaceHandler: (URL) async throws -> Workspace
 
-    @Published var selectedTab: Tab = .studio {
-        didSet {
-            if selectedTab == .studio {
-                studioViewModel.refreshApps()
-            }
-        }
-    }
+    @Published var selectedDestination: SidebarDestination = .studio
     @Published private(set) var workspace: Workspace?
     @Published private(set) var workspaceErrorMessage: String?
     @Published var workspaceSelectionRequired = false
@@ -64,17 +60,26 @@ final class AppState: ObservableObject {
         )
         self.studioViewModel.onSessionStopped = { [weak self] _ in
             self?.studioViewModel.clearStoppedCTAIfNeeded()
-            self?.selectedTab = .jobs
+            self?.selectDestination(.jobs)
         }
     }
 
-    func selectTab(_ tab: Tab) {
-        if tab != .studio {
-            studioViewModel.clearStoppedCTAIfNeeded()
-        } else {
-            studioViewModel.refreshApps()
+    func selectDestination(_ destination: SidebarDestination) {
+        guard selectedDestination != destination else {
+            return
         }
-        selectedTab = tab
+        selectedDestination = destination
+        applyDestinationSideEffects(for: destination)
+    }
+
+    private func applyDestinationSideEffects(for destination: SidebarDestination) {
+        Task { @MainActor in
+            if destination == .studio {
+                studioViewModel.refreshApps()
+            } else {
+                studioViewModel.clearStoppedCTAIfNeeded()
+            }
+        }
     }
 
     func bootstrapWorkspace() async {

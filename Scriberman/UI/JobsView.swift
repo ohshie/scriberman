@@ -1,106 +1,125 @@
 import AppKit
-import SwiftUI
 import SwiftData
+import SwiftUI
 import UniformTypeIdentifiers
 
 struct JobsView: View {
-    enum SessionNavigationTarget: Hashable {
-        case recording(UUID)
-        case imported(UUID)
-    }
-
     @ObservedObject var viewModel: JobsViewModel
-    @Environment(\.modelContext) private var modelContext
-    @Query(sort: \RecordingSession.createdAt, order: .reverse) private var recordingSessions: [RecordingSession]
-    @Query(sort: \ImportedSession.createdAt, order: .reverse) private var importedSessions: [ImportedSession]
-    @State private var navigationPath = NavigationPath()
+    let items: [JobsViewModel.SessionListItem]
+    @Binding var selection: JobsViewModel.SessionListItem?
 
-    private var allItems: [JobsViewModel.SessionListItem] {
-        let recordingItems = recordingSessions.map(JobsViewModel.SessionListItem.recording)
-        let importedItems = importedSessions.map(JobsViewModel.SessionListItem.imported)
-        return (recordingItems + importedItems).sorted { $0.createdAt > $1.createdAt }
+    @Environment(\.modelContext) private var modelContext
+    @State private var showClearAllConfirmation = false
+
+    private var sections: [JobsViewModel.SessionDateSection] {
+        viewModel.groupedSections(for: items)
     }
 
     var body: some View {
-        NavigationStack(path: $navigationPath) {
-            Group {
-                if allItems.isEmpty {
-                    ContentUnavailableView("No Jobs", systemImage: "list.bullet.rectangle")
-                } else {
-                    List {
-                        ForEach(allItems) { item in
-                            switch item {
-                            case .recording(let session):
-                                RecordingSessionRow(
-                                    session: session,
-                                    onTranscribe: { viewModel.transcribe(session: session, context: modelContext) },
-                                    onRetry: { viewModel.retry(session: session, context: modelContext) },
-                                    onOpen: { navigationPath.append(SessionNavigationTarget.recording(session.id)) }
-                                )
-                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                    Button(role: .destructive) {
-                                        viewModel.delete(session: session, context: modelContext)
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
-                                }
-                            case .imported(let session):
-                                ImportedSessionRow(
-                                    session: session,
-                                    onRetry: { viewModel.retryImported(session: session, context: modelContext) },
-                                    onOpen: { navigationPath.append(SessionNavigationTarget.imported(session.id)) }
-                                )
-                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                    Button(role: .destructive) {
-                                        viewModel.deleteImported(session: session, context: modelContext)
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+        Group {
+            if items.isEmpty {
+                emptyState(
+                    title: "No Sessions Yet",
+                    systemImage: "list.bullet.rectangle",
+                    message: "Record or import audio to start building your session history."
+                )
+            } else {
+                listContent
             }
-            .navigationTitle("Jobs")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        openImportPanel()
-                    } label: {
-                        Label("Import Audio", systemImage: "square.and.arrow.down")
-                    }
-                }
-            }
-            .navigationDestination(for: SessionNavigationTarget.self) { target in
-                switch target {
-                case .recording(let sessionID):
-                    if let session = recordingSessions.first(where: { $0.id == sessionID }) {
-                        TranscriptDetailView(session: session)
-                    } else {
-                        ContentUnavailableView("Recording Not Found", systemImage: "exclamationmark.triangle")
-                    }
-                case .imported(let sessionID):
-                    if let session = importedSessions.first(where: { $0.id == sessionID }) {
-                        TranscriptDetailView(session: session)
-                    } else {
-                        ContentUnavailableView("Imported Session Not Found", systemImage: "exclamationmark.triangle")
-                    }
+        }
+        .navigationTitle("Jobs")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    openImportPanel()
+                } label: {
+                    Label("Import Audio", systemImage: "square.and.arrow.down")
                 }
             }
         }
-        .dropDestination(for: URL.self) { urls, _ in
-            let audioURLs = urls.filter(isAudioURL)
-            guard !audioURLs.isEmpty else {
-                return false
+        .confirmationDialog(
+            "Clear All Sessions",
+            isPresented: $showClearAllConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Clear All", role: .destructive) {
+                clearAll()
             }
-            Task {
-                await viewModel.importAudio(urls: audioURLs, context: modelContext)
-            }
-            return true
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This permanently deletes every session from the workspace.")
         }
         .task {
             await viewModel.refresh()
+        }
+    }
+
+    private var listContent: some View {
+        List(selection: $selection) {
+            ForEach(sections) { section in
+                Section(section.title) {
+                    ForEach(section.items) { item in
+                        row(for: item)
+                            .tag(item)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                deleteButton(for: item)
+                            }
+                    }
+                }
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    showClearAllConfirmation = true
+                } label: {
+                    Label("Clear All", systemImage: "trash")
+                }
+                .disabled(items.isEmpty)
+            } footer: {
+                Text("Deletes every session after confirmation.")
+            }
+        }
+        .listStyle(.sidebar)
+    }
+
+    @ViewBuilder
+    private func row(for item: JobsViewModel.SessionListItem) -> some View {
+        switch item {
+        case .recording(let session):
+            RecordingSessionRow(
+                session: session,
+                onTranscribe: { viewModel.transcribe(session: session, context: modelContext) },
+                onRetry: { viewModel.retry(session: session, context: modelContext) }
+            )
+        case .imported(let session):
+            ImportedSessionRow(
+                session: session,
+                onRetry: { viewModel.retryImported(session: session, context: modelContext) }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func deleteButton(for item: JobsViewModel.SessionListItem) -> some View {
+        switch item {
+        case .recording(let session):
+            Button(role: .destructive) {
+                viewModel.delete(session: session, context: modelContext)
+                if selection == item {
+                    selection = nil
+                }
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        case .imported(let session):
+            Button(role: .destructive) {
+                viewModel.deleteImported(session: session, context: modelContext)
+                if selection == item {
+                    selection = nil
+                }
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
         }
     }
 
@@ -122,15 +141,25 @@ struct JobsView: View {
         }
     }
 
-    private func isAudioURL(_ url: URL) -> Bool {
-        if let contentType = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType,
-           contentType.conforms(to: .audio) {
-            return true
+    @ViewBuilder
+    private func emptyState(title: String, systemImage: String, message: String) -> some View {
+        VStack {
+            Spacer()
+            ContentUnavailableView(title, systemImage: systemImage, description: Text(message))
+                .frame(maxWidth: .infinity)
+            Spacer()
         }
-        let ext = url.pathExtension.lowercased()
-        guard !ext.isEmpty, let type = UTType(filenameExtension: ext) else {
-            return false
+    }
+
+    private func clearAll() {
+        for item in items {
+            switch item {
+            case .recording(let session):
+                viewModel.delete(session: session, context: modelContext)
+            case .imported(let session):
+                viewModel.deleteImported(session: session, context: modelContext)
+            }
         }
-        return type.conforms(to: .audio)
+        selection = nil
     }
 }

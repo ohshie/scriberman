@@ -172,49 +172,32 @@ final class RecordingStatusTests: XCTestCase {
 
         let state = TranscriptDetailViewState(session: session)
         XCTAssertEqual(state.displayedTranscript?.fullText, "retry")
-        XCTAssertEqual(state.segments.map(\.text), ["retry"])
-        XCTAssertEqual(state.speakersById.keys.sorted(), ["app:S1"])
+        XCTAssertEqual(state.finalTranscriptText, "retry")
+        XCTAssertEqual(state.originalTranscriptText, "original")
+        XCTAssertTrue(state.isReprocessed)
     }
 
-    func testTranscriptDetailStateRetranscribeVisibilityAndExportDisableRules() {
-        let done = TranscriptDetailViewState(session: RecordingSession(
+    func testTranscriptDetailStateApplicationNameAndReprocessedFlag() {
+        let recording = TranscriptDetailViewState(session: RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
             duration: 10,
             micAudioURL: "/tmp/mic.wav",
-            appAudioURL: "/tmp/app.wav",
-            mixdownURL: "/tmp/recording.m4a",
             title: "Session",
+            capturedAppName: "Zoom",
             status: .done
         ))
-        XCTAssertTrue(done.canRetranscribe)
-        XCTAssertTrue(done.showRetranscribeButton)
-        XCTAssertFalse(done.showRetranscribingProgress)
-        XCTAssertFalse(done.isExportDisabled)
+        XCTAssertEqual(recording.applicationName, "Zoom")
+        XCTAssertFalse(recording.isReprocessed)
 
-        let retranscribing = TranscriptDetailViewState(session: RecordingSession(
+        let imported = TranscriptDetailViewState(session: ImportedSession(
             createdAt: Date(timeIntervalSince1970: 0),
-            duration: 10,
-            micAudioURL: "/tmp/mic.wav",
-            appAudioURL: "/tmp/app.wav",
-            mixdownURL: "/tmp/recording.m4a",
-            title: "Session",
-            status: .retranscribing
-        ))
-        XCTAssertTrue(retranscribing.isRetranscribing)
-        XCTAssertTrue(retranscribing.showRetranscribingProgress)
-        XCTAssertFalse(retranscribing.showRetranscribeButton)
-        XCTAssertTrue(retranscribing.isExportDisabled)
-
-        let noMixdown = TranscriptDetailViewState(session: RecordingSession(
-            createdAt: Date(timeIntervalSince1970: 0),
-            duration: 10,
-            micAudioURL: "/tmp/mic.wav",
-            appAudioURL: "/tmp/app.wav",
-            mixdownURL: nil,
-            title: "Session",
+            duration: 4,
+            mixdownURL: "/tmp/mix.m4a",
+            title: "Imported",
+            originalFileName: "sample.wav",
+            originalFormat: "wav",
             status: .done
         ))
-        XCTAssertFalse(noMixdown.canRetranscribe)
-        XCTAssertFalse(noMixdown.showRetranscribeButton)
+        XCTAssertNil(imported.applicationName)
     }
 }

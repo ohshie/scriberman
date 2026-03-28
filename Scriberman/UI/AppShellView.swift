@@ -1,29 +1,59 @@
+import SwiftData
 import SwiftUI
 
 struct AppShellView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.scenePhase) private var scenePhase
+    @Query(sort: \RecordingSession.createdAt, order: .reverse) private var recordingSessions: [RecordingSession]
+    @Query(sort: \ImportedSession.createdAt, order: .reverse) private var importedSessions: [ImportedSession]
+    @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+    @State private var selectedSession: JobsViewModel.SessionListItem?
+
+    private var allSessionItems: [JobsViewModel.SessionListItem] {
+        let recordingItems = recordingSessions.map(JobsViewModel.SessionListItem.recording)
+        let importedItems = importedSessions.map(JobsViewModel.SessionListItem.imported)
+        return (recordingItems + importedItems).sorted { $0.createdAt > $1.createdAt }
+    }
 
     var body: some View {
-        TabView(selection: $appState.selectedTab) {
-            StudioView(viewModel: appState.studioViewModel)
-                .tag(AppState.Tab.studio)
-                .tabItem {
-                    Label("Studio", systemImage: "waveform")
-                }
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebar
+        } content: {
+            switch appState.selectedDestination {
+            case .studio:
+                StudioView(viewModel: appState.studioViewModel)
 
-            JobsView(viewModel: appState.jobsViewModel)
-                .tag(AppState.Tab.jobs)
-                .tabItem {
-                    Label("Jobs", systemImage: "list.bullet.rectangle")
-                }
+            case .jobs:
+                JobsView(
+                    viewModel: appState.jobsViewModel,
+                    items: allSessionItems,
+                    selection: $selectedSession
+                )
 
-            SettingsView(viewModel: appState.settingsViewModel)
-                .tag(AppState.Tab.settings)
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape")
+            case .settings:
+                SettingsView(viewModel: appState.settingsViewModel)
+            }
+        } detail: {
+            switch appState.selectedDestination {
+            case .studio, .settings:
+                EmptyView()
+
+            case .jobs:
+                if let selectedSession {
+                    detailView(for: selectedSession)
+                } else {
+                    ContentUnavailableView(
+                        "Select a Session",
+                        systemImage: "text.bubble",
+                        description: Text("Choose a session from the Jobs list to see its transcript and metadata.")
+                    )
                 }
+            }
         }
+        .navigationSplitViewStyle(.balanced)
+        .toolbar(removing: .sidebarToggle)
+        .toolbar(removing: .title)
+        .toolbar(removing: .search)
         .frame(minWidth: 900, minHeight: 600)
         .sheet(isPresented: $appState.workspaceSelectionRequired) {
             VStack(alignment: .leading, spacing: 16) {
@@ -71,6 +101,11 @@ struct AppShellView: View {
             PermissionsOnboardingView(permissionService: appState.permissionService)
                 .environmentObject(appState)
         }
+        .onChange(of: appState.selectedDestination) { _, newDestination in
+            if newDestination != .jobs {
+                selectedSession = nil
+            }
+        }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else {
                 return
@@ -78,6 +113,76 @@ struct AppShellView: View {
 
             appState.permissionService.checkAll()
             appState.showPermissionsOnboarding = !appState.workspaceSelectionRequired && appState.permissionService.needsOnboarding
+        }
+    }
+
+    private var sidebar: some View {
+        List(selection: Binding(
+            get: { appState.selectedDestination },
+            set: { appState.selectDestination($0) }
+        )) {
+            Section {
+                ForEach(AppState.SidebarDestination.allCases) { destination in
+                    Label(destination.title, systemImage: destination.systemImage)
+                        .tag(destination)
+                }
+            }
+        }
+        .listStyle(.sidebar)
+    }
+
+    @ViewBuilder
+    private func detailView(for item: JobsViewModel.SessionListItem) -> some View {
+        switch item {
+        case .recording(let session):
+            TranscriptDetailView(
+                session: session,
+                onReprocess: {
+                    appState.jobsViewModel.reprocess(session: session, context: modelContext)
+                },
+                onDelete: {
+                    appState.jobsViewModel.delete(session: session, context: modelContext)
+                    selectedSession = nil
+                }
+            )
+
+        case .imported(let session):
+            TranscriptDetailView(
+                session: session,
+                onReprocess: {
+                    appState.jobsViewModel.reprocess(session: session, context: modelContext)
+                },
+                onDelete: {
+                    appState.jobsViewModel.deleteImported(session: session, context: modelContext)
+                    selectedSession = nil
+                }
+            )
+        }
+    }
+
+    @Environment(\.modelContext) private var modelContext
+}
+
+private extension AppState.SidebarDestination {
+    var title: String {
+        switch self {
+        case .studio:
+            return "Studio"
+        case .jobs:
+            return "Jobs"
+        case .settings:
+            return "Settings"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .studio:
+            return "waveform"
+        case .jobs:
+            return "list.bullet.rectangle"
+        case .settings:
+            return "gearshape"
         }
     }
 }

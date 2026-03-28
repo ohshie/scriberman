@@ -3,89 +3,79 @@ import SwiftUI
 struct ImportedSessionRow: View {
     let session: ImportedSession
     let onRetry: () -> Void
-    let onOpen: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .top, spacing: 12) {
+            sourceGlyph
+
+            VStack(alignment: .leading, spacing: 6) {
                 Text(session.title)
                     .font(.headline)
                     .lineLimit(1)
-                Text("Imported from \(session.originalFileName) (\(session.originalFormat))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Text("\(dateText(session.createdAt)) • \(durationText(session.duration))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if case .error = session.status, let errorMessage = session.errorMessage, !errorMessage.isEmpty {
-                    Text(errorMessage)
-                        .font(.caption2)
-                        .foregroundStyle(.red)
-                        .lineLimit(2)
+
+                HStack(spacing: 6) {
+                    Text(sourceName)
+                    Text("•")
+                    Text(durationText(session.duration))
                 }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+                Text(JobsViewModel.relativeTimestampText(for: session.createdAt))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
-            Spacer()
+            Spacer(minLength: 12)
 
-            statusAccessory
+            VStack(alignment: .trailing, spacing: 8) {
+                StatusTagView(status: session.status)
+                accessory
+            }
         }
+        .padding(.vertical, 4)
         .contentShape(Rectangle())
-        .onTapGesture {
-            if case .done = session.status {
-                onOpen()
-            }
-        }
     }
 
     @ViewBuilder
-    private var statusAccessory: some View {
+    private var sourceGlyph: some View {
+        Image(systemName: "mic.fill")
+            .font(.title3)
+            .foregroundStyle(.tint)
+            .frame(width: 24, height: 24, alignment: .center)
+            .accessibilityHidden(true)
+    }
+
+    private var sourceName: String {
+        session.originalFileName
+    }
+
+    @ViewBuilder
+    private var accessory: some View {
         switch session.status {
         case .recorded:
             Button("Retry", action: onRetry)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
 
-        case .converting:
-            progressLabel("Converting")
-
-        case .transcribing:
-            progressLabel("Transcribing")
-
-        case .retranscribing:
-            progressLabel("Transcribing")
-
-        case .done:
+        case .converting, .transcribing, .retranscribing:
             HStack(spacing: 6) {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                Text("Done")
+                ProgressView()
+                    .controlSize(.small)
+                Text("Working")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+        case .done:
+            EmptyView()
 
         case .error:
             Button("Retry", action: onRetry)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
         }
-    }
-
-    private func progressLabel(_ text: String) -> some View {
-        HStack(spacing: 6) {
-            ProgressView()
-                .controlSize(.small)
-            Text(text)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private func dateText(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
     }
 
     private func durationText(_ duration: TimeInterval) -> String {
@@ -97,6 +87,7 @@ struct ImportedSessionRow: View {
         if hours > 0 {
             return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
         }
+
         return String(format: "%02d:%02d", minutes, seconds)
     }
 }

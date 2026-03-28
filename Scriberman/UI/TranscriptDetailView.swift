@@ -1,172 +1,197 @@
-import SwiftData
+import AppKit
 import SwiftUI
 
 struct TranscriptDetailView: View {
     let session: any TranscribableSession
+    let onReprocess: (() -> Void)?
+    let onDelete: () -> Void
 
-    @EnvironmentObject private var appState: AppState
-    @Environment(\.modelContext) private var modelContext
-    @FocusState private var titleFocused: Bool
-    @State private var exportAlertMessage: String?
+    @State private var showingDeleteConfirmation = false
+
     private var viewState: TranscriptDetailViewState {
         TranscriptDetailViewState(session: session)
     }
 
     var body: some View {
-        List {
-            if segments.isEmpty {
-                ContentUnavailableView("No Transcript Segments", systemImage: "text.bubble")
-            } else {
-                ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
-                    TranscriptSegmentRow(
-                        speakerLabel: speakerLabel(for: segment.speakerId),
-                        segment: segment
-                    )
-                }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                header
+                transcriptBody
+                metadataGrid
+                deleteButton
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(28)
         }
         .navigationTitle("")
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                TextField("Session Title", text: Binding(
-                    get: { session.title },
-                    set: { session.title = $0 }
-                ))
-                .textFieldStyle(.roundedBorder)
-                .frame(minWidth: 280, maxWidth: 520)
-                .focused($titleFocused)
-                .onSubmit {
-                    saveTitleIfNeeded()
-                }
-                .onChange(of: titleFocused) { wasFocused, isFocused in
-                    if wasFocused, !isFocused {
-                        saveTitleIfNeeded()
-                    }
-                }
-            }
-
-            ToolbarItem(placement: .primaryAction) {
-                Button("Export") {
-                    Task {
-                        await exportTranscript()
-                    }
-                }
-                .disabled(viewState.isExportDisabled)
-            }
-
-            ToolbarItem(placement: .secondaryAction) {
-                if viewState.showRetranscribingProgress {
-                    ProgressView()
-                } else if viewState.showRetranscribeButton {
-                    Button("Retranscribe") {
-                        Task {
-                            await retranscribe()
+            ToolbarItemGroup(placement: .primaryAction) {
+                if let onReprocess {
+                    Button {
+                        onReprocess()
+                    } label: {
+                        if viewState.isReprocessing {
+                            Label("Reprocessing", systemImage: "hourglass")
+                        } else {
+                            Label("Reprocess", systemImage: "arrow.triangle.2.circlepath")
                         }
                     }
+                    .disabled(!viewState.canReprocess)
+                }
+
+                Button {
+                    copyTranscript()
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
                 }
             }
         }
-        .alert("Transcript Export", isPresented: Binding(
-            get: { exportAlertMessage != nil },
-            set: { isPresented in
-                if !isPresented {
-                    exportAlertMessage = nil
-                }
+        .alert("Delete Entry", isPresented: $showingDeleteConfirmation) {
+            Button("Delete Entry", role: .destructive) {
+                onDelete()
             }
-        )) {
-            Button("OK", role: .cancel) { }
+            Button("Cancel", role: .cancel) { }
         } message: {
-            Text(exportAlertMessage ?? "")
+            Text("This permanently deletes the selected session.")
         }
     }
 
-    private var segments: [TranscriptSegment] {
-        viewState.segments
-    }
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(session.title)
+                .font(.largeTitle.weight(.semibold))
 
-    private var speakersById: [String: TranscriptSpeaker] {
-        viewState.speakersById
-    }
-
-    private func speakerLabel(for speakerId: String) -> String {
-        if let label = speakersById[speakerId]?.label, !label.isEmpty {
-            return label
+            Text(formattedDate)
+                .font(.headline)
+                .foregroundStyle(.secondary)
         }
-        return "Speaker"
     }
 
-    private func saveTitleIfNeeded() {
-        try? modelContext.save()
+    private var transcriptBody: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            sectionCard(title: "Transcript", text: viewState.finalTranscriptText)
+        }
     }
 
-    private func exportTranscript() async {
-        do {
-            try await appState.services.transcriptExportService.export(
-                session: session,
-                transcript: viewState.displayedTranscript
+    private var metadataGrid: some View {
+        LazyVGrid(columns: [
+            GridItem(.flexible(), alignment: .leading),
+            GridItem(.flexible(), alignment: .leading)
+        ], alignment: .leading, spacing: 16) {
+            metadataCell(
+                title: "Application",
+                value: viewState.applicationName ?? "—",
+                systemImage: viewState.applicationName == nil ? "mic.fill" : "app.fill"
             )
-            exportAlertMessage = "Transcript exported successfully."
-        } catch TranscriptExportError.exportCancelled {
-            exportAlertMessage = nil
-        } catch {
-            exportAlertMessage = error.localizedDescription
+            metadataCell(
+                title: "Window",
+                value: "—",
+                systemImage: "macwindow"
+            )
+            metadataCell(
+                title: "Duration",
+                value: TimeFormatter.format(seconds: Float(session.duration)),
+                systemImage: "clock"
+            )
         }
     }
 
-    private func retranscribe() async {
-        guard let workspace = appState.workspace else {
-            return
+    private var deleteButton: some View {
+        Button(role: .destructive) {
+            showingDeleteConfirmation = true
+        } label: {
+            Label("Delete Entry", systemImage: "trash")
         }
-        await appState.services.retranscriptionService.retranscribe(
-            session: session,
-            workspace: workspace,
-            context: modelContext
-        )
+        .buttonStyle(.bordered)
+    }
+
+    private var formattedDate: String {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.dateFormat = "MMM d, yyyy 'at' HH:mm"
+        return formatter.string(from: session.createdAt)
+    }
+
+    private func copyTranscript() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(viewState.finalTranscriptText, forType: .string)
+    }
+
+    @ViewBuilder
+    private func metadataCell(title: String, value: String, systemImage: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(.tint)
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(value)
+                .font(.body)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func sectionCard(title: String, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(title)
+                .font(.title3.weight(.semibold))
+
+            Text(text.isEmpty ? "No transcript available." : text)
+                .font(.body)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 }
 
 struct TranscriptDetailViewState {
     let session: any TranscribableSession
 
+    var finalTranscriptText: String {
+        displayedTranscript?.fullText ?? ""
+    }
+
+    var originalTranscriptText: String? {
+        session.transcript?.fullText
+    }
+
+    var applicationName: String? {
+        if let recordingSession = session as? RecordingSession {
+            return recordingSession.capturedAppName
+        }
+        return nil
+    }
+
     var displayedTranscript: Transcript? {
         session.retranscript ?? session.transcript
     }
 
-    var segments: [TranscriptSegment] {
-        (displayedTranscript?.segments ?? []).sorted { $0.startTime < $1.startTime }
+    var isReprocessed: Bool {
+        session.retranscript != nil
     }
 
-    var speakersById: [String: TranscriptSpeaker] {
-        Dictionary(uniqueKeysWithValues: (displayedTranscript?.speakers ?? []).map { ($0.id, $0) })
-    }
-
-    var isDone: Bool {
-        if case .done = session.status {
+    var canReprocess: Bool {
+        guard session.mixdownURL != nil else { return false }
+        switch session.status {
+        case .converting, .transcribing, .retranscribing:
+            return false
+        case .recorded, .done, .error:
             return true
         }
-        return false
     }
 
-    var isRetranscribing: Bool {
-        if case .retranscribing = session.status {
-            return true
-        }
-        return false
-    }
-
-    var canRetranscribe: Bool {
-        session.mixdownURL != nil && isDone
-    }
-
-    var showRetranscribeButton: Bool {
-        canRetranscribe && !isRetranscribing
-    }
-
-    var showRetranscribingProgress: Bool {
-        isRetranscribing
-    }
-
-    var isExportDisabled: Bool {
-        !isDone || isRetranscribing
+    var isReprocessing: Bool {
+        session.status == .retranscribing
     }
 }
