@@ -41,6 +41,23 @@ final class SettingsViewModel: ObservableObject {
         }
     }
 
+    var currentModelNameText: String {
+        ModelGroup.asrParakeetV3.title
+    }
+
+    var currentModelStatusText: String {
+        switch modelStates[.asrParakeetV3] ?? .missing {
+        case .ready:
+            return "Installed"
+        case .missing:
+            return "Not selected"
+        case .downloading, .installing:
+            return "Installing"
+        case .error:
+            return "Error"
+        }
+    }
+
     func downloadTapped(for group: ModelGroup) async {
         guard canDownloadModels else {
             modelStates[group] = .error

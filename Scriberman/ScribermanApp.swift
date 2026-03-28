@@ -30,5 +30,8 @@ struct ScribermanApp: App {
                 }
         }
         .modelContainer(modelContainer)
+        .commands {
+            SidebarCommands()
+        }
     }
 }

@@ -91,14 +91,100 @@ final class JobsViewModelTests: XCTestCase {
         XCTAssertNil(session.errorMessage)
     }
 
-    private func makeSession(status: RecordingStatus) -> RecordingSession {
+    func testGroupedSectionsOrdersExpectedBucketsAndOmitsEmpty() {
+        let calendar = Calendar(identifier: .gregorian)
+        let referenceDate = makeDate(year: 2026, month: 3, day: 28, hour: 12)
+
+        let todaySession = makeSession(
+            createdAt: makeDate(year: 2026, month: 3, day: 28, hour: 9),
+            status: .done
+        )
+        let yesterdaySession = makeSession(
+            createdAt: makeDate(year: 2026, month: 3, day: 27, hour: 15),
+            status: .done
+        )
+        let thisWeekSession = makeSession(
+            createdAt: makeDate(year: 2026, month: 3, day: 24, hour: 8),
+            status: .done
+        )
+        let earlierSession = makeSession(
+            createdAt: makeDate(year: 2026, month: 3, day: 17, hour: 8),
+            status: .done
+        )
+
+        let items: [JobsViewModel.SessionListItem] = [
+            .recording(todaySession),
+            .recording(yesterdaySession),
+            .recording(thisWeekSession),
+            .recording(earlierSession)
+        ]
+
+        let sections = viewModel.groupedSections(for: items, referenceDate: referenceDate, calendar: calendar)
+
+        XCTAssertEqual(sections.map(\.group), [.today, .yesterday, .thisWeek, .earlier])
+        XCTAssertEqual(sections[0].items.count, 1)
+        XCTAssertEqual(sections[1].items.count, 1)
+        XCTAssertEqual(sections[2].items.count, 1)
+        XCTAssertEqual(sections[3].items.count, 1)
+    }
+
+    func testRelativeTimestampFormattingForNowMinutesAndHours() {
+        let calendar = Calendar(identifier: .gregorian)
+        let referenceDate = makeDate(year: 2026, month: 3, day: 28, hour: 12)
+
+        XCTAssertEqual(
+            JobsViewModel.relativeTimestampText(
+                for: referenceDate.addingTimeInterval(-30),
+                referenceDate: referenceDate,
+                calendar: calendar
+            ),
+            "Now"
+        )
+
+        XCTAssertEqual(
+            JobsViewModel.relativeTimestampText(
+                for: referenceDate.addingTimeInterval(-(2 * 60)),
+                referenceDate: referenceDate,
+                calendar: calendar
+            ),
+            "2m ago"
+        )
+
+        XCTAssertEqual(
+            JobsViewModel.relativeTimestampText(
+                for: referenceDate.addingTimeInterval(-(3 * 3600)),
+                referenceDate: referenceDate,
+                calendar: calendar
+            ),
+            "3h ago"
+        )
+    }
+
+    private func makeSession(
+        createdAt: Date = Date(timeIntervalSince1970: 0),
+        status: RecordingStatus
+    ) -> RecordingSession {
         RecordingSession(
-            createdAt: Date(timeIntervalSince1970: 0),
+            createdAt: createdAt,
             duration: 8,
             micAudioURL: "/tmp/audio.wav",
             mixdownURL: nil,
             title: "Session",
             status: status
         )
+    }
+
+    private func makeDate(year: Int, month: Int, day: Int, hour: Int, minute: Int = 0) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+        let components = DateComponents(
+            timeZone: calendar.timeZone,
+            year: year,
+            month: month,
+            day: day,
+            hour: hour,
+            minute: minute
+        )
+        return calendar.date(from: components) ?? .now
     }
 }

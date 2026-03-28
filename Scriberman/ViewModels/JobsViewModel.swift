@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 @MainActor
 final class JobsViewModel: ObservableObject {
-    enum SessionListItem: Identifiable {
+    enum SessionListItem: Identifiable, Hashable {
         case recording(RecordingSession)
         case imported(ImportedSession)
 
@@ -26,6 +26,46 @@ final class JobsViewModel: ObservableObject {
                 return session.createdAt
             }
         }
+
+        static func == (lhs: SessionListItem, rhs: SessionListItem) -> Bool {
+            lhs.id == rhs.id
+        }
+
+        func hash(into hasher: inout Hasher) {
+            hasher.combine(id)
+        }
+    }
+
+    enum SessionDateGroup: CaseIterable, Identifiable, Hashable {
+        case today
+        case yesterday
+        case thisWeek
+        case earlier
+
+        var id: String {
+            title
+        }
+
+        var title: String {
+            switch self {
+            case .today:
+                return "Today"
+            case .yesterday:
+                return "Yesterday"
+            case .thisWeek:
+                return "This Week"
+            case .earlier:
+                return "Earlier"
+            }
+        }
+    }
+
+    struct SessionDateSection: Identifiable, Hashable {
+        let group: SessionDateGroup
+        let items: [SessionListItem]
+
+        var id: SessionDateGroup { group }
+        var title: String { group.title }
     }
 
     private let workspaceService: WorkspaceServiceProtocol
@@ -48,6 +88,78 @@ final class JobsViewModel: ObservableObject {
 
     func refresh() async {
         _ = await workspaceService.currentWorkspace()
+    }
+
+    func groupedSections(
+        for items: [SessionListItem],
+        referenceDate: Date = .now,
+        calendar: Calendar = .current
+    ) -> [SessionDateSection] {
+        SessionDateGroup.allCases.compactMap { group in
+            let sectionItems = items.filter {
+                sessionDateGroup(for: $0.createdAt, referenceDate: referenceDate, calendar: calendar) == group
+            }
+
+            guard !sectionItems.isEmpty else {
+                return nil
+            }
+
+            return SessionDateSection(group: group, items: sectionItems.sorted { $0.createdAt > $1.createdAt })
+        }
+    }
+
+    func sessionDateGroup(
+        for date: Date,
+        referenceDate: Date = .now,
+        calendar: Calendar = .current
+    ) -> SessionDateGroup {
+        if calendar.isDate(date, inSameDayAs: referenceDate) {
+            return .today
+        }
+
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: referenceDate),
+           calendar.isDate(date, inSameDayAs: yesterday) {
+            return .yesterday
+        }
+
+        if calendar.isDate(date, equalTo: referenceDate, toGranularity: .weekOfYear) {
+            return .thisWeek
+        }
+
+        return .earlier
+    }
+
+    func relativeTimestampText(
+        for date: Date,
+        referenceDate: Date = .now,
+        calendar: Calendar = .current
+    ) -> String {
+        Self.relativeTimestampText(for: date, referenceDate: referenceDate, calendar: calendar)
+    }
+
+    static func relativeTimestampText(
+        for date: Date,
+        referenceDate: Date = .now,
+        calendar: Calendar = .current
+    ) -> String {
+        if calendar.isDate(date, inSameDayAs: referenceDate) {
+            let interval = max(0, Int(referenceDate.timeIntervalSince(date).rounded(.down)))
+
+            if interval < 60 {
+                return "Now"
+            }
+
+            if interval < 3_600 {
+                return "\(max(1, interval / 60))m ago"
+            }
+
+            return "\(max(1, interval / 3_600))h ago"
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.dateFormat = "MMM d"
+        return formatter.string(from: date)
     }
 
     func transcribe(session: RecordingSession, context: ModelContext) {
@@ -112,6 +224,30 @@ final class JobsViewModel: ObservableObject {
             return
         }
         session.status = .transcribing
+        session.errorMessage = nil
+        try? context.save()
+
+        Task {
+            do {
+                let workspace = try await workspaceService.requireWritableWorkspace()
+                await retranscriptionService.retranscribe(session: session, workspace: workspace, context: context)
+            } catch {
+                session.status = .error(error.localizedDescription)
+                session.errorMessage = error.localizedDescription
+                try? context.save()
+            }
+        }
+    }
+
+    func reprocess(session: any TranscribableSession, context: ModelContext) {
+        guard session.mixdownURL != nil else {
+            session.status = .error("No mixdown available for reprocessing")
+            session.errorMessage = "No mixdown available for reprocessing"
+            try? context.save()
+            return
+        }
+
+        session.status = .retranscribing
         session.errorMessage = nil
         try? context.save()
 
