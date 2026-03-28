@@ -91,10 +91,13 @@ final class AppState: ObservableObject {
             workspace = configuredWorkspace
             workspaceErrorMessage = nil
             workspaceSelectionRequired = false
+            permissionService.checkAll()
+            showPermissionsOnboarding = permissionService.needsOnboarding
         } catch {
             workspace = nil
             workspaceErrorMessage = error.localizedDescription
             workspaceSelectionRequired = true
+            showPermissionsOnboarding = false
         }
 
         await settingsViewModel.refresh()
