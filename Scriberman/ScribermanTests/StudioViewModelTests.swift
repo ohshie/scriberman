@@ -213,6 +213,7 @@ final class StudioViewModelTests: XCTestCase {
             permissionService: permissionService,
             userDefaults: userDefaults
         )
+        viewModel.recordAppAudio = true
 
         await viewModel.startRecording()
 
@@ -239,6 +240,7 @@ final class StudioViewModelTests: XCTestCase {
             permissionService: permissionService,
             userDefaults: userDefaults
         )
+        viewModel.recordAppAudio = true
 
         await viewModel.startRecording()
 
@@ -307,7 +309,7 @@ final class StudioViewModelTests: XCTestCase {
         XCTAssertNil(recordingService.startCalls.first?.capturedAppName)
     }
 
-    func testStartRecordingRequestsAppAudioPermissionAndFallsBackWhenDenied() async {
+    func testStartRecordingWithDeniedScreenPermissionKeepsMicOnlyWithoutPermissionErrorMessage() async {
         let selectedMic = AudioInputDevice(id: 1, uid: "mic-1", name: "Mic")
         let selectedApp = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
         audioDeviceService.availableDevices = [selectedMic]
@@ -329,7 +331,7 @@ final class StudioViewModelTests: XCTestCase {
 
         XCTAssertNil(recordingService.startCalls.first?.appProcessID)
         XCTAssertNil(recordingService.startCalls.first?.capturedAppName)
-        XCTAssertEqual(viewModel.errorMessage, "App audio capture permission denied. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording.")
+        XCTAssertNil(viewModel.errorMessage)
     }
 
     func testRecordingMonitorSurfacesPendingInterruptionError() async {
