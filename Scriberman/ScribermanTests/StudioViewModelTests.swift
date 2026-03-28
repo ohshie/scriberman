@@ -520,6 +520,7 @@ final class StudioViewModelTests: XCTestCase {
             createdAt: Date(timeIntervalSince1970: 0),
             duration: 12,
             micAudioURL: "/tmp/audio.wav",
+            mixdownURL: nil,
             title: "Session",
             status: status
         )

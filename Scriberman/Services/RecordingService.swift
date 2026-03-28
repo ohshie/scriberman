@@ -460,7 +460,7 @@ actor RecordingService: RecordingServiceProtocol {
         appStartHostTime = hostTime
     }
 
-    private func runMixdown(
+    func runMixdown(
         sessionID: UUID,
         micURL: URL,
         appURL: URL?,
