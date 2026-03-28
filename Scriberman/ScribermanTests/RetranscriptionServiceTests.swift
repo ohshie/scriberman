@@ -200,4 +200,48 @@ final class RetranscriptionServiceTests: XCTestCase {
         }
         XCTAssertNil(session.retranscript)
     }
+
+    func testRetranscribeImportedSessionUsesMonoExtraction() async {
+        let transcriptionService = TranscriptionService()
+        var capturedIsStereo: Bool?
+        let service = RetranscriptionService(
+            transcriptionService: transcriptionService,
+            extractSamples: { _, isStereo in
+                capturedIsStereo = isStereo
+                return (mic: [0.1, 0.2], app: nil)
+            },
+            prepareModelsHandler: { _ in },
+            transcribePassFromSamplesHandler: { _, source, _ in
+                XCTAssertEqual(source, .mic)
+                return [
+                    TranscriptSegment(
+                        speakerId: "S1",
+                        text: "imported",
+                        startTime: 0.0,
+                        endTime: 0.5,
+                        audioSource: .mic
+                    )
+                ]
+            }
+        )
+
+        let session = ImportedSession(
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 8,
+            mixdownURL: "/tmp/recording.m4a",
+            title: "Imported",
+            originalFileName: "sample.mp3",
+            originalFormat: "mp3",
+            status: .done
+        )
+        context.insert(session)
+        try? context.save()
+
+        let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()))
+        await service.retranscribe(session: session, workspace: workspace, context: context)
+
+        XCTAssertEqual(capturedIsStereo, false)
+        XCTAssertEqual(session.status, .done)
+        XCTAssertEqual(session.retranscript?.segments.first?.text, "imported")
+    }
 }
