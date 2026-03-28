@@ -10,14 +10,23 @@ enum AudioMixdownOutputFormat {
 }
 
 actor AudioMixdownService {
+    typealias RemoveItemAtURL = @Sendable (URL) throws -> Void
+
     private let outputSampleRate: Double = 48_000
     private let processingChunkSize: AVAudioFrameCount = 4_096
     private let fileManager = FileManager.default
     private let outputFormat: AudioMixdownOutputFormat
+    private let removeItemAtURL: RemoveItemAtURL
     private let logger = Logger(subsystem: "Scriberman", category: "AudioMixdownService")
 
-    init(outputFormat: AudioMixdownOutputFormat = .aacM4A) {
+    init(
+        outputFormat: AudioMixdownOutputFormat = .aacM4A,
+        removeItemAtURL: @escaping RemoveItemAtURL = { url in
+            try FileManager.default.removeItem(at: url)
+        }
+    ) {
         self.outputFormat = outputFormat
+        self.removeItemAtURL = removeItemAtURL
     }
 
     func mix(
@@ -73,6 +82,27 @@ actor AudioMixdownService {
         }
 
         logger.info("Mix completed. outputExists=\(self.fileManager.fileExists(atPath: outputURL.path), privacy: .public)")
+        deleteSourceWAVFiles(micURL: micURL, appURL: appURL)
+    }
+
+    private func deleteSourceWAVFiles(micURL: URL, appURL: URL?) {
+        deleteSourceWAVFile(url: micURL, label: "mic")
+        if let appURL {
+            deleteSourceWAVFile(url: appURL, label: "app")
+        }
+    }
+
+    private func deleteSourceWAVFile(url: URL, label: String) {
+        guard fileManager.fileExists(atPath: url.path) else {
+            return
+        }
+
+        do {
+            try removeItemAtURL(url)
+            logger.info("Deleted \(label, privacy: .public) wav at \(url.path, privacy: .public)")
+        } catch {
+            logger.error("Failed to delete \(label, privacy: .public) wav at \(url.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     private func readSamplesWithRetry(from url: URL, label: String) async throws -> [Float] {
