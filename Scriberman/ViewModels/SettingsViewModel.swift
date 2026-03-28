@@ -10,6 +10,7 @@ final class SettingsViewModel: ObservableObject {
 
     @Published var modelStates: [ModelGroup: ModelGroupReadinessState] = [:]
     @Published var modelStatusMessages: [ModelGroup: String] = [:]
+    @Published var modelDownloadProgress: [ModelGroup: Double] = [:]
     @Published var canDownloadModels = false
 
     init(workspaceService: WorkspaceService, modelInstallService: ModelInstallService) {
@@ -69,17 +70,27 @@ final class SettingsViewModel: ObservableObject {
         modelStatusMessages[group] = nil
 
         do {
-            _ = try await modelInstallService.installModelGroup(group) { [weak self] state in
-                Task { @MainActor in
-                    self?.modelStates[group] = state
+            _ = try await modelInstallService.installModelGroup(
+                group,
+                progress: { [weak self] state in
+                    Task { @MainActor in
+                        self?.modelStates[group] = state
+                    }
+                },
+                downloadProgress: { [weak self] value in
+                    Task { @MainActor in
+                        self?.modelDownloadProgress[group] = value
+                    }
                 }
-            }
+            )
 
             modelStates[group] = .ready
             modelStatusMessages[group] = nil
+            modelDownloadProgress[group] = nil
         } catch {
             modelStates[group] = .error
             modelStatusMessages[group] = error.localizedDescription
+            modelDownloadProgress[group] = nil
         }
     }
 }
