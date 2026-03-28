@@ -1,6 +1,7 @@
 import CoreAudio
 import Foundation
 
+@preconcurrency
 protocol RecordingServiceProtocol {
     func isRecording() async -> Bool
     func audioLevel() async -> Float

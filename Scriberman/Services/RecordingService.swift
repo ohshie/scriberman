@@ -30,7 +30,7 @@ enum RecordingError: LocalizedError {
     }
 }
 
-actor RecordingService: RecordingServiceProtocol {
+actor RecordingService: @preconcurrency RecordingServiceProtocol {
     private let workspaceService: WorkspaceServiceProtocol
     private let modelContainer: ModelContainer
     private let notificationCenter: NotificationCenter
@@ -51,7 +51,7 @@ actor RecordingService: RecordingServiceProtocol {
     private var activeCapturedAppName: String?
     private var appAudioCaptureSession: AppAudioCaptureSession?
     private var pendingError: RecordingError?
-    private var engineConfigurationObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var engineConfigurationObserver: NSObjectProtocol?
 
     private var isRecordingValue = false
     private var audioLevelValue: Float = 0
@@ -754,7 +754,7 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
         monoBuffer.frameLength = AVAudioFrameCount(monoSamples.count)
         monoSamples.withUnsafeBufferPointer { source in
             if let sourceBaseAddress = source.baseAddress {
-                channelData[0].assign(from: sourceBaseAddress, count: monoSamples.count)
+                channelData[0].update(from: sourceBaseAddress, count: monoSamples.count)
             }
         }
 
