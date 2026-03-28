@@ -34,7 +34,8 @@ actor AudioMixdownService {
         appURL: URL?,
         micStartHostTime: UInt64,
         appStartHostTime: UInt64?,
-        into outputURL: URL
+        into outputURL: URL,
+        deleteSourceFiles: Bool = true
     ) async throws {
         logger.info(
             "Mix request received. mic=\(micURL.path, privacy: .public) app=\(appURL?.path ?? "nil", privacy: .public) out=\(outputURL.path, privacy: .public) format=\(String(describing: self.outputFormat), privacy: .public)"
@@ -82,7 +83,9 @@ actor AudioMixdownService {
         }
 
         logger.info("Mix completed. outputExists=\(self.fileManager.fileExists(atPath: outputURL.path), privacy: .public)")
-        deleteSourceWAVFiles(micURL: micURL, appURL: appURL)
+        if deleteSourceFiles {
+            deleteSourceWAVFiles(micURL: micURL, appURL: appURL)
+        }
     }
 
     private func deleteSourceWAVFiles(micURL: URL, appURL: URL?) {
