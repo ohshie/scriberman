@@ -99,7 +99,7 @@
 		22E362F775C935EB29AE832A /* ScribermanApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScribermanApp.swift; sourceTree = "<group>"; };
 		27994768D463D730435539F3 /* BookmarkStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BookmarkStore.swift; sourceTree = "<group>"; };
 		533164BEA51E4E4A0EA33B0E /* MockTranscriptionService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MockTranscriptionService.swift; sourceTree = "<group>"; };
-		5542239A238BB9A1883C5B5A /* Scriberman_debug.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Scriberman_debug.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		5542239A238BB9A1883C5B5A /* Scriberman.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Scriberman.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5AD764C83EECDAD9A42F5993 /* ModelsSettingsScreen.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelsSettingsScreen.swift; sourceTree = "<group>"; };
 		5BB3D5811B6745E46A81D7DE /* AppShellView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppShellView.swift; sourceTree = "<group>"; };
 		63F7B7CE8A7FE4E0F6C5539F /* JobsViewModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JobsViewModelTests.swift; sourceTree = "<group>"; };
@@ -191,7 +191,7 @@
 		43993D81DB3C75CD2DC1BB1F /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				5542239A238BB9A1883C5B5A /* Scriberman_debug.app */,
+				5542239A238BB9A1883C5B5A /* Scriberman.app */,
 				D4D635DCD4938EB7B6FA9A36 /* ScribermanTests.xctest */,
 			);
 			name = Products;
@@ -355,7 +355,7 @@
 				DDA5336F2945D8E09B308BC2 /* FluidAudio */,
 			);
 			productName = Scriberman;
-			productReference = 5542239A238BB9A1883C5B5A /* Scriberman_debug.app */;
+			productReference = 5542239A238BB9A1883C5B5A /* Scriberman.app */;
 			productType = "com.apple.product-type.application";
 		};
 		EA1EEB3A39CED694132BA045 /* ScribermanTests */ = {
@@ -594,8 +594,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = "";
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Scriberman/Scriberman.Debug.entitlements;
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				COMBINE_HIDPI_IMAGES = YES;
+				"DEVELOPMENT_TEAM[sdk=macosx*]" = PPUHWCTTZ6;
 				INFOPLIST_FILE = Scriberman/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Scriberman;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
@@ -606,7 +607,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ohshie.scriberman.app;
 				PRODUCT_MODULE_NAME = Scriberman;
-				PRODUCT_NAME = Scriberman_debug;
+				PRODUCT_NAME = Scriberman;
 				SDKROOT = macosx;
 				SUPPORTED_PLATFORMS = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -707,8 +708,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = "";
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Scriberman/Scriberman.entitlements;
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				COMBINE_HIDPI_IMAGES = YES;
+				"DEVELOPMENT_TEAM[sdk=macosx*]" = PPUHWCTTZ6;
 				INFOPLIST_FILE = Scriberman/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Scriberman;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
