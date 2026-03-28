@@ -363,6 +363,113 @@ final class StudioViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.appAudioToggleEnabled)
     }
 
+    func testShowAppPickerDependsOnToggleAndPermission() {
+        permissionService.screenRecordingStatus = .granted
+
+        viewModel = StudioViewModel(
+            workspaceService: workspaceService,
+            recordingService: recordingService,
+            audioDeviceService: audioDeviceService,
+            appAudioService: appAudioService,
+            permissionService: permissionService,
+            userDefaults: userDefaults
+        )
+
+        XCTAssertFalse(viewModel.showAppPicker)
+
+        viewModel.recordAppAudio = true
+
+        XCTAssertTrue(viewModel.showAppPicker)
+    }
+
+    func testCanRecordFalseWhenToggleOnWithoutSelectionAndTrueWithSelection() {
+        permissionService.screenRecordingStatus = .granted
+        let app = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
+        appAudioService.runningApps = [app]
+
+        viewModel = StudioViewModel(
+            workspaceService: workspaceService,
+            recordingService: recordingService,
+            audioDeviceService: audioDeviceService,
+            appAudioService: appAudioService,
+            permissionService: permissionService,
+            userDefaults: userDefaults
+        )
+
+        viewModel.recordAppAudio = true
+        XCTAssertFalse(viewModel.canRecord)
+
+        viewModel.selectedApp = app
+        XCTAssertTrue(viewModel.canRecord)
+    }
+
+    func testRestoreLastUsedAppSelectsMatchingRunningAppByName() {
+        userDefaults.set("Zoom", forKey: "lastUsedAppName")
+        let app = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
+        appAudioService.onRefresh = { [weak appAudioService] in
+            appAudioService?.runningApps = [app]
+        }
+
+        viewModel.restoreLastUsedApp()
+
+        XCTAssertEqual(viewModel.selectedApp?.name, "Zoom")
+    }
+
+    func testRestoreLastUsedAppLeavesSelectionNilWhenNoMatchFound() {
+        userDefaults.set("Zoom", forKey: "lastUsedAppName")
+        appAudioService.onRefresh = { [weak appAudioService] in
+            appAudioService?.runningApps = [
+                CapturedApp(bundleID: "com.test.meet", name: "Meet", pid: 444, icon: nil)
+            ]
+        }
+
+        viewModel.restoreLastUsedApp()
+
+        XCTAssertNil(viewModel.selectedApp)
+    }
+
+    func testSelectedAppWritePersistsLastUsedAppName() {
+        let app = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
+
+        viewModel.selectedApp = app
+
+        XCTAssertEqual(userDefaults.string(forKey: "lastUsedAppName"), "Zoom")
+    }
+
+    func testTurningRecordAppAudioOffClearsServiceSelectedApp() {
+        let app = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
+        viewModel.selectedApp = app
+        viewModel.recordAppAudio = true
+
+        viewModel.recordAppAudio = false
+
+        XCTAssertNil(appAudioService.selectedApp)
+    }
+
+    func testStartRecordingDoesNotPassAppCaptureParamsWhenToggleIsOff() async {
+        let selectedMic = AudioInputDevice(id: 1, uid: "mic-1", name: "Mic")
+        let selectedApp = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
+        audioDeviceService.availableDevices = [selectedMic]
+        audioDeviceService.selectedDevice = selectedMic
+        appAudioService.runningApps = [selectedApp]
+        appAudioService.selectedApp = selectedApp
+        permissionService.screenRecordingStatus = .granted
+
+        viewModel = StudioViewModel(
+            workspaceService: workspaceService,
+            recordingService: recordingService,
+            audioDeviceService: audioDeviceService,
+            appAudioService: appAudioService,
+            permissionService: permissionService,
+            userDefaults: userDefaults
+        )
+
+        await viewModel.startRecording()
+
+        XCTAssertNil(recordingService.startCalls.first?.capturedAppName)
+        XCTAssertNil(recordingService.startCalls.first?.appProcessID)
+    }
+
     private func makeSession(status: RecordingStatus) -> RecordingSession {
         RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
