@@ -3,6 +3,7 @@ import Foundation
 enum RecordingStatus: Equatable, Codable {
     case recorded
     case transcribing
+    case retranscribing
     case done
     case error(String)
 
@@ -12,6 +13,8 @@ enum RecordingStatus: Equatable, Codable {
             return "recorded"
         case .transcribing:
             return "transcribing"
+        case .retranscribing:
+            return "retranscribing"
         case .done:
             return "done"
         case .error:
@@ -25,6 +28,8 @@ enum RecordingStatus: Equatable, Codable {
             self = .recorded
         case "transcribing":
             self = .transcribing
+        case "retranscribing":
+            self = .retranscribing
         case "done":
             self = .done
         case "error":

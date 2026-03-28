@@ -58,6 +58,15 @@ struct RecordingSessionRow: View {
                     .foregroundStyle(.secondary)
             }
 
+        case .retranscribing:
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Retranscribing")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
         case .done:
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle.fill")
