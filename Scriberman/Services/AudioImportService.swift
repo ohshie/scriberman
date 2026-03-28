@@ -11,7 +11,7 @@ struct AudioImportProbeResult {
 }
 
 actor AudioImportService {
-    typealias ProbeAudio = @Sendable (URL) throws -> AudioImportProbeResult
+    typealias ProbeAudio = @Sendable (URL) async throws -> AudioImportProbeResult
     typealias ReadChannelSamples = @Sendable (URL) throws -> [[Float]]
     typealias CreateDirectory = @Sendable (URL) throws -> Void
     typealias WriteMonoAAC = @Sendable ([Float], URL) async throws -> Void
@@ -36,7 +36,7 @@ actor AudioImportService {
     ) {
         let mixdownService = AudioMixdownService()
         self.probeAudio = probeAudio ?? { url in
-            try Self.probeAudio(url: url)
+            try await Self.probeAudio(url: url)
         }
         self.readChannelSamples = readChannelSamples ?? { url in
             try Self.readChannelSamples(url: url)
@@ -71,7 +71,7 @@ actor AudioImportService {
         try? saveContext(context)
 
         do {
-            let probe = try probeAudio(url)
+            let probe = try await probeAudio(url)
             session.title = probe.title
             session.originalFileName = probe.originalFileName
             session.originalFormat = probe.originalFormat
@@ -110,7 +110,7 @@ actor AudioImportService {
         return candidate
     }
 
-    private static func probeAudio(url: URL) throws -> AudioImportProbeResult {
+    private static func probeAudio(url: URL) async throws -> AudioImportProbeResult {
         let originalFileName = url.lastPathComponent
         let originalFormat = defaultFormat(from: url)
         let title = defaultTitle(from: url)
@@ -121,7 +121,8 @@ actor AudioImportService {
             : 0
 
         let asset = AVURLAsset(url: url)
-        let assetDuration = CMTimeGetSeconds(asset.duration)
+        let loadedDuration = try await asset.load(.duration)
+        let assetDuration = CMTimeGetSeconds(loadedDuration)
         let duration: TimeInterval
         if assetDuration.isFinite, assetDuration > 0 {
             duration = assetDuration

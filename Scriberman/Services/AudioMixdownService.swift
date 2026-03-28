@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import AudioToolbox
 import CoreMedia
 import Foundation
@@ -228,8 +228,6 @@ actor AudioMixdownService {
         var allSamples: [Float] = []
         var reachedEndOfInput = false
         var inputReadError: Error?
-        var sourceBuffer: AVAudioPCMBuffer?
-
         while true {
             guard let convertedBuffer = AVAudioPCMBuffer(
                 pcmFormat: targetFormat,
@@ -268,9 +266,8 @@ actor AudioMixdownService {
                     return nil
                 }
 
-                sourceBuffer = readBuffer
                 outputStatus.pointee = .haveData
-                return sourceBuffer
+                return readBuffer
             }
 
             if let inputReadError {
@@ -317,7 +314,7 @@ actor AudioMixdownService {
             mBitsPerChannel: 32,
             mReserved: 0
         )
-        var clientFormatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let clientFormatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         let setFormatStatus = ExtAudioFileSetProperty(
             extAudioFile,
             kExtAudioFileProperty_ClientDataFormat,
@@ -396,7 +393,7 @@ actor AudioMixdownService {
             buffer.frameLength = AVAudioFrameCount(frameCount)
             samples[index..<(index + frameCount)].withUnsafeBufferPointer { pointer in
                 if let baseAddress = pointer.baseAddress {
-                    channelData[0].assign(from: baseAddress, count: frameCount)
+                    channelData[0].update(from: baseAddress, count: frameCount)
                 }
             }
 
