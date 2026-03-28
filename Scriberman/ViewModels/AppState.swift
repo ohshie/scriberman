@@ -9,9 +9,12 @@ final class AppState: ObservableObject {
     }
 
     let services: ServiceContainer
+    let permissionService: PermissionServiceProtocol
     let studioViewModel: StudioViewModel
     let jobsViewModel: JobsViewModel
     let settingsViewModel: SettingsViewModel
+    private let restoreWorkspaceHandler: () async throws -> Workspace
+    private let setWorkspaceHandler: (URL) async throws -> Workspace
 
     @Published var selectedTab: Tab = .studio {
         didSet {
@@ -23,18 +26,31 @@ final class AppState: ObservableObject {
     @Published private(set) var workspace: Workspace?
     @Published private(set) var workspaceErrorMessage: String?
     @Published var workspaceSelectionRequired = false
+    @Published var showPermissionsOnboarding = false
 
     convenience init() {
         self.init(services: .live())
     }
 
-    init(services: ServiceContainer) {
+    init(
+        services: ServiceContainer,
+        restoreWorkspaceHandler: (() async throws -> Workspace)? = nil,
+        setWorkspaceHandler: ((URL) async throws -> Workspace)? = nil
+    ) {
         self.services = services
+        self.permissionService = services.permissionService
+        self.restoreWorkspaceHandler = restoreWorkspaceHandler ?? {
+            try await services.workspaceService.restoreWorkspaceIfPossible()
+        }
+        self.setWorkspaceHandler = setWorkspaceHandler ?? { url in
+            try await services.workspaceService.setWorkspace(url: url)
+        }
         self.studioViewModel = StudioViewModel(
             workspaceService: services.workspaceService,
             recordingService: services.recordingService,
             audioDeviceService: services.audioDeviceService,
-            appAudioService: services.appAudioService
+            appAudioService: services.appAudioService,
+            permissionService: services.permissionService
         )
         self.jobsViewModel = JobsViewModel(
             workspaceService: services.workspaceService,
@@ -61,7 +77,7 @@ final class AppState: ObservableObject {
 
     func bootstrapWorkspace() async {
         do {
-            let restoredWorkspace = try await services.workspaceService.restoreWorkspaceIfPossible()
+            let restoredWorkspace = try await restoreWorkspaceHandler()
             workspace = restoredWorkspace
             workspaceErrorMessage = nil
             workspaceSelectionRequired = false
@@ -75,19 +91,25 @@ final class AppState: ObservableObject {
             workspaceSelectionRequired = true
         }
 
+        permissionService.checkAll()
+        showPermissionsOnboarding = !workspaceSelectionRequired && permissionService.needsOnboarding
+
         await settingsViewModel.refresh()
     }
 
     func selectWorkspace(url: URL) async {
         do {
-            let configuredWorkspace = try await services.workspaceService.setWorkspace(url: url)
+            let configuredWorkspace = try await setWorkspaceHandler(url)
             workspace = configuredWorkspace
             workspaceErrorMessage = nil
             workspaceSelectionRequired = false
+            permissionService.checkAll()
+            showPermissionsOnboarding = permissionService.needsOnboarding
         } catch {
             workspace = nil
             workspaceErrorMessage = error.localizedDescription
             workspaceSelectionRequired = true
+            showPermissionsOnboarding = false
         }
 
         await settingsViewModel.refresh()

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AppShellView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         TabView(selection: $appState.selectedTab) {
@@ -60,6 +61,23 @@ struct AppShellView: View {
             }
             .padding(24)
             .frame(minWidth: 520)
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { appState.showPermissionsOnboarding && !appState.workspaceSelectionRequired },
+                set: { appState.showPermissionsOnboarding = $0 }
+            )
+        ) {
+            PermissionsOnboardingView(permissionService: appState.permissionService)
+                .environmentObject(appState)
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else {
+                return
+            }
+
+            appState.permissionService.checkAll()
+            appState.showPermissionsOnboarding = !appState.workspaceSelectionRequired && appState.permissionService.needsOnboarding
         }
     }
 }

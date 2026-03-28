@@ -8,6 +8,7 @@ struct ServiceContainer {
     let recordingService: RecordingService
     let audioDeviceService: AudioDeviceService
     let appAudioService: AppAudioService
+    let permissionService: PermissionServiceProtocol
     let transcriptionService: TranscriptionService
     let transcriptExportService: TranscriptExportService
 
@@ -26,6 +27,7 @@ struct ServiceContainer {
             ),
             audioDeviceService: AudioDeviceService(),
             appAudioService: AppAudioService(),
+            permissionService: PermissionService(),
             transcriptionService: TranscriptionService(),
             transcriptExportService: TranscriptExportService()
         )
