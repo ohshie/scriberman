@@ -1,3 +1,4 @@
+import AppKit
 import SwiftData
 import SwiftUI
 
@@ -19,7 +20,7 @@ struct StudioView: View {
                 VStack(spacing: 12) {
                     HStack {
                         microphonePicker
-                        appPicker
+                        appPickerSection
                         Spacer()
                     }
 
@@ -131,11 +132,32 @@ struct StudioView: View {
         } label: {
             Label(viewModel.selectedApp?.name ?? "App", systemImage: "app")
         }
+        .disabled(!viewModel.appPickerEnabled)
         .simultaneousGesture(
             TapGesture().onEnded {
                 viewModel.refreshApps()
             }
         )
+    }
+
+    private var appPickerSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            appPicker
+
+            if !viewModel.appPickerEnabled {
+                HStack(spacing: 6) {
+                    Text("Screen Recording required")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Button("Open Settings") {
+                        openScreenRecordingSettings()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -151,5 +173,13 @@ struct StudioView: View {
         } else {
             Label(app.name, systemImage: "app")
         }
+    }
+
+    private func openScreenRecordingSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") else {
+            return
+        }
+
+        NSWorkspace.shared.open(url)
     }
 }
