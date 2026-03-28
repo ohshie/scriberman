@@ -52,7 +52,7 @@ final class MarkdownRendererTests: XCTestCase {
         RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
             duration: 5,
-            audioURL: "/tmp/audio.wav",
+            micAudioURL: "/tmp/audio.wav",
             title: title,
             status: .done
         )

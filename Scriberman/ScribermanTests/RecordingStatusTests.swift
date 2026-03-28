@@ -32,7 +32,7 @@ final class RecordingStatusTests: XCTestCase {
         let session = RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
             duration: 10,
-            audioURL: "/tmp/audio.wav",
+            micAudioURL: "/tmp/audio.wav",
             title: "Session",
             capturedAppName: "Zoom",
             status: .recorded
@@ -45,7 +45,7 @@ final class RecordingStatusTests: XCTestCase {
         let session = RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
             duration: 10,
-            audioURL: "/tmp/audio.wav",
+            micAudioURL: "/tmp/audio.wav",
             title: "Session",
             status: .recorded
         )

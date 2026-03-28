@@ -6,7 +6,8 @@ final class RecordingSession {
     @Attribute(.unique) var id: UUID
     var createdAt: Date
     var duration: TimeInterval
-    var audioURL: String
+    var micAudioURL: String
+    var appAudioURL: String?
     var title: String
     var capturedAppName: String?
     var statusRawValue: String
@@ -44,7 +45,8 @@ final class RecordingSession {
         id: UUID = UUID(),
         createdAt: Date = .now,
         duration: TimeInterval,
-        audioURL: String,
+        micAudioURL: String,
+        appAudioURL: String? = nil,
         title: String,
         capturedAppName: String? = nil,
         status: RecordingStatus = .recorded,
@@ -54,7 +56,8 @@ final class RecordingSession {
         self.id = id
         self.createdAt = createdAt
         self.duration = duration
-        self.audioURL = audioURL
+        self.micAudioURL = micAudioURL
+        self.appAudioURL = appAudioURL
         self.title = title
         self.capturedAppName = capturedAppName
         self.statusRawValue = status.persistedValue

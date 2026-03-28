@@ -293,7 +293,7 @@ actor RecordingService: RecordingServiceProtocol {
         let session = RecordingSession(
             createdAt: createdAt,
             duration: duration,
-            audioURL: recordingURL.path,
+            micAudioURL: recordingURL.path,
             title: makeSessionTitle(createdAt: createdAt),
             capturedAppName: activeCapturedAppName,
             status: .recorded

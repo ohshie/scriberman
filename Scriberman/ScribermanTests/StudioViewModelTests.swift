@@ -374,7 +374,7 @@ final class StudioViewModelTests: XCTestCase {
         RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
             duration: 12,
-            audioURL: "/tmp/audio.wav",
+            micAudioURL: "/tmp/audio.wav",
             title: "Session",
             status: status
         )
