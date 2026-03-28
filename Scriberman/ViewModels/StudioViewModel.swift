@@ -1,24 +1,6 @@
 import Combine
 import CoreAudio
 import Foundation
-import CoreGraphics
-
-@MainActor
-protocol AppAudioPermissionProviding {
-    func hasSystemAudioCaptureAccess() -> Bool
-    func requestSystemAudioCaptureAccess() -> Bool
-}
-
-@MainActor
-struct AppAudioPermissionService: AppAudioPermissionProviding {
-    func hasSystemAudioCaptureAccess() -> Bool {
-        CGPreflightScreenCaptureAccess()
-    }
-
-    func requestSystemAudioCaptureAccess() -> Bool {
-        CGRequestScreenCaptureAccess()
-    }
-}
 
 @MainActor
 final class StudioViewModel: ObservableObject {
@@ -32,7 +14,7 @@ final class StudioViewModel: ObservableObject {
     private let recordingService: RecordingServiceProtocol
     private let audioDeviceService: AudioDeviceServiceProtocol
     private let appAudioService: AppAudioServiceProtocol
-    private let appAudioPermissionService: AppAudioPermissionProviding
+    private let permissionService: PermissionServiceProtocol
     private var recordingMonitorTask: Task<Void, Never>?
     private var ctaCountdownTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
@@ -61,6 +43,7 @@ final class StudioViewModel: ObservableObject {
             appAudioService.selectedApp = selectedApp
         }
     }
+    @Published var appPickerEnabled: Bool
     var onSessionStopped: ((RecordingSession) -> Void)?
 
     init(
@@ -68,17 +51,18 @@ final class StudioViewModel: ObservableObject {
         recordingService: RecordingServiceProtocol,
         audioDeviceService: AudioDeviceServiceProtocol,
         appAudioService: AppAudioServiceProtocol,
-        appAudioPermissionService: AppAudioPermissionProviding? = nil
+        permissionService: PermissionServiceProtocol
     ) {
         self.workspaceService = workspaceService
         self.recordingService = recordingService
         self.audioDeviceService = audioDeviceService
         self.appAudioService = appAudioService
-        self.appAudioPermissionService = appAudioPermissionService ?? AppAudioPermissionService()
+        self.permissionService = permissionService
         self.availableDevices = audioDeviceService.availableDevices
         self.selectedDevice = audioDeviceService.selectedDevice
         self.runningApps = appAudioService.runningApps
         self.selectedApp = appAudioService.selectedApp
+        self.appPickerEnabled = permissionService.screenRecordingStatus == .granted
 
         audioDeviceService.availableDevicesPublisher
             .sink { [weak self] devices in
@@ -101,6 +85,12 @@ final class StudioViewModel: ObservableObject {
         appAudioService.selectedAppPublisher
             .sink { [weak self] app in
                 self?.applySelectedAppFromService(app)
+            }
+            .store(in: &cancellables)
+
+        permissionService.screenRecordingStatusPublisher
+            .sink { [weak self] status in
+                self?.appPickerEnabled = status == .granted
             }
             .store(in: &cancellables)
     }
@@ -138,16 +128,11 @@ final class StudioViewModel: ObservableObject {
             var selectedAppProcessID: pid_t?
 
             if let selectedApp {
-                if !appAudioPermissionService.hasSystemAudioCaptureAccess() {
-                    let granted = appAudioPermissionService.requestSystemAudioCaptureAccess()
-                    if !granted {
-                        errorMessage = "App audio capture permission denied. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording."
-                    }
-                }
-
-                if appAudioPermissionService.hasSystemAudioCaptureAccess() {
+                if permissionService.screenRecordingStatus == .granted {
                     selectedCapturedAppName = selectedApp.name
                     selectedAppProcessID = selectedApp.pid
+                } else {
+                    errorMessage = "App audio capture permission denied. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording."
                 }
             }
 
