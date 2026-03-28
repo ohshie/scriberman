@@ -15,6 +15,8 @@ final class StudioViewModel: ObservableObject {
     private let audioDeviceService: AudioDeviceServiceProtocol
     private let appAudioService: AppAudioServiceProtocol
     private let permissionService: PermissionServiceProtocol
+    private let userDefaults: UserDefaults
+    private let lastUsedAppNameKey = "lastUsedAppName"
     private var recordingMonitorTask: Task<Void, Never>?
     private var ctaCountdownTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
@@ -37,6 +39,7 @@ final class StudioViewModel: ObservableObject {
     @Published var runningApps: [CapturedApp]
     @Published var selectedApp: CapturedApp? {
         didSet {
+            lastUsedAppName = selectedApp?.name
             guard !isApplyingAppSelection else {
                 return
             }
@@ -44,7 +47,18 @@ final class StudioViewModel: ObservableObject {
         }
     }
     @Published private var screenRecordingStatus: PermissionStatus
-    @Published var recordAppAudio: Bool = false
+    @Published var recordAppAudio: Bool = false {
+        didSet {
+            guard oldValue != recordAppAudio else {
+                return
+            }
+            if recordAppAudio {
+                restoreLastUsedApp()
+            } else {
+                appAudioService.selectedApp = nil
+            }
+        }
+    }
     var onSessionStopped: ((RecordingSession) -> Void)?
 
     var appAudioToggleEnabled: Bool {
@@ -62,18 +76,31 @@ final class StudioViewModel: ObservableObject {
         return false
     }
 
+    private var lastUsedAppName: String? {
+        get { userDefaults.string(forKey: lastUsedAppNameKey) }
+        set {
+            if let newValue {
+                userDefaults.set(newValue, forKey: lastUsedAppNameKey)
+            } else {
+                userDefaults.removeObject(forKey: lastUsedAppNameKey)
+            }
+        }
+    }
+
     init(
         workspaceService: WorkspaceServiceProtocol,
         recordingService: RecordingServiceProtocol,
         audioDeviceService: AudioDeviceServiceProtocol,
         appAudioService: AppAudioServiceProtocol,
-        permissionService: PermissionServiceProtocol
+        permissionService: PermissionServiceProtocol,
+        userDefaults: UserDefaults = .standard
     ) {
         self.workspaceService = workspaceService
         self.recordingService = recordingService
         self.audioDeviceService = audioDeviceService
         self.appAudioService = appAudioService
         self.permissionService = permissionService
+        self.userDefaults = userDefaults
         self.availableDevices = audioDeviceService.availableDevices
         self.selectedDevice = audioDeviceService.selectedDevice
         self.runningApps = appAudioService.runningApps
@@ -122,6 +149,9 @@ final class StudioViewModel: ObservableObject {
     }
 
     private func applySelectedAppFromService(_ app: CapturedApp?) {
+        if app == nil, !recordAppAudio, selectedApp != nil {
+            return
+        }
         isApplyingAppSelection = true
         selectedApp = app
         isApplyingAppSelection = false
@@ -129,6 +159,17 @@ final class StudioViewModel: ObservableObject {
 
     func refreshApps() {
         appAudioService.refreshRunningApps()
+    }
+
+    func restoreLastUsedApp() {
+        let lastUsedAppName = lastUsedAppName
+        appAudioService.refreshRunningApps()
+        guard let lastUsedAppName else {
+            selectedApp = nil
+            return
+        }
+
+        selectedApp = runningApps.first(where: { $0.name == lastUsedAppName })
     }
 
     func startRecording() async {

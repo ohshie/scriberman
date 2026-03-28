@@ -10,6 +10,8 @@ final class StudioViewModelTests: XCTestCase {
     private var audioDeviceService: MockAudioDeviceService!
     private var appAudioService: MockAppAudioService!
     private var permissionService: MockPermissionService!
+    private var userDefaultsSuiteName: String!
+    private var userDefaults: UserDefaults!
     private var viewModel: StudioViewModel!
     private var workspace: Workspace!
 
@@ -20,6 +22,8 @@ final class StudioViewModelTests: XCTestCase {
         audioDeviceService = MockAudioDeviceService()
         appAudioService = MockAppAudioService()
         permissionService = MockPermissionService()
+        userDefaultsSuiteName = "StudioViewModelTests-\(UUID().uuidString)"
+        userDefaults = UserDefaults(suiteName: userDefaultsSuiteName)
         workspace = Workspace(rootURL: URL(fileURLWithPath: "/tmp/workspace"))
         workspaceService.requireWritableResult = .success(workspace)
         viewModel = StudioViewModel(
@@ -27,13 +31,19 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
     }
 
     override func tearDown() {
         viewModel = nil
         workspace = nil
+        if let userDefaultsSuiteName {
+            userDefaults?.removePersistentDomain(forName: userDefaultsSuiteName)
+        }
+        userDefaultsSuiteName = nil
+        userDefaults = nil
         permissionService = nil
         appAudioService = nil
         audioDeviceService = nil
@@ -114,7 +124,8 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
 
         XCTAssertEqual(viewModel.availableDevices, [builtInMic])
@@ -132,7 +143,8 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
 
         viewModel.selectedDevice = micB
@@ -150,7 +162,8 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
 
         audioDeviceService.selectedDevice = micB
@@ -168,7 +181,8 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
 
         await viewModel.startRecording()
@@ -196,7 +210,8 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
 
         await viewModel.startRecording()
@@ -221,7 +236,8 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
 
         await viewModel.startRecording()
@@ -248,7 +264,8 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
 
         await viewModel.startRecording()
@@ -279,7 +296,8 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
 
         await viewModel.startRecording()
@@ -303,7 +321,8 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
 
         await viewModel.startRecording()
@@ -331,7 +350,8 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
 
         XCTAssertFalse(viewModel.appAudioToggleEnabled)
