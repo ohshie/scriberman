@@ -38,6 +38,7 @@
 		72E17286721922EFD739F74A /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 95199C39E12ED82DCA4C4932 /* Cocoa.framework */; };
 		79DCE41A2F77BC3D0024DC26 /* TranscriptionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */; };
 		79DCE41D2F77CC1E0024DC26 /* PermissionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */; };
+		79DCE41F2F77CDA90024DC26 /* PermissionsOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41E2F77CDA90024DC26 /* PermissionsOnboardingView.swift */; };
 		79E005D22F7673EF00D3EAD9 /* AudioInputDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E005D12F7673EF00D3EAD9 /* AudioInputDevice.swift */; };
 		79E005D42F76741900D3EAD9 /* CapturedApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E005D32F76741900D3EAD9 /* CapturedApp.swift */; };
 		79E005D62F76756000D3EAD9 /* AudioDeviceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E005D52F76756000D3EAD9 /* AudioDeviceService.swift */; };
@@ -108,6 +109,7 @@
 		79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionServiceTests.swift; sourceTree = "<group>"; };
 		79DCE41B2F77CC0B0024DC26 /* Scriberman.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = Scriberman.xctestplan; sourceTree = "<group>"; };
 		79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionService.swift; sourceTree = "<group>"; };
+		79DCE41E2F77CDA90024DC26 /* PermissionsOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsOnboardingView.swift; sourceTree = "<group>"; };
 		79E005D12F7673EF00D3EAD9 /* AudioInputDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioInputDevice.swift; sourceTree = "<group>"; };
 		79E005D32F76741900D3EAD9 /* CapturedApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapturedApp.swift; sourceTree = "<group>"; };
 		79E005D52F76756000D3EAD9 /* AudioDeviceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDeviceService.swift; sourceTree = "<group>"; };
@@ -244,6 +246,7 @@
 				BA65604F12187C96E37A1413 /* WorkspacePicker.swift */,
 				AAB646F914C2425E3CBEE33D /* ModelsSettingsView.swift */,
 				5AD764C83EECDAD9A42F5993 /* ModelsSettingsScreen.swift */,
+				79DCE41E2F77CDA90024DC26 /* PermissionsOnboardingView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -483,6 +486,7 @@
 				06B30512C65DF04AFA9A0026 /* MarkdownRenderer.swift in Sources */,
 				993FF0F23A6CE7ED3F1B8F49 /* WorkspaceServiceProtocol.swift in Sources */,
 				C16E1FE0441F3C95A965E4C0 /* RecordingServiceProtocol.swift in Sources */,
+				79DCE41F2F77CDA90024DC26 /* PermissionsOnboardingView.swift in Sources */,
 				B2FBF1E99346D1C849214837 /* TranscriptionServiceProtocol.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
