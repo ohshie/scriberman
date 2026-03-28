@@ -22,10 +22,6 @@ struct SettingsView: View {
                         Text(errorMessage)
                             .font(.footnote)
                             .foregroundStyle(.red)
-                    } else {
-                        Text("Recommended location: ~/Documents/Scriberman")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
                     }
                 }
 
