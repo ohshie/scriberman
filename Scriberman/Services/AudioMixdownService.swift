@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import OSLog
 
 enum AudioMixdownOutputFormat {
     case aacM4A
@@ -12,6 +13,7 @@ actor AudioMixdownService {
     private let processingChunkSize: AVAudioFrameCount = 4_096
     private let fileManager = FileManager.default
     private let outputFormat: AudioMixdownOutputFormat
+    private let logger = Logger(subsystem: "Scriberman", category: "AudioMixdownService")
 
     init(outputFormat: AudioMixdownOutputFormat = .aacM4A) {
         self.outputFormat = outputFormat
@@ -24,10 +26,22 @@ actor AudioMixdownService {
         appStartHostTime: UInt64?,
         into outputURL: URL
     ) async throws {
+        logger.info(
+            "Mix request received. mic=\(micURL.path, privacy: .public) app=\(appURL?.path ?? "nil", privacy: .public) out=\(outputURL.path, privacy: .public) format=\(String(describing: self.outputFormat), privacy: .public)"
+        )
+        logger.info(
+            "Mix timing input. micStart=\(micStartHostTime, privacy: .public) appStart=\(appStartHostTime ?? 0, privacy: .public)"
+        )
+        logger.info(
+            "Input existence. micExists=\(self.fileManager.fileExists(atPath: micURL.path), privacy: .public) appExists=\(appURL.map { self.fileManager.fileExists(atPath: $0.path) } ?? false, privacy: .public)"
+        )
+
         let micSamples: [Float]
         do {
             micSamples = try readResampledMonoSamples(from: micURL)
+            logger.info("Mic samples loaded. count=\(micSamples.count, privacy: .public)")
         } catch {
+            logger.error("Mic read failed: \(error.localizedDescription, privacy: .public)")
             throw RecordingError.failedToStart("Mixdown mic read failed: \(error.localizedDescription)")
         }
 
@@ -35,7 +49,9 @@ actor AudioMixdownService {
             let appSamples: [Float]
             do {
                 appSamples = try readResampledMonoSamples(from: appURL)
+                logger.info("App samples loaded. count=\(appSamples.count, privacy: .public)")
             } catch {
+                logger.error("App read failed: \(error.localizedDescription, privacy: .public)")
                 throw RecordingError.failedToStart("Mixdown app read failed: \(error.localizedDescription)")
             }
 
@@ -43,6 +59,7 @@ actor AudioMixdownService {
                 micStartHostTime: micStartHostTime,
                 appStartHostTime: appStartHostTime
             )
+            logger.info("Computed stereo offsetSamples=\(offsetSamples, privacy: .public)")
 
             do {
                 try writeStereoAAC(
@@ -51,16 +68,22 @@ actor AudioMixdownService {
                     appOffsetSamples: offsetSamples,
                     to: outputURL
                 )
+                logger.info("Stereo write completed to \(outputURL.path, privacy: .public)")
             } catch {
+                logger.error("Stereo write failed: \(error.localizedDescription, privacy: .public)")
                 throw RecordingError.failedToStart("Mixdown stereo write failed: \(error.localizedDescription)")
             }
         } else {
             do {
                 try writeMonoAAC(samples: micSamples, to: outputURL)
+                logger.info("Mono write completed to \(outputURL.path, privacy: .public)")
             } catch {
+                logger.error("Mono write failed: \(error.localizedDescription, privacy: .public)")
                 throw RecordingError.failedToStart("Mixdown mono write failed: \(error.localizedDescription)")
             }
         }
+
+        logger.info("Mix completed. outputExists=\(self.fileManager.fileExists(atPath: outputURL.path), privacy: .public)")
     }
 
     private func readResampledMonoSamples(from inputURL: URL) throws -> [Float] {

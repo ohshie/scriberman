@@ -276,6 +276,10 @@ actor RecordingService: RecordingServiceProtocol {
             return nil
         }
 
+        logger.info(
+            "Prepared recording session folder. mic=\(finalRecordingURLs.mic.path, privacy: .public) app=\(finalRecordingURLs.app?.path ?? "nil", privacy: .public)"
+        )
+
         let session = RecordingSession(
             createdAt: createdAt,
             duration: duration,
@@ -295,6 +299,9 @@ actor RecordingService: RecordingServiceProtocol {
             if self.micStartHostTime == nil {
                 logger.warning("Mic start host time missing for session \(sessionID, privacy: .public); using fallback for mixdown alignment.")
             }
+            logger.info(
+                "Scheduling mixdown for session \(sessionID, privacy: .public). micStart=\(micStartHostTime, privacy: .public) appStart=\(appStartHostTime ?? 0, privacy: .public) hasApp=\(finalRecordingURLs.app != nil, privacy: .public)"
+            )
 
             let context = ModelContext(modelContainer)
             context.insert(session)
@@ -472,6 +479,12 @@ actor RecordingService: RecordingServiceProtocol {
         micStartHostTime: UInt64,
         appStartHostTime: UInt64?
     ) async {
+        logger.info(
+            "Mixdown started for session \(sessionID, privacy: .public). mic=\(micURL.path, privacy: .public) app=\(appURL?.path ?? "nil", privacy: .public) out=\(mixdownURL.path, privacy: .public)"
+        )
+        logger.info(
+            "Mixdown timing for session \(sessionID, privacy: .public). micStart=\(micStartHostTime, privacy: .public) appStart=\(appStartHostTime ?? 0, privacy: .public)"
+        )
         do {
             try await mixdownService.mix(
                 micURL: micURL,
@@ -484,6 +497,11 @@ actor RecordingService: RecordingServiceProtocol {
             logger.error("Mixdown failed for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return
         }
+
+        let existsAfterMix = fileManager.fileExists(atPath: mixdownURL.path)
+        logger.info(
+            "Mixdown finished for session \(sessionID, privacy: .public). outputExists=\(existsAfterMix, privacy: .public) path=\(mixdownURL.path, privacy: .public)"
+        )
 
         do {
             let context = ModelContext(modelContainer)
@@ -498,6 +516,7 @@ actor RecordingService: RecordingServiceProtocol {
 
             persistedSession.mixdownURL = mixdownURL.path
             try context.save()
+            logger.info("Persisted mixdownURL for session \(sessionID, privacy: .public): \(mixdownURL.path, privacy: .public)")
         } catch {
             logger.error("Failed to persist mixdown URL for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
