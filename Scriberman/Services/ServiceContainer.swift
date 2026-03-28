@@ -6,9 +6,12 @@ struct ServiceContainer {
     let workspaceService: WorkspaceService
     let modelInstallService: ModelInstallService
     let recordingService: RecordingService
+    let audioDeviceService: AudioDeviceService
+    let appAudioService: AppAudioService
     let transcriptionService: TranscriptionService
     let transcriptExportService: TranscriptExportService
 
+    @MainActor
     static func live(modelContainer: ModelContainer = defaultModelContainer()) -> ServiceContainer {
         let bookmarkStore = UserDefaultsBookmarkStore()
         let workspaceService = WorkspaceService(bookmarkStore: bookmarkStore)
@@ -21,6 +24,8 @@ struct ServiceContainer {
                 workspaceService: workspaceService,
                 modelContainer: modelContainer
             ),
+            audioDeviceService: AudioDeviceService(),
+            appAudioService: AppAudioService(),
             transcriptionService: TranscriptionService(),
             transcriptExportService: TranscriptExportService()
         )

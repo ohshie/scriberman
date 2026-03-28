@@ -8,6 +8,7 @@ final class RecordingSession {
     var duration: TimeInterval
     var audioURL: String
     var title: String
+    var capturedAppName: String?
     var statusRawValue: String
     var errorMessage: String?
     var transcriptData: Data?
@@ -45,6 +46,7 @@ final class RecordingSession {
         duration: TimeInterval,
         audioURL: String,
         title: String,
+        capturedAppName: String? = nil,
         status: RecordingStatus = .recorded,
         errorMessage: String? = nil,
         transcriptData: Data? = nil
@@ -54,6 +56,7 @@ final class RecordingSession {
         self.duration = duration
         self.audioURL = audioURL
         self.title = title
+        self.capturedAppName = capturedAppName
         self.statusRawValue = status.persistedValue
         self.errorMessage = errorMessage
         self.transcriptData = transcriptData
