@@ -89,18 +89,13 @@ struct JobsView: View {
                 }
             }
         }
-        .onDrop(of: [.audio, .fileURL], isTargeted: nil) { providers in
-            let canHandle = providers.contains { provider in
-                provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
-                    || provider.hasItemConformingToTypeIdentifier(UTType.audio.identifier)
-            }
-            guard canHandle else {
+        .dropDestination(for: URL.self) { urls, _ in
+            let audioURLs = urls.filter(isAudioURL)
+            guard !audioURLs.isEmpty else {
                 return false
             }
-
             Task {
-                let urls = await loadDroppedAudioURLs(from: providers)
-                await viewModel.importAudio(urls: urls, context: modelContext)
+                await viewModel.importAudio(urls: audioURLs, context: modelContext)
             }
             return true
         }
@@ -124,38 +119,6 @@ struct JobsView: View {
 
         Task {
             await viewModel.importAudio(urls: panel.urls, context: modelContext)
-        }
-    }
-
-    private func loadDroppedAudioURLs(from providers: [NSItemProvider]) async -> [URL] {
-        var urls: [URL] = []
-        for provider in providers {
-            if let url = await loadURL(from: provider), isAudioURL(url) {
-                urls.append(url)
-            }
-        }
-        return urls
-    }
-
-    private func loadURL(from provider: NSItemProvider) async -> URL? {
-        await withCheckedContinuation { continuation in
-            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                if let url = item as? URL {
-                    continuation.resume(returning: url)
-                    return
-                }
-                if let data = item as? Data,
-                   let url = URL(dataRepresentation: data, relativeTo: nil) {
-                    continuation.resume(returning: url)
-                    return
-                }
-                if let string = item as? String,
-                   let url = URL(string: string) {
-                    continuation.resume(returning: url)
-                    return
-                }
-                continuation.resume(returning: nil)
-            }
         }
     }
 
