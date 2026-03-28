@@ -1,10 +1,12 @@
 import Foundation
+import OSLog
 import SwiftData
 
 @MainActor
 final class JobsViewModel: ObservableObject {
     private let workspaceService: WorkspaceServiceProtocol
     private let transcriptionService: TranscriptionServiceProtocol
+    private let logger = Logger(subsystem: "Scriberman", category: "JobsViewModel")
 
     init(workspaceService: WorkspaceServiceProtocol, transcriptionService: TranscriptionServiceProtocol) {
         self.workspaceService = workspaceService
@@ -33,6 +35,7 @@ final class JobsViewModel: ObservableObject {
                 session.errorMessage = nil
                 try? context.save()
             } catch {
+                logger.error("Transcription failed for session \(session.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 session.status = .error(error.localizedDescription)
                 session.errorMessage = error.localizedDescription
                 try? context.save()

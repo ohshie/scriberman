@@ -1,5 +1,6 @@
 import FluidAudio
 import Foundation
+import OSLog
 
 enum TranscriptionError: LocalizedError {
     case missingAudioFile
@@ -27,8 +28,10 @@ actor TranscriptionService: TranscriptionServiceProtocol {
 
     private let fileManager = FileManager.default
     private let transcriptAligner = TranscriptAligner()
+    private let logger = Logger(subsystem: "Scriberman", category: "TranscriptionService")
     private let resampleAudioFile: ResampleAudioFile
     private let segmentSpeech: SegmentSpeech
+    private let minimumChunkSamples = 16_000
 
     init(
         resampleAudioFile: @escaping ResampleAudioFile = { url in
@@ -88,6 +91,7 @@ actor TranscriptionService: TranscriptionServiceProtocol {
     }
 
     func transcribe(session: RecordingSession, workspace: Workspace) async throws -> Transcript {
+        logger.info("Starting transcription for session \(session.id, privacy: .public)")
         try await prepareModels(workspace: workspace)
 
         let micURL = URL(fileURLWithPath: session.micAudioURL)
@@ -104,6 +108,7 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         }()
 
         let mergedSegments = try await mergeByTimestamp(micSegments + appSegments)
+        logger.info("Completed transcription for session \(session.id, privacy: .public) with \(mergedSegments.count, privacy: .public) segments")
         let speakerIds = Array(Set(mergedSegments.map(\.speakerId))).sorted()
         let speakers = speakerIds.enumerated().map { index, speakerId in
             TranscriptSpeaker(
@@ -126,25 +131,28 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         workspace: Workspace
     ) async throws -> [TranscriptSegment] {
         _ = workspace
+        let passName = source == .app ? "app" : "mic"
+        logger.info("Starting \(passName, privacy: .public) pass for file \(url.lastPathComponent, privacy: .public)")
         guard fileManager.fileExists(atPath: url.path) else {
-            throw TranscriptionError.missingAudioFile
+            throw TranscriptionError.failedToTranscribe("\(passName) pass: audio file not found at \(url.path)")
         }
 
         let samples: [Float]
         do {
             samples = try resampleAudioFile(url)
         } catch {
-            throw TranscriptionError.failedToTranscribe(error.localizedDescription)
+            throw TranscriptionError.failedToTranscribe("\(passName) pass: resample failed - \(error.localizedDescription)")
         }
 
         let speechSegments: [VadSegment]
         do {
             speechSegments = try await segmentSpeech(samples)
         } catch {
-            throw TranscriptionError.failedToTranscribe(error.localizedDescription)
+            throw TranscriptionError.failedToTranscribe("\(passName) pass: VAD failed - \(error.localizedDescription)")
         }
 
         guard !speechSegments.isEmpty else {
+            logger.info("\(passName, privacy: .public) pass produced no speech segments")
             return []
         }
 
@@ -156,7 +164,7 @@ actor TranscriptionService: TranscriptionServiceProtocol {
             let diarizerModels = try await DiarizerModels.downloadIfNeeded()
             diarizerManager.initialize(models: diarizerModels)
         } catch {
-            throw TranscriptionError.failedToTranscribe(error.localizedDescription)
+            throw TranscriptionError.failedToTranscribe("\(passName) pass: model initialization failed - \(error.localizedDescription)")
         }
 
         var allSegments: [TranscriptSegment] = []
@@ -167,7 +175,12 @@ actor TranscriptionService: TranscriptionServiceProtocol {
                 continue
             }
 
-            let chunkSamples = Array(samples[startIndex..<endIndex])
+            var chunkSamples = Array(samples[startIndex..<endIndex])
+            if chunkSamples.count < minimumChunkSamples {
+                let missing = minimumChunkSamples - chunkSamples.count
+                chunkSamples.append(contentsOf: Array(repeating: 0, count: missing))
+                logger.info("Padded \(passName, privacy: .public) chunk from \(chunkSamples.count - missing, privacy: .public) to \(chunkSamples.count, privacy: .public) samples")
+            }
 
             let asrResult: ASRResult
             let diarizationResult: DiarizationResult
@@ -175,7 +188,7 @@ actor TranscriptionService: TranscriptionServiceProtocol {
                 asrResult = try await asrManager.transcribe(chunkSamples, source: .system)
                 diarizationResult = try diarizerManager.performCompleteDiarization(chunkSamples, sampleRate: 16_000)
             } catch {
-                throw TranscriptionError.failedToTranscribe(error.localizedDescription)
+                throw TranscriptionError.failedToTranscribe("\(passName) pass: ASR/diarization failed - \(error.localizedDescription)")
             }
 
             let aligned = transcriptAligner.alignTranscript(
