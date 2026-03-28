@@ -7,8 +7,6 @@ protocol RecordingServiceProtocol {
     func startRecording(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID?,
-        tapID: AudioObjectID?,
-        aggregateDeviceID: AudioDeviceID?,
         capturedAppName: String?,
         appProcessID: pid_t?
     ) async throws

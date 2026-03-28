@@ -10,7 +10,6 @@ final class StudioViewModelTests: XCTestCase {
     private var audioDeviceService: MockAudioDeviceService!
     private var appAudioService: MockAppAudioService!
     private var appAudioPermissionService: MockAppAudioPermissionService!
-    private var aggregateDeviceBuilder: MockAggregateDeviceBuilder!
     private var viewModel: StudioViewModel!
     private var workspace: Workspace!
 
@@ -21,7 +20,6 @@ final class StudioViewModelTests: XCTestCase {
         audioDeviceService = MockAudioDeviceService()
         appAudioService = MockAppAudioService()
         appAudioPermissionService = MockAppAudioPermissionService()
-        aggregateDeviceBuilder = MockAggregateDeviceBuilder()
         workspace = Workspace(rootURL: URL(fileURLWithPath: "/tmp/workspace"))
         workspaceService.requireWritableResult = .success(workspace)
         viewModel = StudioViewModel(
@@ -29,15 +27,13 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            appAudioPermissionService: appAudioPermissionService,
-            aggregateDeviceBuilder: aggregateDeviceBuilder
+            appAudioPermissionService: appAudioPermissionService
         )
     }
 
     override func tearDown() {
         viewModel = nil
         workspace = nil
-        aggregateDeviceBuilder = nil
         appAudioPermissionService = nil
         appAudioService = nil
         audioDeviceService = nil
@@ -118,8 +114,7 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            appAudioPermissionService: appAudioPermissionService,
-            aggregateDeviceBuilder: aggregateDeviceBuilder
+            appAudioPermissionService: appAudioPermissionService
         )
 
         XCTAssertEqual(viewModel.availableDevices, [builtInMic])
@@ -137,8 +132,7 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            appAudioPermissionService: appAudioPermissionService,
-            aggregateDeviceBuilder: aggregateDeviceBuilder
+            appAudioPermissionService: appAudioPermissionService
         )
 
         viewModel.selectedDevice = micB
@@ -156,8 +150,7 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            appAudioPermissionService: appAudioPermissionService,
-            aggregateDeviceBuilder: aggregateDeviceBuilder
+            appAudioPermissionService: appAudioPermissionService
         )
 
         audioDeviceService.selectedDevice = micB
@@ -175,8 +168,7 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            appAudioPermissionService: appAudioPermissionService,
-            aggregateDeviceBuilder: aggregateDeviceBuilder
+            appAudioPermissionService: appAudioPermissionService
         )
 
         await viewModel.startRecording()
@@ -190,57 +182,27 @@ final class StudioViewModelTests: XCTestCase {
         XCTAssertEqual(appAudioService.refreshCalls, 1)
     }
 
-    func testStartRecordingWithSelectedAppCreatesTapAndAggregate() async {
+    func testStartRecordingWithSelectedAppPassesAppContext() async {
         let selectedMic = AudioInputDevice(id: 1, uid: "mic-1", name: "Mic")
         let selectedApp = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
         audioDeviceService.availableDevices = [selectedMic]
         audioDeviceService.selectedDevice = selectedMic
         appAudioService.runningApps = [selectedApp]
         appAudioService.selectedApp = selectedApp
-        aggregateDeviceBuilder.tapResult = 77
-        aggregateDeviceBuilder.aggregateResult = 88
 
         viewModel = StudioViewModel(
             workspaceService: workspaceService,
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            appAudioPermissionService: appAudioPermissionService,
-            aggregateDeviceBuilder: aggregateDeviceBuilder
+            appAudioPermissionService: appAudioPermissionService
         )
 
         await viewModel.startRecording()
 
-        XCTAssertEqual(aggregateDeviceBuilder.createTapPIDs, [333])
-        XCTAssertEqual(aggregateDeviceBuilder.createAggregateInputs.first?.micUID, "mic-1")
-        XCTAssertEqual(recordingService.startCalls.first?.tapID, 77)
-        XCTAssertEqual(recordingService.startCalls.first?.aggregateDeviceID, 88)
+        XCTAssertEqual(recordingService.startCalls.first?.micDeviceID, selectedMic.id)
         XCTAssertEqual(recordingService.startCalls.first?.capturedAppName, "Zoom")
-    }
-
-    func testStartRecordingFallsBackToMicOnlyWhenTapCreationFails() async {
-        let selectedMic = AudioInputDevice(id: 1, uid: "mic-1", name: "Mic")
-        let selectedApp = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
-        audioDeviceService.availableDevices = [selectedMic]
-        audioDeviceService.selectedDevice = selectedMic
-        appAudioService.runningApps = [selectedApp]
-        appAudioService.selectedApp = selectedApp
-        aggregateDeviceBuilder.tapError = AggregateDeviceBuilderError.failedToCreateTap(-1)
-
-        viewModel = StudioViewModel(
-            workspaceService: workspaceService,
-            recordingService: recordingService,
-            audioDeviceService: audioDeviceService,
-            appAudioService: appAudioService,
-            appAudioPermissionService: appAudioPermissionService,
-            aggregateDeviceBuilder: aggregateDeviceBuilder
-        )
-
-        await viewModel.startRecording()
-
-        XCTAssertNil(recordingService.startCalls.first?.tapID)
-        XCTAssertNil(recordingService.startCalls.first?.aggregateDeviceID)
-        XCTAssertEqual(viewModel.errorMessage, "App audio capture unavailable. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording.")
+        XCTAssertEqual(recordingService.startCalls.first?.appProcessID, 333)
     }
 
     func testStartRecordingFallsBackToMicOnlyWhenAppStartAttemptFails() async {
@@ -250,8 +212,6 @@ final class StudioViewModelTests: XCTestCase {
         audioDeviceService.selectedDevice = selectedMic
         appAudioService.runningApps = [selectedApp]
         appAudioService.selectedApp = selectedApp
-        aggregateDeviceBuilder.tapResult = 77
-        aggregateDeviceBuilder.aggregateResult = 88
         recordingService.startThrowSequence = [MockStartError.failed]
 
         viewModel = StudioViewModel(
@@ -259,17 +219,16 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            appAudioPermissionService: appAudioPermissionService,
-            aggregateDeviceBuilder: aggregateDeviceBuilder
+            appAudioPermissionService: appAudioPermissionService
         )
 
         await viewModel.startRecording()
 
         XCTAssertEqual(recordingService.startCalls.count, 2)
-        XCTAssertEqual(recordingService.startCalls.first?.tapID, 77)
-        XCTAssertNil(recordingService.startCalls.last?.tapID)
-        XCTAssertNil(recordingService.startCalls.last?.aggregateDeviceID)
-        XCTAssertEqual(aggregateDeviceBuilder.teardownCalls.count, 1)
+        XCTAssertEqual(recordingService.startCalls.first?.appProcessID, 333)
+        XCTAssertEqual(recordingService.startCalls.first?.capturedAppName, "Zoom")
+        XCTAssertNil(recordingService.startCalls.last?.appProcessID)
+        XCTAssertNil(recordingService.startCalls.last?.capturedAppName)
         XCTAssertEqual(viewModel.errorMessage, "App audio capture unavailable. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording.")
         guard case .recording = viewModel.recordingState else {
             return XCTFail("Expected recording state")
@@ -287,8 +246,7 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            appAudioPermissionService: appAudioPermissionService,
-            aggregateDeviceBuilder: aggregateDeviceBuilder
+            appAudioPermissionService: appAudioPermissionService
         )
 
         await viewModel.startRecording()
@@ -319,16 +277,13 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            appAudioPermissionService: appAudioPermissionService,
-            aggregateDeviceBuilder: aggregateDeviceBuilder
+            appAudioPermissionService: appAudioPermissionService
         )
 
         await viewModel.startRecording()
 
         XCTAssertEqual(appAudioService.refreshCalls, 1)
-        XCTAssertEqual(aggregateDeviceBuilder.createTapPIDs, [])
-        XCTAssertNil(recordingService.startCalls.first?.tapID)
-        XCTAssertNil(recordingService.startCalls.first?.aggregateDeviceID)
+        XCTAssertNil(recordingService.startCalls.first?.appProcessID)
         XCTAssertNil(recordingService.startCalls.first?.capturedAppName)
     }
 
@@ -347,16 +302,14 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            appAudioPermissionService: appAudioPermissionService,
-            aggregateDeviceBuilder: aggregateDeviceBuilder
+            appAudioPermissionService: appAudioPermissionService
         )
 
         await viewModel.startRecording()
 
         XCTAssertEqual(appAudioPermissionService.requestCalls, 1)
-        XCTAssertEqual(aggregateDeviceBuilder.createTapPIDs, [])
-        XCTAssertNil(recordingService.startCalls.first?.tapID)
-        XCTAssertNil(recordingService.startCalls.first?.aggregateDeviceID)
+        XCTAssertNil(recordingService.startCalls.first?.appProcessID)
+        XCTAssertNil(recordingService.startCalls.first?.capturedAppName)
         XCTAssertEqual(viewModel.errorMessage, "App audio capture permission denied. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording.")
     }
 
@@ -427,41 +380,5 @@ private final class MockAppAudioService: AppAudioServiceProtocol {
     func refreshRunningApps() {
         refreshCalls += 1
         onRefresh?()
-    }
-}
-
-private final class MockAggregateDeviceBuilder: AggregateDeviceBuilding {
-    var tapResult: AudioObjectID = 0
-    var aggregateResult: AudioDeviceID = 0
-    var tapError: Error?
-    var aggregateError: Error?
-
-    var createTapPIDs: [pid_t] = []
-    var createAggregateInputs: [(micUID: String, tapID: AudioObjectID)] = []
-    var destroyedTapIDs: [AudioObjectID] = []
-    var teardownCalls: [(tapID: AudioObjectID, aggregateDeviceID: AudioDeviceID)] = []
-
-    func createTap(for pid: pid_t) throws -> AudioObjectID {
-        createTapPIDs.append(pid)
-        if let tapError {
-            throw tapError
-        }
-        return tapResult
-    }
-
-    func createAggregateDevice(micUID: String, tapID: AudioObjectID) throws -> AudioDeviceID {
-        createAggregateInputs.append((micUID: micUID, tapID: tapID))
-        if let aggregateError {
-            throw aggregateError
-        }
-        return aggregateResult
-    }
-
-    func teardown(tapID: AudioObjectID, aggregateDeviceID: AudioDeviceID) {
-        teardownCalls.append((tapID: tapID, aggregateDeviceID: aggregateDeviceID))
-    }
-
-    func destroyTap(_ tapID: AudioObjectID) {
-        destroyedTapIDs.append(tapID)
     }
 }
