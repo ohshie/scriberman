@@ -10,12 +10,14 @@ struct ServiceContainer {
     let appAudioService: AppAudioService
     let permissionService: PermissionServiceProtocol
     let transcriptionService: TranscriptionService
+    let retranscriptionService: RetranscriptionService
     let transcriptExportService: TranscriptExportService
 
     @MainActor
     static func live(modelContainer: ModelContainer = defaultModelContainer()) -> ServiceContainer {
         let bookmarkStore = UserDefaultsBookmarkStore()
         let workspaceService = WorkspaceService(bookmarkStore: bookmarkStore)
+        let transcriptionService = TranscriptionService()
 
         return ServiceContainer(
             bookmarkStore: bookmarkStore,
@@ -28,7 +30,8 @@ struct ServiceContainer {
             audioDeviceService: AudioDeviceService(),
             appAudioService: AppAudioService(),
             permissionService: PermissionService(),
-            transcriptionService: TranscriptionService(),
+            transcriptionService: transcriptionService,
+            retranscriptionService: RetranscriptionService(transcriptionService: transcriptionService),
             transcriptExportService: TranscriptExportService()
         )
     }
