@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
     @EnvironmentObject private var appState: AppState
+    @State private var isModelsExpanded = false
 
     var body: some View {
         NavigationStack {
@@ -35,8 +36,8 @@ struct SettingsView: View {
                             .foregroundStyle(viewModel.currentModelStatusText == "Installed" ? .green : .secondary)
                     }
 
-                    NavigationLink("Manage Models") {
-                        ModelsSettingsScreen(viewModel: viewModel)
+                    DisclosureGroup("Manage Models", isExpanded: $isModelsExpanded) {
+                        ModelsSettingsView(viewModel: viewModel)
                     }
                 }
 
