@@ -52,4 +52,31 @@ final class RecordingStatusTests: XCTestCase {
 
         XCTAssertNil(session.capturedAppName)
     }
+
+    func testRecordingSessionStoresAppAudioURLWhenProvided() {
+        let session = RecordingSession(
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 10,
+            micAudioURL: "/tmp/mic.wav",
+            appAudioURL: "/tmp/app.wav",
+            title: "Session",
+            status: .recorded
+        )
+
+        XCTAssertEqual(session.micAudioURL, "/tmp/mic.wav")
+        XCTAssertEqual(session.appAudioURL, "/tmp/app.wav")
+    }
+
+    func testRecordingSessionAppAudioURLDefaultsToNil() {
+        let session = RecordingSession(
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 10,
+            micAudioURL: "/tmp/mic.wav",
+            title: "Session",
+            status: .recorded
+        )
+
+        XCTAssertEqual(session.micAudioURL, "/tmp/mic.wav")
+        XCTAssertNil(session.appAudioURL)
+    }
 }

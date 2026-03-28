@@ -22,8 +22,26 @@ enum TranscriptionError: LocalizedError {
 }
 
 actor TranscriptionService: TranscriptionServiceProtocol {
+    typealias ResampleAudioFile = (URL) throws -> [Float]
+    typealias SegmentSpeech = ([Float]) async throws -> [VadSegment]
+
     private let fileManager = FileManager.default
     private let transcriptAligner = TranscriptAligner()
+    private let resampleAudioFile: ResampleAudioFile
+    private let segmentSpeech: SegmentSpeech
+
+    init(
+        resampleAudioFile: @escaping ResampleAudioFile = { url in
+            try AudioConverter().resampleAudioFile(url)
+        },
+        segmentSpeech: @escaping SegmentSpeech = { samples in
+            let vadManager = try await VadManager(config: VadConfig(defaultThreshold: 0.75))
+            return try await vadManager.segmentSpeech(samples, config: VadSegmentationConfig.default)
+        }
+    ) {
+        self.resampleAudioFile = resampleAudioFile
+        self.segmentSpeech = segmentSpeech
+    }
 
     func prepareModels(workspace: Workspace) async throws {
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -114,21 +132,14 @@ actor TranscriptionService: TranscriptionServiceProtocol {
 
         let samples: [Float]
         do {
-            samples = try AudioConverter().resampleAudioFile(url)
-        } catch {
-            throw TranscriptionError.failedToTranscribe(error.localizedDescription)
-        }
-
-        let vadManager: VadManager
-        do {
-            vadManager = try await VadManager(config: VadConfig(defaultThreshold: 0.75))
+            samples = try resampleAudioFile(url)
         } catch {
             throw TranscriptionError.failedToTranscribe(error.localizedDescription)
         }
 
         let speechSegments: [VadSegment]
         do {
-            speechSegments = try await vadManager.segmentSpeech(samples, config: VadSegmentationConfig.default)
+            speechSegments = try await segmentSpeech(samples)
         } catch {
             throw TranscriptionError.failedToTranscribe(error.localizedDescription)
         }
@@ -194,5 +205,13 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         }
 
         return allSegments
+    }
+
+    func transcribePassForTesting(
+        url: URL,
+        source: AudioSource,
+        workspace: Workspace
+    ) async throws -> [TranscriptSegment] {
+        try await transcribePass(url: url, source: source, workspace: workspace)
     }
 }
