@@ -119,10 +119,10 @@ actor RecordingService: RecordingServiceProtocol {
 
         do {
             try fileManager.createDirectory(at: workspace.recordingsURL, withIntermediateDirectories: true)
+            try fileManager.createDirectory(at: workspace.tmpRecordingURL, withIntermediateDirectories: true)
 
-            let recordingIdentifier = UUID().uuidString
-            let micFileURL = workspace.recordingsURL.appendingPathComponent("\(recordingIdentifier)_mic.wav")
-            let appFileURL = workspace.recordingsURL.appendingPathComponent("\(recordingIdentifier)_app.wav")
+            let micFileURL = workspace.tmpRecordingURL.appendingPathComponent("mic.wav")
+            let appFileURL = workspace.tmpRecordingURL.appendingPathComponent("app.wav")
 
             let audioEngine = AVAudioEngine()
             let inputNode = audioEngine.inputNode
