@@ -33,7 +33,6 @@ final class StudioViewModel: ObservableObject {
     private let audioDeviceService: AudioDeviceServiceProtocol
     private let appAudioService: AppAudioServiceProtocol
     private let appAudioPermissionService: AppAudioPermissionProviding
-    private let aggregateDeviceBuilder: AggregateDeviceBuilding
     private var recordingMonitorTask: Task<Void, Never>?
     private var ctaCountdownTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
@@ -69,15 +68,13 @@ final class StudioViewModel: ObservableObject {
         recordingService: RecordingServiceProtocol,
         audioDeviceService: AudioDeviceServiceProtocol,
         appAudioService: AppAudioServiceProtocol,
-        appAudioPermissionService: AppAudioPermissionProviding? = nil,
-        aggregateDeviceBuilder: AggregateDeviceBuilding
+        appAudioPermissionService: AppAudioPermissionProviding? = nil
     ) {
         self.workspaceService = workspaceService
         self.recordingService = recordingService
         self.audioDeviceService = audioDeviceService
         self.appAudioService = appAudioService
         self.appAudioPermissionService = appAudioPermissionService ?? AppAudioPermissionService()
-        self.aggregateDeviceBuilder = aggregateDeviceBuilder
         self.availableDevices = audioDeviceService.availableDevices
         self.selectedDevice = audioDeviceService.selectedDevice
         self.runningApps = appAudioService.runningApps
@@ -137,8 +134,6 @@ final class StudioViewModel: ObservableObject {
             let workspace = try await workspaceService.requireWritableWorkspace()
             appAudioService.refreshRunningApps()
 
-            var selectedTapID: AudioObjectID?
-            var selectedAggregateDeviceID: AudioDeviceID?
             var selectedCapturedAppName: String?
             var selectedAppProcessID: pid_t?
 
@@ -162,14 +157,12 @@ final class StudioViewModel: ObservableObject {
             var fallbackMessage: String?
 
             do {
-                try await startRecordingAttempt(
-                    in: workspace,
-                    micDeviceID: selectedMicDeviceID,
-                    tapID: selectedTapID,
-                    aggregateDeviceID: selectedAggregateDeviceID,
-                    capturedAppName: selectedCapturedAppName,
-                    appProcessID: selectedAppProcessID
-                )
+                    try await startRecordingAttempt(
+                        in: workspace,
+                        micDeviceID: selectedMicDeviceID,
+                        capturedAppName: selectedCapturedAppName,
+                        appProcessID: selectedAppProcessID
+                    )
             } catch {
                 startError = error
             }
@@ -181,8 +174,6 @@ final class StudioViewModel: ObservableObject {
                     try await startRecordingAttempt(
                         in: workspace,
                         micDeviceID: selectedMicDeviceID,
-                        tapID: nil,
-                        aggregateDeviceID: nil,
                         capturedAppName: nil,
                         appProcessID: nil
                     )
@@ -197,8 +188,6 @@ final class StudioViewModel: ObservableObject {
                     try await startRecordingAttempt(
                         in: workspace,
                         micDeviceID: nil,
-                        tapID: nil,
-                        aggregateDeviceID: nil,
                         capturedAppName: nil,
                         appProcessID: nil
                     )
@@ -289,16 +278,12 @@ final class StudioViewModel: ObservableObject {
     private func startRecordingAttempt(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID?,
-        tapID: AudioObjectID?,
-        aggregateDeviceID: AudioDeviceID?,
         capturedAppName: String?,
         appProcessID: pid_t?
     ) async throws {
         try await recordingService.startRecording(
             in: workspace,
             micDeviceID: micDeviceID,
-            tapID: tapID,
-            aggregateDeviceID: aggregateDeviceID,
             capturedAppName: capturedAppName,
             appProcessID: appProcessID
         )
