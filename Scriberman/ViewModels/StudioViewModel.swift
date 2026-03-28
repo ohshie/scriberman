@@ -43,8 +43,24 @@ final class StudioViewModel: ObservableObject {
             appAudioService.selectedApp = selectedApp
         }
     }
-    @Published var appPickerEnabled: Bool
+    @Published private var screenRecordingStatus: PermissionStatus
+    @Published var recordAppAudio: Bool = false
     var onSessionStopped: ((RecordingSession) -> Void)?
+
+    var appAudioToggleEnabled: Bool {
+        screenRecordingStatus == .granted
+    }
+
+    var showAppPicker: Bool {
+        recordAppAudio && screenRecordingStatus == .granted
+    }
+
+    var canRecord: Bool {
+        if case .idle = recordingState {
+            return !recordAppAudio || selectedApp != nil
+        }
+        return false
+    }
 
     init(
         workspaceService: WorkspaceServiceProtocol,
@@ -62,7 +78,7 @@ final class StudioViewModel: ObservableObject {
         self.selectedDevice = audioDeviceService.selectedDevice
         self.runningApps = appAudioService.runningApps
         self.selectedApp = appAudioService.selectedApp
-        self.appPickerEnabled = permissionService.screenRecordingStatus == .granted
+        self.screenRecordingStatus = permissionService.screenRecordingStatus
 
         audioDeviceService.availableDevicesPublisher
             .sink { [weak self] devices in
@@ -90,7 +106,7 @@ final class StudioViewModel: ObservableObject {
 
         permissionService.screenRecordingStatusPublisher
             .sink { [weak self] status in
-                self?.appPickerEnabled = status == .granted
+                self?.screenRecordingStatus = status
             }
             .store(in: &cancellables)
     }

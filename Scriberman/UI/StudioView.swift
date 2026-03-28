@@ -132,7 +132,7 @@ struct StudioView: View {
         } label: {
             Label(viewModel.selectedApp?.name ?? "App", systemImage: "app")
         }
-        .disabled(!viewModel.appPickerEnabled)
+        .disabled(!viewModel.appAudioToggleEnabled)
         .simultaneousGesture(
             TapGesture().onEnded {
                 viewModel.refreshApps()
@@ -144,7 +144,7 @@ struct StudioView: View {
         VStack(alignment: .leading, spacing: 4) {
             appPicker
 
-            if !viewModel.appPickerEnabled {
+            if !viewModel.appAudioToggleEnabled {
                 HStack(spacing: 6) {
                     Text("Screen Recording required")
                         .font(.caption)

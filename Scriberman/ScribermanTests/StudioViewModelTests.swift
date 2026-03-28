@@ -323,7 +323,7 @@ final class StudioViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.errorMessage, RecordingError.captureInterrupted.localizedDescription)
     }
 
-    func testAppPickerEnabledTracksScreenRecordingStatus() {
+    func testAppAudioToggleEnabledTracksScreenRecordingStatus() {
         permissionService.screenRecordingStatus = .denied
 
         viewModel = StudioViewModel(
@@ -334,11 +334,11 @@ final class StudioViewModelTests: XCTestCase {
             permissionService: permissionService
         )
 
-        XCTAssertFalse(viewModel.appPickerEnabled)
+        XCTAssertFalse(viewModel.appAudioToggleEnabled)
 
         permissionService.screenRecordingStatus = .granted
 
-        XCTAssertTrue(viewModel.appPickerEnabled)
+        XCTAssertTrue(viewModel.appAudioToggleEnabled)
     }
 
     private func makeSession(status: RecordingStatus) -> RecordingSession {
