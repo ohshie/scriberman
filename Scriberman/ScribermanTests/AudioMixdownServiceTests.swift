@@ -86,6 +86,42 @@ final class AudioMixdownServiceTests: XCTestCase {
         XCTAssertGreaterThan(average, 0.15)
     }
 
+    func testMixWithNilAppDownmixesStereoInputToAveragedMonoOutput() async throws {
+        let service = AudioMixdownService(outputFormat: .linearPCMCaf)
+        let micURL = tempDirectoryURL.appendingPathComponent("mic_stereo.wav")
+        let outputURL = tempDirectoryURL.appendingPathComponent("recording_downmixed.caf")
+
+        let left = Array(repeating: Float(0.8), count: 24_000)
+        let right = Array(repeating: Float(-0.2), count: 24_000)
+        try writeStereoWAV(left: left, right: right, to: micURL)
+        try ensureReadableAudioFile(at: micURL)
+        let source = try decodePCM(from: micURL)
+        XCTAssertEqual(source.channelCount, 2)
+        XCTAssertGreaterThan(mean(source.channelSamples[0].prefix(5_000)), 0.6)
+        XCTAssertLessThan(mean(source.channelSamples[1].prefix(5_000)), -0.1)
+
+        do {
+            try await service.mix(
+                micURL: micURL,
+                appURL: nil,
+                micStartHostTime: 2_000_000_000,
+                appStartHostTime: nil,
+                into: outputURL
+            )
+        } catch {
+            if shouldSkipForSandboxAudioIO(error) {
+                throw XCTSkip("Skipping stereo downmix test in sandboxed runtime: \(error.localizedDescription)")
+            }
+            throw error
+        }
+
+        let decoded = try decodePCM(from: outputURL)
+        XCTAssertEqual(decoded.channelCount, 1)
+        let average = mean(decoded.channelSamples[0].prefix(10_000))
+        XCTAssertGreaterThan(average, 0.20)
+        XCTAssertLessThan(average, 0.40)
+    }
+
     func testMixWithHalfSecondAppOffsetPadsRightChannelSilence() async throws {
         let service = AudioMixdownService(outputFormat: .linearPCMCaf)
         let micURL = tempDirectoryURL.appendingPathComponent("mic.wav")
@@ -256,6 +292,47 @@ final class AudioMixdownServiceTests: XCTestCase {
                 let sample = samples[index + sampleIndex]
                 let clamped = max(-1.0, min(1.0, sample))
                 channelData[0][sampleIndex] = Int16(clamped * Float(Int16.max))
+            }
+            try file.write(from: buffer)
+            index += frameCount
+        }
+    }
+
+    private func writeStereoWAV(left: [Float], right: [Float], to url: URL) throws {
+        XCTAssertEqual(left.count, right.count)
+        guard let format = AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
+            sampleRate: 48_000,
+            channels: 2,
+            interleaved: false
+        ) else {
+            XCTFail("Failed to build stereo WAV format")
+            return
+        }
+
+        let file = try AVAudioFile(
+            forWriting: url,
+            settings: format.settings,
+            commonFormat: format.commonFormat,
+            interleaved: format.isInterleaved
+        )
+
+        var index = 0
+        while index < left.count {
+            let frameCount = min(4_096, left.count - index)
+            guard let buffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(frameCount)
+            ), let channelData = buffer.int16ChannelData else {
+                throw RecordingError.failedToStart("Failed to allocate stereo WAV write buffer for tests.")
+            }
+
+            buffer.frameLength = AVAudioFrameCount(frameCount)
+            for sampleIndex in 0..<frameCount {
+                let l = max(-1.0, min(1.0, left[index + sampleIndex]))
+                let r = max(-1.0, min(1.0, right[index + sampleIndex]))
+                channelData[0][sampleIndex] = Int16(l * Float(Int16.max))
+                channelData[1][sampleIndex] = Int16(r * Float(Int16.max))
             }
             try file.write(from: buffer)
             index += frameCount
