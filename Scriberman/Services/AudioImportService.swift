@@ -60,6 +60,17 @@ actor AudioImportService {
         let fallbackFileName = url.lastPathComponent
         let fallbackFormat = Self.defaultFormat(from: url)
 
+        let hasInputScopeAccess = url.startAccessingSecurityScopedResource()
+        let hasWorkspaceScopeAccess = workspace.rootURL.startAccessingSecurityScopedResource()
+        defer {
+            if hasInputScopeAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+            if hasWorkspaceScopeAccess {
+                workspace.rootURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
         let session = ImportedSession(
             duration: 0,
             title: fallbackTitle,
@@ -67,17 +78,26 @@ actor AudioImportService {
             originalFormat: fallbackFormat,
             status: .converting
         )
-        context.insert(session)
-        try? saveContext(context)
+        await MainActor.run {
+            context.insert(session)
+            try? saveContext(context)
+        }
 
         do {
             let probe = try await probeAudio(url)
-            session.title = probe.title
-            session.originalFileName = probe.originalFileName
-            session.originalFormat = probe.originalFormat
-            session.duration = probe.duration
+            await MainActor.run {
+                session.title = probe.title
+                session.originalFileName = probe.originalFileName
+                session.originalFormat = probe.originalFormat
+                session.duration = probe.duration
+            }
 
-            let importFolderURL = makeUniqueImportFolderURL(title: session.title, createdAt: session.createdAt, workspace: workspace)
+            let sessionSnapshot = await MainActor.run { (title: session.title, createdAt: session.createdAt) }
+            let importFolderURL = makeUniqueImportFolderURL(
+                title: sessionSnapshot.title,
+                createdAt: sessionSnapshot.createdAt,
+                workspace: workspace
+            )
             try createDirectory(importFolderURL)
 
             let outputURL = importFolderURL.appendingPathComponent("recording.m4a")
@@ -85,14 +105,18 @@ actor AudioImportService {
             let monoSamples = downmixToMono(channelSamples: channelSamples)
             try await writeMonoAAC(monoSamples, outputURL)
 
-            session.mixdownURL = outputURL.path
-            session.status = .transcribing
-            try saveContext(context)
+            await MainActor.run {
+                session.mixdownURL = outputURL.path
+                session.status = .transcribing
+                try? saveContext(context)
+            }
 
             await retranscribe(session, workspace, context)
         } catch {
-            session.status = .error(error.localizedDescription)
-            try? saveContext(context)
+            await MainActor.run {
+                session.status = .error(error.localizedDescription)
+                try? saveContext(context)
+            }
         }
     }
 
