@@ -20,7 +20,7 @@ struct StudioView: View {
                 VStack(spacing: 12) {
                     HStack {
                         microphonePicker
-                        appPickerSection
+                        appAudioControls
                         Spacer()
                     }
 
@@ -29,6 +29,7 @@ struct StudioView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
+                    .disabled(!viewModel.canRecord)
                 }
 
             case .recording(let duration, let level):
@@ -107,14 +108,8 @@ struct StudioView: View {
 
     private var appPicker: some View {
         Menu {
-            Button {
-                viewModel.selectedApp = nil
-            } label: {
-                if viewModel.selectedApp == nil {
-                    Label("No App", systemImage: "checkmark")
-                } else {
-                    Text("No App")
-                }
+            if viewModel.selectedApp == nil {
+                Label("Choose an app…", systemImage: "checkmark")
             }
 
             ForEach(viewModel.runningApps) { app in
@@ -130,9 +125,8 @@ struct StudioView: View {
                 }
             }
         } label: {
-            Label(viewModel.selectedApp?.name ?? "App", systemImage: "app")
+            Label(viewModel.selectedApp?.name ?? "Choose an app…", systemImage: "app")
         }
-        .disabled(!viewModel.appPickerEnabled)
         .simultaneousGesture(
             TapGesture().onEnded {
                 viewModel.refreshApps()
@@ -140,22 +134,27 @@ struct StudioView: View {
         )
     }
 
-    private var appPickerSection: some View {
+    private var appAudioControls: some View {
         VStack(alignment: .leading, spacing: 4) {
-            appPicker
+            Toggle("Record app audio", isOn: $viewModel.recordAppAudio)
+                .disabled(!viewModel.appAudioToggleEnabled)
 
-            if !viewModel.appPickerEnabled {
+            if !viewModel.appAudioToggleEnabled {
                 HStack(spacing: 6) {
                     Text("Screen Recording required")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    Button("Open Settings") {
+                    Button("Open System Settings") {
                         openScreenRecordingSettings()
                     }
                     .buttonStyle(.plain)
                     .font(.caption)
                 }
+            }
+
+            if viewModel.showAppPicker {
+                appPicker
             }
         }
     }

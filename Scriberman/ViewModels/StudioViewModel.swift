@@ -15,6 +15,8 @@ final class StudioViewModel: ObservableObject {
     private let audioDeviceService: AudioDeviceServiceProtocol
     private let appAudioService: AppAudioServiceProtocol
     private let permissionService: PermissionServiceProtocol
+    private let userDefaults: UserDefaults
+    private let lastUsedAppNameKey = "lastUsedAppName"
     private var recordingMonitorTask: Task<Void, Never>?
     private var ctaCountdownTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
@@ -37,32 +39,75 @@ final class StudioViewModel: ObservableObject {
     @Published var runningApps: [CapturedApp]
     @Published var selectedApp: CapturedApp? {
         didSet {
+            lastUsedAppName = selectedApp?.name
             guard !isApplyingAppSelection else {
                 return
             }
             appAudioService.selectedApp = selectedApp
         }
     }
-    @Published var appPickerEnabled: Bool
+    @Published private var screenRecordingStatus: PermissionStatus
+    @Published var recordAppAudio: Bool = false {
+        didSet {
+            guard oldValue != recordAppAudio else {
+                return
+            }
+            if recordAppAudio {
+                restoreLastUsedApp()
+            } else {
+                appAudioService.selectedApp = nil
+            }
+        }
+    }
     var onSessionStopped: ((RecordingSession) -> Void)?
+
+    var appAudioToggleEnabled: Bool {
+        screenRecordingStatus == .granted
+    }
+
+    var showAppPicker: Bool {
+        recordAppAudio && screenRecordingStatus == .granted
+    }
+
+    var canRecord: Bool {
+        if case .idle = recordingState {
+            return !recordAppAudio || selectedApp != nil
+        }
+        return false
+    }
+
+    private var lastUsedAppName: String? {
+        get { userDefaults.string(forKey: lastUsedAppNameKey) }
+        set {
+            if let newValue {
+                userDefaults.set(newValue, forKey: lastUsedAppNameKey)
+            } else {
+                userDefaults.removeObject(forKey: lastUsedAppNameKey)
+            }
+        }
+    }
 
     init(
         workspaceService: WorkspaceServiceProtocol,
         recordingService: RecordingServiceProtocol,
         audioDeviceService: AudioDeviceServiceProtocol,
         appAudioService: AppAudioServiceProtocol,
-        permissionService: PermissionServiceProtocol
+        permissionService: PermissionServiceProtocol,
+        userDefaults: UserDefaults = .standard
     ) {
         self.workspaceService = workspaceService
         self.recordingService = recordingService
         self.audioDeviceService = audioDeviceService
         self.appAudioService = appAudioService
         self.permissionService = permissionService
+        self.userDefaults = userDefaults
         self.availableDevices = audioDeviceService.availableDevices
         self.selectedDevice = audioDeviceService.selectedDevice
         self.runningApps = appAudioService.runningApps
         self.selectedApp = appAudioService.selectedApp
-        self.appPickerEnabled = permissionService.screenRecordingStatus == .granted
+        self.screenRecordingStatus = permissionService.screenRecordingStatus
+
+        handleScreenRecordingStatusChange(permissionService.screenRecordingStatus)
 
         audioDeviceService.availableDevicesPublisher
             .sink { [weak self] devices in
@@ -90,9 +135,22 @@ final class StudioViewModel: ObservableObject {
 
         permissionService.screenRecordingStatusPublisher
             .sink { [weak self] status in
-                self?.appPickerEnabled = status == .granted
+                self?.handleScreenRecordingStatusChange(status)
             }
             .store(in: &cancellables)
+    }
+
+    private func handleScreenRecordingStatusChange(_ status: PermissionStatus) {
+        screenRecordingStatus = status
+
+        guard status == .granted else {
+            // Permission loss invalidates app-audio intent and previous app selection.
+            recordAppAudio = false
+            selectedApp = nil
+            appAudioService.selectedApp = nil
+            lastUsedAppName = nil
+            return
+        }
     }
 
     func refresh() async {
@@ -106,6 +164,9 @@ final class StudioViewModel: ObservableObject {
     }
 
     private func applySelectedAppFromService(_ app: CapturedApp?) {
+        if app == nil, !recordAppAudio, selectedApp != nil {
+            return
+        }
         isApplyingAppSelection = true
         selectedApp = app
         isApplyingAppSelection = false
@@ -113,6 +174,17 @@ final class StudioViewModel: ObservableObject {
 
     func refreshApps() {
         appAudioService.refreshRunningApps()
+    }
+
+    func restoreLastUsedApp() {
+        let lastUsedAppName = lastUsedAppName
+        appAudioService.refreshRunningApps()
+        guard let lastUsedAppName else {
+            selectedApp = nil
+            return
+        }
+
+        selectedApp = runningApps.first(where: { $0.name == lastUsedAppName })
     }
 
     func startRecording() async {
@@ -127,13 +199,9 @@ final class StudioViewModel: ObservableObject {
             var selectedCapturedAppName: String?
             var selectedAppProcessID: pid_t?
 
-            if let selectedApp {
-                if permissionService.screenRecordingStatus == .granted {
-                    selectedCapturedAppName = selectedApp.name
-                    selectedAppProcessID = selectedApp.pid
-                } else {
-                    errorMessage = "App audio capture permission denied. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording."
-                }
+            if recordAppAudio, let selectedApp {
+                selectedCapturedAppName = selectedApp.name
+                selectedAppProcessID = selectedApp.pid
             }
 
             let selectedMicDeviceID = selectedDevice?.id

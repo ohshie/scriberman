@@ -10,6 +10,8 @@ final class StudioViewModelTests: XCTestCase {
     private var audioDeviceService: MockAudioDeviceService!
     private var appAudioService: MockAppAudioService!
     private var permissionService: MockPermissionService!
+    private var userDefaultsSuiteName: String!
+    private var userDefaults: UserDefaults!
     private var viewModel: StudioViewModel!
     private var workspace: Workspace!
 
@@ -20,6 +22,8 @@ final class StudioViewModelTests: XCTestCase {
         audioDeviceService = MockAudioDeviceService()
         appAudioService = MockAppAudioService()
         permissionService = MockPermissionService()
+        userDefaultsSuiteName = "StudioViewModelTests-\(UUID().uuidString)"
+        userDefaults = UserDefaults(suiteName: userDefaultsSuiteName)
         workspace = Workspace(rootURL: URL(fileURLWithPath: "/tmp/workspace"))
         workspaceService.requireWritableResult = .success(workspace)
         viewModel = StudioViewModel(
@@ -27,13 +31,19 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
     }
 
     override func tearDown() {
         viewModel = nil
         workspace = nil
+        if let userDefaultsSuiteName {
+            userDefaults?.removePersistentDomain(forName: userDefaultsSuiteName)
+        }
+        userDefaultsSuiteName = nil
+        userDefaults = nil
         permissionService = nil
         appAudioService = nil
         audioDeviceService = nil
@@ -114,7 +124,8 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
 
         XCTAssertEqual(viewModel.availableDevices, [builtInMic])
@@ -132,7 +143,8 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
 
         viewModel.selectedDevice = micB
@@ -150,7 +162,8 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
 
         audioDeviceService.selectedDevice = micB
@@ -168,7 +181,8 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
 
         await viewModel.startRecording()
@@ -196,8 +210,10 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
+        viewModel.recordAppAudio = true
 
         await viewModel.startRecording()
 
@@ -221,8 +237,10 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
+        viewModel.recordAppAudio = true
 
         await viewModel.startRecording()
 
@@ -248,7 +266,8 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
 
         await viewModel.startRecording()
@@ -279,7 +298,8 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
 
         await viewModel.startRecording()
@@ -289,7 +309,7 @@ final class StudioViewModelTests: XCTestCase {
         XCTAssertNil(recordingService.startCalls.first?.capturedAppName)
     }
 
-    func testStartRecordingRequestsAppAudioPermissionAndFallsBackWhenDenied() async {
+    func testStartRecordingWithDeniedScreenPermissionKeepsMicOnlyWithoutPermissionErrorMessage() async {
         let selectedMic = AudioInputDevice(id: 1, uid: "mic-1", name: "Mic")
         let selectedApp = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
         audioDeviceService.availableDevices = [selectedMic]
@@ -303,14 +323,15 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
 
         await viewModel.startRecording()
 
         XCTAssertNil(recordingService.startCalls.first?.appProcessID)
         XCTAssertNil(recordingService.startCalls.first?.capturedAppName)
-        XCTAssertEqual(viewModel.errorMessage, "App audio capture permission denied. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording.")
+        XCTAssertNil(viewModel.errorMessage)
     }
 
     func testRecordingMonitorSurfacesPendingInterruptionError() async {
@@ -323,7 +344,7 @@ final class StudioViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.errorMessage, RecordingError.captureInterrupted.localizedDescription)
     }
 
-    func testAppPickerEnabledTracksScreenRecordingStatus() {
+    func testAppAudioToggleEnabledTracksScreenRecordingStatus() {
         permissionService.screenRecordingStatus = .denied
 
         viewModel = StudioViewModel(
@@ -331,14 +352,167 @@ final class StudioViewModelTests: XCTestCase {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
-            permissionService: permissionService
+            permissionService: permissionService,
+            userDefaults: userDefaults
         )
 
-        XCTAssertFalse(viewModel.appPickerEnabled)
+        XCTAssertFalse(viewModel.appAudioToggleEnabled)
 
         permissionService.screenRecordingStatus = .granted
 
-        XCTAssertTrue(viewModel.appPickerEnabled)
+        XCTAssertTrue(viewModel.appAudioToggleEnabled)
+    }
+
+    func testShowAppPickerDependsOnToggleAndPermission() {
+        permissionService.screenRecordingStatus = .granted
+
+        viewModel = StudioViewModel(
+            workspaceService: workspaceService,
+            recordingService: recordingService,
+            audioDeviceService: audioDeviceService,
+            appAudioService: appAudioService,
+            permissionService: permissionService,
+            userDefaults: userDefaults
+        )
+
+        XCTAssertFalse(viewModel.showAppPicker)
+
+        viewModel.recordAppAudio = true
+
+        XCTAssertTrue(viewModel.showAppPicker)
+    }
+
+    func testCanRecordFalseWhenToggleOnWithoutSelectionAndTrueWithSelection() {
+        permissionService.screenRecordingStatus = .granted
+        let app = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
+        appAudioService.runningApps = [app]
+
+        viewModel = StudioViewModel(
+            workspaceService: workspaceService,
+            recordingService: recordingService,
+            audioDeviceService: audioDeviceService,
+            appAudioService: appAudioService,
+            permissionService: permissionService,
+            userDefaults: userDefaults
+        )
+
+        viewModel.recordAppAudio = true
+        XCTAssertFalse(viewModel.canRecord)
+
+        viewModel.selectedApp = app
+        XCTAssertTrue(viewModel.canRecord)
+    }
+
+    func testRestoreLastUsedAppSelectsMatchingRunningAppByName() {
+        userDefaults.set("Zoom", forKey: "lastUsedAppName")
+        let app = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
+        appAudioService.onRefresh = { [weak appAudioService] in
+            appAudioService?.runningApps = [app]
+        }
+
+        viewModel.restoreLastUsedApp()
+
+        XCTAssertEqual(viewModel.selectedApp?.name, "Zoom")
+    }
+
+    func testRestoreLastUsedAppLeavesSelectionNilWhenNoMatchFound() {
+        userDefaults.set("Zoom", forKey: "lastUsedAppName")
+        appAudioService.onRefresh = { [weak appAudioService] in
+            appAudioService?.runningApps = [
+                CapturedApp(bundleID: "com.test.meet", name: "Meet", pid: 444, icon: nil)
+            ]
+        }
+
+        viewModel.restoreLastUsedApp()
+
+        XCTAssertNil(viewModel.selectedApp)
+    }
+
+    func testSelectedAppWritePersistsLastUsedAppName() {
+        let app = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
+
+        viewModel.selectedApp = app
+
+        XCTAssertEqual(userDefaults.string(forKey: "lastUsedAppName"), "Zoom")
+    }
+
+    func testTurningRecordAppAudioOffClearsServiceSelectedApp() {
+        let app = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
+        viewModel.selectedApp = app
+        viewModel.recordAppAudio = true
+
+        viewModel.recordAppAudio = false
+
+        XCTAssertNil(appAudioService.selectedApp)
+    }
+
+    func testStartRecordingDoesNotPassAppCaptureParamsWhenToggleIsOff() async {
+        let selectedMic = AudioInputDevice(id: 1, uid: "mic-1", name: "Mic")
+        let selectedApp = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
+        audioDeviceService.availableDevices = [selectedMic]
+        audioDeviceService.selectedDevice = selectedMic
+        appAudioService.runningApps = [selectedApp]
+        appAudioService.selectedApp = selectedApp
+        permissionService.screenRecordingStatus = .granted
+
+        viewModel = StudioViewModel(
+            workspaceService: workspaceService,
+            recordingService: recordingService,
+            audioDeviceService: audioDeviceService,
+            appAudioService: appAudioService,
+            permissionService: permissionService,
+            userDefaults: userDefaults
+        )
+
+        await viewModel.startRecording()
+
+        XCTAssertNil(recordingService.startCalls.first?.capturedAppName)
+        XCTAssertNil(recordingService.startCalls.first?.appProcessID)
+    }
+
+    func testInitWithDeniedPermissionClearsPreviouslySelectedAppAndSavedName() {
+        let app = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
+        appAudioService.selectedApp = app
+        permissionService.screenRecordingStatus = .denied
+        userDefaults.set("Zoom", forKey: "lastUsedAppName")
+
+        viewModel = StudioViewModel(
+            workspaceService: workspaceService,
+            recordingService: recordingService,
+            audioDeviceService: audioDeviceService,
+            appAudioService: appAudioService,
+            permissionService: permissionService,
+            userDefaults: userDefaults
+        )
+
+        XCTAssertNil(viewModel.selectedApp)
+        XCTAssertNil(appAudioService.selectedApp)
+        XCTAssertNil(userDefaults.string(forKey: "lastUsedAppName"))
+        XCTAssertFalse(viewModel.recordAppAudio)
+    }
+
+    func testPermissionRevokedClearsSelectedAndSavedAppState() {
+        let app = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
+        permissionService.screenRecordingStatus = .granted
+
+        viewModel = StudioViewModel(
+            workspaceService: workspaceService,
+            recordingService: recordingService,
+            audioDeviceService: audioDeviceService,
+            appAudioService: appAudioService,
+            permissionService: permissionService,
+            userDefaults: userDefaults
+        )
+
+        viewModel.selectedApp = app
+        userDefaults.set("Zoom", forKey: "lastUsedAppName")
+
+        permissionService.screenRecordingStatus = .denied
+
+        XCTAssertNil(viewModel.selectedApp)
+        XCTAssertNil(appAudioService.selectedApp)
+        XCTAssertNil(userDefaults.string(forKey: "lastUsedAppName"))
+        XCTAssertFalse(viewModel.recordAppAudio)
     }
 
     private func makeSession(status: RecordingStatus) -> RecordingSession {
