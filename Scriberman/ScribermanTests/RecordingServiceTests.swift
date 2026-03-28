@@ -79,7 +79,7 @@ final class RecordingServiceTests: XCTestCase {
 
     func testMixdownFailureLeavesSessionMixdownURLNilAndStatusUnchanged() async throws {
         let container = try ModelContainer(
-            for: RecordingSession.self,
+            for: RecordingSession.self, ImportedSession.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let workspaceService = MockWorkspaceService()
@@ -127,7 +127,7 @@ final class RecordingServiceTests: XCTestCase {
 
     func testStopRecordingWhenNotRecordingReturnsNil() async throws {
         let container = try ModelContainer(
-            for: RecordingSession.self,
+            for: RecordingSession.self, ImportedSession.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let service = RecordingService(
@@ -141,7 +141,7 @@ final class RecordingServiceTests: XCTestCase {
 
     func testCaptureHostTimesKeepsFirstObservedValues() async throws {
         let container = try ModelContainer(
-            for: RecordingSession.self,
+            for: RecordingSession.self, ImportedSession.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let service = RecordingService(

@@ -9,7 +9,7 @@ final class AppStateTests: XCTestCase {
     override func setUpWithError() throws {
         try super.setUpWithError()
         modelContainer = try ModelContainer(
-            for: RecordingSession.self,
+            for: RecordingSession.self, ImportedSession.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
     }

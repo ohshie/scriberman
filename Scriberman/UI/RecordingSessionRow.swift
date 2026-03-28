@@ -49,6 +49,15 @@ struct RecordingSessionRow: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
 
+        case .converting:
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Converting")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
         case .transcribing:
             HStack(spacing: 6) {
                 ProgressView()
