@@ -479,6 +479,22 @@ actor RecordingService: RecordingServiceProtocol {
         micStartHostTime: UInt64,
         appStartHostTime: UInt64?
     ) async {
+        var scopedWorkspaceRoot: URL?
+        var didStartScopedAccess = false
+        if let workspace = await workspaceService.currentWorkspace(),
+           micURL.path.hasPrefix(workspace.rootURL.path) {
+            scopedWorkspaceRoot = workspace.rootURL
+            didStartScopedAccess = workspace.rootURL.startAccessingSecurityScopedResource()
+            logger.info(
+                "Mixdown workspace scope for session \(sessionID, privacy: .public): started=\(didStartScopedAccess, privacy: .public) root=\(workspace.rootURL.path, privacy: .public)"
+            )
+        }
+        defer {
+            if didStartScopedAccess {
+                scopedWorkspaceRoot?.stopAccessingSecurityScopedResource()
+            }
+        }
+
         logger.info(
             "Mixdown started for session \(sessionID, privacy: .public). mic=\(micURL.path, privacy: .public) app=\(appURL?.path ?? "nil", privacy: .public) out=\(mixdownURL.path, privacy: .public)"
         )
