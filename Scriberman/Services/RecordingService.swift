@@ -288,9 +288,13 @@ actor RecordingService: RecordingServiceProtocol {
 
         do {
             let sessionID = session.id
-            let micStartHostTime = self.micStartHostTime
+            let micStartHostTime = self.micStartHostTime ?? self.appStartHostTime ?? 0
             let appStartHostTime = self.appStartHostTime
             let mixdownURL = finalRecordingURLs.mic.deletingLastPathComponent().appendingPathComponent("recording.m4a")
+
+            if self.micStartHostTime == nil {
+                logger.warning("Mic start host time missing for session \(sessionID, privacy: .public); using fallback for mixdown alignment.")
+            }
 
             let context = ModelContext(modelContainer)
             context.insert(session)
@@ -465,14 +469,9 @@ actor RecordingService: RecordingServiceProtocol {
         micURL: URL,
         appURL: URL?,
         mixdownURL: URL,
-        micStartHostTime: UInt64?,
+        micStartHostTime: UInt64,
         appStartHostTime: UInt64?
     ) async {
-        guard let micStartHostTime else {
-            logger.error("Skipping mixdown for session \(sessionID, privacy: .public): missing mic start host time.")
-            return
-        }
-
         do {
             try await mixdownService.mix(
                 micURL: micURL,
