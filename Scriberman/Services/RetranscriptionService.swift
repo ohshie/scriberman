@@ -37,18 +37,25 @@ actor RetranscriptionService {
     }
 
     func retranscribe(session: any TranscribableSession, workspace: Workspace, context: ModelContext) async {
-        guard let mixdownPath = session.mixdownURL else {
-            session.status = .error("No mixdown available for retranscription")
-            try? saveContext(context)
+        var mixdownPath: String?
+        var isStereo = false
+        await MainActor.run {
+            mixdownPath = session.mixdownURL
+            isStereo = (session as? RecordingSession)?.appAudioURL != nil
+            if mixdownPath == nil {
+                session.status = .error("No mixdown available for retranscription")
+                try? saveContext(context)
+            } else {
+                session.status = .retranscribing
+                try? saveContext(context)
+            }
+        }
+        guard let mixdownPath else {
             return
         }
 
-        session.status = .retranscribing
-        try? saveContext(context)
-
         do {
             let mixdownURL = URL(fileURLWithPath: mixdownPath)
-            let isStereo = (session as? RecordingSession)?.appAudioURL != nil
             let extracted = try extractSamples(mixdownURL, isStereo)
             try await prepareModelsHandler(workspace)
 
@@ -68,16 +75,20 @@ actor RetranscriptionService {
                 )
             }
 
-            session.retranscript = Transcript(
-                fullText: merged.map(\.text).joined(separator: " "),
-                segments: merged,
-                speakers: speakers
-            )
-            session.status = .done
-            try? saveContext(context)
+            await MainActor.run {
+                session.retranscript = Transcript(
+                    fullText: merged.map(\.text).joined(separator: " "),
+                    segments: merged,
+                    speakers: speakers
+                )
+                session.status = .done
+                try? saveContext(context)
+            }
         } catch {
-            session.status = .error(error.localizedDescription)
-            try? saveContext(context)
+            await MainActor.run {
+                session.status = .error(error.localizedDescription)
+                try? saveContext(context)
+            }
         }
     }
 }
