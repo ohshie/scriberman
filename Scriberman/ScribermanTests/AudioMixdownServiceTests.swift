@@ -146,6 +146,78 @@ final class AudioMixdownServiceTests: XCTestCase {
         XCTAssertEqual(asbd.mSampleRate, 48_000, accuracy: 1.0)
     }
 
+    func testMixDeletesSourceWAVFilesAfterSuccessfulWrite() async throws {
+        let service = AudioMixdownService(outputFormat: .linearPCMCaf)
+        let micURL = tempDirectoryURL.appendingPathComponent("mic.wav")
+        let appURL = tempDirectoryURL.appendingPathComponent("app.wav")
+        let outputURL = tempDirectoryURL.appendingPathComponent("recording.caf")
+
+        try writeMonoWAV(samples: Array(repeating: Float(0.15), count: 48_000), to: micURL)
+        try writeMonoWAV(samples: Array(repeating: Float(0.45), count: 48_000), to: appURL)
+        try ensureReadableAudioFile(at: micURL)
+        try ensureReadableAudioFile(at: appURL)
+
+        do {
+            try await service.mix(
+                micURL: micURL,
+                appURL: appURL,
+                micStartHostTime: 1_000_000_000,
+                appStartHostTime: 1_000_000_000,
+                into: outputURL
+            )
+        } catch {
+            if shouldSkipForSandboxAudioIO(error) {
+                throw XCTSkip("Skipping mixdown deletion test in sandboxed runtime: \(error.localizedDescription)")
+            }
+            throw error
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outputURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: appURL.path))
+    }
+
+    func testDeletionFailureDoesNotFailMixOrOutput() async throws {
+        let failingURL = tempDirectoryURL.appendingPathComponent("app.wav")
+        let service = AudioMixdownService(
+            outputFormat: .linearPCMCaf,
+            removeItemAtURL: { url in
+                if url.path == failingURL.path {
+                    throw RecordingError.failedToStart("Forced deletion failure")
+                }
+                try FileManager.default.removeItem(at: url)
+            }
+        )
+
+        let micURL = tempDirectoryURL.appendingPathComponent("mic.wav")
+        let appURL = failingURL
+        let outputURL = tempDirectoryURL.appendingPathComponent("recording.caf")
+
+        try writeMonoWAV(samples: Array(repeating: Float(0.2), count: 48_000), to: micURL)
+        try writeMonoWAV(samples: Array(repeating: Float(0.3), count: 48_000), to: appURL)
+        try ensureReadableAudioFile(at: micURL)
+        try ensureReadableAudioFile(at: appURL)
+
+        do {
+            try await service.mix(
+                micURL: micURL,
+                appURL: appURL,
+                micStartHostTime: 1_000_000_000,
+                appStartHostTime: 1_000_000_000,
+                into: outputURL
+            )
+        } catch {
+            if shouldSkipForSandboxAudioIO(error) {
+                throw XCTSkip("Skipping mixdown deletion-failure test in sandboxed runtime: \(error.localizedDescription)")
+            }
+            throw error
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outputURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: appURL.path))
+    }
+
     private struct DecodedPCM {
         let channelCount: Int
         let channelSamples: [[Float]]

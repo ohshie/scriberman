@@ -8,6 +8,9 @@ struct TranscriptDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @FocusState private var titleFocused: Bool
     @State private var exportAlertMessage: String?
+    private var viewState: TranscriptDetailViewState {
+        TranscriptDetailViewState(session: session)
+    }
 
     var body: some View {
         List {
@@ -48,7 +51,19 @@ struct TranscriptDetailView: View {
                         await exportTranscript()
                     }
                 }
-                .disabled(!isDone)
+                .disabled(viewState.isExportDisabled)
+            }
+
+            ToolbarItem(placement: .secondaryAction) {
+                if viewState.showRetranscribingProgress {
+                    ProgressView()
+                } else if viewState.showRetranscribeButton {
+                    Button("Retranscribe") {
+                        Task {
+                            await retranscribe()
+                        }
+                    }
+                }
             }
         }
         .alert("Transcript Export", isPresented: Binding(
@@ -66,18 +81,11 @@ struct TranscriptDetailView: View {
     }
 
     private var segments: [TranscriptSegment] {
-        (session.transcript?.segments ?? []).sorted { $0.startTime < $1.startTime }
+        viewState.segments
     }
 
     private var speakersById: [String: TranscriptSpeaker] {
-        Dictionary(uniqueKeysWithValues: (session.transcript?.speakers ?? []).map { ($0.id, $0) })
-    }
-
-    private var isDone: Bool {
-        if case .done = session.status {
-            return true
-        }
-        return false
+        viewState.speakersById
     }
 
     private func speakerLabel(for speakerId: String) -> String {
@@ -93,12 +101,72 @@ struct TranscriptDetailView: View {
 
     private func exportTranscript() async {
         do {
-            try await appState.services.transcriptExportService.export(session: session)
+            try await appState.services.transcriptExportService.export(
+                session: session,
+                transcript: viewState.displayedTranscript
+            )
             exportAlertMessage = "Transcript exported successfully."
         } catch TranscriptExportError.exportCancelled {
             exportAlertMessage = nil
         } catch {
             exportAlertMessage = error.localizedDescription
         }
+    }
+
+    private func retranscribe() async {
+        guard let workspace = appState.workspace else {
+            return
+        }
+        await appState.services.retranscriptionService.retranscribe(
+            session: session,
+            workspace: workspace,
+            context: modelContext
+        )
+    }
+}
+
+struct TranscriptDetailViewState {
+    let session: RecordingSession
+
+    var displayedTranscript: Transcript? {
+        session.retranscript ?? session.transcript
+    }
+
+    var segments: [TranscriptSegment] {
+        (displayedTranscript?.segments ?? []).sorted { $0.startTime < $1.startTime }
+    }
+
+    var speakersById: [String: TranscriptSpeaker] {
+        Dictionary(uniqueKeysWithValues: (displayedTranscript?.speakers ?? []).map { ($0.id, $0) })
+    }
+
+    var isDone: Bool {
+        if case .done = session.status {
+            return true
+        }
+        return false
+    }
+
+    var isRetranscribing: Bool {
+        if case .retranscribing = session.status {
+            return true
+        }
+        return false
+    }
+
+    var canRetranscribe: Bool {
+        session.mixdownURL != nil && isDone
+    }
+
+    var showRetranscribeButton: Bool {
+        canRetranscribe && !isRetranscribing
+    }
+
+    var showRetranscribingProgress: Bool {
+        isRetranscribing
+    }
+
+    var isExportDisabled: Bool {
+        !isDone || isRetranscribing
     }
 }

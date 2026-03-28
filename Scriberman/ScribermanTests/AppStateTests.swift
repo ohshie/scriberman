@@ -41,6 +41,7 @@ final class AppStateTests: XCTestCase {
     private func makeServiceContainer(permissionService: PermissionServiceProtocol) -> ServiceContainer {
         let bookmarkStore = TestBookmarkStore()
         let workspaceService = WorkspaceService(bookmarkStore: bookmarkStore)
+        let transcriptionService = TranscriptionService()
 
         return ServiceContainer(
             bookmarkStore: bookmarkStore,
@@ -53,7 +54,8 @@ final class AppStateTests: XCTestCase {
             audioDeviceService: AudioDeviceService(),
             appAudioService: AppAudioService(),
             permissionService: permissionService,
-            transcriptionService: TranscriptionService(),
+            transcriptionService: transcriptionService,
+            retranscriptionService: RetranscriptionService(transcriptionService: transcriptionService),
             transcriptExportService: TranscriptExportService()
         )
     }
