@@ -374,7 +374,7 @@ actor AudioMixdownService {
         return Int((deltaNanoseconds / 1_000_000_000.0 * outputSampleRate).rounded())
     }
 
-    private func writeMonoAAC(samples: [Float], to outputURL: URL) throws {
+    func writeMonoAAC(samples: [Float], to outputURL: URL) throws {
         try removeOutputIfNeeded(outputURL)
 
         let outputFile = try makeOutputFile(url: outputURL, channelCount: 1)
