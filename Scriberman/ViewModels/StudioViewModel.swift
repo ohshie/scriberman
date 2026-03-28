@@ -184,13 +184,9 @@ final class StudioViewModel: ObservableObject {
             var selectedCapturedAppName: String?
             var selectedAppProcessID: pid_t?
 
-            if let selectedApp {
-                if permissionService.screenRecordingStatus == .granted {
-                    selectedCapturedAppName = selectedApp.name
-                    selectedAppProcessID = selectedApp.pid
-                } else {
-                    errorMessage = "App audio capture permission denied. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording."
-                }
+            if recordAppAudio, let selectedApp {
+                selectedCapturedAppName = selectedApp.name
+                selectedAppProcessID = selectedApp.pid
             }
 
             let selectedMicDeviceID = selectedDevice?.id
