@@ -1,4 +1,5 @@
 import AVFoundation
+import AudioToolbox
 import CoreMedia
 import Foundation
 import OSLog
@@ -36,24 +37,12 @@ actor AudioMixdownService {
             "Input existence. micExists=\(self.fileManager.fileExists(atPath: micURL.path), privacy: .public) appExists=\(appURL.map { self.fileManager.fileExists(atPath: $0.path) } ?? false, privacy: .public)"
         )
 
-        let micSamples: [Float]
-        do {
-            micSamples = try readResampledMonoSamples(from: micURL)
-            logger.info("Mic samples loaded. count=\(micSamples.count, privacy: .public)")
-        } catch {
-            logger.error("Mic read failed: \(error.localizedDescription, privacy: .public)")
-            throw RecordingError.failedToStart("Mixdown mic read failed: \(error.localizedDescription)")
-        }
+        let micSamples = try await readSamplesWithRetry(from: micURL, label: "mic")
+        logger.info("Mic samples loaded. count=\(micSamples.count, privacy: .public)")
 
         if let appURL {
-            let appSamples: [Float]
-            do {
-                appSamples = try readResampledMonoSamples(from: appURL)
-                logger.info("App samples loaded. count=\(appSamples.count, privacy: .public)")
-            } catch {
-                logger.error("App read failed: \(error.localizedDescription, privacy: .public)")
-                throw RecordingError.failedToStart("Mixdown app read failed: \(error.localizedDescription)")
-            }
+            let appSamples = try await readSamplesWithRetry(from: appURL, label: "app")
+            logger.info("App samples loaded. count=\(appSamples.count, privacy: .public)")
 
             let offsetSamples = computeOffsetSamples(
                 micStartHostTime: micStartHostTime,
@@ -86,7 +75,45 @@ actor AudioMixdownService {
         logger.info("Mix completed. outputExists=\(self.fileManager.fileExists(atPath: outputURL.path), privacy: .public)")
     }
 
-    private func readResampledMonoSamples(from inputURL: URL) throws -> [Float] {
+    private func readSamplesWithRetry(from url: URL, label: String) async throws -> [Float] {
+        let maxAttempts = 3
+        var lastError: Error?
+
+        for attempt in 1...maxAttempts {
+            do {
+                if attempt > 1 {
+                    logger.info("Retrying \(label, privacy: .public) read attempt \(attempt, privacy: .public)")
+                }
+                return try readSamplesWithFallback(from: url, label: label)
+            } catch {
+                lastError = error
+                let nsError = error as NSError
+                logger.error(
+                    "\(label, privacy: .public) read attempt \(attempt, privacy: .public) failed. domain=\(nsError.domain, privacy: .public) code=\(nsError.code, privacy: .public) desc=\(nsError.localizedDescription, privacy: .public)"
+                )
+                if attempt < maxAttempts {
+                    try? await Task.sleep(for: .milliseconds(120))
+                }
+            }
+        }
+
+        let fallbackDescription = lastError?.localizedDescription ?? "unknown"
+        throw RecordingError.failedToStart("Mixdown \(label) read failed: \(fallbackDescription)")
+    }
+
+    private func readSamplesWithFallback(from inputURL: URL, label: String) throws -> [Float] {
+        do {
+            return try readResampledMonoSamplesViaAVAudioFile(from: inputURL)
+        } catch {
+            let nsError = error as NSError
+            logger.error(
+                "\(label, privacy: .public) AVAudioFile read path failed. domain=\(nsError.domain, privacy: .public) code=\(nsError.code, privacy: .public) desc=\(nsError.localizedDescription, privacy: .public). Falling back to ExtAudioFile."
+            )
+            return try readResampledMonoSamplesViaExtAudioFile(from: inputURL, label: label)
+        }
+    }
+
+    private func readResampledMonoSamplesViaAVAudioFile(from inputURL: URL) throws -> [Float] {
         let inputFile: AVAudioFile
         do {
             inputFile = try AVAudioFile(forReading: inputURL)
@@ -237,6 +264,72 @@ actor AudioMixdownService {
                 continue
             }
         }
+    }
+
+    private func readResampledMonoSamplesViaExtAudioFile(from inputURL: URL, label: String) throws -> [Float] {
+        var extAudioFile: ExtAudioFileRef?
+        let openStatus = ExtAudioFileOpenURL(inputURL as CFURL, &extAudioFile)
+        guard openStatus == noErr, let extAudioFile else {
+            throw RecordingError.failedToStart(
+                "ExtAudioFileOpenURL failed for \(label): \(openStatus)"
+            )
+        }
+        defer { ExtAudioFileDispose(extAudioFile) }
+
+        var clientFormat = AudioStreamBasicDescription(
+            mSampleRate: outputSampleRate,
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kLinearPCMFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved,
+            mBytesPerPacket: 4,
+            mFramesPerPacket: 1,
+            mBytesPerFrame: 4,
+            mChannelsPerFrame: 1,
+            mBitsPerChannel: 32,
+            mReserved: 0
+        )
+        var clientFormatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let setFormatStatus = ExtAudioFileSetProperty(
+            extAudioFile,
+            kExtAudioFileProperty_ClientDataFormat,
+            clientFormatSize,
+            &clientFormat
+        )
+        guard setFormatStatus == noErr else {
+            throw RecordingError.failedToStart(
+                "ExtAudioFileSetProperty(ClientDataFormat) failed for \(label): \(setFormatStatus)"
+            )
+        }
+
+        var samples: [Float] = []
+        let chunkSize = Int(processingChunkSize)
+        var chunk = [Float](repeating: 0, count: chunkSize)
+
+        while true {
+            var frames = UInt32(chunkSize)
+            let status = chunk.withUnsafeMutableBufferPointer { buffer -> OSStatus in
+                var audioBufferList = AudioBufferList(
+                    mNumberBuffers: 1,
+                    mBuffers: AudioBuffer(
+                        mNumberChannels: 1,
+                        mDataByteSize: UInt32(buffer.count * MemoryLayout<Float>.size),
+                        mData: buffer.baseAddress
+                    )
+                )
+                return ExtAudioFileRead(extAudioFile, &frames, &audioBufferList)
+            }
+            guard status == noErr else {
+                throw RecordingError.failedToStart("ExtAudioFileRead failed for \(label): \(status)")
+            }
+            if frames == 0 {
+                break
+            }
+            samples.append(contentsOf: chunk.prefix(Int(frames)))
+        }
+
+        logger.info(
+            "\(label, privacy: .public) ExtAudioFile fallback succeeded. sampleCount=\(samples.count, privacy: .public)"
+        )
+        return samples
     }
 
     private func computeOffsetSamples(
