@@ -36,8 +36,17 @@ struct SettingsView: View {
                             .foregroundStyle(viewModel.currentModelStatusText == "Installed" ? .green : .secondary)
                     }
 
-                    DisclosureGroup("Manage Models", isExpanded: $isModelsExpanded) {
+                    DisclosureGroup(isExpanded: $isModelsExpanded) {
                         ModelsSettingsView(viewModel: viewModel)
+                    } label: {
+                        Text("Manage Models")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                withAnimation {
+                                    isModelsExpanded.toggle()
+                                }
+                            }
                     }
                 }
 
