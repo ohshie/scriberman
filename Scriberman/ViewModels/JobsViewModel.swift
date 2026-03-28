@@ -20,7 +20,6 @@ final class JobsViewModel: ObservableObject {
             return
         }
 
-        let micAudioURL = URL(fileURLWithPath: session.micAudioURL)
         session.status = .transcribing
         session.errorMessage = nil
         try? context.save()
@@ -28,7 +27,7 @@ final class JobsViewModel: ObservableObject {
         Task {
             do {
                 let workspace = try await workspaceService.requireWritableWorkspace()
-                let transcript = try await transcriptionService.transcribe(audioURL: micAudioURL, workspace: workspace)
+                let transcript = try await transcriptionService.transcribe(session: session, workspace: workspace)
                 session.transcript = transcript
                 session.status = .done
                 session.errorMessage = nil

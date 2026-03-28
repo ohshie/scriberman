@@ -65,44 +65,134 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         }
     }
 
-    func transcribe(audioURL: URL, workspace: Workspace) async throws -> Transcript {
+    func mergeByTimestamp(_ segments: [TranscriptSegment]) -> [TranscriptSegment] {
+        segments.sorted { $0.startTime < $1.startTime }
+    }
+
+    func transcribe(session: RecordingSession, workspace: Workspace) async throws -> Transcript {
         try await prepareModels(workspace: workspace)
 
-        guard fileManager.fileExists(atPath: audioURL.path) else {
+        let micURL = URL(fileURLWithPath: session.micAudioURL)
+        guard fileManager.fileExists(atPath: micURL.path) else {
+            throw TranscriptionError.missingAudioFile
+        }
+
+        let appURL = session.appAudioURL.map(URL.init(fileURLWithPath:))
+
+        async let micSegments = transcribePass(url: micURL, source: .mic, workspace: workspace)
+        async let appSegments: [TranscriptSegment] = {
+            guard let appURL else { return [] }
+            return try await transcribePass(url: appURL, source: .app, workspace: workspace)
+        }()
+
+        let mergedSegments = try await mergeByTimestamp(micSegments + appSegments)
+        let speakerIds = Array(Set(mergedSegments.map(\.speakerId))).sorted()
+        let speakers = speakerIds.enumerated().map { index, speakerId in
+            TranscriptSpeaker(
+                id: speakerId,
+                label: "Speaker \(index + 1)",
+                colorHex: transcriptAligner.speakerColorHex(at: index)
+            )
+        }
+
+        return Transcript(
+            fullText: mergedSegments.map(\.text).joined(separator: " "),
+            segments: mergedSegments,
+            speakers: speakers
+        )
+    }
+
+    private func transcribePass(
+        url: URL,
+        source: AudioSource,
+        workspace: Workspace
+    ) async throws -> [TranscriptSegment] {
+        _ = workspace
+        guard fileManager.fileExists(atPath: url.path) else {
             throw TranscriptionError.missingAudioFile
         }
 
         let samples: [Float]
         do {
-            samples = try AudioConverter().resampleAudioFile(audioURL)
+            samples = try AudioConverter().resampleAudioFile(url)
         } catch {
             throw TranscriptionError.failedToTranscribe(error.localizedDescription)
         }
 
-        let asrResult: ASRResult
+        let vadManager: VadManager
         do {
-            let asrManager = AsrManager(config: .default)
+            vadManager = try await VadManager(config: VadConfig(defaultThreshold: 0.75))
+        } catch {
+            throw TranscriptionError.failedToTranscribe(error.localizedDescription)
+        }
+
+        let speechSegments: [VadSegment]
+        do {
+            speechSegments = try await vadManager.segmentSpeech(samples, config: VadSegmentationConfig.default)
+        } catch {
+            throw TranscriptionError.failedToTranscribe(error.localizedDescription)
+        }
+
+        guard !speechSegments.isEmpty else {
+            return []
+        }
+
+        let asrManager = AsrManager(config: .default)
+        let diarizerManager = DiarizerManager(config: .default)
+        do {
             let asrModels = try await AsrModels.downloadAndLoad()
             try await asrManager.initialize(models: asrModels)
-            asrResult = try await asrManager.transcribe(samples, source: .system)
-        } catch {
-            throw TranscriptionError.failedToTranscribe(error.localizedDescription)
-        }
-
-        let diarizationResult: DiarizationResult
-        do {
-            let diarizerManager = DiarizerManager(config: .default)
             let diarizerModels = try await DiarizerModels.downloadIfNeeded()
             diarizerManager.initialize(models: diarizerModels)
-            diarizationResult = try diarizerManager.performCompleteDiarization(samples, sampleRate: 16_000)
         } catch {
             throw TranscriptionError.failedToTranscribe(error.localizedDescription)
         }
 
-        return transcriptAligner.alignTranscript(
-            fullText: asrResult.text,
-            tokenTimings: asrResult.tokenTimings ?? [],
-            diarizedSegments: diarizationResult.segments
-        )
+        var allSegments: [TranscriptSegment] = []
+        for speechSegment in speechSegments {
+            let startIndex = max(0, Int(speechSegment.startTime * 16_000.0))
+            let endIndex = min(samples.count, max(startIndex + 1, Int(speechSegment.endTime * 16_000.0)))
+            guard startIndex < endIndex else {
+                continue
+            }
+
+            let chunkSamples = Array(samples[startIndex..<endIndex])
+
+            let asrResult: ASRResult
+            let diarizationResult: DiarizationResult
+            do {
+                asrResult = try await asrManager.transcribe(chunkSamples, source: .system)
+                diarizationResult = try diarizerManager.performCompleteDiarization(chunkSamples, sampleRate: 16_000)
+            } catch {
+                throw TranscriptionError.failedToTranscribe(error.localizedDescription)
+            }
+
+            let aligned = transcriptAligner.alignTranscript(
+                fullText: asrResult.text,
+                tokenTimings: asrResult.tokenTimings ?? [],
+                diarizedSegments: diarizationResult.segments,
+                source: source
+            )
+
+            let adjusted: [TranscriptSegment] = aligned.segments.map { segment in
+                let speakerId: String
+                if source == .app {
+                    speakerId = segment.speakerId.hasPrefix("app:") ? segment.speakerId : "app:\(segment.speakerId)"
+                } else {
+                    speakerId = segment.speakerId
+                }
+                return TranscriptSegment(
+                    speakerId: speakerId,
+                    text: segment.text,
+                    startTime: segment.startTime + Float(speechSegment.startTime),
+                    endTime: segment.endTime + Float(speechSegment.startTime),
+                    audioSource: source
+                )
+            }
+
+            allSegments.append(contentsOf: adjusted)
+        }
+
+        return allSegments
     }
 }

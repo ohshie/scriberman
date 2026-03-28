@@ -7,7 +7,8 @@ struct TranscriptAligner {
     func alignTranscript(
         fullText: String,
         tokenTimings: [TokenTiming],
-        diarizedSegments: [TimedSpeakerSegment]
+        diarizedSegments: [TimedSpeakerSegment],
+        source: AudioSource
     ) -> Transcript {
         let cleanedWords = tokenTimings.compactMap { timing -> TimedWord? in
             let tokenPiece = tokenStitcher.normalizeTokenPiece(timing.token)
@@ -29,7 +30,8 @@ struct TranscriptAligner {
                     speakerId: segment.speakerId,
                     text: text,
                     startTime: segment.startTimeSeconds,
-                    endTime: segment.endTimeSeconds
+                    endTime: segment.endTimeSeconds,
+                    audioSource: source
                 )
             }
         } else {
@@ -41,7 +43,8 @@ struct TranscriptAligner {
                             speakerId: "S1",
                             text: fullText.trimmingCharacters(in: .whitespacesAndNewlines),
                             startTime: 0,
-                            endTime: Float(max(0, fullText.count / 12))
+                            endTime: Float(max(0, fullText.count / 12)),
+                            audioSource: source
                         )
                     ]
             } else {
@@ -53,7 +56,8 @@ struct TranscriptAligner {
                             speakerId: sortedDiarized[0].speakerId,
                             text: trimmedText,
                             startTime: sortedDiarized[0].startTimeSeconds,
-                            endTime: sortedDiarized.last?.endTimeSeconds ?? sortedDiarized[0].endTimeSeconds
+                            endTime: sortedDiarized.last?.endTimeSeconds ?? sortedDiarized[0].endTimeSeconds,
+                            audioSource: source
                         )
                     ]
             }
