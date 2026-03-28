@@ -125,6 +125,40 @@ final class RecordingServiceTests: XCTestCase {
         XCTAssertEqual(persisted.status, .recorded)
     }
 
+    func testStopRecordingWhenNotRecordingReturnsNil() async throws {
+        let container = try ModelContainer(
+            for: RecordingSession.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let service = RecordingService(
+            workspaceService: MockWorkspaceService(),
+            modelContainer: container
+        )
+
+        let result = await service.stopRecording()
+        XCTAssertNil(result)
+    }
+
+    func testCaptureHostTimesKeepsFirstObservedValues() async throws {
+        let container = try ModelContainer(
+            for: RecordingSession.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let service = RecordingService(
+            workspaceService: MockWorkspaceService(),
+            modelContainer: container
+        )
+
+        await service.captureMicStartHostTimeIfNeeded(1_000)
+        await service.captureMicStartHostTimeIfNeeded(2_000)
+        await service.captureAppStartHostTimeIfNeeded(3_000)
+        await service.captureAppStartHostTimeIfNeeded(4_000)
+
+        let hostTimes = await service.capturedHostTimes()
+        XCTAssertEqual(hostTimes.mic, 1_000)
+        XCTAssertEqual(hostTimes.app, 3_000)
+    }
+
     private func makeWorkspace() -> Workspace {
         let rootURL = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
