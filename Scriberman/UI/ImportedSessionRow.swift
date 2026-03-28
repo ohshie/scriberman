@@ -53,7 +53,7 @@ struct ImportedSessionRow: View {
             progressLabel("Transcribing")
 
         case .retranscribing:
-            progressLabel("Retranscribing")
+            progressLabel("Transcribing")
 
         case .done:
             HStack(spacing: 6) {
