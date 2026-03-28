@@ -107,6 +107,8 @@ final class StudioViewModel: ObservableObject {
         self.selectedApp = appAudioService.selectedApp
         self.screenRecordingStatus = permissionService.screenRecordingStatus
 
+        handleScreenRecordingStatusChange(permissionService.screenRecordingStatus)
+
         audioDeviceService.availableDevicesPublisher
             .sink { [weak self] devices in
                 self?.availableDevices = devices
@@ -133,9 +135,22 @@ final class StudioViewModel: ObservableObject {
 
         permissionService.screenRecordingStatusPublisher
             .sink { [weak self] status in
-                self?.screenRecordingStatus = status
+                self?.handleScreenRecordingStatusChange(status)
             }
             .store(in: &cancellables)
+    }
+
+    private func handleScreenRecordingStatusChange(_ status: PermissionStatus) {
+        screenRecordingStatus = status
+
+        guard status == .granted else {
+            // Permission loss invalidates app-audio intent and previous app selection.
+            recordAppAudio = false
+            selectedApp = nil
+            appAudioService.selectedApp = nil
+            lastUsedAppName = nil
+            return
+        }
     }
 
     func refresh() async {

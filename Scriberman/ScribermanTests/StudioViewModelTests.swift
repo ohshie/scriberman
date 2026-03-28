@@ -470,6 +470,51 @@ final class StudioViewModelTests: XCTestCase {
         XCTAssertNil(recordingService.startCalls.first?.appProcessID)
     }
 
+    func testInitWithDeniedPermissionClearsPreviouslySelectedAppAndSavedName() {
+        let app = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
+        appAudioService.selectedApp = app
+        permissionService.screenRecordingStatus = .denied
+        userDefaults.set("Zoom", forKey: "lastUsedAppName")
+
+        viewModel = StudioViewModel(
+            workspaceService: workspaceService,
+            recordingService: recordingService,
+            audioDeviceService: audioDeviceService,
+            appAudioService: appAudioService,
+            permissionService: permissionService,
+            userDefaults: userDefaults
+        )
+
+        XCTAssertNil(viewModel.selectedApp)
+        XCTAssertNil(appAudioService.selectedApp)
+        XCTAssertNil(userDefaults.string(forKey: "lastUsedAppName"))
+        XCTAssertFalse(viewModel.recordAppAudio)
+    }
+
+    func testPermissionRevokedClearsSelectedAndSavedAppState() {
+        let app = CapturedApp(bundleID: "com.test.zoom", name: "Zoom", pid: 333, icon: nil)
+        permissionService.screenRecordingStatus = .granted
+
+        viewModel = StudioViewModel(
+            workspaceService: workspaceService,
+            recordingService: recordingService,
+            audioDeviceService: audioDeviceService,
+            appAudioService: appAudioService,
+            permissionService: permissionService,
+            userDefaults: userDefaults
+        )
+
+        viewModel.selectedApp = app
+        userDefaults.set("Zoom", forKey: "lastUsedAppName")
+
+        permissionService.screenRecordingStatus = .denied
+
+        XCTAssertNil(viewModel.selectedApp)
+        XCTAssertNil(appAudioService.selectedApp)
+        XCTAssertNil(userDefaults.string(forKey: "lastUsedAppName"))
+        XCTAssertFalse(viewModel.recordAppAudio)
+    }
+
     private func makeSession(status: RecordingStatus) -> RecordingSession {
         RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
