@@ -252,6 +252,10 @@ actor RecordingService: RecordingServiceProtocol {
         audioRecorder?.stop()
         await appAudioCaptureSession?.stop()
         appAudioCaptureSession = nil
+        if #available(macOS 15.0, *) {
+            audioFile?.close()
+            logger.info("Closed mic AVAudioFile writer before session folder promotion.")
+        }
 
         let startedAt = recordingStartedAt ?? Date()
         let createdAt = Date()
@@ -653,6 +657,7 @@ final class AppAudioCaptureSession {
             try? await stream.stopCapture()
         }
         self.stream = nil
+        outputHandler.closeOutput()
     }
 }
 
@@ -679,6 +684,15 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
         self.monoFormat = nil
         self.currentLevel = 0
         self.firstBufferHostTime = nil
+    }
+
+    func closeOutput() {
+        lock.lock()
+        defer { lock.unlock() }
+        if #available(macOS 15.0, *) {
+            audioFile?.close()
+        }
+        audioFile = nil
     }
 
     nonisolated func stream(
