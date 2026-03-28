@@ -92,19 +92,34 @@ actor TranscriptionService: TranscriptionServiceProtocol {
 
     func transcribe(session: RecordingSession, workspace: Workspace) async throws -> Transcript {
         logger.info("Starting transcription for session \(session.id, privacy: .public)")
-        try await prepareModels(workspace: workspace)
-
-        let micURL = URL(fileURLWithPath: session.micAudioURL)
-        guard fileManager.fileExists(atPath: micURL.path) else {
+        guard let mixdownPath = session.mixdownURL else {
             throw TranscriptionError.missingAudioFile
         }
+        let mixdownURL = URL(fileURLWithPath: mixdownPath)
+        try await prepareModels(workspace: workspace)
 
-        let appURL = session.appAudioURL.map(URL.init(fileURLWithPath:))
+        let extractedSamples: (mic: [Float], app: [Float]?)
+        do {
+            extractedSamples = try M4AChannelExtractor().extract(
+                url: mixdownURL,
+                isStereo: session.appAudioURL != nil
+            )
+        } catch {
+            throw TranscriptionError.failedToTranscribe("M4A extraction failed - \(error.localizedDescription)")
+        }
 
-        async let micSegments = transcribePass(url: micURL, source: .mic, workspace: workspace)
+        async let micSegments = transcribePassFromSamples(
+            samples: extractedSamples.mic,
+            source: .mic,
+            workspace: workspace
+        )
         async let appSegments: [TranscriptSegment] = {
-            guard let appURL else { return [] }
-            return try await transcribePass(url: appURL, source: .app, workspace: workspace)
+            guard let appSamples = extractedSamples.app else { return [] }
+            return try await transcribePassFromSamples(
+                samples: appSamples,
+                source: .app,
+                workspace: workspace
+            )
         }()
 
         let mergedSegments = try await mergeByTimestamp(micSegments + appSegments)
@@ -130,7 +145,6 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         source: AudioSource,
         workspace: Workspace
     ) async throws -> [TranscriptSegment] {
-        _ = workspace
         let passName = source == .app ? "app" : "mic"
         logger.info("Starting \(passName, privacy: .public) pass for file \(url.lastPathComponent, privacy: .public)")
         guard fileManager.fileExists(atPath: url.path) else {
@@ -144,6 +158,16 @@ actor TranscriptionService: TranscriptionServiceProtocol {
             throw TranscriptionError.failedToTranscribe("\(passName) pass: resample failed - \(error.localizedDescription)")
         }
 
+        return try await transcribePassFromSamples(samples: samples, source: source, workspace: workspace)
+    }
+
+    func transcribePassFromSamples(
+        samples: [Float],
+        source: AudioSource,
+        workspace: Workspace
+    ) async throws -> [TranscriptSegment] {
+        _ = workspace
+        let passName = source == .app ? "app" : "mic"
         let speechSegments: [VadSegment]
         do {
             speechSegments = try await segmentSpeech(samples)
@@ -226,5 +250,13 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         workspace: Workspace
     ) async throws -> [TranscriptSegment] {
         try await transcribePass(url: url, source: source, workspace: workspace)
+    }
+
+    func transcribePassFromSamplesForTesting(
+        samples: [Float],
+        source: AudioSource,
+        workspace: Workspace
+    ) async throws -> [TranscriptSegment] {
+        try await transcribePassFromSamples(samples: samples, source: source, workspace: workspace)
     }
 }

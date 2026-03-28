@@ -58,4 +58,44 @@ final class TranscriptionServiceTests: XCTestCase {
         let segments = try await service.transcribePassForTesting(url: audioURL, source: .app, workspace: workspace)
         XCTAssertEqual(segments, [])
     }
+
+    func testTranscribePassFromSamplesSilentAudioReturnsEmptySegments() async throws {
+        let service = TranscriptionService(
+            resampleAudioFile: { _ in [1, 2, 3, 4] },
+            segmentSpeech: { _ in [] }
+        )
+        let workspace = Workspace(rootURL: FileManager.default.temporaryDirectory)
+
+        let segments = try await service.transcribePassFromSamplesForTesting(
+            samples: [0, 0, 0, 0],
+            source: .mic,
+            workspace: workspace
+        )
+
+        XCTAssertEqual(segments, [])
+    }
+
+    func testTranscribeThrowsMissingAudioWhenMixdownURLIsNil() async {
+        let service = TranscriptionService()
+        let workspace = Workspace(rootURL: FileManager.default.temporaryDirectory)
+        let session = RecordingSession(
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 3,
+            micAudioURL: "/tmp/mic.wav",
+            appAudioURL: nil,
+            mixdownURL: nil,
+            title: "Session",
+            status: .recorded
+        )
+
+        do {
+            _ = try await service.transcribe(session: session, workspace: workspace)
+            XCTFail("Expected missing audio file error.")
+        } catch {
+            guard case TranscriptionError.missingAudioFile = error else {
+                XCTFail("Expected missingAudioFile, got \(error)")
+                return
+            }
+        }
+    }
 }
