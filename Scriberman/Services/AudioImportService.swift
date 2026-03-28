@@ -56,7 +56,8 @@ actor AudioImportService {
                 appURL: nil,
                 micStartHostTime: 0,
                 appStartHostTime: nil,
-                into: outputURL
+                into: outputURL,
+                deleteSourceFiles: false
             )
         }
         self.retranscribe = retranscribe ?? { session, workspace, context in

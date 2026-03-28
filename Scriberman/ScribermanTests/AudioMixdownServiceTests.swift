@@ -254,6 +254,34 @@ final class AudioMixdownServiceTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: appURL.path))
     }
 
+    func testMixKeepsSourceFilesWhenDeletionDisabled() async throws {
+        let service = AudioMixdownService(outputFormat: .linearPCMCaf)
+        let micURL = tempDirectoryURL.appendingPathComponent("mic.wav")
+        let outputURL = tempDirectoryURL.appendingPathComponent("recording.caf")
+
+        try writeMonoWAV(samples: Array(repeating: Float(0.2), count: 24_000), to: micURL)
+        try ensureReadableAudioFile(at: micURL)
+
+        do {
+            try await service.mix(
+                micURL: micURL,
+                appURL: nil,
+                micStartHostTime: 1_000_000_000,
+                appStartHostTime: nil,
+                into: outputURL,
+                deleteSourceFiles: false
+            )
+        } catch {
+            if shouldSkipForSandboxAudioIO(error) {
+                throw XCTSkip("Skipping no-delete mixdown test in sandboxed runtime: \(error.localizedDescription)")
+            }
+            throw error
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outputURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
+    }
+
     private struct DecodedPCM {
         let channelCount: Int
         let channelSamples: [[Float]]
