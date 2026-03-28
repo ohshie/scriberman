@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import XCTest
 @testable import Scriberman
 
@@ -74,6 +75,88 @@ final class RecordingServiceTests: XCTestCase {
 
         XCTAssertEqual(result.mic.path, workspace.recordingsURL.appendingPathComponent("\(folderName)/mic.wav").path)
         XCTAssertEqual(result.app?.path, workspace.recordingsURL.appendingPathComponent("\(folderName)/app.wav").path)
+    }
+
+    func testMixdownFailureLeavesSessionMixdownURLNilAndStatusUnchanged() async throws {
+        let container = try ModelContainer(
+            for: RecordingSession.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let workspaceService = MockWorkspaceService()
+        let service = RecordingService(
+            workspaceService: workspaceService,
+            modelContainer: container
+        )
+
+        let context = ModelContext(container)
+        let session = RecordingSession(
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 12,
+            micAudioURL: "/tmp/missing-mic.wav",
+            mixdownURL: nil,
+            title: "Session",
+            status: .recorded
+        )
+        context.insert(session)
+        try context.save()
+
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("recording.m4a")
+        try? FileManager.default.createDirectory(
+            at: outputURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        await service.runMixdown(
+            sessionID: session.id,
+            micURL: URL(fileURLWithPath: "/tmp/does-not-exist-mic.wav"),
+            appURL: nil,
+            mixdownURL: outputURL,
+            micStartHostTime: 1,
+            appStartHostTime: nil
+        )
+
+        let sessionID = session.id
+        var descriptor = FetchDescriptor<RecordingSession>(predicate: #Predicate { $0.id == sessionID })
+        descriptor.fetchLimit = 1
+        let persisted = try XCTUnwrap(context.fetch(descriptor).first)
+        XCTAssertNil(persisted.mixdownURL)
+        XCTAssertEqual(persisted.status, .recorded)
+    }
+
+    func testStopRecordingWhenNotRecordingReturnsNil() async throws {
+        let container = try ModelContainer(
+            for: RecordingSession.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let service = RecordingService(
+            workspaceService: MockWorkspaceService(),
+            modelContainer: container
+        )
+
+        let result = await service.stopRecording()
+        XCTAssertNil(result)
+    }
+
+    func testCaptureHostTimesKeepsFirstObservedValues() async throws {
+        let container = try ModelContainer(
+            for: RecordingSession.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let service = RecordingService(
+            workspaceService: MockWorkspaceService(),
+            modelContainer: container
+        )
+
+        await service.captureMicStartHostTimeIfNeeded(1_000)
+        await service.captureMicStartHostTimeIfNeeded(2_000)
+        await service.captureAppStartHostTimeIfNeeded(3_000)
+        await service.captureAppStartHostTimeIfNeeded(4_000)
+
+        let hostTimes = await service.capturedHostTimes()
+        XCTAssertEqual(hostTimes.mic, 1_000)
+        XCTAssertEqual(hostTimes.app, 3_000)
     }
 
     private func makeWorkspace() -> Workspace {

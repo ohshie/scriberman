@@ -3,6 +3,7 @@ import AudioToolbox
 import CoreAudio
 import CoreMedia
 import Foundation
+import OSLog
 import ScreenCaptureKit
 import SwiftData
 
@@ -34,6 +35,8 @@ actor RecordingService: RecordingServiceProtocol {
     private let modelContainer: ModelContainer
     private let notificationCenter: NotificationCenter
     private let fileManager = FileManager.default
+    private let mixdownService = AudioMixdownService()
+    private let logger = Logger(subsystem: "Scriberman", category: "RecordingService")
 
     private var audioEngine: AVAudioEngine?
     private var audioFile: AVAudioFile?
@@ -41,6 +44,8 @@ actor RecordingService: RecordingServiceProtocol {
     private var recordingStartedAt: Date?
     private var recordingIdentifier: String?
     private var appAudioURL: URL?
+    private var micStartHostTime: UInt64?
+    private var appStartHostTime: UInt64?
     private var hasScopedRecordingAccess = false
     private var recordingWorkspaceRootURL: URL?
     private var activeCapturedAppName: String?
@@ -125,6 +130,8 @@ actor RecordingService: RecordingServiceProtocol {
             let fileURLs = Self.recordingFileURLs(in: workspace)
             let micFileURL = fileURLs.mic
             let appFileURL = fileURLs.app
+            self.micStartHostTime = nil
+            self.appStartHostTime = nil
 
             let audioEngine = AVAudioEngine()
             let inputNode = audioEngine.inputNode
@@ -162,7 +169,13 @@ actor RecordingService: RecordingServiceProtocol {
                     )
 
                     inputNode.removeTap(onBus: 0)
-                    inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, _ in
+                    inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, audioTime in
+                        if audioTime.hostTime != 0 {
+                            Task { [weak self] in
+                                await self?.captureMicStartHostTimeIfNeeded(audioTime.hostTime)
+                            }
+                        }
+
                         do {
                             try audioFile.write(from: buffer)
                         } catch {
@@ -198,7 +211,12 @@ actor RecordingService: RecordingServiceProtocol {
             if let appProcessID {
                 let session = AppAudioCaptureSession(
                     fileURL: appFileURL,
-                    processID: appProcessID
+                    processID: appProcessID,
+                    onFirstBufferHostTime: { [weak self] hostTime in
+                        Task { [weak self] in
+                            await self?.captureAppStartHostTimeIfNeeded(hostTime)
+                        }
+                    }
                 )
                 try await session.start()
                 self.appAudioCaptureSession = session
@@ -234,6 +252,10 @@ actor RecordingService: RecordingServiceProtocol {
         audioRecorder?.stop()
         await appAudioCaptureSession?.stop()
         appAudioCaptureSession = nil
+        if #available(macOS 15.0, *) {
+            audioFile?.close()
+            logger.info("Closed mic AVAudioFile writer before session folder promotion.")
+        }
 
         let startedAt = recordingStartedAt ?? Date()
         let createdAt = Date()
@@ -258,6 +280,10 @@ actor RecordingService: RecordingServiceProtocol {
             return nil
         }
 
+        logger.info(
+            "Prepared recording session folder. mic=\(finalRecordingURLs.mic.path, privacy: .public) app=\(finalRecordingURLs.app?.path ?? "nil", privacy: .public)"
+        )
+
         let session = RecordingSession(
             createdAt: createdAt,
             duration: duration,
@@ -269,10 +295,36 @@ actor RecordingService: RecordingServiceProtocol {
         )
 
         do {
+            let sessionID = session.id
+            let micStartHostTime = self.micStartHostTime ?? self.appStartHostTime ?? 0
+            let appStartHostTime = self.appStartHostTime
+            let mixdownURL = finalRecordingURLs.mic.deletingLastPathComponent().appendingPathComponent("recording.m4a")
+
+            if self.micStartHostTime == nil {
+                logger.warning("Mic start host time missing for session \(sessionID, privacy: .public); using fallback for mixdown alignment.")
+            }
+            logger.info(
+                "Scheduling mixdown for session \(sessionID, privacy: .public). micStart=\(micStartHostTime, privacy: .public) appStart=\(appStartHostTime ?? 0, privacy: .public) hasApp=\(finalRecordingURLs.app != nil, privacy: .public)"
+            )
+
             let context = ModelContext(modelContainer)
             context.insert(session)
             try context.save()
+
+            // Release capture writer resources before background mixdown starts.
             cleanupRecordingState()
+
+            Task { [weak self] in
+                await self?.runMixdown(
+                    sessionID: sessionID,
+                    micURL: finalRecordingURLs.mic,
+                    appURL: finalRecordingURLs.app,
+                    mixdownURL: mixdownURL,
+                    micStartHostTime: micStartHostTime,
+                    appStartHostTime: appStartHostTime
+                )
+            }
+
             return session
         } catch {
             cleanupRecordingState()
@@ -349,6 +401,8 @@ actor RecordingService: RecordingServiceProtocol {
         recordingStartedAt = nil
         recordingIdentifier = nil
         activeCapturedAppName = nil
+        micStartHostTime = nil
+        appStartHostTime = nil
     }
 
     private func releaseRecordingScopeIfNeeded() {
@@ -409,6 +463,98 @@ actor RecordingService: RecordingServiceProtocol {
         format.sampleRate.isFinite && format.sampleRate > 0 && format.channelCount > 0
     }
 
+    func captureMicStartHostTimeIfNeeded(_ hostTime: UInt64) {
+        guard micStartHostTime == nil else {
+            return
+        }
+        micStartHostTime = hostTime
+    }
+
+    func captureAppStartHostTimeIfNeeded(_ hostTime: UInt64) {
+        guard appStartHostTime == nil else {
+            return
+        }
+        appStartHostTime = hostTime
+    }
+
+    func capturedHostTimes() -> (mic: UInt64?, app: UInt64?) {
+        (micStartHostTime, appStartHostTime)
+    }
+
+    func runMixdown(
+        sessionID: UUID,
+        micURL: URL,
+        appURL: URL?,
+        mixdownURL: URL,
+        micStartHostTime: UInt64,
+        appStartHostTime: UInt64?
+    ) async {
+        var scopedWorkspaceRoot: URL?
+        var didStartScopedAccess = false
+        if let workspace = await workspaceService.currentWorkspace(),
+           micURL.path.hasPrefix(workspace.rootURL.path) {
+            scopedWorkspaceRoot = workspace.rootURL
+            didStartScopedAccess = workspace.rootURL.startAccessingSecurityScopedResource()
+            logger.info(
+                "Mixdown workspace scope for session \(sessionID, privacy: .public): started=\(didStartScopedAccess, privacy: .public) root=\(workspace.rootURL.path, privacy: .public)"
+            )
+        }
+        defer {
+            if didStartScopedAccess {
+                scopedWorkspaceRoot?.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        logger.info(
+            "Mixdown started for session \(sessionID, privacy: .public). mic=\(micURL.path, privacy: .public) app=\(appURL?.path ?? "nil", privacy: .public) out=\(mixdownURL.path, privacy: .public)"
+        )
+        let micSize = (try? fileManager.attributesOfItem(atPath: micURL.path)[.size] as? NSNumber)?.int64Value ?? -1
+        let appSize = appURL.flatMap { url in
+            (try? fileManager.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value
+        } ?? -1
+        logger.info(
+            "Mixdown input sizes for session \(sessionID, privacy: .public). micBytes=\(micSize, privacy: .public) appBytes=\(appSize, privacy: .public)"
+        )
+        logger.info(
+            "Mixdown timing for session \(sessionID, privacy: .public). micStart=\(micStartHostTime, privacy: .public) appStart=\(appStartHostTime ?? 0, privacy: .public)"
+        )
+        do {
+            try await mixdownService.mix(
+                micURL: micURL,
+                appURL: appURL,
+                micStartHostTime: micStartHostTime,
+                appStartHostTime: appStartHostTime,
+                into: mixdownURL
+            )
+        } catch {
+            logger.error("Mixdown failed for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return
+        }
+
+        let existsAfterMix = fileManager.fileExists(atPath: mixdownURL.path)
+        logger.info(
+            "Mixdown finished for session \(sessionID, privacy: .public). outputExists=\(existsAfterMix, privacy: .public) path=\(mixdownURL.path, privacy: .public)"
+        )
+
+        do {
+            let context = ModelContext(modelContainer)
+            var descriptor = FetchDescriptor<RecordingSession>(
+                predicate: #Predicate { $0.id == sessionID }
+            )
+            descriptor.fetchLimit = 1
+            guard let persistedSession = try context.fetch(descriptor).first else {
+                logger.error("Mixdown succeeded but session \(sessionID, privacy: .public) was not found for persistence update.")
+                return
+            }
+
+            persistedSession.mixdownURL = mixdownURL.path
+            try context.save()
+            logger.info("Persisted mixdownURL for session \(sessionID, privacy: .public): \(mixdownURL.path, privacy: .public)")
+        } catch {
+            logger.error("Failed to persist mixdown URL for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
 }
 
 extension RecordingService {
@@ -455,9 +601,14 @@ final class AppAudioCaptureSession {
         outputHandler.audioLevel
     }
 
-    init(fileURL: URL, processID: pid_t) {
+    init(
+        fileURL: URL,
+        processID: pid_t,
+        onFirstBufferHostTime: (@Sendable (UInt64) -> Void)? = nil
+    ) {
         self.fileURL = fileURL
         self.processID = processID
+        outputHandler.onFirstBufferHostTime = onFirstBufferHostTime
     }
 
     func start() async throws {
@@ -510,6 +661,7 @@ final class AppAudioCaptureSession {
             try? await stream.stopCapture()
         }
         self.stream = nil
+        outputHandler.closeOutput()
     }
 }
 
@@ -519,6 +671,8 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
     private var audioFile: AVAudioFile?
     private var monoFormat: AVAudioFormat?
     private var currentLevel: Float = 0
+    private var firstBufferHostTime: UInt64?
+    var onFirstBufferHostTime: (@Sendable (UInt64) -> Void)?
 
     var audioLevel: Float {
         lock.lock()
@@ -533,6 +687,16 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
         self.audioFile = nil
         self.monoFormat = nil
         self.currentLevel = 0
+        self.firstBufferHostTime = nil
+    }
+
+    func closeOutput() {
+        lock.lock()
+        defer { lock.unlock() }
+        if #available(macOS 15.0, *) {
+            audioFile?.close()
+        }
+        audioFile = nil
     }
 
     nonisolated func stream(
@@ -547,6 +711,8 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
     }
 
     private func process(_ sampleBuffer: CMSampleBuffer) {
+        captureFirstBufferHostTimeIfNeeded(from: sampleBuffer)
+
         guard let pcmBuffer = createPCMBuffer(from: sampleBuffer) else {
             return
         }
@@ -714,5 +880,34 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
             mono[frame] = sum / Float(channelCount)
         }
         return mono
+    }
+
+    private func captureFirstBufferHostTimeIfNeeded(from sampleBuffer: CMSampleBuffer) {
+        let callback: (@Sendable (UInt64) -> Void)?
+        let hostTimeToEmit: UInt64?
+        var didCaptureFirstHostTime = false
+
+        lock.lock()
+        if firstBufferHostTime == nil {
+            let presentationTimestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            let hostTimeClock = CMClockGetHostTimeClock()
+            let hostTime = CMSyncConvertTime(
+                presentationTimestamp,
+                from: hostTimeClock,
+                to: hostTimeClock
+            )
+
+            if CMTIME_IS_VALID(hostTime), CMTIME_IS_NUMERIC(hostTime) {
+                firstBufferHostTime = CMClockConvertHostTimeToSystemUnits(hostTime)
+                didCaptureFirstHostTime = true
+            }
+        }
+        callback = onFirstBufferHostTime
+        hostTimeToEmit = didCaptureFirstHostTime ? firstBufferHostTime : nil
+        lock.unlock()
+
+        if let hostTimeToEmit {
+            callback?(hostTimeToEmit)
+        }
     }
 }

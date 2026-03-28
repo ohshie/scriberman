@@ -79,4 +79,29 @@ final class RecordingStatusTests: XCTestCase {
         XCTAssertEqual(session.micAudioURL, "/tmp/mic.wav")
         XCTAssertNil(session.appAudioURL)
     }
+
+    func testRecordingSessionStoresMixdownURLWhenProvided() {
+        let session = RecordingSession(
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 10,
+            micAudioURL: "/tmp/mic.wav",
+            mixdownURL: "/tmp/recording.m4a",
+            title: "Session",
+            status: .recorded
+        )
+
+        XCTAssertEqual(session.mixdownURL, "/tmp/recording.m4a")
+    }
+
+    func testRecordingSessionMixdownURLDefaultsToNil() {
+        let session = RecordingSession(
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 10,
+            micAudioURL: "/tmp/mic.wav",
+            title: "Session",
+            status: .recorded
+        )
+
+        XCTAssertNil(session.mixdownURL)
+    }
 }
