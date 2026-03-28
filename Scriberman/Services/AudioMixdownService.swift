@@ -87,7 +87,28 @@ actor AudioMixdownService {
     }
 
     private func readResampledMonoSamples(from inputURL: URL) throws -> [Float] {
-        let inputFile = try AVAudioFile(forReading: inputURL)
+        let inputFile: AVAudioFile
+        do {
+            inputFile = try AVAudioFile(forReading: inputURL)
+        } catch {
+            let nsError = error as NSError
+            logger.error(
+                "AVAudioFile(forReading:) failed for \(inputURL.path, privacy: .public). domain=\(nsError.domain, privacy: .public) code=\(nsError.code, privacy: .public) desc=\(nsError.localizedDescription, privacy: .public). Retrying with explicit decode format."
+            )
+            do {
+                inputFile = try AVAudioFile(
+                    forReading: inputURL,
+                    commonFormat: .pcmFormatFloat32,
+                    interleaved: false
+                )
+            } catch {
+                let fallbackError = error as NSError
+                logger.error(
+                    "AVAudioFile explicit decode fallback failed for \(inputURL.path, privacy: .public). domain=\(fallbackError.domain, privacy: .public) code=\(fallbackError.code, privacy: .public) desc=\(fallbackError.localizedDescription, privacy: .public)"
+                )
+                throw error
+            }
+        }
         let inputFormat = inputFile.processingFormat
 
         if inputFormat.sampleRate == outputSampleRate,
