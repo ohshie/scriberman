@@ -14,6 +14,7 @@ final class RecordingSession {
     var statusRawValue: String
     var errorMessage: String?
     var transcriptData: Data?
+    var retranscriptData: Data?
 
     var status: RecordingStatus {
         get { RecordingStatus(persistedValue: statusRawValue, errorMessage: errorMessage) }
@@ -42,6 +43,20 @@ final class RecordingSession {
         }
     }
 
+    var retranscript: Transcript? {
+        get {
+            guard let retranscriptData else { return nil }
+            return try? JSONDecoder().decode(Transcript.self, from: retranscriptData)
+        }
+        set {
+            if let newValue {
+                retranscriptData = try? JSONEncoder().encode(newValue)
+            } else {
+                retranscriptData = nil
+            }
+        }
+    }
+
     init(
         id: UUID = UUID(),
         createdAt: Date = .now,
@@ -53,7 +68,8 @@ final class RecordingSession {
         capturedAppName: String? = nil,
         status: RecordingStatus = .recorded,
         errorMessage: String? = nil,
-        transcriptData: Data? = nil
+        transcriptData: Data? = nil,
+        retranscriptData: Data? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -66,6 +82,7 @@ final class RecordingSession {
         self.statusRawValue = status.persistedValue
         self.errorMessage = errorMessage
         self.transcriptData = transcriptData
+        self.retranscriptData = retranscriptData
         if case .error = status {
             self.status = status
         }

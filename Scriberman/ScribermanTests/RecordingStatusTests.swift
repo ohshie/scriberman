@@ -3,7 +3,7 @@ import XCTest
 
 final class RecordingStatusTests: XCTestCase {
     func testNonErrorStatusesRoundTripPersistence() {
-        let statuses: [RecordingStatus] = [.recorded, .transcribing, .done]
+        let statuses: [RecordingStatus] = [.recorded, .transcribing, .retranscribing, .done]
 
         for status in statuses {
             let reconstructed = RecordingStatus(persistedValue: status.persistedValue, errorMessage: nil)
@@ -103,5 +103,49 @@ final class RecordingStatusTests: XCTestCase {
         )
 
         XCTAssertNil(session.mixdownURL)
+    }
+
+    func testRecordingSessionRetranscriptRoundTripsWithoutAffectingOriginalTranscript() {
+        let original = Transcript(
+            fullText: "original",
+            segments: [
+                TranscriptSegment(
+                    speakerId: "S1",
+                    text: "original",
+                    startTime: 0,
+                    endTime: 1,
+                    audioSource: .mic
+                )
+            ],
+            speakers: [TranscriptSpeaker(id: "S1", label: "Speaker 1", colorHex: "#111111")]
+        )
+        let retranscript = Transcript(
+            fullText: "retry",
+            segments: [
+                TranscriptSegment(
+                    speakerId: "S2",
+                    text: "retry",
+                    startTime: 0,
+                    endTime: 1,
+                    audioSource: .mic
+                )
+            ],
+            speakers: [TranscriptSpeaker(id: "S2", label: "Speaker 2", colorHex: "#222222")]
+        )
+        let session = RecordingSession(
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 10,
+            micAudioURL: "/tmp/mic.wav",
+            title: "Session",
+            status: .recorded
+        )
+
+        session.transcript = original
+        session.retranscript = retranscript
+
+        XCTAssertEqual(session.transcript?.fullText, "original")
+        XCTAssertEqual(session.retranscript?.fullText, "retry")
+        XCTAssertNotNil(session.transcriptData)
+        XCTAssertNotNil(session.retranscriptData)
     }
 }

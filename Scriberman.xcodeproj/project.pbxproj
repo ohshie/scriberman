@@ -39,6 +39,8 @@
 		7910094F2F78031A00225294 /* RecordingServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7910094E2F78031A00225294 /* RecordingServiceTests.swift */; };
 		791009512F78184900225294 /* AudioMixdownService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009502F78184900225294 /* AudioMixdownService.swift */; };
 		791009532F78184E00225294 /* AudioMixdownServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009522F78184E00225294 /* AudioMixdownServiceTests.swift */; };
+		791009552F78328500225294 /* M4AChannelExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009542F78328500225294 /* M4AChannelExtractor.swift */; };
+		791009572F7832AD00225294 /* M4AChannelExtractorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009562F7832AD00225294 /* M4AChannelExtractorTests.swift */; };
 		79DCE41A2F77BC3D0024DC26 /* TranscriptionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */; };
 		79DCE41D2F77CC1E0024DC26 /* PermissionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */; };
 		79DCE41F2F77CDA90024DC26 /* PermissionsOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41E2F77CDA90024DC26 /* PermissionsOnboardingView.swift */; };
@@ -115,6 +117,8 @@
 		7910094E2F78031A00225294 /* RecordingServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingServiceTests.swift; sourceTree = "<group>"; };
 		791009502F78184900225294 /* AudioMixdownService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioMixdownService.swift; sourceTree = "<group>"; };
 		791009522F78184E00225294 /* AudioMixdownServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioMixdownServiceTests.swift; sourceTree = "<group>"; };
+		791009542F78328500225294 /* M4AChannelExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = M4AChannelExtractor.swift; sourceTree = "<group>"; };
+		791009562F7832AD00225294 /* M4AChannelExtractorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = M4AChannelExtractorTests.swift; sourceTree = "<group>"; };
 		79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionServiceTests.swift; sourceTree = "<group>"; };
 		79DCE41B2F77CC0B0024DC26 /* Scriberman.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = Scriberman.xctestplan; sourceTree = "<group>"; };
 		79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionService.swift; sourceTree = "<group>"; };
@@ -205,6 +209,7 @@
 				79DCE4222F77D03C0024DC26 /* AppStateTests.swift */,
 				7910094E2F78031A00225294 /* RecordingServiceTests.swift */,
 				791009522F78184E00225294 /* AudioMixdownServiceTests.swift */,
+				791009562F7832AD00225294 /* M4AChannelExtractorTests.swift */,
 			);
 			path = ScribermanTests;
 			sourceTree = "<group>";
@@ -286,6 +291,7 @@
 				79E005E12F767E5300D3EAD9 /* AggregateDeviceBuilder.swift */,
 				79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */,
 				791009502F78184900225294 /* AudioMixdownService.swift */,
+				791009542F78328500225294 /* M4AChannelExtractor.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -487,6 +493,7 @@
 				A0313B452C3199D5A6118FB9 /* AppShellView.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CC /* WaveformView.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CD /* RecordingSessionRow.swift in Sources */,
+				791009552F78328500225294 /* M4AChannelExtractor.swift in Sources */,
 				79E005E22F767E5300D3EAD9 /* AggregateDeviceBuilder.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CE /* TranscriptDetailView.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CF /* TranscriptSegmentRow.swift in Sources */,
@@ -515,6 +522,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A0E794CEB3C68D77E20749D6 /* MarkdownRendererTests.swift in Sources */,
+				791009572F7832AD00225294 /* M4AChannelExtractorTests.swift in Sources */,
 				A2E8F18069EB9CB0F14A58BA /* RecordingStatusTests.swift in Sources */,
 				79DCE4252F77D0A10024DC26 /* MockPermissionService.swift in Sources */,
 				C4EC45D56DEE48C672BEE45A /* TimeFormatterTests.swift in Sources */,
