@@ -6,7 +6,7 @@ final class RecordingSession {
     @Attribute(.unique) var id: UUID
     var createdAt: Date
     var duration: TimeInterval
-    var micAudioURL: String
+    @Attribute(originalName: "audioURL") var micAudioURL: String
     var appAudioURL: String?
     var title: String
     var capturedAppName: String?
