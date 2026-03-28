@@ -21,7 +21,12 @@ final class TranscriptExportService {
 
     @MainActor
     func export(session: RecordingSession) async throws {
-        guard let transcript = session.transcript else {
+        try await export(session: session, transcript: session.transcript)
+    }
+
+    @MainActor
+    func export(session: RecordingSession, transcript: Transcript?) async throws {
+        guard let transcript else {
             throw TranscriptExportError.transcriptUnavailable
         }
 

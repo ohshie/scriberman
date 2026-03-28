@@ -48,7 +48,19 @@ struct TranscriptDetailView: View {
                         await exportTranscript()
                     }
                 }
-                .disabled(!isDone)
+                .disabled(!isDone || isRetranscribing)
+            }
+
+            ToolbarItem(placement: .secondaryAction) {
+                if isRetranscribing {
+                    ProgressView()
+                } else if canRetranscribe {
+                    Button("Retranscribe") {
+                        Task {
+                            await retranscribe()
+                        }
+                    }
+                }
             }
         }
         .alert("Transcript Export", isPresented: Binding(
@@ -66,11 +78,15 @@ struct TranscriptDetailView: View {
     }
 
     private var segments: [TranscriptSegment] {
-        (session.transcript?.segments ?? []).sorted { $0.startTime < $1.startTime }
+        (displayedTranscript?.segments ?? []).sorted { $0.startTime < $1.startTime }
     }
 
     private var speakersById: [String: TranscriptSpeaker] {
-        Dictionary(uniqueKeysWithValues: (session.transcript?.speakers ?? []).map { ($0.id, $0) })
+        Dictionary(uniqueKeysWithValues: (displayedTranscript?.speakers ?? []).map { ($0.id, $0) })
+    }
+
+    private var displayedTranscript: Transcript? {
+        session.retranscript ?? session.transcript
     }
 
     private var isDone: Bool {
@@ -78,6 +94,17 @@ struct TranscriptDetailView: View {
             return true
         }
         return false
+    }
+
+    private var isRetranscribing: Bool {
+        if case .retranscribing = session.status {
+            return true
+        }
+        return false
+    }
+
+    private var canRetranscribe: Bool {
+        session.mixdownURL != nil && isDone
     }
 
     private func speakerLabel(for speakerId: String) -> String {
@@ -93,12 +120,26 @@ struct TranscriptDetailView: View {
 
     private func exportTranscript() async {
         do {
-            try await appState.services.transcriptExportService.export(session: session)
+            try await appState.services.transcriptExportService.export(
+                session: session,
+                transcript: displayedTranscript
+            )
             exportAlertMessage = "Transcript exported successfully."
         } catch TranscriptExportError.exportCancelled {
             exportAlertMessage = nil
         } catch {
             exportAlertMessage = error.localizedDescription
         }
+    }
+
+    private func retranscribe() async {
+        guard let workspace = appState.workspace else {
+            return
+        }
+        await appState.services.retranscriptionService.retranscribe(
+            session: session,
+            workspace: workspace,
+            context: modelContext
+        )
     }
 }
