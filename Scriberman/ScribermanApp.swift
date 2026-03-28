@@ -33,5 +33,10 @@ struct ScribermanApp: App {
         .commands {
             SidebarCommands()
         }
+
+        Settings {
+            SettingsView(viewModel: appState.settingsViewModel)
+                .environmentObject(appState)
+        }
     }
 }
