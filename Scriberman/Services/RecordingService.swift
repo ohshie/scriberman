@@ -3,6 +3,7 @@ import AudioToolbox
 import CoreAudio
 import CoreMedia
 import Foundation
+import OSLog
 import ScreenCaptureKit
 import SwiftData
 
@@ -34,6 +35,8 @@ actor RecordingService: RecordingServiceProtocol {
     private let modelContainer: ModelContainer
     private let notificationCenter: NotificationCenter
     private let fileManager = FileManager.default
+    private let mixdownService = AudioMixdownService()
+    private let logger = Logger(subsystem: "Scriberman", category: "RecordingService")
 
     private var audioEngine: AVAudioEngine?
     private var audioFile: AVAudioFile?
@@ -284,9 +287,26 @@ actor RecordingService: RecordingServiceProtocol {
         )
 
         do {
+            let sessionID = session.id
+            let micStartHostTime = self.micStartHostTime
+            let appStartHostTime = self.appStartHostTime
+            let mixdownURL = finalRecordingURLs.mic.deletingLastPathComponent().appendingPathComponent("recording.m4a")
+
             let context = ModelContext(modelContainer)
             context.insert(session)
             try context.save()
+
+            Task { [weak self] in
+                await self?.runMixdown(
+                    sessionID: sessionID,
+                    micURL: finalRecordingURLs.mic,
+                    appURL: finalRecordingURLs.app,
+                    mixdownURL: mixdownURL,
+                    micStartHostTime: micStartHostTime,
+                    appStartHostTime: appStartHostTime
+                )
+            }
+
             cleanupRecordingState()
             return session
         } catch {
@@ -438,6 +458,50 @@ actor RecordingService: RecordingServiceProtocol {
             return
         }
         appStartHostTime = hostTime
+    }
+
+    private func runMixdown(
+        sessionID: UUID,
+        micURL: URL,
+        appURL: URL?,
+        mixdownURL: URL,
+        micStartHostTime: UInt64?,
+        appStartHostTime: UInt64?
+    ) async {
+        guard let micStartHostTime else {
+            logger.error("Skipping mixdown for session \(sessionID, privacy: .public): missing mic start host time.")
+            return
+        }
+
+        do {
+            try await mixdownService.mix(
+                micURL: micURL,
+                appURL: appURL,
+                micStartHostTime: micStartHostTime,
+                appStartHostTime: appStartHostTime,
+                into: mixdownURL
+            )
+        } catch {
+            logger.error("Mixdown failed for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return
+        }
+
+        do {
+            let context = ModelContext(modelContainer)
+            var descriptor = FetchDescriptor<RecordingSession>(
+                predicate: #Predicate { $0.id == sessionID }
+            )
+            descriptor.fetchLimit = 1
+            guard let persistedSession = try context.fetch(descriptor).first else {
+                logger.error("Mixdown succeeded but session \(sessionID, privacy: .public) was not found for persistence update.")
+                return
+            }
+
+            persistedSession.mixdownURL = mixdownURL.path
+            try context.save()
+        } catch {
+            logger.error("Failed to persist mixdown URL for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
     }
 
 }
