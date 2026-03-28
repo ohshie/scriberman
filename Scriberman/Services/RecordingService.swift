@@ -307,6 +307,9 @@ actor RecordingService: RecordingServiceProtocol {
             context.insert(session)
             try context.save()
 
+            // Release capture writer resources before background mixdown starts.
+            cleanupRecordingState()
+
             Task { [weak self] in
                 await self?.runMixdown(
                     sessionID: sessionID,
@@ -318,7 +321,6 @@ actor RecordingService: RecordingServiceProtocol {
                 )
             }
 
-            cleanupRecordingState()
             return session
         } catch {
             cleanupRecordingState()
@@ -497,6 +499,13 @@ actor RecordingService: RecordingServiceProtocol {
 
         logger.info(
             "Mixdown started for session \(sessionID, privacy: .public). mic=\(micURL.path, privacy: .public) app=\(appURL?.path ?? "nil", privacy: .public) out=\(mixdownURL.path, privacy: .public)"
+        )
+        let micSize = (try? fileManager.attributesOfItem(atPath: micURL.path)[.size] as? NSNumber)?.int64Value ?? -1
+        let appSize = appURL.flatMap { url in
+            (try? fileManager.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value
+        } ?? -1
+        logger.info(
+            "Mixdown input sizes for session \(sessionID, privacy: .public). micBytes=\(micSize, privacy: .public) appBytes=\(appSize, privacy: .public)"
         )
         logger.info(
             "Mixdown timing for session \(sessionID, privacy: .public). micStart=\(micStartHostTime, privacy: .public) appStart=\(appStartHostTime ?? 0, privacy: .public)"
