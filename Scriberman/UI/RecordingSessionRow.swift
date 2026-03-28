@@ -21,6 +21,12 @@ struct RecordingSessionRow: View {
                 Text("\(dateText(session.createdAt)) • \(durationText(session.duration))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if case .error = session.status, let errorMessage = session.errorMessage, !errorMessage.isEmpty {
+                    Text(errorMessage)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                }
             }
 
             Spacer()

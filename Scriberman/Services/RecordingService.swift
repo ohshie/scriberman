@@ -32,7 +32,6 @@ enum RecordingError: LocalizedError {
 actor RecordingService: RecordingServiceProtocol {
     private let workspaceService: WorkspaceServiceProtocol
     private let modelContainer: ModelContainer
-    private let aggregateDeviceBuilder: AggregateDeviceBuilding
     private let notificationCenter: NotificationCenter
     private let fileManager = FileManager.default
 
@@ -41,10 +40,9 @@ actor RecordingService: RecordingServiceProtocol {
     private var audioRecorder: AVAudioRecorder?
     private var recordingStartedAt: Date?
     private var recordingURL: URL?
+    private var appAudioURL: URL?
     private var hasScopedRecordingAccess = false
     private var recordingWorkspaceRootURL: URL?
-    private var activeTapID: AudioObjectID?
-    private var activeAggregateDeviceID: AudioDeviceID?
     private var activeCapturedAppName: String?
     private var appAudioCaptureSession: AppAudioCaptureSession?
     private var pendingError: RecordingError?
@@ -56,12 +54,10 @@ actor RecordingService: RecordingServiceProtocol {
     init(
         workspaceService: WorkspaceServiceProtocol,
         modelContainer: ModelContainer,
-        aggregateDeviceBuilder: AggregateDeviceBuilding = AggregateDeviceBuilder(),
         notificationCenter: NotificationCenter = .default
     ) {
         self.workspaceService = workspaceService
         self.modelContainer = modelContainer
-        self.aggregateDeviceBuilder = aggregateDeviceBuilder
         self.notificationCenter = notificationCenter
 
         engineConfigurationObserver = notificationCenter.addObserver(
@@ -87,7 +83,8 @@ actor RecordingService: RecordingServiceProtocol {
 
     func audioLevel() async -> Float {
         if let appAudioCaptureSession {
-            audioLevelValue = appAudioCaptureSession.audioLevel
+            let appLevel = appAudioCaptureSession.audioLevel
+            audioLevelValue = max(audioLevelValue, appLevel)
         }
         if let audioRecorder {
             audioRecorder.updateMeters()
@@ -103,8 +100,6 @@ actor RecordingService: RecordingServiceProtocol {
     func startRecording(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID? = nil,
-        tapID: AudioObjectID? = nil,
-        aggregateDeviceID: AudioDeviceID? = nil,
         capturedAppName: String? = nil,
         appProcessID: pid_t? = nil
     ) async throws {
@@ -126,54 +121,13 @@ actor RecordingService: RecordingServiceProtocol {
             try fileManager.createDirectory(at: workspace.recordingsURL, withIntermediateDirectories: true)
 
             let recordingIdentifier = UUID().uuidString
-            let fileURL = workspace.recordingsURL.appendingPathComponent("\(recordingIdentifier).wav")
-
-            if let appProcessID {
-                let session = AppAudioCaptureSession(
-                    fileURL: fileURL,
-                    processID: appProcessID,
-                    microphoneDeviceUID: micDeviceID.flatMap(deviceUID(for:))
-                )
-                try await session.start()
-                self.appAudioCaptureSession = session
-                self.audioEngine = nil
-                self.audioFile = nil
-                self.audioRecorder = nil
-                self.recordingStartedAt = Date()
-                self.recordingURL = fileURL
-                self.isRecordingValue = true
-                self.audioLevelValue = 0
-                self.pendingError = nil
-                self.activeTapID = nil
-                self.activeAggregateDeviceID = nil
-                self.activeCapturedAppName = capturedAppName
-                return
-            }
+            let micFileURL = workspace.recordingsURL.appendingPathComponent("\(recordingIdentifier)_mic.wav")
+            let appFileURL = workspace.recordingsURL.appendingPathComponent("\(recordingIdentifier)_app.wav")
 
             let audioEngine = AVAudioEngine()
             let inputNode = audioEngine.inputNode
 
-            if let aggregateDeviceID, aggregateDeviceID != 0 {
-                guard let inputAudioUnit = inputNode.audioUnit else {
-                    throw RecordingError.failedToStart("Audio input unit is unavailable.")
-                }
-
-                var targetDeviceID = aggregateDeviceID
-                let status = withUnsafePointer(to: &targetDeviceID) { pointer in
-                    AudioUnitSetProperty(
-                        inputAudioUnit,
-                        kAudioOutputUnitProperty_CurrentDevice,
-                        kAudioUnitScope_Global,
-                        0,
-                        pointer,
-                        UInt32(MemoryLayout<AudioDeviceID>.size)
-                    )
-                }
-
-                guard status == noErr else {
-                    throw RecordingError.failedToStart("Unable to configure aggregate capture device (OSStatus \(status)).")
-                }
-            } else if let micDeviceID, micDeviceID != 0 {
+            if let micDeviceID, micDeviceID != 0 {
                 guard let inputAudioUnit = inputNode.audioUnit else {
                     throw RecordingError.failedToStart("Audio input unit is unavailable.")
                 }
@@ -195,69 +149,68 @@ actor RecordingService: RecordingServiceProtocol {
                 }
             }
 
-            do {
-                let inputFormat = inputNode.inputFormat(forBus: 0)
-                guard isValidTapFormat(inputFormat) else {
-                    guard aggregateDeviceID == nil else {
-                        throw RecordingError.failedToStart("Aggregate capture input format is invalid.")
-                    }
-                    try startRecorderFallback(to: fileURL)
-                    self.recordingStartedAt = Date()
-                    self.recordingURL = fileURL
-                    self.isRecordingValue = true
-                    self.audioLevelValue = 0
-                    self.pendingError = nil
-                    self.activeTapID = tapID
-                    self.activeAggregateDeviceID = aggregateDeviceID
-                    self.activeCapturedAppName = capturedAppName
-                    return
-                }
-                let audioFile = try AVAudioFile(
-                    forWriting: fileURL,
-                    settings: inputFormat.settings,
-                    commonFormat: inputFormat.commonFormat,
-                    interleaved: inputFormat.isInterleaved
-                )
+            let inputFormat = inputNode.inputFormat(forBus: 0)
+            if isValidTapFormat(inputFormat) {
+                do {
+                    let audioFile = try AVAudioFile(
+                        forWriting: micFileURL,
+                        settings: inputFormat.settings,
+                        commonFormat: inputFormat.commonFormat,
+                        interleaved: inputFormat.isInterleaved
+                    )
 
-                inputNode.removeTap(onBus: 0)
-                inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, _ in
-                    do {
-                        try audioFile.write(from: buffer)
-                    } catch {
-                        return
+                    inputNode.removeTap(onBus: 0)
+                    inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, _ in
+                        do {
+                            try audioFile.write(from: buffer)
+                        } catch {
+                            return
+                        }
+
+                        Task { [weak self] in
+                            await self?.updateAudioLevel(from: buffer)
+                        }
                     }
 
-                    Task { [weak self] in
-                        await self?.updateAudioLevel(from: buffer)
-                    }
+                    audioEngine.prepare()
+                    try audioEngine.start()
+
+                    self.audioEngine = audioEngine
+                    self.audioFile = audioFile
+                    self.audioRecorder = nil
+                } catch {
+                    inputNode.removeTap(onBus: 0)
+                    audioEngine.stop()
+                    try startRecorderFallback(to: micFileURL)
                 }
-
-                audioEngine.prepare()
-                try audioEngine.start()
-
-                self.audioEngine = audioEngine
-                self.audioFile = audioFile
-                self.audioRecorder = nil
-            } catch {
-                inputNode.removeTap(onBus: 0)
-                audioEngine.stop()
-
-                guard aggregateDeviceID == nil else {
-                    throw error
-                }
-
-                try startRecorderFallback(to: fileURL)
+            } else {
+                try startRecorderFallback(to: micFileURL)
             }
             self.recordingStartedAt = Date()
-            self.recordingURL = fileURL
+            self.recordingURL = micFileURL
             self.isRecordingValue = true
             self.audioLevelValue = 0
             self.pendingError = nil
-            self.activeTapID = tapID
-            self.activeAggregateDeviceID = aggregateDeviceID
             self.activeCapturedAppName = capturedAppName
+
+            if let appProcessID {
+                let session = AppAudioCaptureSession(
+                    fileURL: appFileURL,
+                    processID: appProcessID
+                )
+                try await session.start()
+                self.appAudioCaptureSession = session
+                self.appAudioURL = appFileURL
+            } else {
+                self.appAudioCaptureSession = nil
+                self.appAudioURL = nil
+            }
         } catch {
-            cleanupAggregateCaptureIfNeeded()
+            audioEngine?.inputNode.removeTap(onBus: 0)
+            audioEngine?.stop()
+            audioRecorder?.stop()
+            await appAudioCaptureSession?.stop()
+            cleanupRecordingState()
             releaseRecordingScopeIfNeeded()
             throw RecordingError.failedToStart(error.localizedDescription)
         }
@@ -279,7 +232,6 @@ actor RecordingService: RecordingServiceProtocol {
         audioRecorder?.stop()
         await appAudioCaptureSession?.stop()
         appAudioCaptureSession = nil
-        cleanupAggregateCaptureIfNeeded()
 
         let startedAt = recordingStartedAt ?? Date()
         let createdAt = Date()
@@ -293,7 +245,8 @@ actor RecordingService: RecordingServiceProtocol {
         let session = RecordingSession(
             createdAt: createdAt,
             duration: duration,
-            audioURL: recordingURL.path,
+            micAudioURL: recordingURL.path,
+            appAudioURL: appAudioURL?.path,
             title: makeSessionTitle(createdAt: createdAt),
             capturedAppName: activeCapturedAppName,
             status: .recorded
@@ -376,10 +329,9 @@ actor RecordingService: RecordingServiceProtocol {
         audioFile = nil
         audioRecorder = nil
         appAudioCaptureSession = nil
+        appAudioURL = nil
         recordingStartedAt = nil
         recordingURL = nil
-        activeTapID = nil
-        activeAggregateDeviceID = nil
         activeCapturedAppName = nil
     }
 
@@ -391,21 +343,6 @@ actor RecordingService: RecordingServiceProtocol {
         recordingWorkspaceRootURL.stopAccessingSecurityScopedResource()
         hasScopedRecordingAccess = false
         self.recordingWorkspaceRootURL = nil
-    }
-
-    private func cleanupAggregateCaptureIfNeeded() {
-        guard let activeTapID, let activeAggregateDeviceID else {
-            activeTapID = nil
-            activeAggregateDeviceID = nil
-            return
-        }
-
-        aggregateDeviceBuilder.teardown(
-            tapID: activeTapID,
-            aggregateDeviceID: activeAggregateDeviceID
-        )
-        self.activeTapID = nil
-        self.activeAggregateDeviceID = nil
     }
 
     private func handleAudioEngineConfigurationChange() async {
@@ -424,7 +361,6 @@ actor RecordingService: RecordingServiceProtocol {
         audioRecorder?.stop()
         await appAudioCaptureSession?.stop()
         appAudioCaptureSession = nil
-        cleanupAggregateCaptureIfNeeded()
         cleanupRecordingState()
         audioLevelValue = 0
         isRecordingValue = false
@@ -457,33 +393,11 @@ actor RecordingService: RecordingServiceProtocol {
         format.sampleRate.isFinite && format.sampleRate > 0 && format.channelCount > 0
     }
 
-    private func deviceUID(for deviceID: AudioDeviceID) -> String? {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDeviceUID,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var cfString: CFString?
-        var dataSize = UInt32(MemoryLayout<CFString?>.size)
-        let status = AudioObjectGetPropertyData(
-            deviceID,
-            &address,
-            0,
-            nil,
-            &dataSize,
-            &cfString
-        )
-        guard status == noErr else {
-            return nil
-        }
-        return cfString as String?
-    }
 }
 
 final class AppAudioCaptureSession {
     private let fileURL: URL
     private let processID: pid_t
-    private let microphoneDeviceUID: String?
     private let outputHandler = AppAudioStreamOutputHandler()
     private let sampleQueue = DispatchQueue(label: "com.scriberman.app-audio.stream")
     private var stream: SCStream?
@@ -492,10 +406,9 @@ final class AppAudioCaptureSession {
         outputHandler.audioLevel
     }
 
-    init(fileURL: URL, processID: pid_t, microphoneDeviceUID: String?) {
+    init(fileURL: URL, processID: pid_t) {
         self.fileURL = fileURL
         self.processID = processID
-        self.microphoneDeviceUID = microphoneDeviceUID
     }
 
     func start() async throws {
@@ -510,8 +423,7 @@ final class AppAudioCaptureSession {
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let configuration = SCStreamConfiguration()
         configuration.capturesAudio = true
-        configuration.captureMicrophone = true
-        configuration.microphoneCaptureDeviceID = microphoneDeviceUID
+        configuration.captureMicrophone = false
         configuration.sampleRate = 48_000
         configuration.channelCount = 2
         configuration.width = 1
@@ -524,11 +436,6 @@ final class AppAudioCaptureSession {
         try stream.addStreamOutput(
             outputHandler,
             type: .audio,
-            sampleHandlerQueue: sampleQueue
-        )
-        try stream.addStreamOutput(
-            outputHandler,
-            type: .microphone,
             sampleHandlerQueue: sampleQueue
         )
 
@@ -561,9 +468,7 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
     private let lock = NSLock()
     private var fileURL: URL?
     private var audioFile: AVAudioFile?
-    private var stereoFormat: AVAudioFormat?
-    private var appSamples: [Float] = []
-    private var micSamples: [Float] = []
+    private var monoFormat: AVAudioFormat?
     private var currentLevel: Float = 0
 
     var audioLevel: Float {
@@ -577,9 +482,7 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
         defer { lock.unlock() }
         self.fileURL = url
         self.audioFile = nil
-        self.stereoFormat = nil
-        self.appSamples.removeAll(keepingCapacity: false)
-        self.micSamples.removeAll(keepingCapacity: false)
+        self.monoFormat = nil
         self.currentLevel = 0
     }
 
@@ -588,13 +491,13 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
         didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
         of outputType: SCStreamOutputType
     ) {
-        guard outputType == .audio || outputType == .microphone else {
+        guard outputType == .audio else {
             return
         }
-        process(sampleBuffer, outputType: outputType)
+        process(sampleBuffer)
     }
 
-    private func process(_ sampleBuffer: CMSampleBuffer, outputType: SCStreamOutputType) {
+    private func process(_ sampleBuffer: CMSampleBuffer) {
         guard let pcmBuffer = createPCMBuffer(from: sampleBuffer) else {
             return
         }
@@ -606,77 +509,42 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
         lock.lock()
         defer { lock.unlock() }
 
-        if outputType == .audio {
-            appSamples.append(contentsOf: monoSamples)
-        } else {
-            micSamples.append(contentsOf: monoSamples)
-        }
-
-        if stereoFormat == nil {
-            stereoFormat = AVAudioFormat(
+        if monoFormat == nil {
+            monoFormat = AVAudioFormat(
                 standardFormatWithSampleRate: pcmBuffer.format.sampleRate,
-                channels: 2
+                channels: 1
             )
         }
 
-        if audioFile == nil, let fileURL, let stereoFormat {
+        if audioFile == nil, let fileURL, let monoFormat {
             audioFile = try? AVAudioFile(
                 forWriting: fileURL,
-                settings: stereoFormat.settings,
-                commonFormat: stereoFormat.commonFormat,
-                interleaved: stereoFormat.isInterleaved
+                settings: monoFormat.settings,
+                commonFormat: monoFormat.commonFormat,
+                interleaved: monoFormat.isInterleaved
             )
         }
 
-        let availableFrames = max(appSamples.count, micSamples.count)
-        guard availableFrames > 0 else {
-            return
-        }
-
-        let framesToWrite = min(availableFrames, 1024)
         guard
-            let stereoFormat,
-            let stereoBuffer = AVAudioPCMBuffer(
-                pcmFormat: stereoFormat,
-                frameCapacity: AVAudioFrameCount(framesToWrite)
+            let monoFormat,
+            let monoBuffer = AVAudioPCMBuffer(
+                pcmFormat: monoFormat,
+                frameCapacity: AVAudioFrameCount(monoSamples.count)
             ),
-            let channelData = stereoBuffer.floatChannelData
+            let channelData = monoBuffer.floatChannelData
         else {
             return
         }
 
-        stereoBuffer.frameLength = AVAudioFrameCount(framesToWrite)
-        let appChannel = channelData[0]
-        let micChannel = channelData[1]
-
-        let appCount = min(framesToWrite, appSamples.count)
-        if appCount > 0 {
-            appSamples.withUnsafeBufferPointer { source in
-                appChannel.initialize(from: source.baseAddress!, count: appCount)
+        monoBuffer.frameLength = AVAudioFrameCount(monoSamples.count)
+        monoSamples.withUnsafeBufferPointer { source in
+            if let sourceBaseAddress = source.baseAddress {
+                channelData[0].assign(from: sourceBaseAddress, count: monoSamples.count)
             }
         }
-        if appCount < framesToWrite {
-            appChannel.advanced(by: appCount).initialize(repeating: 0, count: framesToWrite - appCount)
-        }
-        if appCount > 0 {
-            appSamples.removeFirst(appCount)
-        }
 
-        let micCount = min(framesToWrite, micSamples.count)
-        if micCount > 0 {
-            micSamples.withUnsafeBufferPointer { source in
-                micChannel.initialize(from: source.baseAddress!, count: micCount)
-            }
-        }
-        if micCount < framesToWrite {
-            micChannel.advanced(by: micCount).initialize(repeating: 0, count: framesToWrite - micCount)
-        }
-        if micCount > 0 {
-            micSamples.removeFirst(micCount)
-        }
-
-        try? audioFile?.write(from: stereoBuffer)
-        currentLevel = computeLevel(from: stereoBuffer)
+        try? audioFile?.write(from: monoBuffer)
+        currentLevel = computeLevel(from: monoBuffer)
     }
 
     private func computeLevel(from buffer: AVAudioPCMBuffer) -> Float {

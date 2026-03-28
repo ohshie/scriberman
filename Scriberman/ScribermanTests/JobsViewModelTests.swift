@@ -69,7 +69,7 @@ final class JobsViewModelTests: XCTestCase {
         RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
             duration: 8,
-            audioURL: "/tmp/audio.wav",
+            micAudioURL: "/tmp/audio.wav",
             title: "Session",
             status: status
         )
