@@ -20,7 +20,7 @@ final class JobsViewModel: ObservableObject {
             return
         }
 
-        let audioURL = URL(fileURLWithPath: session.audioURL)
+        let micAudioURL = URL(fileURLWithPath: session.micAudioURL)
         session.status = .transcribing
         session.errorMessage = nil
         try? context.save()
@@ -28,7 +28,7 @@ final class JobsViewModel: ObservableObject {
         Task {
             do {
                 let workspace = try await workspaceService.requireWritableWorkspace()
-                let transcript = try await transcriptionService.transcribe(audioURL: audioURL, workspace: workspace)
+                let transcript = try await transcriptionService.transcribe(audioURL: micAudioURL, workspace: workspace)
                 session.transcript = transcript
                 session.status = .done
                 session.errorMessage = nil
@@ -48,9 +48,9 @@ final class JobsViewModel: ObservableObject {
     }
 
     func delete(session: RecordingSession, context: ModelContext) {
-        let audioURL = URL(fileURLWithPath: session.audioURL)
-        if FileManager.default.fileExists(atPath: audioURL.path) {
-            try? FileManager.default.removeItem(at: audioURL)
+        let micAudioURL = URL(fileURLWithPath: session.micAudioURL)
+        if FileManager.default.fileExists(atPath: micAudioURL.path) {
+            try? FileManager.default.removeItem(at: micAudioURL)
         }
         context.delete(session)
         try? context.save()
