@@ -3,10 +3,14 @@ import SwiftUI
 struct TranscriptPreviewView: View {
     let blocks: [TranscriptBlock]
     let previewLimit: Int
+    let onTap: (() -> Void)?
 
-    init(blocks: [TranscriptBlock], previewLimit: Int = 4) {
+    @State private var isHovering = false
+
+    init(blocks: [TranscriptBlock], previewLimit: Int = 4, onTap: (() -> Void)? = nil) {
         self.blocks = blocks
         self.previewLimit = previewLimit
+        self.onTap = onTap
     }
 
     var body: some View {
@@ -32,7 +36,25 @@ struct TranscriptPreviewView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .onTapGesture {
+            onTap?()
+        }
+        .onHover { hovering in
+            guard onTap != nil else {
+                isHovering = false
+                return
+            }
+            isHovering = hovering
+        }
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            if isHovering {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(.tint.opacity(0.35), lineWidth: 1.5)
+            }
+        }
+        .animation(.easeInOut(duration: 0.15), value: isHovering)
     }
 
     private var previewBlocks: [TranscriptBlock] {

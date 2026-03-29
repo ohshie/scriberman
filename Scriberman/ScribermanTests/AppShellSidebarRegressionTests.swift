@@ -97,6 +97,66 @@ final class AppShellSidebarRegressionTests: XCTestCase {
         )
     }
 
+    func testAppShellDefinesDetailModeAndDefaultsToStandard() throws {
+        let source = try appShellSource()
+        XCTAssertTrue(
+            source.contains("private enum DetailMode"),
+            "App shell should define an explicit detail mode for in-place transcript navigation."
+        )
+        XCTAssertTrue(
+            source.contains("@State private var detailMode: DetailMode = .standard"),
+            "App shell should default detail mode to standard."
+        )
+    }
+
+    func testPreviewTapSwitchesDetailModeToStudy() throws {
+        let source = try appShellSource()
+        XCTAssertTrue(
+            source.contains("onOpenStudy: {\n                        detailMode = .study"),
+            "Opening study mode should be triggered from transcript preview tap action."
+        )
+    }
+
+    func testAppShellResetsDetailModeWhenSelectionChanges() throws {
+        let source = try appShellSource()
+        XCTAssertTrue(
+            source.contains(".onChange(of: selectedSession)"),
+            "App shell should observe selected session changes."
+        )
+        XCTAssertTrue(
+            source.contains("detailMode = .standard"),
+            "Selecting a different session should reset the detail mode to standard."
+        )
+    }
+
+    func testStudyModeToolbarProvidesBackButtonAndStudyActions() throws {
+        let source = try appShellSource()
+        XCTAssertTrue(
+            source.contains("Image(systemName: \"chevron.left\")"),
+            "Study mode should provide icon-only chevron back navigation."
+        )
+        XCTAssertTrue(
+            source.contains("TranscriptStudyView.toolbarActions("),
+            "Study mode toolbar should include transcript copy and export actions."
+        )
+        XCTAssertTrue(
+            source.contains("copyTranscript(for: session)"),
+            "Study mode toolbar should wire copy action to transcript copy helper."
+        )
+        XCTAssertTrue(
+            source.contains("exportTranscript(for: session)"),
+            "Study mode toolbar should wire export action to transcript export helper."
+        )
+    }
+
+    func testStudyModeRendersTranscriptStudyViewInPlace() throws {
+        let source = try appShellSource()
+        XCTAssertTrue(
+            source.contains("if detailMode == .study, let transcript = displayedTranscript(for: session) {\n                TranscriptStudyView(session: session, transcript: transcript)"),
+            "App shell should render TranscriptStudyView in the detail column when study mode is active."
+        )
+    }
+
     private func appShellSource() throws -> String {
         try readSourceFile(relativePathFromTests: "../UI/AppShellView.swift")
     }

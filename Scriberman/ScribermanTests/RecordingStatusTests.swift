@@ -271,10 +271,10 @@ final class RecordingSessionTests: XCTestCase {
     func testTranscriptDetailViewIncludesPreviewAndStudyNavigation() throws {
         let source = try transcriptDetailSource()
 
-        XCTAssertTrue(source.contains("TranscriptPreviewView(blocks: transcriptBlocks)"))
-        XCTAssertTrue(source.contains("Label(\"Study Transcript\", systemImage: \"book.pages\")"))
-        XCTAssertTrue(source.contains(".sheet(isPresented: $showingStudyTranscript)"))
-        XCTAssertTrue(source.contains("TranscriptStudyView(session: session, transcript: transcript)"))
+        XCTAssertTrue(source.contains("TranscriptPreviewView("))
+        XCTAssertTrue(source.contains("onTap: viewState.displayedTranscript == nil ? nil : onOpenStudy"))
+        XCTAssertFalse(source.contains("Label(\"Study Transcript\", systemImage: \"book.pages\")"))
+        XCTAssertFalse(source.contains(".sheet(isPresented: $showingStudyTranscript)"))
     }
 
     func testTranscriptConversationViewsUseAdaptiveStylesForLightDarkMode() throws {

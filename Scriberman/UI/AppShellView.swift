@@ -4,11 +4,18 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct AppShellView: View {
+    private enum DetailMode {
+        case standard
+        case study
+    }
+
     @EnvironmentObject private var appState: AppState
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \RecordingSession.createdAt, order: .reverse) private var recordingSessions: [RecordingSession]
     @Query(sort: \ImportedSession.createdAt, order: .reverse) private var importedSessions: [ImportedSession]
     @State private var selectedSession: JobsViewModel.SessionListItem?
+    @State private var detailMode: DetailMode = .standard
+    @State private var studyActionErrorMessage: String?
 
     private var allSessionItems: [JobsViewModel.SessionListItem] {
         let recordingItems = recordingSessions.map(JobsViewModel.SessionListItem.recording)
@@ -40,11 +47,28 @@ struct AppShellView: View {
         .navigationSplitViewStyle(.prominentDetail)
         .toolbar {
             sidebarToolbar
-            jobsToolbar
+            switch detailMode {
+            case .standard:
+                jobsToolbar
+            case .study:
+                studyModeToolbar
+            }
         }
         .toolbar(removing: .title)
         .toolbar(removing: .search)
         .frame(minHeight: 580)
+        .alert("Study Action Failed", isPresented: Binding(
+            get: { studyActionErrorMessage != nil },
+            set: { isPresented in
+                if isPresented == false {
+                    studyActionErrorMessage = nil
+                }
+            }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(studyActionErrorMessage ?? "Unknown error.")
+        }
         .sheet(isPresented: $appState.workspaceSelectionRequired) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Select Workspace Folder")
@@ -98,6 +122,12 @@ struct AppShellView: View {
             appState.permissionService.checkAll()
             appState.showPermissionsOnboarding = !appState.workspaceSelectionRequired && appState.permissionService.needsOnboarding
         }
+        .onChange(of: selectedSession) { oldValue, newValue in
+            guard oldValue?.id != newValue?.id else {
+                return
+            }
+            detailMode = .standard
+        }
     }
 
     @ViewBuilder
@@ -128,28 +158,42 @@ struct AppShellView: View {
                 )
             }
         case .recording(let session):
-            TranscriptDetailView(
-                session: session,
-                onReprocess: {
-                    appState.jobsViewModel.reprocess(session: session, context: modelContext)
-                },
-                onDelete: {
-                    appState.jobsViewModel.delete(session: session, context: modelContext)
-                    selectedSession = nil
-                }
-            )
+            if detailMode == .study, let transcript = displayedTranscript(for: session) {
+                TranscriptStudyView(session: session, transcript: transcript)
+            } else {
+                TranscriptDetailView(
+                    session: session,
+                    onReprocess: {
+                        appState.jobsViewModel.reprocess(session: session, context: modelContext)
+                    },
+                    onDelete: {
+                        appState.jobsViewModel.delete(session: session, context: modelContext)
+                        selectedSession = nil
+                    },
+                    onOpenStudy: {
+                        detailMode = .study
+                    }
+                )
+            }
 
         case .imported(let session):
-            TranscriptDetailView(
-                session: session,
-                onReprocess: {
-                    appState.jobsViewModel.reprocess(session: session, context: modelContext)
-                },
-                onDelete: {
-                    appState.jobsViewModel.deleteImported(session: session, context: modelContext)
-                    selectedSession = nil
-                }
-            )
+            if detailMode == .study, let transcript = displayedTranscript(for: session) {
+                TranscriptStudyView(session: session, transcript: transcript)
+            } else {
+                TranscriptDetailView(
+                    session: session,
+                    onReprocess: {
+                        appState.jobsViewModel.reprocess(session: session, context: modelContext)
+                    },
+                    onDelete: {
+                        appState.jobsViewModel.deleteImported(session: session, context: modelContext)
+                        selectedSession = nil
+                    },
+                    onOpenStudy: {
+                        detailMode = .study
+                    }
+                )
+            }
         }
     }
 
@@ -201,4 +245,70 @@ struct AppShellView: View {
         }
     }
 
+    @ToolbarContentBuilder
+    private var studyModeToolbar: some ToolbarContent {
+        if let session = selectedTranscribableSession {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    detailMode = .standard
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .help("Back")
+            }
+
+            TranscriptStudyView.toolbarActions(
+                onCopy: {
+                    copyTranscript(for: session)
+                },
+                onExport: {
+                    exportTranscript(for: session)
+                }
+            )
+        }
+    }
+
+    private var selectedTranscribableSession: (any TranscribableSession)? {
+        guard let selectedSession else {
+            return nil
+        }
+
+        switch selectedSession {
+        case .recording(let session):
+            return session
+        case .imported(let session):
+            return session
+        case .pending:
+            return nil
+        }
+    }
+
+    private func displayedTranscript(for session: any TranscribableSession) -> Transcript? {
+        session.retranscript ?? session.transcript
+    }
+
+    private func copyTranscript(for session: any TranscribableSession) {
+        guard let transcript = displayedTranscript(for: session) else {
+            return
+        }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(transcript.fullText, forType: .string)
+    }
+
+    private func exportTranscript(for session: any TranscribableSession) {
+        Task { @MainActor in
+            do {
+                try await appState.services.transcriptExportService.export(
+                    session: session,
+                    transcript: displayedTranscript(for: session)
+                )
+            } catch TranscriptExportError.exportCancelled {
+                return
+            } catch {
+                studyActionErrorMessage = error.localizedDescription
+            }
+        }
+    }
 }
