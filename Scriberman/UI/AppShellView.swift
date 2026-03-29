@@ -1,12 +1,13 @@
+import AppKit
 import SwiftData
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct AppShellView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \RecordingSession.createdAt, order: .reverse) private var recordingSessions: [RecordingSession]
     @Query(sort: \ImportedSession.createdAt, order: .reverse) private var importedSessions: [ImportedSession]
-    @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var selectedSession: JobsViewModel.SessionListItem?
 
     private var allSessionItems: [JobsViewModel.SessionListItem] {
@@ -16,42 +17,34 @@ struct AppShellView: View {
     }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            sidebar
-        } content: {
-            switch appState.selectedDestination {
-            case .studio:
-                StudioView(viewModel: appState.studioViewModel)
-
-            case .jobs:
-                JobsView(
-                    viewModel: appState.jobsViewModel,
-                    items: allSessionItems,
-                    selection: $selectedSession
-                )
-            }
+        NavigationSplitView {
+            JobsView(
+                viewModel: appState.jobsViewModel,
+                items: allSessionItems,
+                selection: $selectedSession
+            )
+            .toolbar(removing: .sidebarToggle)
+            .navigationSplitViewColumnWidth(min: 380, ideal: 460)
         } detail: {
-            switch appState.selectedDestination {
-            case .studio:
-                EmptyView()
-
-            case .jobs:
-                if let selectedSession {
-                    detailView(for: selectedSession)
-                } else {
-                    ContentUnavailableView(
-                        "Select a Session",
-                        systemImage: "text.bubble",
-                        description: Text("Choose a session from the Jobs list to see its transcript and metadata.")
-                    )
-                }
+            if let selectedSession {
+                detailView(for: selectedSession)
+                    .navigationSplitViewColumnWidth(min: 560, ideal: 860)
+            } else {
+                ContentUnavailableView(
+                    "Select a Session",
+                    systemImage: "text.bubble",
+                    description: Text("Choose a session from the Jobs list to see its transcript and metadata.")
+                ).navigationSplitViewColumnWidth(min: 560, ideal: 860)
             }
         }
-        .navigationSplitViewStyle(.balanced)
-        .toolbar(removing: .sidebarToggle)
+        .navigationSplitViewStyle(.prominentDetail)
+        .toolbar {
+            sidebarToolbar
+            jobsToolbar
+        }
         .toolbar(removing: .title)
         .toolbar(removing: .search)
-        .frame(minWidth: 900, minHeight: 600)
+        .frame(minHeight: 580)
         .sheet(isPresented: $appState.workspaceSelectionRequired) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Select Workspace Folder")
@@ -87,7 +80,6 @@ struct AppShellView: View {
                 }
             }
             .padding(24)
-            .frame(minWidth: 520)
         }
         .sheet(
             isPresented: Binding(
@@ -97,11 +89,6 @@ struct AppShellView: View {
         ) {
             PermissionsOnboardingView(permissionService: appState.permissionService)
                 .environmentObject(appState)
-        }
-        .onChange(of: appState.selectedDestination) { _, newDestination in
-            if newDestination != .jobs {
-                selectedSession = nil
-            }
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else {
@@ -113,24 +100,33 @@ struct AppShellView: View {
         }
     }
 
-    private var sidebar: some View {
-        List(selection: Binding(
-            get: { appState.selectedDestination },
-            set: { appState.selectDestination($0) }
-        )) {
-            Section {
-                ForEach(AppState.SidebarDestination.allCases) { destination in
-                    Label(destination.title, systemImage: destination.systemImage)
-                        .tag(destination)
-                }
-            }
-        }
-        .listStyle(.sidebar)
-    }
-
     @ViewBuilder
     private func detailView(for item: JobsViewModel.SessionListItem) -> some View {
         switch item {
+        case .pending(let pendingItem):
+            if let pendingSession = appState.pendingSession, pendingSession.id == pendingItem.id {
+                NewSessionPanelView(
+                    viewModel: appState.newSessionViewModel,
+                    pendingSession: Binding(
+                        get: { appState.pendingSession ?? pendingSession },
+                        set: { appState.pendingSession = $0 }
+                    ),
+                    onTranscribe: { session in
+                        appState.jobsViewModel.transcribe(session: session, context: modelContext)
+                        appState.discardPendingSession()
+                        selectedSession = .recording(session)
+                    },
+                    onImportFile: {
+                        presentImportPanel()
+                    }
+                )
+            } else {
+                ContentUnavailableView(
+                    "No Pending Session",
+                    systemImage: "plus.circle",
+                    description: Text("Create a new session from the + button.")
+                )
+            }
         case .recording(let session):
             TranscriptDetailView(
                 session: session,
@@ -158,24 +154,50 @@ struct AppShellView: View {
     }
 
     @Environment(\.modelContext) private var modelContext
-}
 
-private extension AppState.SidebarDestination {
-    var title: String {
-        switch self {
-        case .studio:
-            return "Studio"
-        case .jobs:
-            return "Jobs"
+    private func presentImportPanel() {
+        let panel = NSOpenPanel()
+        panel.title = "Import Audio"
+        panel.prompt = "Import"
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.audio]
+
+        guard panel.runModal() == .OK else {
+            return
+        }
+
+        Task {
+            await appState.jobsViewModel.importAudio(urls: panel.urls, context: modelContext)
+            appState.discardPendingSession()
         }
     }
 
-    var systemImage: String {
-        switch self {
-        case .studio:
-            return "waveform"
-        case .jobs:
-            return "list.bullet.rectangle"
+    @ToolbarContentBuilder
+    private var sidebarToolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            Button {
+                NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
+            } label: {
+                Image(systemName: "sidebar.left")
+            }
+            .help("Toggle Sidebar")
         }
     }
+
+    @ToolbarContentBuilder
+    private var jobsToolbar: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                appState.selectPendingSession()
+                if let pendingSession = appState.pendingSession {
+                    selectedSession = .pending(pendingSession)
+                }
+            } label: {
+                Label("New Session", systemImage: "plus")
+            }
+        }
+    }
+
 }

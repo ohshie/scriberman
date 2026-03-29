@@ -205,7 +205,9 @@ final class AudioDeviceService: ObservableObject, AudioDeviceServiceProtocol {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.refreshDevices()
+            Task { @MainActor [weak self] in
+                self?.refreshDevices()
+            }
         }
     }
 

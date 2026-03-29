@@ -1,13 +1,14 @@
 import Combine
 import CoreAudio
 import Foundation
+import SwiftData
 
 @MainActor
-final class StudioViewModel: ObservableObject {
-    enum RecordingState {
+final class NewSessionViewModel: ObservableObject {
+    enum State {
         case idle
         case recording(duration: TimeInterval, level: Float)
-        case stopped(session: RecordingSession, ctaSecondsRemaining: Int)
+        case stopped(session: RecordingSession)
     }
 
     private let workspaceService: WorkspaceServiceProtocol
@@ -18,14 +19,12 @@ final class StudioViewModel: ObservableObject {
     private let userDefaults: UserDefaults
     private let lastUsedAppNameKey = "lastUsedAppName"
     private var recordingMonitorTask: Task<Void, Never>?
-    private var ctaCountdownTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
-    private var stoppedSessionForCTA: RecordingSession?
     private var cancellables = Set<AnyCancellable>()
     private var isApplyingServiceSelection = false
     private var isApplyingAppSelection = false
 
-    @Published var recordingState: RecordingState = .idle
+    @Published var state: State = .idle
     @Published var errorMessage: String?
     @Published var availableDevices: [AudioInputDevice]
     @Published var selectedDevice: AudioInputDevice? {
@@ -47,6 +46,7 @@ final class StudioViewModel: ObservableObject {
         }
     }
     @Published private var screenRecordingStatus: PermissionStatus
+    @Published private var micStatus: PermissionStatus
     @Published var recordAppAudio: Bool = false {
         didSet {
             guard oldValue != recordAppAudio else {
@@ -59,10 +59,31 @@ final class StudioViewModel: ObservableObject {
             }
         }
     }
-    var onSessionStopped: ((RecordingSession) -> Void)?
 
     var appAudioToggleEnabled: Bool {
         screenRecordingStatus == .granted
+    }
+
+    var microphonePermissionGranted: Bool {
+        micStatus == .granted
+    }
+
+    var shouldShowMicrophonePermissionPrompt: Bool {
+        if case .idle = state {
+            return !microphonePermissionGranted
+        }
+        return false
+    }
+
+    var microphonePermissionPromptText: String {
+        switch micStatus {
+        case .notDetermined:
+            return "Allow microphone access to start recording."
+        case .denied:
+            return "Microphone access is disabled. Allow access in System Settings to start recording."
+        case .granted:
+            return ""
+        }
     }
 
     var showAppPicker: Bool {
@@ -70,7 +91,10 @@ final class StudioViewModel: ObservableObject {
     }
 
     var canRecord: Bool {
-        if case .idle = recordingState {
+        guard microphonePermissionGranted else {
+            return false
+        }
+        if case .idle = state {
             return !recordAppAudio || selectedApp != nil
         }
         return false
@@ -106,6 +130,7 @@ final class StudioViewModel: ObservableObject {
         self.runningApps = appAudioService.runningApps
         self.selectedApp = appAudioService.selectedApp
         self.screenRecordingStatus = permissionService.screenRecordingStatus
+        self.micStatus = permissionService.micStatus
 
         handleScreenRecordingStatusChange(permissionService.screenRecordingStatus)
 
@@ -138,42 +163,32 @@ final class StudioViewModel: ObservableObject {
                 self?.handleScreenRecordingStatusChange(status)
             }
             .store(in: &cancellables)
+
+        permissionService.micStatusPublisher
+            .sink { [weak self] status in
+                self?.micStatus = status
+            }
+            .store(in: &cancellables)
     }
 
-    private func handleScreenRecordingStatusChange(_ status: PermissionStatus) {
-        screenRecordingStatus = status
-
-        guard status == .granted else {
-            // Permission loss invalidates app-audio intent and previous app selection.
-            recordAppAudio = false
-            selectedApp = nil
-            appAudioService.selectedApp = nil
-            lastUsedAppName = nil
-            return
-        }
+    func reset() {
+        recordingMonitorTask?.cancel()
+        recordingMonitorTask = nil
+        recordingStartedAt = nil
+        errorMessage = nil
+        state = .idle
     }
 
     func refresh() async {
         _ = await workspaceService.currentWorkspace()
     }
 
-    private func applySelectedDeviceFromService(_ device: AudioInputDevice?) {
-        isApplyingServiceSelection = true
-        selectedDevice = device
-        isApplyingServiceSelection = false
-    }
-
-    private func applySelectedAppFromService(_ app: CapturedApp?) {
-        if app == nil, !recordAppAudio, selectedApp != nil {
-            return
-        }
-        isApplyingAppSelection = true
-        selectedApp = app
-        isApplyingAppSelection = false
-    }
-
     func refreshApps() {
         appAudioService.refreshRunningApps()
+    }
+
+    func requestMicrophonePermission() async {
+        _ = await permissionService.requestMic()
     }
 
     func restoreLastUsedApp() {
@@ -187,9 +202,9 @@ final class StudioViewModel: ObservableObject {
         selectedApp = runningApps.first(where: { $0.name == lastUsedAppName })
     }
 
-    func startRecording() async {
-        ctaCountdownTask?.cancel()
-        ctaCountdownTask = nil
+    func startRecording(title: String, context _: ModelContext) async {
+        recordingMonitorTask?.cancel()
+        recordingMonitorTask = nil
         errorMessage = nil
 
         do {
@@ -205,17 +220,16 @@ final class StudioViewModel: ObservableObject {
             }
 
             let selectedMicDeviceID = selectedDevice?.id
-
             var startError: Error?
             var fallbackMessage: String?
 
             do {
-                    try await startRecordingAttempt(
-                        in: workspace,
-                        micDeviceID: selectedMicDeviceID,
-                        capturedAppName: selectedCapturedAppName,
-                        appProcessID: selectedAppProcessID
-                    )
+                try await startRecordingAttempt(
+                    in: workspace,
+                    micDeviceID: selectedMicDeviceID,
+                    capturedAppName: selectedCapturedAppName,
+                    appProcessID: selectedAppProcessID
+                )
             } catch {
                 startError = error
             }
@@ -261,48 +275,53 @@ final class StudioViewModel: ObservableObject {
                 errorMessage = fallbackMessage
             }
 
-            recordingStartedAt = Date()
-            recordingState = .recording(duration: 0, level: 0)
+            recordingStartedAt = .now
+            state = .recording(duration: 0, level: 0)
             startRecordingMonitor()
         } catch {
             errorMessage = error.localizedDescription
-            recordingState = .idle
+            state = .idle
         }
     }
 
-    func stopRecording() async {
+    func stopRecording(context _: ModelContext) async {
         recordingMonitorTask?.cancel()
         recordingMonitorTask = nil
 
         let session = await recordingService.stopRecording()
         guard let session else {
-            recordingState = .idle
+            state = .idle
             return
         }
 
-        stoppedSessionForCTA = session
-        recordingState = .stopped(session: session, ctaSecondsRemaining: 15)
-        onSessionStopped?(session)
-        startCtaCountdown()
+        state = .stopped(session: session)
     }
 
-    func consumeSessionForTranscribeCTA() -> RecordingSession? {
-        ctaCountdownTask?.cancel()
-        ctaCountdownTask = nil
-        let session = stoppedSessionForCTA
-        stoppedSessionForCTA = nil
-        recordingState = .idle
-        return session
-    }
+    private func handleScreenRecordingStatusChange(_ status: PermissionStatus) {
+        screenRecordingStatus = status
 
-    func clearStoppedCTAIfNeeded() {
-        guard case .stopped = recordingState else {
+        guard status == .granted else {
+            recordAppAudio = false
+            selectedApp = nil
+            appAudioService.selectedApp = nil
+            lastUsedAppName = nil
             return
         }
-        ctaCountdownTask?.cancel()
-        ctaCountdownTask = nil
-        stoppedSessionForCTA = nil
-        recordingState = .idle
+    }
+
+    private func applySelectedDeviceFromService(_ device: AudioInputDevice?) {
+        isApplyingServiceSelection = true
+        selectedDevice = device
+        isApplyingServiceSelection = false
+    }
+
+    private func applySelectedAppFromService(_ app: CapturedApp?) {
+        if app == nil, !recordAppAudio, selectedApp != nil {
+            return
+        }
+        isApplyingAppSelection = true
+        selectedApp = app
+        isApplyingAppSelection = false
     }
 
     private func startRecordingMonitor() {
@@ -313,15 +332,15 @@ final class StudioViewModel: ObservableObject {
                 guard isRecording else {
                     if let pendingError = await recordingService.consumePendingError() {
                         errorMessage = pendingError.localizedDescription
-                        recordingState = .idle
+                        state = .idle
                     }
                     break
                 }
 
                 let level = await recordingService.audioLevel()
-                let startedAt = recordingStartedAt ?? Date()
+                let startedAt = recordingStartedAt ?? .now
                 let duration = Date().timeIntervalSince(startedAt)
-                recordingState = .recording(duration: duration, level: level)
+                state = .recording(duration: duration, level: level)
 
                 try? await Task.sleep(for: .milliseconds(50))
             }
@@ -340,25 +359,5 @@ final class StudioViewModel: ObservableObject {
             capturedAppName: capturedAppName,
             appProcessID: appProcessID
         )
-    }
-
-    private func startCtaCountdown() {
-        ctaCountdownTask?.cancel()
-        ctaCountdownTask = Task { [weak self] in
-            var remaining = 15
-            while let self, !Task.isCancelled, remaining > 0 {
-                try? await Task.sleep(for: .seconds(1))
-                remaining -= 1
-                guard case let .stopped(session, _) = recordingState else {
-                    return
-                }
-                if remaining <= 0 {
-                    stoppedSessionForCTA = nil
-                    recordingState = .idle
-                } else {
-                    recordingState = .stopped(session: session, ctaSecondsRemaining: remaining)
-                }
-            }
-        }
     }
 }

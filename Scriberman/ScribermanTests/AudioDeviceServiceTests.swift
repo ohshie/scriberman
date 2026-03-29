@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import CoreAudio
 import XCTest
 @testable import Scriberman
@@ -10,6 +11,7 @@ final class AudioDeviceServiceTests: XCTestCase {
     private var notificationCenter: NotificationCenter!
     private var service: AudioDeviceService!
     private var userDefaultsSuiteName: String!
+    private var cancellables = Set<AnyCancellable>()
 
     override func setUp() {
         super.setUp()
@@ -29,6 +31,7 @@ final class AudioDeviceServiceTests: XCTestCase {
         userDefaultsSuiteName = nil
         notificationCenter = nil
         hardware = nil
+        cancellables.removeAll()
         super.tearDown()
     }
 
@@ -121,7 +124,18 @@ final class AudioDeviceServiceTests: XCTestCase {
         ]
         hardware.defaultInputID = 2
 
+        let refreshExpectation = expectation(description: "Audio devices refreshed after configuration change")
+        service.availableDevicesPublisher
+            .dropFirst()
+            .sink { devices in
+                if devices.map(\.uid) == ["uid-2"] {
+                    refreshExpectation.fulfill()
+                }
+            }
+            .store(in: &cancellables)
+
         notificationCenter.post(name: .AVAudioEngineConfigurationChange, object: nil)
+        wait(for: [refreshExpectation], timeout: 1.0)
 
         XCTAssertEqual(service.availableDevices.map(\.uid), ["uid-2"])
         XCTAssertEqual(service.selectedDevice?.uid, "uid-2")

@@ -38,16 +38,52 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(permissionService.checkAllCalls, 1)
     }
 
-    func testSidebarDestinationsContainOnlyStudioAndJobs() {
-        XCTAssertEqual(AppState.SidebarDestination.allCases, [.studio, .jobs])
+    func testAppSourceDeclaresSettingsScene() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let appFileURL = testsDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("ScribermanApp.swift")
+        let appSource = try String(contentsOf: appFileURL, encoding: .utf8)
+
+        XCTAssertTrue(
+            appSource.contains("Settings {"),
+            "Expected ScribermanApp.swift to declare a SwiftUI Settings scene."
+        )
     }
 
-    func testAppBodyContainsSettingsScene() {
-        let description = String(describing: ScribermanApp().body)
-        XCTAssertTrue(
-            description.contains("Settings<"),
-            "Expected ScribermanApp scene tree to contain a SwiftUI Settings scene."
+    func testSelectPendingSessionCreatesSinglePendingSession() {
+        let permissionService = MockPermissionService()
+        let services = makeServiceContainer(permissionService: permissionService)
+        let appState = AppState(services: services)
+
+        appState.selectPendingSession()
+        let firstPending = appState.pendingSession
+        appState.selectPendingSession()
+
+        XCTAssertNotNil(firstPending)
+        XCTAssertEqual(appState.pendingSession?.id, firstPending?.id)
+    }
+
+    func testDiscardPendingSessionClearsPendingAndResetsNewSessionState() {
+        let permissionService = MockPermissionService()
+        let services = makeServiceContainer(permissionService: permissionService)
+        let appState = AppState(services: services)
+        let recording = RecordingSession(
+            createdAt: .now,
+            duration: 5,
+            micAudioURL: "/tmp/recording.wav",
+            title: "Recorded",
+            status: .recorded
         )
+
+        appState.selectPendingSession()
+        appState.newSessionViewModel.state = .stopped(session: recording)
+        appState.discardPendingSession()
+
+        XCTAssertNil(appState.pendingSession)
+        guard case .idle = appState.newSessionViewModel.state else {
+            return XCTFail("Expected new session state to reset to idle")
+        }
     }
 
     private func makeServiceContainer(permissionService: PermissionServiceProtocol) -> ServiceContainer {

@@ -128,6 +128,36 @@ final class JobsViewModelTests: XCTestCase {
         XCTAssertEqual(sections[3].items.count, 1)
     }
 
+    func testGroupedSectionsExcludesPendingItems() {
+        let calendar = Calendar(identifier: .gregorian)
+        let referenceDate = makeDate(year: 2026, month: 3, day: 28, hour: 12)
+        let todaySession = makeSession(
+            createdAt: makeDate(year: 2026, month: 3, day: 28, hour: 9),
+            status: .done
+        )
+        let pending = PendingSession(
+            id: UUID(uuidString: "11111111-1111-1111-1111-111111111111") ?? UUID(),
+            title: "Pending Session",
+            createdAt: referenceDate
+        )
+
+        let items: [JobsViewModel.SessionListItem] = [
+            .pending(pending),
+            .recording(todaySession)
+        ]
+
+        let sections = viewModel.groupedSections(for: items, referenceDate: referenceDate, calendar: calendar)
+
+        XCTAssertEqual(sections.map(\.group), [.today])
+        XCTAssertEqual(sections.first?.items.count, 1)
+        guard let firstItem = sections.first?.items.first else {
+            return XCTFail("Expected at least one grouped item")
+        }
+        if case .pending = firstItem {
+            XCTFail("Pending item should not be included in grouped sections")
+        }
+    }
+
     func testRelativeTimestampFormattingForNowMinutesAndHours() {
         let calendar = Calendar(identifier: .gregorian)
         let referenceDate = makeDate(year: 2026, month: 3, day: 28, hour: 12)
@@ -158,6 +188,32 @@ final class JobsViewModelTests: XCTestCase {
             ),
             "3h ago"
         )
+    }
+
+    func testShouldDiscardPendingSessionOnSelectionChangeIdleOnly() {
+        let pending = PendingSession(title: "Pending")
+        let recording = makeSession(status: .done)
+        let nonPendingSelection = JobsViewModel.SessionListItem.recording(recording)
+
+        let shouldDiscardIdle = viewModel.shouldDiscardPendingSessionOnSelectionChange(
+            pendingSession: pending,
+            newSelection: nonPendingSelection,
+            isNewSessionIdle: true
+        )
+        let shouldDiscardRecording = viewModel.shouldDiscardPendingSessionOnSelectionChange(
+            pendingSession: pending,
+            newSelection: nonPendingSelection,
+            isNewSessionIdle: false
+        )
+        let shouldDiscardWhenPendingSelected = viewModel.shouldDiscardPendingSessionOnSelectionChange(
+            pendingSession: pending,
+            newSelection: .pending(pending),
+            isNewSessionIdle: true
+        )
+
+        XCTAssertTrue(shouldDiscardIdle)
+        XCTAssertFalse(shouldDiscardRecording)
+        XCTAssertFalse(shouldDiscardWhenPendingSelected)
     }
 
     private func makeSession(

@@ -6,11 +6,14 @@ import UniformTypeIdentifiers
 @MainActor
 final class JobsViewModel: ObservableObject {
     enum SessionListItem: Identifiable, Hashable {
+        case pending(PendingSession)
         case recording(RecordingSession)
         case imported(ImportedSession)
 
         var id: String {
             switch self {
+            case .pending(let session):
+                return "pending:\(session.id.uuidString)"
             case .recording(let session):
                 return "recording:\(session.id.uuidString)"
             case .imported(let session):
@@ -20,6 +23,8 @@ final class JobsViewModel: ObservableObject {
 
         var createdAt: Date {
             switch self {
+            case .pending(let session):
+                return session.createdAt
             case .recording(let session):
                 return session.createdAt
             case .imported(let session):
@@ -97,7 +102,10 @@ final class JobsViewModel: ObservableObject {
     ) -> [SessionDateSection] {
         SessionDateGroup.allCases.compactMap { group in
             let sectionItems = items.filter {
-                sessionDateGroup(for: $0.createdAt, referenceDate: referenceDate, calendar: calendar) == group
+                if case .pending = $0 {
+                    return false
+                }
+                return sessionDateGroup(for: $0.createdAt, referenceDate: referenceDate, calendar: calendar) == group
             }
 
             guard !sectionItems.isEmpty else {
@@ -106,6 +114,22 @@ final class JobsViewModel: ObservableObject {
 
             return SessionDateSection(group: group, items: sectionItems.sorted { $0.createdAt > $1.createdAt })
         }
+    }
+
+    func shouldDiscardPendingSessionOnSelectionChange(
+        pendingSession: PendingSession?,
+        newSelection: SessionListItem?,
+        isNewSessionIdle: Bool
+    ) -> Bool {
+        guard pendingSession != nil, isNewSessionIdle, let newSelection else {
+            return false
+        }
+
+        if case .pending = newSelection {
+            return false
+        }
+
+        return true
     }
 
     func sessionDateGroup(
