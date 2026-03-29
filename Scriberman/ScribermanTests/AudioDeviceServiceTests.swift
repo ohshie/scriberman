@@ -189,6 +189,118 @@ final class AudioDeviceServiceTests: XCTestCase {
         XCTAssertEqual(service.availableDevices.map(\.uid), ["uid-2"])
         XCTAssertEqual(service.selectedDevice?.uid, "uid-2")
     }
+
+    func testRefreshDevicesFallsBackToSystemDefaultWhenSelectedDeviceIsRemoved() {
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "uid-1", name: "Built-in Mic", hasInput: true),
+            MockAudioDevice(id: 2, uid: "uid-2", name: "AirPods Mic", hasInput: true)
+        ]
+        hardware.defaultInputID = 1
+
+        service = AudioDeviceService(
+            hardware: hardware,
+            userDefaults: userDefaults,
+            notificationCenter: notificationCenter
+        )
+        service.selectedDevice = service.availableDevices.first(where: { $0.uid == "uid-2" })
+
+        let fallbackExpectation = expectation(description: "Selected device publishes fallback selection")
+        service.selectedDevicePublisher
+            .dropFirst()
+            .sink { device in
+                if device?.uid == "uid-1" {
+                    fallbackExpectation.fulfill()
+                }
+            }
+            .store(in: &cancellables)
+
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "uid-1", name: "Built-in Mic", hasInput: true)
+        ]
+        hardware.defaultInputID = 1
+
+        service.refreshDevices()
+        wait(for: [fallbackExpectation], timeout: 1.0)
+
+        XCTAssertEqual(service.selectedDevice?.uid, "uid-1")
+    }
+
+    func testRefreshDevicesRecoversDisconnectedDeviceWhenCurrentSelectionIsDefault() {
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "uid-1", name: "Built-in Mic", hasInput: true),
+            MockAudioDevice(id: 2, uid: "uid-2", name: "AirPods Mic", hasInput: true)
+        ]
+        hardware.defaultInputID = 1
+
+        service = AudioDeviceService(
+            hardware: hardware,
+            userDefaults: userDefaults,
+            notificationCenter: notificationCenter
+        )
+        service.selectedDevice = service.availableDevices.first(where: { $0.uid == "uid-2" })
+
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "uid-1", name: "Built-in Mic", hasInput: true)
+        ]
+        service.refreshDevices()
+        XCTAssertEqual(service.selectedDevice?.uid, "uid-1")
+
+        let recoveryExpectation = expectation(description: "Selected device publishes recovery selection")
+        service.selectedDevicePublisher
+            .dropFirst()
+            .sink { device in
+                if device?.uid == "uid-2" {
+                    recoveryExpectation.fulfill()
+                }
+            }
+            .store(in: &cancellables)
+
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "uid-1", name: "Built-in Mic", hasInput: true),
+            MockAudioDevice(id: 2, uid: "uid-2", name: "AirPods Mic", hasInput: true)
+        ]
+        hardware.defaultInputID = 1
+
+        service.refreshDevices()
+        wait(for: [recoveryExpectation], timeout: 1.0)
+
+        XCTAssertEqual(service.selectedDevice?.uid, "uid-2")
+    }
+
+    func testRefreshDevicesDoesNotRecoverDisconnectedDeviceAfterManualOverride() {
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "uid-1", name: "Built-in Mic", hasInput: true),
+            MockAudioDevice(id: 2, uid: "uid-2", name: "AirPods Mic", hasInput: true),
+            MockAudioDevice(id: 3, uid: "uid-3", name: "USB Mic", hasInput: true)
+        ]
+        hardware.defaultInputID = 1
+
+        service = AudioDeviceService(
+            hardware: hardware,
+            userDefaults: userDefaults,
+            notificationCenter: notificationCenter
+        )
+        service.selectedDevice = service.availableDevices.first(where: { $0.uid == "uid-2" })
+
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "uid-1", name: "Built-in Mic", hasInput: true),
+            MockAudioDevice(id: 3, uid: "uid-3", name: "USB Mic", hasInput: true)
+        ]
+        service.refreshDevices()
+        XCTAssertEqual(service.selectedDevice?.uid, "uid-1")
+
+        service.selectedDevice = service.availableDevices.first(where: { $0.uid == "uid-3" })
+        XCTAssertEqual(service.selectedDevice?.uid, "uid-3")
+
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "uid-1", name: "Built-in Mic", hasInput: true),
+            MockAudioDevice(id: 2, uid: "uid-2", name: "AirPods Mic", hasInput: true),
+            MockAudioDevice(id: 3, uid: "uid-3", name: "USB Mic", hasInput: true)
+        ]
+        service.refreshDevices()
+
+        XCTAssertEqual(service.selectedDevice?.uid, "uid-3")
+    }
 }
 
 private struct MockAudioDevice {
