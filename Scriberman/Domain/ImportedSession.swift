@@ -14,6 +14,7 @@ final class ImportedSession {
     var errorMessage: String?
     var transcriptData: Data?
     var retranscriptData: Data?
+    var aiTransformationsData: Data?
 
     var status: RecordingStatus {
         get { RecordingStatus(persistedValue: statusRawValue, errorMessage: errorMessage) }
@@ -56,6 +57,20 @@ final class ImportedSession {
         }
     }
 
+    var aiTransformations: [AITransformation] {
+        get {
+            guard let aiTransformationsData else { return [] }
+            return (try? JSONDecoder().decode([AITransformation].self, from: aiTransformationsData)) ?? []
+        }
+        set {
+            if newValue.isEmpty {
+                aiTransformationsData = nil
+            } else {
+                aiTransformationsData = try? JSONEncoder().encode(newValue)
+            }
+        }
+    }
+
     init(
         id: UUID = UUID(),
         createdAt: Date = .now,
@@ -67,7 +82,8 @@ final class ImportedSession {
         status: RecordingStatus = .converting,
         errorMessage: String? = nil,
         transcriptData: Data? = nil,
-        retranscriptData: Data? = nil
+        retranscriptData: Data? = nil,
+        aiTransformationsData: Data? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -80,6 +96,7 @@ final class ImportedSession {
         self.errorMessage = errorMessage
         self.transcriptData = transcriptData
         self.retranscriptData = retranscriptData
+        self.aiTransformationsData = aiTransformationsData
         if case .error = status {
             self.status = status
         }

@@ -74,6 +74,49 @@ final class AIProviderServiceTests: XCTestCase {
         XCTAssertNil(service.makeClient())
     }
 
+    func testPerformTransformationBuildsExpectedRequestStructure() async {
+        let keychainStore = MockKeychainStore()
+        try? keychainStore.save(key: "aiProvider.openAI.apiKey", value: "sk-12345678901234567890")
+        var capturedQuery: CreateModelResponseQuery?
+
+        let service = makeService(
+            keychainStore: keychainStore,
+            responseCreator: { _, query in
+                capturedQuery = query
+                throw TestError.expectedFailure
+            }
+        )
+        service.selectedModelID = "gpt-5.2"
+
+        do {
+            _ = try await service.performTransformation(
+                transcript: "Transcript body",
+                systemPrompt: "Summarize this transcript"
+            )
+            XCTFail("Expected provider failure")
+        } catch {
+            XCTAssertEqual(
+                error.localizedDescription,
+                "Could not transform transcript right now. Check your key/network and try again."
+            )
+        }
+
+        XCTAssertEqual(capturedQuery?.model, "gpt-5.2")
+        XCTAssertEqual(capturedQuery?.instructions, "Summarize this transcript")
+        if case let .textInput(input)? = capturedQuery?.input {
+            XCTAssertEqual(input, "Transcript body")
+        } else {
+            XCTFail("Expected text input request")
+        }
+    }
+
+    func testShouldWarnAboutTranscriptLengthThreshold() {
+        let service = makeService()
+
+        XCTAssertFalse(service.shouldWarnAboutTranscriptLength(String(repeating: "a", count: 40_000)))
+        XCTAssertTrue(service.shouldWarnAboutTranscriptLength(String(repeating: "a", count: 40_001)))
+    }
+
     private func makeService(
         keychainStore: MockKeychainStore = MockKeychainStore(),
         defaults: UserDefaults? = nil,
@@ -100,5 +143,60 @@ final class AIProviderServiceTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
         return defaults
     }
+}
 
+final class AIPromptStoreTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var suiteName: String!
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "AIPromptStoreTests.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults = nil
+        suiteName = nil
+        super.tearDown()
+    }
+
+    func testAddPromptPersistsPrompt() {
+        let store = AIPromptStore(defaults: defaults)
+
+        let added = store.addPrompt(name: "Summary", content: "Summarize this transcript")
+        let prompts = store.loadPrompts()
+
+        XCTAssertEqual(prompts.count, 1)
+        XCTAssertEqual(prompts.first, added)
+    }
+
+    func testUpdatePromptUpdatesPersistedPrompt() {
+        let store = AIPromptStore(defaults: defaults)
+        let added = store.addPrompt(name: "Summary", content: "Summarize")
+
+        store.updatePrompt(id: added.id, name: "Action Items", content: "Extract actions")
+        let prompts = store.loadPrompts()
+
+        XCTAssertEqual(prompts.count, 1)
+        XCTAssertEqual(prompts.first?.id, added.id)
+        XCTAssertEqual(prompts.first?.name, "Action Items")
+        XCTAssertEqual(prompts.first?.content, "Extract actions")
+    }
+
+    func testDeletePromptRemovesPromptAndClearsLastUsedWhenNeeded() {
+        let store = AIPromptStore(defaults: defaults)
+        let first = store.addPrompt(name: "Summary", content: "Summarize")
+        let second = store.addPrompt(name: "Action Items", content: "List actions")
+        store.setLastUsedPromptID(second.id)
+
+        store.deletePrompt(id: second.id)
+
+        let prompts = store.loadPrompts()
+        XCTAssertEqual(prompts.count, 1)
+        XCTAssertEqual(prompts.first?.id, first.id)
+        XCTAssertNil(store.loadLastUsedPromptID())
+    }
 }
