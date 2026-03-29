@@ -50,3 +50,19 @@ protocol TranscribableSession: AnyObject {
     var transcript: Transcript? { get set }
     var retranscript: Transcript? { get set }
 }
+
+extension TranscribableSession {
+    var aiTransformations: [AITransformation] {
+        get {
+            guard let aiTransformationsData else { return [] }
+            return (try? JSONDecoder().decode([AITransformation].self, from: aiTransformationsData)) ?? []
+        }
+        set {
+            if newValue.isEmpty {
+                aiTransformationsData = nil
+            } else {
+                aiTransformationsData = try? JSONEncoder().encode(newValue)
+            }
+        }
+    }
+}

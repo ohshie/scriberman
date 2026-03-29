@@ -256,4 +256,21 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertEqual(session.aiTransformations, transformations)
         XCTAssertNotNil(session.aiTransformationsData)
     }
+
+    func testTranscriptDetailViewIncludesAITransformationUIElements() throws {
+        let source = try transcriptDetailSource()
+
+        XCTAssertTrue(source.contains("Text(\"AI Transformations\")"))
+        XCTAssertTrue(source.contains("Picker(\"Prompt\""))
+        XCTAssertTrue(source.contains("Picker(\"History\""))
+        XCTAssertTrue(source.contains("SkeletonView()"))
+        XCTAssertTrue(source.contains("Add prompts in Settings to enable transformations."))
+        XCTAssertTrue(source.contains("40,000"))
+    }
+
+    private func transcriptDetailSource() throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let fileURL = testsDirectory.appendingPathComponent("../UI/TranscriptDetailView.swift")
+        return try String(contentsOf: fileURL, encoding: .utf8)
+    }
 }

@@ -58,20 +58,6 @@ final class RecordingSession {
         }
     }
 
-    var aiTransformations: [AITransformation] {
-        get {
-            guard let aiTransformationsData else { return [] }
-            return (try? JSONDecoder().decode([AITransformation].self, from: aiTransformationsData)) ?? []
-        }
-        set {
-            if newValue.isEmpty {
-                aiTransformationsData = nil
-            } else {
-                aiTransformationsData = try? JSONEncoder().encode(newValue)
-            }
-        }
-    }
-
     init(
         id: UUID = UUID(),
         createdAt: Date = .now,
