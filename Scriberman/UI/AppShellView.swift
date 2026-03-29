@@ -8,7 +8,6 @@ struct AppShellView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \RecordingSession.createdAt, order: .reverse) private var recordingSessions: [RecordingSession]
     @Query(sort: \ImportedSession.createdAt, order: .reverse) private var importedSessions: [ImportedSession]
-    @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var selectedSession: JobsViewModel.SessionListItem?
 
     private var allSessionItems: [JobsViewModel.SessionListItem] {
@@ -18,7 +17,7 @@ struct AppShellView: View {
     }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        NavigationSplitView {
             JobsView(
                 viewModel: appState.jobsViewModel,
                 items: allSessionItems,
@@ -178,11 +177,11 @@ struct AppShellView: View {
     private var sidebarToolbar: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             Button {
-                toggleSidebarVisibility()
+                NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
             } label: {
                 Image(systemName: "sidebar.left")
             }
-            .help(isSidebarVisible ? "Hide Sidebar" : "Show Sidebar")
+            .help("Toggle Sidebar")
         }
     }
 
@@ -200,11 +199,4 @@ struct AppShellView: View {
         }
     }
 
-    private var isSidebarVisible: Bool {
-        columnVisibility != .detailOnly
-    }
-
-    private func toggleSidebarVisibility() {
-        columnVisibility = isSidebarVisible ? .detailOnly : .all
-    }
 }
