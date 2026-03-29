@@ -268,9 +268,36 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertTrue(source.contains("40,000"))
     }
 
+    func testTranscriptDetailViewIncludesPreviewAndStudyNavigation() throws {
+        let source = try transcriptDetailSource()
+
+        XCTAssertTrue(source.contains("TranscriptPreviewView(blocks: transcriptBlocks)"))
+        XCTAssertTrue(source.contains("Label(\"Study Transcript\", systemImage: \"book.pages\")"))
+        XCTAssertTrue(source.contains(".sheet(isPresented: $showingStudyTranscript)"))
+        XCTAssertTrue(source.contains("TranscriptStudyView(session: session, transcript: transcript)"))
+    }
+
+    func testTranscriptConversationViewsUseAdaptiveStylesForLightDarkMode() throws {
+        let blockSource = try sourceForFile(named: "TranscriptBlockView.swift")
+        let previewSource = try sourceForFile(named: "TranscriptPreviewView.swift")
+        let studySource = try sourceForFile(named: "TranscriptStudyView.swift")
+
+        XCTAssertTrue(blockSource.contains(".background(.thinMaterial"))
+        XCTAssertTrue(blockSource.contains(".foregroundStyle(.primary)"))
+        XCTAssertFalse(blockSource.contains("Color.white"))
+        XCTAssertFalse(blockSource.contains("Color.black"))
+
+        XCTAssertTrue(previewSource.contains(".background(.thinMaterial"))
+        XCTAssertTrue(studySource.contains(".background(.bar)"))
+    }
+
     private func transcriptDetailSource() throws -> String {
+        try sourceForFile(named: "TranscriptDetailView.swift")
+    }
+
+    private func sourceForFile(named fileName: String) throws -> String {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let fileURL = testsDirectory.appendingPathComponent("../UI/TranscriptDetailView.swift")
+        let fileURL = testsDirectory.appendingPathComponent("../UI/\(fileName)")
         return try String(contentsOf: fileURL, encoding: .utf8)
     }
 }
