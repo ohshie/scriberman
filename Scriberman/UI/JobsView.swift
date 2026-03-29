@@ -57,17 +57,6 @@ struct JobsView: View {
 
     private var listContent: some View {
         List(selection: $selection) {
-            Section {
-                Button {
-                    appState.selectPendingSession()
-                    if let pendingSession = appState.pendingSession {
-                        selection = .pending(pendingSession)
-                    }
-                } label: {
-                    Label("New Session", systemImage: "plus")
-                }
-            }
-
             if let pendingSession = appState.pendingSession {
                 row(for: .pending(pendingSession))
                     .tag(JobsViewModel.SessionListItem.pending(pendingSession))
