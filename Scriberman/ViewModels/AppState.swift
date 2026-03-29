@@ -58,6 +58,7 @@ final class AppState: ObservableObject {
 
     func selectPendingSession() {
         if pendingSession == nil {
+            newSessionViewModel.reset()
             pendingSession = PendingSession(title: Self.defaultPendingSessionTitle())
         }
     }

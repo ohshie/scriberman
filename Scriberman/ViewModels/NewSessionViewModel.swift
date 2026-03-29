@@ -400,13 +400,15 @@ final class NewSessionViewModel: ObservableObject {
         in workspace: Workspace,
         micDeviceID: AudioDeviceID?,
         capturedAppName: String?,
-        appProcessID: pid_t?
+        appProcessID: pid_t?,
+        title: String?
     ) async throws {
         try await recordingService.startRecording(
             in: workspace,
             micDeviceID: micDeviceID,
             capturedAppName: capturedAppName,
-            appProcessID: appProcessID
+            appProcessID: appProcessID,
+            title: title
         )
     }
 }

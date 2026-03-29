@@ -46,7 +46,8 @@ struct JobsView: View {
             guard viewModel.shouldDiscardPendingSessionOnSelectionChange(
                 pendingSession: appState.pendingSession,
                 newSelection: newSelection,
-                isNewSessionIdle: isNewSessionIdle
+                isNewSessionIdle: isNewSessionIdle,
+                isNewSessionStopped: isNewSessionStopped
             ) else {
                 return
             }
@@ -161,6 +162,13 @@ struct JobsView: View {
 
     private var isNewSessionIdle: Bool {
         if case .idle = appState.newSessionViewModel.state {
+            return true
+        }
+
+        return false
+    }
+}
+ .stopped = appState.newSessionViewModel.state {
             return true
         }
 
