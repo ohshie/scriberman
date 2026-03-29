@@ -55,8 +55,9 @@ final class TranscriptionServiceTests: XCTestCase {
         FileManager.default.createFile(atPath: audioURL.path, contents: Data())
         let workspace = Workspace(rootURL: tempRoot)
 
-        let segments = try await service.transcribePassForTesting(url: audioURL, source: .app, workspace: workspace)
+        let (segments, embeddings) = try await service.transcribePassForTesting(url: audioURL, source: .app, workspace: workspace)
         XCTAssertEqual(segments, [])
+        XCTAssertTrue(embeddings.isEmpty)
     }
 
     func testTranscribePassFromSamplesSilentAudioReturnsEmptySegments() async throws {
@@ -66,13 +67,14 @@ final class TranscriptionServiceTests: XCTestCase {
         )
         let workspace = Workspace(rootURL: FileManager.default.temporaryDirectory)
 
-        let segments = try await service.transcribePassFromSamplesForTesting(
+        let (segments, embeddings) = try await service.transcribePassFromSamplesForTesting(
             samples: [0, 0, 0, 0],
             source: .mic,
             workspace: workspace
         )
 
         XCTAssertEqual(segments, [])
+        XCTAssertTrue(embeddings.isEmpty)
     }
 
     func testTranscribeThrowsMissingAudioWhenMixdownURLIsNil() async {

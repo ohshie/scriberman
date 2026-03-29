@@ -2,6 +2,10 @@ import SwiftUI
 
 struct TranscriptBlockView: View {
     let block: TranscriptBlock
+    var onSpeakerRename: ((String) -> Void)? = nil
+
+    @State private var isEditingSpeaker = false
+    @State private var speakerNameDraft = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -10,9 +14,25 @@ struct TranscriptBlockView: View {
                     .fill(speakerColor)
                     .frame(width: 10, height: 10)
 
-                Text(block.speaker.label)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(speakerColor)
+                if isEditingSpeaker {
+                    TextField("Speaker Name", text: $speakerNameDraft)
+                        .textFieldStyle(.plain)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(speakerColor)
+                        .onSubmit {
+                            commitRename()
+                        }
+                } else {
+                    Text(block.speaker.label)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(speakerColor)
+                        .onTapGesture {
+                            if onSpeakerRename != nil {
+                                speakerNameDraft = block.speaker.label
+                                isEditingSpeaker = true
+                            }
+                        }
+                }
 
                 Text(timeRange)
                     .font(.caption.monospacedDigit())
@@ -42,6 +62,14 @@ struct TranscriptBlockView: View {
 
     private var speakerColor: Color {
         Color(hex: block.speaker.colorHex) ?? .accentColor
+    }
+
+    private func commitRename() {
+        let trimmed = speakerNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty && trimmed != block.speaker.label {
+            onSpeakerRename?(trimmed)
+        }
+        isEditingSpeaker = false
     }
 }
 

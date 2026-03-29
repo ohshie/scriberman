@@ -4,7 +4,7 @@ import SwiftData
 actor RetranscriptionService {
     typealias ExtractSamples = @Sendable (URL, Bool) throws -> (mic: [Float], app: [Float]?)
     typealias PrepareModels = @Sendable (Workspace) async throws -> Void
-    typealias TranscribePassFromSamples = @Sendable ([Float], AudioSource, Workspace) async throws -> [TranscriptSegment]
+    typealias TranscribePassFromSamples = @Sendable ([Float], AudioSource, Workspace) async throws -> ([TranscriptSegment], [String: [Float]])
     typealias SaveContext = @Sendable (ModelContext) throws -> Void
 
     private let transcriptionService: TranscriptionService
@@ -59,18 +59,23 @@ actor RetranscriptionService {
             let extracted = try extractSamples(mixdownURL, isStereo)
             try await prepareModelsHandler(workspace)
 
-            async let micSegments = transcribePassFromSamplesHandler(extracted.mic, .mic, workspace)
-            async let appSegments: [TranscriptSegment] = {
-                guard let appSamples = extracted.app else { return [] }
+            async let micResult = transcribePassFromSamplesHandler(extracted.mic, .mic, workspace)
+            async let appResult: ([TranscriptSegment], [String: [Float]]) = {
+                guard let appSamples = extracted.app else { return ([], [:]) }
                 return try await transcribePassFromSamplesHandler(appSamples, .app, workspace)
             }()
 
-            let merged = (try await (micSegments + appSegments)).sorted { $0.startTime < $1.startTime }
+            let (micSegments, micEmbeddings) = try await micResult
+            let (appSegments, appEmbeddings) = try await appResult
+            
+            let merged = (micSegments + appSegments).sorted { $0.startTime < $1.startTime }
+            let mergedEmbeddings = micEmbeddings.merging(appEmbeddings) { (current, _) in current }
+
             let speakerIDs = Array(Set(merged.map(\.speakerId))).sorted()
             let speakers = speakerIDs.enumerated().map { index, speakerID in
                 TranscriptSpeaker(
                     id: speakerID,
-                    label: "Speaker \(index + 1)",
+                    label: speakerID.hasPrefix("app:") || speakerID.hasPrefix("mic:") || speakerID.hasPrefix("unknown") ? "Speaker \(index + 1)" : speakerID,
                     colorHex: transcriptAligner.speakerColorHex(at: index)
                 )
             }
@@ -79,7 +84,8 @@ actor RetranscriptionService {
                 session.retranscript = Transcript(
                     fullText: merged.map(\.text).joined(separator: " "),
                     segments: merged,
-                    speakers: speakers
+                    speakers: speakers,
+                    speakerEmbeddings: mergedEmbeddings
                 )
                 session.status = .done
                 try? saveContext(context)

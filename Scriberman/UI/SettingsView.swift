@@ -4,6 +4,7 @@ struct SettingsView: View {
     private enum SettingsTab {
         case general
         case prompts
+        case advanced
     }
 
     private enum Field: Hashable {
@@ -172,6 +173,45 @@ struct SettingsView: View {
                     Label("Prompts", systemImage: "text.bubble")
                 }
                 .tag(SettingsTab.prompts)
+
+                Form {
+                    Section("Diarization Settings") {
+                        VStack(alignment: .leading) {
+                            HStack {
+                                Text("Speaker Similarity")
+                                Spacer()
+                                Text(String(format: "%.2f", viewModel.speakerThreshold))
+                                    .monospacedDigit()
+                            }
+                            Slider(value: $viewModel.speakerThreshold, in: 0.1...0.9, step: 0.01)
+                            Text("Lower values are stricter, higher values group more aggressively.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading) {
+                            HStack {
+                                Text("Min Silence Gap")
+                                Spacer()
+                                Text(String(format: "%.2fs", viewModel.minSilenceGap))
+                                    .monospacedDigit()
+                            }
+                            Slider(value: $viewModel.minSilenceGap, in: 0.1...2.0, step: 0.1)
+                            Text("Minimum duration of silence between speaker turns.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Section("Speaker Profiles") {
+                        SpeakerManagementView(store: viewModel.speakerEmbeddingStore)
+                    }
+                }
+                .formStyle(.grouped)
+                .tabItem {
+                    Label("Advanced", systemImage: "slider.horizontal.3")
+                }
+                .tag(SettingsTab.advanced)
             }
             .navigationTitle("Settings")
         }

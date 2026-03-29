@@ -2,7 +2,8 @@ import SwiftUI
 
 struct TranscriptStudyView: View {
     let session: any TranscribableSession
-    let transcript: Transcript
+    @State private var transcript: Transcript
+    let store: SpeakerEmbeddingStore?
     let showRawMarkdownToggle: Bool
 
     @State private var showRawMarkdown = false
@@ -12,10 +13,12 @@ struct TranscriptStudyView: View {
     init(
         session: any TranscribableSession,
         transcript: Transcript,
+        store: SpeakerEmbeddingStore? = nil,
         showRawMarkdownToggle: Bool = true
     ) {
         self.session = session
-        self.transcript = transcript
+        self._transcript = State(initialValue: transcript)
+        self.store = store
         self.showRawMarkdownToggle = showRawMarkdownToggle
     }
 
@@ -35,7 +38,9 @@ struct TranscriptStudyView: View {
                 } else {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(blocks) { block in
-                            TranscriptBlockView(block: block)
+                            TranscriptBlockView(block: block) { newName in
+                                renameSpeaker(id: block.speaker.id, to: newName)
+                            }
                         }
                     }
                 }
@@ -63,6 +68,36 @@ struct TranscriptStudyView: View {
 
     private var rawMarkdown: String {
         markdownRenderer.renderMarkdown(session: session, transcript: transcript)
+    }
+
+    private func renameSpeaker(id: String, to newName: String) {
+        var updatedTranscript = transcript
+        var updatedSpeakers = updatedTranscript.speakers
+        if let index = updatedSpeakers.firstIndex(where: { $0.id == id }) {
+            let oldSpeaker = updatedSpeakers[index]
+            updatedSpeakers[index] = TranscriptSpeaker(id: oldSpeaker.id, label: newName, colorHex: oldSpeaker.colorHex)
+            updatedTranscript = Transcript(
+                fullText: updatedTranscript.fullText,
+                segments: updatedTranscript.segments,
+                speakers: updatedSpeakers,
+                speakerEmbeddings: updatedTranscript.speakerEmbeddings
+            )
+            self.transcript = updatedTranscript
+            
+            // Persist back to session
+            if session.retranscript != nil {
+                session.retranscript = updatedTranscript
+            } else {
+                session.transcript = updatedTranscript
+            }
+
+            // Enroll in profile database if we have an embedding
+            if let embedding = updatedTranscript.speakerEmbeddings?[id], let store = store {
+                Task {
+                    try? await store.enrollSpeaker(name: newName, embedding: embedding)
+                }
+            }
+        }
     }
 
     @ToolbarContentBuilder

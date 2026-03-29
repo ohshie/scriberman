@@ -7,6 +7,7 @@ struct TranscriptDetailView: View {
     let onDelete: () -> Void
     let onOpenStudy: (() -> Void)?
 
+    @EnvironmentObject private var appState: AppState
     @Environment(AIProviderService.self) private var aiProviderService
     @State private var showingDeleteConfirmation = false
     @State private var promptStore = AIPromptStore()
@@ -363,6 +364,23 @@ struct TranscriptDetailViewState {
 
     var isReprocessing: Bool {
         session.status == .retranscribing
+    }
+}
+
+private struct AnalyzableView: View {
+    let session: any TranscribableSession
+    let transcript: Transcript
+    let appState: AppState
+    let aiProviderService: AIProviderService
+
+    var body: some View {
+        TranscriptStudyView(
+            session: session,
+            transcript: transcript,
+            store: appState.services.speakerEmbeddingStore
+        )
+        .environmentObject(appState)
+        .environment(aiProviderService)
     }
 }
 

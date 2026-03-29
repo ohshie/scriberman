@@ -35,9 +35,11 @@ actor TranscriptionService: @preconcurrency TranscriptionServiceProtocol {
     private let segmentSpeech: SegmentSpeech
     private let extractSamples: ExtractSamples
     private let prepareModelsHandler: PrepareModelsHandler?
+    private let speakerEmbeddingStore: SpeakerEmbeddingStore?
     private let minimumChunkSamples = 16_000
 
     init(
+        speakerEmbeddingStore: SpeakerEmbeddingStore? = nil,
         resampleAudioFile: @escaping ResampleAudioFile = { url in
             try AudioConverter().resampleAudioFile(url)
         },
@@ -50,6 +52,7 @@ actor TranscriptionService: @preconcurrency TranscriptionServiceProtocol {
         },
         prepareModelsHandler: PrepareModelsHandler? = nil
     ) {
+        self.speakerEmbeddingStore = speakerEmbeddingStore
         self.resampleAudioFile = resampleAudioFile
         self.segmentSpeech = segmentSpeech
         self.extractSamples = extractSamples
@@ -66,7 +69,7 @@ actor TranscriptionService: @preconcurrency TranscriptionServiceProtocol {
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
 
-        let requiredGroups: [ModelGroup] = [.asrParakeetV3, .vadSilero, .diarization]
+        let requiredGroups: [ModelGroup] = [.asrParakeetV3, .vadSilero, .offlineDiarization]
         var missingRepos: [String] = []
 
         for group in requiredGroups {
@@ -119,13 +122,13 @@ actor TranscriptionService: @preconcurrency TranscriptionServiceProtocol {
             throw TranscriptionError.failedToTranscribe("M4A extraction failed - \(error.localizedDescription)")
         }
 
-        async let micSegments = transcribePassFromSamples(
+        async let micResult = transcribePassFromSamples(
             samples: extractedSamples.mic,
             source: .mic,
             workspace: workspace
         )
-        async let appSegments: [TranscriptSegment] = {
-            guard let appSamples = extractedSamples.app else { return [] }
+        async let appResult: ([TranscriptSegment], [String: [Float]]) = {
+            guard let appSamples = extractedSamples.app else { return ([], [:]) }
             return try await transcribePassFromSamples(
                 samples: appSamples,
                 source: .app,
@@ -133,13 +136,18 @@ actor TranscriptionService: @preconcurrency TranscriptionServiceProtocol {
             )
         }()
 
+        let (micSegments, micEmbeddings) = try await micResult
+        let (appSegments, appEmbeddings) = try await appResult
+        
         let mergedSegments = try await mergeByTimestamp(micSegments + appSegments)
+        let mergedEmbeddings = micEmbeddings.merging(appEmbeddings) { (current, _) in current }
+
         logger.info("Completed transcription for session \(session.id, privacy: .public) with \(mergedSegments.count, privacy: .public) segments")
         let speakerIds = Array(Set(mergedSegments.map(\.speakerId))).sorted()
         let speakers = speakerIds.enumerated().map { index, speakerId in
             TranscriptSpeaker(
                 id: speakerId,
-                label: "Speaker \(index + 1)",
+                label: speakerId.hasPrefix("app:") || speakerId.hasPrefix("mic:") || speakerId.hasPrefix("unknown") ? "Speaker \(index + 1)" : speakerId,
                 colorHex: transcriptAligner.speakerColorHex(at: index)
             )
         }
@@ -147,7 +155,8 @@ actor TranscriptionService: @preconcurrency TranscriptionServiceProtocol {
         return Transcript(
             fullText: mergedSegments.map(\.text).joined(separator: " "),
             segments: mergedSegments,
-            speakers: speakers
+            speakers: speakers,
+            speakerEmbeddings: mergedEmbeddings
         )
     }
 
@@ -155,7 +164,7 @@ actor TranscriptionService: @preconcurrency TranscriptionServiceProtocol {
         url: URL,
         source: AudioSource,
         workspace: Workspace
-    ) async throws -> [TranscriptSegment] {
+    ) async throws -> ([TranscriptSegment], [String: [Float]]) {
         let passName = source == .app ? "app" : "mic"
         logger.info("Starting \(passName, privacy: .public) pass for file \(url.lastPathComponent, privacy: .public)")
         guard fileManager.fileExists(atPath: url.path) else {
@@ -176,7 +185,7 @@ actor TranscriptionService: @preconcurrency TranscriptionServiceProtocol {
         samples: [Float],
         source: AudioSource,
         workspace: Workspace
-    ) async throws -> [TranscriptSegment] {
+    ) async throws -> ([TranscriptSegment], [String: [Float]]) {
         _ = workspace
         let passName = source == .app ? "app" : "mic"
         let speechSegments: [VadSegment]
@@ -188,21 +197,23 @@ actor TranscriptionService: @preconcurrency TranscriptionServiceProtocol {
 
         guard !speechSegments.isEmpty else {
             logger.info("\(passName, privacy: .public) pass produced no speech segments")
-            return []
+            return ([], [:])
         }
 
         let asrManager = AsrManager(config: .default)
-        let diarizerManager = DiarizerManager(config: .default)
+        let offlineDiarizerManager = OfflineDiarizerManager(config: .default)
         do {
             let asrModels = try await AsrModels.downloadAndLoad()
             try await asrManager.initialize(models: asrModels)
-            let diarizerModels = try await DiarizerModels.downloadIfNeeded()
-            diarizerManager.initialize(models: diarizerModels)
+            
+            let diarizerModels = try await OfflineDiarizerModels.load(from: workspace.modelsURL)
+            offlineDiarizerManager.initialize(models: diarizerModels)
+        } catch {
         } catch {
             throw TranscriptionError.failedToTranscribe("\(passName) pass: model initialization failed - \(error.localizedDescription)")
         }
 
-        var allSegments: [TranscriptSegment] = []
+        var asrSegments: [TranscriptSegment] = []
         for speechSegment in speechSegments {
             let startIndex = max(0, Int(speechSegment.startTime * 16_000.0))
             let endIndex = min(samples.count, max(startIndex + 1, Int(speechSegment.endTime * 16_000.0)))
@@ -214,52 +225,120 @@ actor TranscriptionService: @preconcurrency TranscriptionServiceProtocol {
             if chunkSamples.count < minimumChunkSamples {
                 let missing = minimumChunkSamples - chunkSamples.count
                 chunkSamples.append(contentsOf: Array(repeating: 0, count: missing))
-                logger.info("Padded \(passName, privacy: .public) chunk from \(chunkSamples.count - missing, privacy: .public) to \(chunkSamples.count, privacy: .public) samples")
             }
 
             let asrResult: ASRResult
-            let diarizationResult: DiarizationResult
             do {
                 asrResult = try await asrManager.transcribe(chunkSamples, source: .system)
-                diarizationResult = try diarizerManager.performCompleteDiarization(chunkSamples, sampleRate: 16_000)
             } catch {
-                throw TranscriptionError.failedToTranscribe("\(passName) pass: ASR/diarization failed - \(error.localizedDescription)")
+                throw TranscriptionError.failedToTranscribe("\(passName) pass: ASR failed - \(error.localizedDescription)")
             }
 
-            let aligned = transcriptAligner.alignTranscript(
-                fullText: asrResult.text,
-                tokenTimings: asrResult.tokenTimings ?? [],
-                diarizedSegments: diarizationResult.segments,
-                source: source
-            )
-
-            let adjusted: [TranscriptSegment] = aligned.segments.map { segment in
-                let speakerId: String
-                if source == .app {
-                    speakerId = segment.speakerId.hasPrefix("app:") ? segment.speakerId : "app:\(segment.speakerId)"
-                } else {
-                    speakerId = segment.speakerId
-                }
-                return TranscriptSegment(
-                    speakerId: speakerId,
-                    text: segment.text,
-                    startTime: segment.startTime + Float(speechSegment.startTime),
-                    endTime: segment.endTime + Float(speechSegment.startTime),
+            // Map ASR result tokens to segments with global timestamps
+            let tokens = asrResult.tokenTimings ?? []
+            if !tokens.isEmpty {
+                // For simplicity in this refactor, we'll create a single segment per VAD chunk for now
+                // but aligned with global timestamps. 
+                // In a full implementation, we might split by words.
+                let segment = TranscriptSegment(
+                    speakerId: "unknown",
+                    text: asrResult.text,
+                    startTime: Float(speechSegment.startTime),
+                    endTime: Float(speechSegment.endTime),
                     audioSource: source
                 )
+                asrSegments.append(segment)
             }
-
-            allSegments.append(contentsOf: adjusted)
         }
 
-        return allSegments
+        // Global Offline Diarization
+        let diarizationResult: DiarizationResult
+        do {
+            diarizationResult = try await offlineDiarizerManager.process(audio: samples)
+        } catch {
+            throw TranscriptionError.failedToTranscribe("\(passName) pass: Offline diarization failed - \(error.localizedDescription)")
+        }
+
+        // Speaker Matching logic for Task 2.3
+        var speakerMapping: [String: String] = [:] // Map local ID to Profile Name
+        if let store = speakerEmbeddingStore {
+            if let db = diarizationResult.speakerDatabase {
+                for (clusterId, embedding) in db {
+                    // Try to find a match in the store
+                    let profiles = try? await store.fetchAll()
+                    var bestMatch: SpeakerProfile?
+                    var bestSimilarity: Float = Float.greatestFiniteMagnitude
+
+                    for profile in profiles ?? [] {
+                        let distance = SpeakerUtilities.cosineDistance(embedding, profile.embedding)
+                        if distance < bestSimilarity && distance < 0.28 { 
+                            bestSimilarity = distance
+                            bestMatch = profile
+                        }
+                    }
+
+                    if let match = bestMatch {
+                        speakerMapping[clusterId] = match.name
+                        try? await store.updateProfile(id: match.id)
+                    }
+                }
+            }
+        }
+
+        // Align ASR segments with global diarization
+        let alignedSegments = transcriptAligner.alignTranscript(
+            fullText: asrSegments.map(\.text).joined(separator: " "),
+            tokenTimings: [], // We already have coarse segments
+            diarizedSegments: diarizationResult.segments,
+            source: source
+        )
+
+        // Adjust speaker IDs for app source and apply global speaker names
+        let finalSegments = alignedSegments.segments.map { segment in
+            let baseId = segment.speakerId
+            let mappedName = speakerMapping[baseId]
+            let finalSpeakerId = mappedName ?? baseId
+
+            let speakerId: String
+            if source == .app {
+                speakerId = finalSpeakerId.hasPrefix("app:") ? finalSpeakerId : "app:\(finalSpeakerId)"
+            } else {
+                speakerId = finalSpeakerId
+            }
+            return TranscriptSegment(
+                speakerId: speakerId,
+                text: segment.text,
+                startTime: segment.startTime,
+                endTime: segment.endTime,
+                audioSource: source
+            )
+        }
+
+        // Map embeddings to final speaker IDs
+        var finalEmbeddings: [String: [Float]] = [:]
+        if let db = diarizationResult.speakerDatabase {
+            for (baseId, embedding) in db {
+                let mappedName = speakerMapping[baseId]
+                let finalSpeakerId = mappedName ?? baseId
+                
+                let speakerId: String
+                if source == .app {
+                    speakerId = finalSpeakerId.hasPrefix("app:") ? finalSpeakerId : "app:\(finalSpeakerId)"
+                } else {
+                    speakerId = finalSpeakerId
+                }
+                finalEmbeddings[speakerId] = embedding
+            }
+        }
+
+        return (finalSegments, finalEmbeddings)
     }
 
     func transcribePassForTesting(
         url: URL,
         source: AudioSource,
         workspace: Workspace
-    ) async throws -> [TranscriptSegment] {
+    ) async throws -> ([TranscriptSegment], [String: [Float]]) {
         try await transcribePass(url: url, source: source, workspace: workspace)
     }
 
@@ -267,7 +346,7 @@ actor TranscriptionService: @preconcurrency TranscriptionServiceProtocol {
         samples: [Float],
         source: AudioSource,
         workspace: Workspace
-    ) async throws -> [TranscriptSegment] {
+    ) async throws -> ([TranscriptSegment], [String: [Float]]) {
         try await transcribePassFromSamples(samples: samples, source: source, workspace: workspace)
     }
 }

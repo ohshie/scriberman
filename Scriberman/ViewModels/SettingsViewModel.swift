@@ -4,6 +4,7 @@ import Foundation
 final class SettingsViewModel: ObservableObject {
     private let workspaceService: WorkspaceService
     private let modelInstallService: ModelInstallService
+    let speakerEmbeddingStore: SpeakerEmbeddingStore
 
     @Published var workspacePathText: String = "Not configured"
     @Published var workspaceStatusText: String = "Select a workspace to enable model installs."
@@ -13,9 +14,23 @@ final class SettingsViewModel: ObservableObject {
     @Published var modelDownloadProgress: [ModelGroup: Double] = [:]
     @Published var canDownloadModels = false
 
-    init(workspaceService: WorkspaceService, modelInstallService: ModelInstallService) {
+    @Published var speakerThreshold: Double {
+        didSet { UserDefaults.standard.set(speakerThreshold, forKey: "speakerThreshold") }
+    }
+    @Published var minSilenceGap: Double {
+        didSet { UserDefaults.standard.set(minSilenceGap, forKey: "minSilenceGap") }
+    }
+
+    init(workspaceService: WorkspaceService, modelInstallService: ModelInstallService, speakerEmbeddingStore: SpeakerEmbeddingStore) {
         self.workspaceService = workspaceService
         self.modelInstallService = modelInstallService
+        self.speakerEmbeddingStore = speakerEmbeddingStore
+
+        let threshold = UserDefaults.standard.double(forKey: "speakerThreshold")
+        self.speakerThreshold = threshold == 0 ? 0.65 : threshold
+
+        let gap = UserDefaults.standard.double(forKey: "minSilenceGap")
+        self.minSilenceGap = gap == 0 ? 0.5 : gap
 
         ModelGroup.allCases.forEach { group in
             modelStates[group] = .missing

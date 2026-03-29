@@ -163,7 +163,7 @@ actor ModelInstallService {
         case .vadSilero:
             try await DownloadUtils.downloadRepo(.vad, to: stagingRoot, progressHandler: progressHandler)
 
-        case .diarization:
+        case .diarization, .offlineDiarization:
             try await DownloadUtils.downloadRepo(.diarizer, to: stagingRoot, progressHandler: progressHandler)
         }
     }
@@ -277,7 +277,7 @@ actor ModelInstallService {
         case .vadSilero:
             return requiredFilesExist(in: repoURL, required: ModelNames.VAD.requiredModels)
 
-        case .diarization:
+        case .diarization, .offlineDiarization:
             return requiredFilesExist(in: repoURL, required: ModelNames.Diarizer.requiredModels)
         }
     }
@@ -301,7 +301,7 @@ actor ModelInstallService {
             repoName = .parakeet
         case .vadSilero:
             repoName = .vad
-        case .diarization:
+        case .diarization, .offlineDiarization:
             repoName = .diarizer
         }
 

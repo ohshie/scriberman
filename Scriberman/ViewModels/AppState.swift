@@ -52,7 +52,8 @@ final class AppState: ObservableObject {
         )
         self.settingsViewModel = SettingsViewModel(
             workspaceService: services.workspaceService,
-            modelInstallService: services.modelInstallService
+            modelInstallService: services.modelInstallService,
+            speakerEmbeddingStore: services.speakerEmbeddingStore
         )
     }
 

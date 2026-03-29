@@ -160,7 +160,11 @@ struct AppShellView: View {
             }
         case .recording(let session):
             if detailMode == .study, let transcript = displayedTranscript(for: session) {
-                TranscriptStudyView(session: session, transcript: transcript)
+                TranscriptStudyView(
+                    session: session,
+                    transcript: transcript,
+                    store: appState.services.speakerEmbeddingStore
+                )
             } else {
                 TranscriptDetailView(
                     session: session,
@@ -179,7 +183,11 @@ struct AppShellView: View {
 
         case .imported(let session):
             if detailMode == .study, let transcript = displayedTranscript(for: session) {
-                TranscriptStudyView(session: session, transcript: transcript)
+                TranscriptStudyView(
+                    session: session,
+                    transcript: transcript,
+                    store: appState.services.speakerEmbeddingStore
+                )
             } else {
                 TranscriptDetailView(
                     session: session,
