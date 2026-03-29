@@ -37,8 +37,10 @@ struct AppShellView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .toolbar {
+            sidebarToolbar
             jobsToolbar
         }
+        .toolbar(removing: .sidebarToggle)
         .toolbar(removing: .title)
         .toolbar(removing: .search)
         .frame(minWidth: 860, minHeight: 580)
@@ -173,6 +175,20 @@ struct AppShellView: View {
     }
 
     @ToolbarContentBuilder
+    private var sidebarToolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            Button {
+                withAnimation(.snappy(duration: 0.22)) {
+                    toggleSidebarVisibility()
+                }
+            } label: {
+                Image(systemName: isSidebarVisible ? "sidebar.left" : "sidebar.right")
+            }
+            .help(isSidebarVisible ? "Hide Sidebar" : "Show Sidebar")
+        }
+    }
+
+    @ToolbarContentBuilder
     private var jobsToolbar: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             Button {
@@ -184,5 +200,13 @@ struct AppShellView: View {
                 Label("New Session", systemImage: "plus")
             }
         }
+    }
+
+    private var isSidebarVisible: Bool {
+        columnVisibility != .detailOnly
+    }
+
+    private func toggleSidebarVisibility() {
+        columnVisibility = isSidebarVisible ? .detailOnly : .all
     }
 }
