@@ -14,6 +14,7 @@ struct TranscriptDetailView: View {
     @State private var selectedTransformationID: UUID?
     @State private var isRunningTransformation = false
     @State private var transformationErrorMessage: String?
+    @State private var showingStudyTranscript = false
 
     private var viewState: TranscriptDetailViewState {
         TranscriptDetailViewState(session: session)
@@ -62,6 +63,14 @@ struct TranscriptDetailView: View {
         } message: {
             Text("This permanently deletes the selected session.")
         }
+        .sheet(isPresented: $showingStudyTranscript) {
+            if let transcript = viewState.displayedTranscript {
+                TranscriptStudyView(session: session, transcript: transcript)
+                    .frame(minWidth: 720, minHeight: 520)
+            } else {
+                EmptyView()
+            }
+        }
         .task {
             loadPromptState()
             refreshSelectedTransformation()
@@ -81,8 +90,21 @@ struct TranscriptDetailView: View {
 
     private var transcriptBody: some View {
         VStack(alignment: .leading, spacing: 18) {
-            sectionCard(title: "Transcript", text: viewState.finalTranscriptText)
+            TranscriptPreviewView(blocks: transcriptBlocks)
+
+            Button {
+                showingStudyTranscript = true
+            } label: {
+                Label("Study Transcript", systemImage: "book.pages")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(viewState.displayedTranscript == nil)
         }
+    }
+
+    private var transcriptBlocks: [TranscriptBlock] {
+        guard let transcript = viewState.displayedTranscript else { return [] }
+        return TranscriptGrouper.makeBlocks(from: transcript)
     }
 
     private var aiTransformationSection: some View {

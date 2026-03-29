@@ -17,4 +17,12 @@ final class TimeFormatterTests: XCTestCase {
     func testNegativeInputIsTreatedAsZero() {
         XCTAssertEqual(TimeFormatter.format(seconds: -5), "00:00")
     }
+
+    func testMillisecondsFormatIncludesHoursMinutesSecondsAndMilliseconds() {
+        XCTAssertEqual(TimeFormatter.formatWithMilliseconds(seconds: 3_661.042), "01:01:01,042")
+    }
+
+    func testMillisecondsFormatTreatsNegativeInputAsZero() {
+        XCTAssertEqual(TimeFormatter.formatWithMilliseconds(seconds: -1.5), "00:00:00,000")
+    }
 }
