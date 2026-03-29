@@ -3,6 +3,7 @@ import SwiftData
 
 struct ServiceContainer {
     let bookmarkStore: BookmarkStore
+    let aiProviderService: AIProviderService
     let workspaceService: WorkspaceService
     let modelInstallService: ModelInstallService
     let recordingService: RecordingService
@@ -17,6 +18,7 @@ struct ServiceContainer {
     @MainActor
     static func live(modelContainer: ModelContainer = defaultModelContainer()) -> ServiceContainer {
         let bookmarkStore = UserDefaultsBookmarkStore()
+        let aiProviderStore = AIProviderStore()
         let workspaceService = WorkspaceService(bookmarkStore: bookmarkStore)
         let transcriptionService = TranscriptionService()
         let retranscriptionService = RetranscriptionService(transcriptionService: transcriptionService)
@@ -24,6 +26,10 @@ struct ServiceContainer {
 
         return ServiceContainer(
             bookmarkStore: bookmarkStore,
+            aiProviderService: AIProviderService(
+                keychainStore: LiveKeychainStore(),
+                store: aiProviderStore
+            ),
             workspaceService: workspaceService,
             modelInstallService: ModelInstallService(workspaceService: workspaceService),
             recordingService: RecordingService(

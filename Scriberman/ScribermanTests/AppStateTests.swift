@@ -91,9 +91,18 @@ final class AppStateTests: XCTestCase {
         let workspaceService = WorkspaceService(bookmarkStore: bookmarkStore)
         let transcriptionService = TranscriptionService()
         let retranscriptionService = RetranscriptionService(transcriptionService: transcriptionService)
+        let keychainStore = InMemoryKeychainStore()
+        let defaultsSuite = "AppStateTests.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: defaultsSuite) ?? .standard
+        userDefaults.removePersistentDomain(forName: defaultsSuite)
+        let aiProviderStore = AIProviderStore(defaults: userDefaults)
 
         return ServiceContainer(
             bookmarkStore: bookmarkStore,
+            aiProviderService: AIProviderService(
+                keychainStore: keychainStore,
+                store: aiProviderStore
+            ),
             workspaceService: workspaceService,
             modelInstallService: ModelInstallService(workspaceService: workspaceService),
             recordingService: RecordingService(
@@ -108,6 +117,22 @@ final class AppStateTests: XCTestCase {
             audioImportService: AudioImportService(retranscriptionService: retranscriptionService),
             transcriptExportService: TranscriptExportService()
         )
+    }
+}
+
+private final class InMemoryKeychainStore: KeychainStore {
+    private var storage: [String: String] = [:]
+
+    func save(key: String, value: String) throws {
+        storage[key] = value
+    }
+
+    func read(key: String) -> String? {
+        storage[key]
+    }
+
+    func delete(key: String) throws {
+        storage.removeValue(forKey: key)
     }
 }
 

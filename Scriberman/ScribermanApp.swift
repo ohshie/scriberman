@@ -25,6 +25,7 @@ struct ScribermanApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(appState)
+                .environment(appState.aiProviderService)
                 .task {
                     await appState.bootstrapWorkspace()
                 }
@@ -37,6 +38,7 @@ struct ScribermanApp: App {
         Settings {
             SettingsView(viewModel: appState.settingsViewModel)
                 .environmentObject(appState)
+                .environment(appState.aiProviderService)
         }
     }
 }
