@@ -96,8 +96,10 @@
 		C16E1FE0441F3C95A965E4C0 /* RecordingServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A52CE181E590B26D3C4E9A5D /* RecordingServiceProtocol.swift */; };
 		C3EE37FB3F5E384076FF1B4E /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = DDA5336F2945D8E09B308BC2 /* FluidAudio */; };
 		C4EC45D56DEE48C672BEE45A /* TimeFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98A016607CB87709B794542A /* TimeFormatterTests.swift */; };
+		E1A2B3C4D5E6F708192A3B4C /* TranscriptGrouperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A2B3C4D5E6F708192A3B4D /* TranscriptGrouperTests.swift */; };
 		C777A4877EC482FDA7D4659C /* TranscriptAligner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A0DE555D53428ABBBCE123E /* TranscriptAligner.swift */; };
 		C8BE5BFB9362549C53823350 /* TokenStitcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FF38F82AD4960A1C5B3E860 /* TokenStitcher.swift */; };
+		F1A2B3C4D5E6F708192A3B4C /* TranscriptGrouper.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F708192A3B4D /* TranscriptGrouper.swift */; };
 		D0AD07DBAD50A6EF4CD90C2B /* MockWorkspaceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4A24E4069AF734D90C9236E /* MockWorkspaceService.swift */; };
 		EF15FDA2B169C6BE3CB9FB4A /* Workspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DFBA039128F2B74BE4BB578 /* Workspace.swift */; };
 /* End PBXBuildFile section */
@@ -208,6 +210,8 @@
 		E01B42C4D525868024537572 /* SettingsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		E6B44A3BD4A39AE7EB75ED6B /* TokenStitcherTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TokenStitcherTests.swift; sourceTree = "<group>"; };
 		EDB34ACA26BE9E4D8CC45D74 /* MockRecordingService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MockRecordingService.swift; sourceTree = "<group>"; };
+		E1A2B3C4D5E6F708192A3B4D /* TranscriptGrouperTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TranscriptGrouperTests.swift; sourceTree = "<group>"; };
+		F1A2B3C4D5E6F708192A3B4D /* TranscriptGrouper.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TranscriptGrouper.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -243,6 +247,7 @@
 				98A016607CB87709B794542A /* TimeFormatterTests.swift */,
 				E6B44A3BD4A39AE7EB75ED6B /* TokenStitcherTests.swift */,
 				9D3289E92C029611DDA5CB75 /* TranscriptAlignerTests.swift */,
+				E1A2B3C4D5E6F708192A3B4D /* TranscriptGrouperTests.swift */,
 				5C7FDED408995E8535F576A9 /* Mocks */,
 				63F7B7CE8A7FE4E0F6C5539F /* JobsViewModelTests.swift */,
 				C1B2C3D4E5F60718293A4B5D /* NewSessionViewModelTests.swift */,
@@ -399,6 +404,7 @@
 				8FF38F82AD4960A1C5B3E860 /* TokenStitcher.swift */,
 				6A0DE555D53428ABBBCE123E /* TranscriptAligner.swift */,
 				AC3C4EF936A2E2BEA0BD4CAF /* MarkdownRenderer.swift */,
+				F1A2B3C4D5E6F708192A3B4D /* TranscriptGrouper.swift */,
 			);
 			path = Helpers;
 			sourceTree = "<group>";
@@ -585,6 +591,7 @@
 				C8BE5BFB9362549C53823350 /* TokenStitcher.swift in Sources */,
 				791009652F785B5900225294 /* ImportedSessionRow.swift in Sources */,
 				C777A4877EC482FDA7D4659C /* TranscriptAligner.swift in Sources */,
+				F1A2B3C4D5E6F708192A3B4C /* TranscriptGrouper.swift in Sources */,
 				06B30512C65DF04AFA9A0026 /* MarkdownRenderer.swift in Sources */,
 				993FF0F23A6CE7ED3F1B8F49 /* WorkspaceServiceProtocol.swift in Sources */,
 				C16E1FE0441F3C95A965E4C0 /* RecordingServiceProtocol.swift in Sources */,
@@ -611,6 +618,7 @@
 				791009632F7859E200225294 /* AudioImportServiceTests.swift in Sources */,
 				BBDF7C9B39514CB1CAFE28C5 /* TokenStitcherTests.swift in Sources */,
 				0779163432BE273DD07FC2E9 /* TranscriptAlignerTests.swift in Sources */,
+				E1A2B3C4D5E6F708192A3B4C /* TranscriptGrouperTests.swift in Sources */,
 				79E005DC2F76777E00D3EAD9 /* MockAudioDeviceService.swift in Sources */,
 				A66A66A66A66A66A66A66A66 /* MockKeychainStore.swift in Sources */,
 				79E005E02F767AE100D3EAD9 /* AppAudioServiceTests.swift in Sources */,

@@ -52,3 +52,12 @@ struct TranscriptSegment: Codable, Equatable {
         try container.encode(audioSource, forKey: .audioSource)
     }
 }
+
+struct TranscriptBlock: Identifiable {
+    let id = UUID()
+    let speaker: TranscriptSpeaker
+    let audioSource: AudioSource
+    let startTime: Float
+    let endTime: Float
+    let text: String
+}
