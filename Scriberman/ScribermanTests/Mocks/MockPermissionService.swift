@@ -10,6 +10,7 @@ final class MockPermissionService: PermissionServiceProtocol {
     var requestMicResult = false
     var requestMicCalls = 0
     var requestScreenRecordingResult = false
+    var requestScreenRecordingCalls = 0
     var verifyMicResult = false
     var verifyMicCalls = 0
     var verifyScreenRecordingResult = false
@@ -40,7 +41,8 @@ final class MockPermissionService: PermissionServiceProtocol {
     }
 
     func requestScreenRecording() -> Bool {
-        requestScreenRecordingResult
+        requestScreenRecordingCalls += 1
+        return requestScreenRecordingResult
     }
 
     func verifyMic() async -> Bool {

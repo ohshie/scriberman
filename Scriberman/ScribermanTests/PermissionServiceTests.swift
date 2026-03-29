@@ -80,6 +80,22 @@ final class PermissionServiceTests: XCTestCase {
         XCTAssertTrue(userDefaults.bool(forKey: PermissionService.DefaultsKey.screenRecordingPromptHasBeenShown))
     }
 
+    func testCheckAllKeepsScreenRecordingNotDeterminedWhenPreflightIsFalseAndStatusNotDenied() {
+        microphonePermissions.status = .authorized
+        screenRecordingPermissions.preflightResult = false
+        userDefaults.set(true, forKey: PermissionService.DefaultsKey.screenRecordingPromptHasBeenShown)
+
+        service = PermissionService(
+            microphonePermissions: microphonePermissions,
+            screenRecordingPermissions: screenRecordingPermissions,
+            screenRecordingFunctionalPermissions: functionalPermissions,
+            userDefaults: userDefaults,
+            notificationCenter: notificationCenter
+        )
+
+        XCTAssertEqual(service.screenRecordingStatus, .notDetermined)
+    }
+
     func testNeedsOnboardingTrueWhenUndeterminedAndFalseAfterMarkingShown() {
         microphonePermissions.status = .notDetermined
         screenRecordingPermissions.preflightResult = false
@@ -151,7 +167,7 @@ final class PermissionServiceTests: XCTestCase {
         let granted = await service.verifyScreenRecording()
 
         XCTAssertFalse(granted)
-        XCTAssertEqual(service.screenRecordingStatus, .denied)
+        XCTAssertEqual(service.screenRecordingStatus, .notDetermined)
     }
 
     func testVerifyScreenRecordingRequiresFunctionalShareableContent() async {

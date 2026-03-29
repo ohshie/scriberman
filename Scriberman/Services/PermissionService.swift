@@ -147,8 +147,9 @@ final class PermissionService: ObservableObject, PermissionServiceProtocol {
                 screenRecordingStatus = .granted
             }
         } else {
-            let hasShownPrompt = userDefaults.bool(forKey: DefaultsKey.screenRecordingPromptHasBeenShown)
-            screenRecordingStatus = hasShownPrompt ? .denied : .notDetermined
+            if screenRecordingStatus != .denied {
+                screenRecordingStatus = .notDetermined
+            }
         }
 
         logger.info(
@@ -165,7 +166,12 @@ final class PermissionService: ObservableObject, PermissionServiceProtocol {
     func requestScreenRecording() -> Bool {
         let granted = screenRecordingPermissions.requestAccess()
         userDefaults.set(true, forKey: DefaultsKey.screenRecordingPromptHasBeenShown)
-        checkAll()
+        screenRecordingStatus = granted ? .granted : .denied
+
+        logger.info(
+            "[\(self.timestamp(), privacy: .public)] source=requestScreenRecording requestResult=\(granted, privacy: .public) screenStatus=\(self.description(for: self.screenRecordingStatus), privacy: .public)"
+        )
+
         return granted
     }
 
@@ -184,8 +190,9 @@ final class PermissionService: ObservableObject, PermissionServiceProtocol {
         let preflightGranted = screenRecordingPermissions.preflightAccess()
 
         guard preflightGranted else {
-            let hasShownPrompt = userDefaults.bool(forKey: DefaultsKey.screenRecordingPromptHasBeenShown)
-            screenRecordingStatus = hasShownPrompt ? .denied : .notDetermined
+            if screenRecordingStatus != .denied {
+                screenRecordingStatus = .notDetermined
+            }
 
             logger.info(
                 "[\(self.timestamp(), privacy: .public)] source=verifyScreenRecording screenPreflight=\(preflightGranted, privacy: .public) functional=false windowCount=0 appCount=0 screenStatus=\(self.description(for: self.screenRecordingStatus), privacy: .public)"
