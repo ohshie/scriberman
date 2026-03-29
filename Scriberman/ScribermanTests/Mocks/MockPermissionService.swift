@@ -8,6 +8,7 @@ final class MockPermissionService: PermissionServiceProtocol {
     @Published var screenRecordingStatus: PermissionStatus = .notDetermined
     var checkAllCalls = 0
     var requestMicResult = false
+    var requestMicCalls = 0
     var requestScreenRecordingResult = false
     var onboardingMarked = false
     var needsOnboardingValue = false
@@ -29,7 +30,9 @@ final class MockPermissionService: PermissionServiceProtocol {
     }
 
     func requestMic() async -> Bool {
-        requestMicResult
+        requestMicCalls += 1
+        micStatus = requestMicResult ? .granted : .denied
+        return requestMicResult
     }
 
     func requestScreenRecording() -> Bool {

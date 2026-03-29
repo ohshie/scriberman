@@ -46,6 +46,7 @@ final class NewSessionViewModel: ObservableObject {
         }
     }
     @Published private var screenRecordingStatus: PermissionStatus
+    @Published private var micStatus: PermissionStatus
     @Published var recordAppAudio: Bool = false {
         didSet {
             guard oldValue != recordAppAudio else {
@@ -63,11 +64,36 @@ final class NewSessionViewModel: ObservableObject {
         screenRecordingStatus == .granted
     }
 
+    var microphonePermissionGranted: Bool {
+        micStatus == .granted
+    }
+
+    var shouldShowMicrophonePermissionPrompt: Bool {
+        if case .idle = state {
+            return !microphonePermissionGranted
+        }
+        return false
+    }
+
+    var microphonePermissionPromptText: String {
+        switch micStatus {
+        case .notDetermined:
+            return "Allow microphone access to start recording."
+        case .denied:
+            return "Microphone access is disabled. Allow access in System Settings to start recording."
+        case .granted:
+            return ""
+        }
+    }
+
     var showAppPicker: Bool {
         recordAppAudio && screenRecordingStatus == .granted
     }
 
     var canRecord: Bool {
+        guard microphonePermissionGranted else {
+            return false
+        }
         if case .idle = state {
             return !recordAppAudio || selectedApp != nil
         }
@@ -104,6 +130,7 @@ final class NewSessionViewModel: ObservableObject {
         self.runningApps = appAudioService.runningApps
         self.selectedApp = appAudioService.selectedApp
         self.screenRecordingStatus = permissionService.screenRecordingStatus
+        self.micStatus = permissionService.micStatus
 
         handleScreenRecordingStatusChange(permissionService.screenRecordingStatus)
 
@@ -136,6 +163,12 @@ final class NewSessionViewModel: ObservableObject {
                 self?.handleScreenRecordingStatusChange(status)
             }
             .store(in: &cancellables)
+
+        permissionService.micStatusPublisher
+            .sink { [weak self] status in
+                self?.micStatus = status
+            }
+            .store(in: &cancellables)
     }
 
     func reset() {
@@ -152,6 +185,10 @@ final class NewSessionViewModel: ObservableObject {
 
     func refreshApps() {
         appAudioService.refreshRunningApps()
+    }
+
+    func requestMicrophonePermission() async {
+        _ = await permissionService.requestMic()
     }
 
     func restoreLastUsedApp() {

@@ -102,6 +102,70 @@ final class NewSessionViewModelTests: XCTestCase {
             return XCTFail("Expected idle state after reset")
         }
     }
+
+    func testCanRecordRequiresGrantedMicrophonePermission() {
+        permissionService.micStatus = .notDetermined
+        XCTAssertFalse(viewModel.canRecord)
+
+        permissionService.micStatus = .denied
+        XCTAssertFalse(viewModel.canRecord)
+
+        permissionService.micStatus = .granted
+        XCTAssertTrue(viewModel.canRecord)
+    }
+
+    func testCanRecordRequiresSelectedAppWhenAppAudioEnabled() {
+        permissionService.micStatus = .granted
+        viewModel.recordAppAudio = true
+        viewModel.selectedApp = nil
+        XCTAssertFalse(viewModel.canRecord)
+
+        let app = CapturedApp(bundleID: "com.apple.Music", name: "Music", pid: 123, icon: nil)
+        viewModel.selectedApp = app
+        XCTAssertTrue(viewModel.canRecord)
+    }
+
+    func testMicrophonePermissionPromptStateTracksMicStatus() {
+        permissionService.micStatus = .notDetermined
+        XCTAssertTrue(viewModel.shouldShowMicrophonePermissionPrompt)
+
+        permissionService.micStatus = .denied
+        XCTAssertTrue(viewModel.shouldShowMicrophonePermissionPrompt)
+
+        permissionService.micStatus = .granted
+        XCTAssertFalse(viewModel.shouldShowMicrophonePermissionPrompt)
+    }
+
+    func testRequestMicrophonePermissionInvokesPermissionService() async {
+        permissionService.requestMicResult = true
+        permissionService.micStatus = .notDetermined
+
+        await viewModel.requestMicrophonePermission()
+
+        XCTAssertEqual(permissionService.requestMicCalls, 1)
+        XCTAssertTrue(viewModel.microphonePermissionGranted)
+    }
+
+    func testNewSessionPanelShowsGrantMicrophoneAccessPrompt() throws {
+        let source = try newSessionPanelSource()
+        XCTAssertTrue(source.contains("if viewModel.shouldShowMicrophonePermissionPrompt"))
+        XCTAssertTrue(source.contains("Grant Microphone Access"))
+    }
+
+    func testNewSessionPanelPromptRequestsMicPermissionViaViewModel() throws {
+        let source = try newSessionPanelSource()
+        XCTAssertTrue(source.contains("await viewModel.requestMicrophonePermission()"))
+    }
+
+    private func newSessionPanelSource() throws -> String {
+        try readSourceFile(relativePathFromTests: "../UI/NewSessionPanelView.swift")
+    }
+
+    private func readSourceFile(relativePathFromTests: String) throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let fileURL = testsDirectory.appendingPathComponent(relativePathFromTests)
+        return try String(contentsOf: fileURL, encoding: .utf8)
+    }
 }
 
 @MainActor

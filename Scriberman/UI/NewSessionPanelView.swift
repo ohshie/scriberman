@@ -34,6 +34,21 @@ struct NewSessionPanelView: View {
 
             controlsSection(isInteractive: true)
 
+            if viewModel.shouldShowMicrophonePermissionPrompt {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(viewModel.microphonePermissionPromptText)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    Button("Grant Microphone Access") {
+                        Task {
+                            await viewModel.requestMicrophonePermission()
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+
             Button {
                 Task {
                     await viewModel.startRecording(title: pendingSession.title, context: modelContext)

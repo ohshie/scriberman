@@ -37,6 +37,46 @@ final class AppShellSidebarRegressionTests: XCTestCase {
         )
     }
 
+    func testAppShellUsesProminentDetailSplitStyleForStableDetailWidth() throws {
+        let source = try appShellSource()
+        XCTAssertTrue(
+            source.contains(".navigationSplitViewStyle(.prominentDetail)"),
+            "App shell should use prominentDetail split style to avoid detail width snap at narrow window sizes."
+        )
+    }
+
+    func testSidebarColumnDeclaresWideFlexibleBounds() throws {
+        let source = try appShellSource()
+        XCTAssertTrue(
+            source.contains(".navigationSplitViewColumnWidth(min: 380, ideal: 460)"),
+            "Sidebar column should keep explicit flexible width bounds to avoid abrupt open animation jumps at narrow window widths."
+        )
+    }
+
+    func testDetailColumnDeclaresMinimumAndIdealWidths() throws {
+        let source = try appShellSource()
+        XCTAssertTrue(
+            source.contains(".navigationSplitViewColumnWidth(min: 560, ideal: 860)"),
+            "Detail column should keep explicit minimum and ideal widths to prevent snap-to-final-width behavior during sidebar open."
+        )
+    }
+
+    func testAppShellDoesNotClampGlobalMinimumWidth() throws {
+        let source = try appShellSource()
+        XCTAssertFalse(
+            source.contains(".frame(minWidth:"),
+            "Global minimum width clamp should remain removed so split view can negotiate widths smoothly."
+        )
+    }
+
+    func testWorkspaceSelectionSheetDoesNotEnforceMinimumWidth() throws {
+        let source = try appShellSource()
+        XCTAssertFalse(
+            source.contains(".frame(minWidth: 520)"),
+            "Workspace selection sheet should avoid a fixed minimum width clamp."
+        )
+    }
+
     func testJobsViewDoesNotRenderInlineHideSidebarRow() throws {
         let source = try jobsViewSource()
         XCTAssertFalse(

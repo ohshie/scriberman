@@ -24,25 +24,27 @@ struct AppShellView: View {
                 selection: $selectedSession
             )
             .toolbar(removing: .sidebarToggle)
+            .navigationSplitViewColumnWidth(min: 380, ideal: 460)
         } detail: {
             if let selectedSession {
                 detailView(for: selectedSession)
+                    .navigationSplitViewColumnWidth(min: 560, ideal: 860)
             } else {
                 ContentUnavailableView(
                     "Select a Session",
                     systemImage: "text.bubble",
                     description: Text("Choose a session from the Jobs list to see its transcript and metadata.")
-                )
+                ).navigationSplitViewColumnWidth(min: 560, ideal: 860)
             }
         }
-        .navigationSplitViewStyle(.balanced)
+        .navigationSplitViewStyle(.prominentDetail)
         .toolbar {
             sidebarToolbar
             jobsToolbar
         }
         .toolbar(removing: .title)
         .toolbar(removing: .search)
-        .frame(minWidth: 860, minHeight: 580)
+        .frame(minHeight: 580)
         .sheet(isPresented: $appState.workspaceSelectionRequired) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Select Workspace Folder")
@@ -78,7 +80,6 @@ struct AppShellView: View {
                 }
             }
             .padding(24)
-            .frame(minWidth: 520)
         }
         .sheet(
             isPresented: Binding(
