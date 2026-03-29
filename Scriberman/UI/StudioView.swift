@@ -134,7 +134,6 @@ struct StudioView: View {
                         }
 
                         appState.jobsViewModel.transcribe(session: session, context: modelContext)
-                        appState.selectDestination(.jobs)
                     }
                 } label: {
                     VStack(spacing: 2) {

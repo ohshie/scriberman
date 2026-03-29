@@ -38,10 +38,6 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(permissionService.checkAllCalls, 1)
     }
 
-    func testSidebarDestinationsContainOnlyStudioAndJobs() {
-        XCTAssertEqual(AppState.SidebarDestination.allCases, [.studio, .jobs])
-    }
-
     func testAppBodyContainsSettingsScene() {
         let description = String(describing: ScribermanApp().body)
         XCTAssertTrue(
@@ -61,7 +57,6 @@ final class AppStateTests: XCTestCase {
 
         XCTAssertNotNil(firstPending)
         XCTAssertEqual(appState.pendingSession?.id, firstPending?.id)
-        XCTAssertEqual(appState.selectedDestination, .jobs)
     }
 
     func testDiscardPendingSessionClearsPendingAndResetsNewSessionState() {

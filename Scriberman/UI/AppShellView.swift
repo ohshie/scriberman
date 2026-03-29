@@ -17,41 +17,27 @@ struct AppShellView: View {
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            sidebar
-        } content: {
-            switch appState.selectedDestination {
-            case .studio:
-                StudioView(viewModel: appState.studioViewModel)
-
-            case .jobs:
-                JobsView(
-                    viewModel: appState.jobsViewModel,
-                    items: allSessionItems,
-                    selection: $selectedSession
-                )
-            }
+            JobsView(
+                viewModel: appState.jobsViewModel,
+                items: allSessionItems,
+                selection: $selectedSession
+            )
         } detail: {
-            switch appState.selectedDestination {
-            case .studio:
-                EmptyView()
-
-            case .jobs:
-                if let selectedSession {
-                    detailView(for: selectedSession)
-                } else {
-                    ContentUnavailableView(
-                        "Select a Session",
-                        systemImage: "text.bubble",
-                        description: Text("Choose a session from the Jobs list to see its transcript and metadata.")
-                    )
-                }
+            if let selectedSession {
+                detailView(for: selectedSession)
+            } else {
+                ContentUnavailableView(
+                    "Select a Session",
+                    systemImage: "text.bubble",
+                    description: Text("Choose a session from the Jobs list to see its transcript and metadata.")
+                )
             }
         }
         .navigationSplitViewStyle(.balanced)
         .toolbar(removing: .sidebarToggle)
         .toolbar(removing: .title)
         .toolbar(removing: .search)
-        .frame(minWidth: 900, minHeight: 600)
+        .frame(minWidth: 860, minHeight: 580)
         .sheet(isPresented: $appState.workspaceSelectionRequired) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Select Workspace Folder")
@@ -98,11 +84,6 @@ struct AppShellView: View {
             PermissionsOnboardingView(permissionService: appState.permissionService)
                 .environmentObject(appState)
         }
-        .onChange(of: appState.selectedDestination) { _, newDestination in
-            if newDestination != .jobs {
-                selectedSession = nil
-            }
-        }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else {
                 return
@@ -111,21 +92,6 @@ struct AppShellView: View {
             appState.permissionService.checkAll()
             appState.showPermissionsOnboarding = !appState.workspaceSelectionRequired && appState.permissionService.needsOnboarding
         }
-    }
-
-    private var sidebar: some View {
-        List(selection: Binding(
-            get: { appState.selectedDestination },
-            set: { appState.selectDestination($0) }
-        )) {
-            Section {
-                ForEach(AppState.SidebarDestination.allCases) { destination in
-                    Label(destination.title, systemImage: destination.systemImage)
-                        .tag(destination)
-                }
-            }
-        }
-        .listStyle(.sidebar)
     }
 
     @ViewBuilder
@@ -164,24 +130,4 @@ struct AppShellView: View {
     }
 
     @Environment(\.modelContext) private var modelContext
-}
-
-private extension AppState.SidebarDestination {
-    var title: String {
-        switch self {
-        case .studio:
-            return "Studio"
-        case .jobs:
-            return "Jobs"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .studio:
-            return "waveform"
-        case .jobs:
-            return "list.bullet.rectangle"
-        }
-    }
 }
