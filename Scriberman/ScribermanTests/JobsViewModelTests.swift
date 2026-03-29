@@ -190,6 +190,32 @@ final class JobsViewModelTests: XCTestCase {
         )
     }
 
+    func testShouldDiscardPendingSessionOnSelectionChangeIdleOnly() {
+        let pending = PendingSession(title: "Pending")
+        let recording = makeSession(status: .done)
+        let nonPendingSelection = JobsViewModel.SessionListItem.recording(recording)
+
+        let shouldDiscardIdle = viewModel.shouldDiscardPendingSessionOnSelectionChange(
+            pendingSession: pending,
+            newSelection: nonPendingSelection,
+            isNewSessionIdle: true
+        )
+        let shouldDiscardRecording = viewModel.shouldDiscardPendingSessionOnSelectionChange(
+            pendingSession: pending,
+            newSelection: nonPendingSelection,
+            isNewSessionIdle: false
+        )
+        let shouldDiscardWhenPendingSelected = viewModel.shouldDiscardPendingSessionOnSelectionChange(
+            pendingSession: pending,
+            newSelection: .pending(pending),
+            isNewSessionIdle: true
+        )
+
+        XCTAssertTrue(shouldDiscardIdle)
+        XCTAssertFalse(shouldDiscardRecording)
+        XCTAssertFalse(shouldDiscardWhenPendingSelected)
+    }
+
     private func makeSession(
         createdAt: Date = Date(timeIntervalSince1970: 0),
         status: RecordingStatus

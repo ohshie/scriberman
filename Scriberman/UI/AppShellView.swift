@@ -1,5 +1,7 @@
+import AppKit
 import SwiftData
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct AppShellView: View {
     @EnvironmentObject private var appState: AppState
@@ -104,7 +106,15 @@ struct AppShellView: View {
                     pendingSession: Binding(
                         get: { appState.pendingSession ?? pendingSession },
                         set: { appState.pendingSession = $0 }
-                    )
+                    ),
+                    onTranscribe: { session in
+                        appState.jobsViewModel.transcribe(session: session, context: modelContext)
+                        appState.discardPendingSession()
+                        selectedSession = .recording(session)
+                    },
+                    onImportFile: {
+                        presentImportPanel()
+                    }
                 )
             } else {
                 ContentUnavailableView(
@@ -140,4 +150,23 @@ struct AppShellView: View {
     }
 
     @Environment(\.modelContext) private var modelContext
+
+    private func presentImportPanel() {
+        let panel = NSOpenPanel()
+        panel.title = "Import Audio"
+        panel.prompt = "Import"
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.audio]
+
+        guard panel.runModal() == .OK else {
+            return
+        }
+
+        Task {
+            await appState.jobsViewModel.importAudio(urls: panel.urls, context: modelContext)
+            appState.discardPendingSession()
+        }
+    }
 }
