@@ -102,8 +102,8 @@ final class PermissionService: ObservableObject, PermissionServiceProtocol {
 
     var needsOnboarding: Bool {
         let hasShownOnboarding = userDefaults.bool(forKey: DefaultsKey.permissionsOnboardingHasBeenShown)
-        let hasUndeterminedPermission = micStatus == .notDetermined || screenRecordingStatus == .notDetermined
-        return !hasShownOnboarding && hasUndeterminedPermission
+        let hasUnverifiedPermission = micStatus != .granted || screenRecordingStatus != .granted
+        return !hasShownOnboarding && hasUnverifiedPermission
     }
 
     private let microphonePermissions: MicrophonePermissionProviding
@@ -143,7 +143,9 @@ final class PermissionService: ObservableObject, PermissionServiceProtocol {
         let preflightGranted = screenRecordingPermissions.preflightAccess()
 
         if preflightGranted {
-            screenRecordingStatus = .granted
+            if screenRecordingStatus != .denied {
+                screenRecordingStatus = .granted
+            }
         } else {
             let hasShownPrompt = userDefaults.bool(forKey: DefaultsKey.screenRecordingPromptHasBeenShown)
             screenRecordingStatus = hasShownPrompt ? .denied : .notDetermined

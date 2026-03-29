@@ -11,6 +11,18 @@ struct NewSessionPanelView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            if let permissionStatusWarningText = viewModel.permissionStatusWarningText {
+                Label(permissionStatusWarningText, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.yellow)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(.yellow.opacity(0.16))
+                    )
+            }
+
             switch viewModel.state {
             case .idle:
                 idleState

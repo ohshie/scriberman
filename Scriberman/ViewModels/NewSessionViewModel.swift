@@ -90,6 +90,18 @@ final class NewSessionViewModel: ObservableObject {
         recordAppAudio && screenRecordingStatus == .granted
     }
 
+    var permissionStatusWarningText: String? {
+        if micStatus != .granted {
+            return "Microphone permission is not verified. Recording is unavailable until access is granted."
+        }
+
+        if screenRecordingStatus == .denied {
+            return "Screen Recording permission verification failed. App audio capture may be unavailable until access is re-enabled in System Settings."
+        }
+
+        return nil
+    }
+
     var canRecord: Bool {
         guard microphonePermissionGranted else {
             return false

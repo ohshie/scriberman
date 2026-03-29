@@ -36,6 +36,28 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(appState.workspace, workspace)
         XCTAssertTrue(appState.showPermissionsOnboarding)
         XCTAssertEqual(permissionService.checkAllCalls, 1)
+        XCTAssertEqual(permissionService.verifyMicCalls, 1)
+        XCTAssertEqual(permissionService.verifyScreenRecordingCalls, 1)
+    }
+
+    func testBootstrapWorkspacePerformsStrictPermissionVerificationBeforeAppShell() async {
+        let permissionService = MockPermissionService()
+        permissionService.verifyMicResult = true
+        permissionService.verifyScreenRecordingResult = true
+        let services = makeServiceContainer(permissionService: permissionService)
+        let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString, isDirectory: true))
+
+        let appState = AppState(
+            services: services,
+            restoreWorkspaceHandler: { workspace }
+        )
+
+        await appState.bootstrapWorkspace()
+
+        XCTAssertEqual(permissionService.checkAllCalls, 1)
+        XCTAssertEqual(permissionService.verifyMicCalls, 1)
+        XCTAssertEqual(permissionService.verifyScreenRecordingCalls, 1)
+        XCTAssertFalse(appState.showPermissionsOnboarding)
     }
 
     func testAppSourceDeclaresSettingsScene() throws {

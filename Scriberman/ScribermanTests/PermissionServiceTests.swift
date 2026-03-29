@@ -100,6 +100,22 @@ final class PermissionServiceTests: XCTestCase {
         XCTAssertTrue(userDefaults.bool(forKey: PermissionService.DefaultsKey.permissionsOnboardingHasBeenShown))
     }
 
+    func testNeedsOnboardingTrueWhenPermissionDeniedAndOnboardingNotMarked() {
+        microphonePermissions.status = .denied
+        screenRecordingPermissions.preflightResult = false
+        userDefaults.set(true, forKey: PermissionService.DefaultsKey.screenRecordingPromptHasBeenShown)
+
+        service = PermissionService(
+            microphonePermissions: microphonePermissions,
+            screenRecordingPermissions: screenRecordingPermissions,
+            screenRecordingFunctionalPermissions: functionalPermissions,
+            userDefaults: userDefaults,
+            notificationCenter: notificationCenter
+        )
+
+        XCTAssertTrue(service.needsOnboarding)
+    }
+
     func testVerifyMicRechecksCurrentAuthorizationStatus() async {
         microphonePermissions.status = .notDetermined
         screenRecordingPermissions.preflightResult = false
