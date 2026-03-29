@@ -168,29 +168,58 @@ final class RecordingServiceTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let workspaceService = MockWorkspaceService()
-        workspaceService.currentWorkspaceResult = workspace
+        workspaceService.requireWritableResult = .success(workspace)
 
         let service = RecordingService(
             workspaceService: workspaceService,
             modelContainer: container
         )
 
-        // We can't fully start recording in a test environment (no mic),
-        // but we can test the title storage logic if we can get past the initial checks.
-        // Actually, startRecording does a lot of side effects.
-        // Let's use a simpler approach if possible, but since we updated the service,
-        // we should try to verify it.
-
         let customTitle = "My Custom Title"
-        try? await service.startRecording(in: workspace, title: customTitle)
+        try FileManager.default.createDirectory(at: workspace.tmpRecordingURL, withIntermediateDirectories: true)
+        let tmpMicURL = workspace.tmpRecordingURL.appendingPathComponent("mic.wav")
+        _ = FileManager.default.createFile(atPath: tmpMicURL.path, contents: Data("mic".utf8))
 
-        // Even if startRecording fails due to missing audio hardware in CI,
-        // we've updated the code to store the title.
-        // However, stopRecording checks isRecordingValue.
+        // Fake the recording state
+        await service.setRecordingStateForTesting(
+            isRecording: true,
+            recordingIdentifier: "test-id",
+            recordingWorkspaceRootURL: workspace.rootURL,
+            pendingTitle: customTitle
+        )
 
-        // If I can't easily test the full flow due to hardware, I'll at least verify
-        // it compiles and the logic looks sound in the implementation.
-        // But the task is to "Update RecordingServiceTests".
+        let session = await service.stopRecording()
+        XCTAssertNotNil(session)
+        XCTAssertEqual(session?.title, customTitle)
+    }
+
+    func testStopRecordingFallbacksToDefaultTitleWhenNoPendingTitle() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let service = RecordingService(
+            workspaceService: MockWorkspaceService(),
+            modelContainer: container
+        )
+
+        try FileManager.default.createDirectory(at: workspace.tmpRecordingURL, withIntermediateDirectories: true)
+        let tmpMicURL = workspace.tmpRecordingURL.appendingPathComponent("mic.wav")
+        _ = FileManager.default.createFile(atPath: tmpMicURL.path, contents: Data("mic".utf8))
+
+        await service.setRecordingStateForTesting(
+            isRecording: true,
+            recordingIdentifier: "test-id-default",
+            recordingWorkspaceRootURL: workspace.rootURL,
+            pendingTitle: nil
+        )
+
+        let session = await service.stopRecording()
+        XCTAssertNotNil(session)
+        XCTAssertTrue(session?.title.hasPrefix("Recording ") ?? false)
     }
 
     private func makeWorkspace() -> Workspace {

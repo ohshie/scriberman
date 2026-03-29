@@ -91,6 +91,20 @@ actor RecordingService: @preconcurrency RecordingServiceProtocol {
         isRecordingValue
     }
 
+    #if DEBUG
+    func setRecordingStateForTesting(
+        isRecording: Bool,
+        recordingIdentifier: String? = nil,
+        recordingWorkspaceRootURL: URL? = nil,
+        pendingTitle: String? = nil
+    ) {
+        self.isRecordingValue = isRecording
+        self.recordingIdentifier = recordingIdentifier
+        self.recordingWorkspaceRootURL = recordingWorkspaceRootURL
+        self.pendingTitle = pendingTitle
+    }
+    #endif
+
     func audioLevel() async -> Float {
         if let appAudioCaptureSession {
             let appLevel = appAudioCaptureSession.audioLevel
@@ -296,7 +310,7 @@ actor RecordingService: @preconcurrency RecordingServiceProtocol {
             duration: duration,
             micAudioURL: finalRecordingURLs.mic.path,
             appAudioURL: finalRecordingURLs.app?.path,
-            title: makeSessionTitle(createdAt: createdAt),
+            title: pendingTitle ?? makeSessionTitle(createdAt: createdAt),
             capturedAppName: activeCapturedAppName,
             status: .recorded
         )

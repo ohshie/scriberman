@@ -98,6 +98,16 @@ final class NewSessionViewModelTests: XCTestCase {
         XCTAssertEqual(audioDeviceService.incrementUsageCalls, ["uid-7"])
     }
 
+    func testStartRecordingPassesTitleToService() async {
+        permissionService.micStatus = .granted
+        let customTitle = "Meeting with Team"
+        
+        await viewModel.startRecording(title: customTitle, context: context)
+        
+        XCTAssertEqual(recordingService.startCalls.count, 1)
+        XCTAssertEqual(recordingService.startCalls.first?.title, customTitle)
+    }
+
     func testResetReturnsIdleFromStoppedState() {
         let stoppedSession = RecordingSession(
             createdAt: .now,
