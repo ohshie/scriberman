@@ -128,6 +128,7 @@ final class NewSessionViewModelTests: XCTestCase {
 
     func testCanRecordRequiresSelectedAppWhenAppAudioEnabled() {
         permissionService.micStatus = .granted
+        permissionService.screenRecordingStatus = .granted
         viewModel.recordAppAudio = true
         viewModel.selectedApp = nil
         XCTAssertFalse(viewModel.canRecord)
@@ -135,6 +136,15 @@ final class NewSessionViewModelTests: XCTestCase {
         let app = CapturedApp(bundleID: "com.apple.Music", name: "Music", pid: 123, icon: nil)
         viewModel.selectedApp = app
         XCTAssertTrue(viewModel.canRecord)
+    }
+
+    func testRecordAppAudioToggleRequestsScreenPermissionWhenNotGranted() {
+        permissionService.screenRecordingStatus = .notDetermined
+
+        viewModel.recordAppAudio = true
+
+        XCTAssertEqual(permissionService.requestScreenRecordingCalls, 1)
+        XCTAssertFalse(viewModel.recordAppAudio)
     }
 
     func testMicrophonePermissionPromptStateTracksMicStatus() {
@@ -196,6 +206,11 @@ final class NewSessionViewModelTests: XCTestCase {
     func testRefreshAudioDevicesOnPanelExpandedCallsAudioDeviceServiceRefresh() {
         viewModel.refreshAudioDevicesOnPanelExpanded()
         XCTAssertEqual(audioDeviceService.refreshDevicesCalls, 1)
+    }
+
+    func testAppAudioToggleRemainsEnabledWhenScreenPermissionNotGranted() {
+        permissionService.screenRecordingStatus = .denied
+        XCTAssertTrue(viewModel.appAudioToggleEnabled)
     }
 
     func testAirPodsDisconnectScenarioUpdatesSelectedDeviceStateFromService() {

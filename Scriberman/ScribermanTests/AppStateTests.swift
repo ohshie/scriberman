@@ -60,6 +60,18 @@ final class AppStateTests: XCTestCase {
         XCTAssertFalse(appState.showPermissionsOnboarding)
     }
 
+    func testRefreshPermissionsOnActivationPerformsStrictVerification() async {
+        let permissionService = MockPermissionService()
+        let services = makeServiceContainer(permissionService: permissionService)
+        let appState = AppState(services: services)
+
+        await appState.refreshPermissionsOnActivation()
+
+        XCTAssertEqual(permissionService.checkAllCalls, 1)
+        XCTAssertEqual(permissionService.verifyMicCalls, 1)
+        XCTAssertEqual(permissionService.verifyScreenRecordingCalls, 1)
+    }
+
     func testAppSourceDeclaresSettingsScene() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let appFileURL = testsDirectory

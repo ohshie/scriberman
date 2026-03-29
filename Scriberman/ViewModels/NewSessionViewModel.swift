@@ -53,6 +53,11 @@ final class NewSessionViewModel: ObservableObject {
                 return
             }
             if recordAppAudio {
+                guard screenRecordingPermissionGranted else {
+                    recordAppAudio = false
+                    requestScreenRecordingPermission()
+                    return
+                }
                 restoreLastUsedApp()
             } else {
                 appAudioService.selectedApp = nil
@@ -61,7 +66,7 @@ final class NewSessionViewModel: ObservableObject {
     }
 
     var appAudioToggleEnabled: Bool {
-        screenRecordingStatus == .granted
+        true
     }
 
     var microphonePermissionGranted: Bool {
@@ -205,10 +210,16 @@ final class NewSessionViewModel: ObservableObject {
 
     func refreshAudioDevicesOnAppear() {
         audioDeviceService.refreshDevices()
+        Task {
+            await recheckPermissions()
+        }
     }
 
     func refreshAudioDevicesOnPanelExpanded() {
         audioDeviceService.refreshDevices()
+        Task {
+            await recheckPermissions()
+        }
     }
 
     func requestMicrophonePermission() async {

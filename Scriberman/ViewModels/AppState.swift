@@ -120,6 +120,10 @@ final class AppState: ObservableObject {
         }
     }
 
+    func refreshPermissionsOnActivation() async {
+        await refreshPermissionPresentationState(strictVerification: true)
+    }
+
     private static func defaultPendingSessionTitle(referenceDate: Date = .now) -> String {
         let formatter = DateFormatter()
         formatter.locale = .current
