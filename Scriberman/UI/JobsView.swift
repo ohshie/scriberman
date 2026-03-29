@@ -100,7 +100,6 @@ struct JobsView: View {
             }
         }
         .listStyle(.sidebar)
-        .backgroundExtensionEffect()
     }
 
     @ViewBuilder
