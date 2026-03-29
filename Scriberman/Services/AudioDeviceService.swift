@@ -169,6 +169,7 @@ final class AudioDeviceService: ObservableObject, AudioDeviceServiceProtocol {
             guard !isApplyingSelection else {
                 return
             }
+            lastDisconnectedSelectedUID = nil
             persistSelectedUID()
         }
     }
@@ -184,24 +185,34 @@ final class AudioDeviceService: ObservableObject, AudioDeviceServiceProtocol {
     private let hardware: AudioDeviceHardwareProviding
     private let userDefaults: UserDefaults
     private let notificationCenter: NotificationCenter
+    private let hardwareListenerQueue: DispatchQueue
+    private lazy var hardwarePropertyListener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+        Task { @MainActor [weak self] in
+            self?.refreshDevices()
+        }
+    }
     private let selectedMicUIDKey = "selectedMicUID"
     private let deviceUsageScoresKey = "deviceUsageScores"
     private var configurationObserver: NSObjectProtocol?
     private var isApplyingSelection = false
     private var deviceUsageScores: [String: Int]
+    private var lastDisconnectedSelectedUID: String?
 
     init(
         hardware: AudioDeviceHardwareProviding = CoreAudioDeviceHardware(),
         userDefaults: UserDefaults = .standard,
-        notificationCenter: NotificationCenter = .default
+        notificationCenter: NotificationCenter = .default,
+        hardwareListenerQueue: DispatchQueue = .main
     ) {
         self.hardware = hardware
         self.userDefaults = userDefaults
         self.notificationCenter = notificationCenter
+        self.hardwareListenerQueue = hardwareListenerQueue
         self.deviceUsageScores = Self.loadUsageScores(from: userDefaults, key: "deviceUsageScores")
 
         availableDevices = enumerateInputDevices()
         revalidateSelectedDevice()
+        registerHardwarePropertyListeners()
 
         configurationObserver = notificationCenter.addObserver(
             forName: .AVAudioEngineConfigurationChange,
@@ -262,15 +273,24 @@ final class AudioDeviceService: ObservableObject, AudioDeviceServiceProtocol {
     }
 
     private func revalidateSelectedDevice() {
+        let defaultDevice = currentDefaultInputDevice()
+
         if let currentUID = selectedDevice?.uid,
-           let matchingCurrent = availableDevices.first(where: { $0.uid == currentUID }) {
+           let matchingCurrent = device(withUID: currentUID) {
             applySelection(matchingCurrent, persist: false)
+            recoverDisconnectedDeviceIfNeeded(defaultDevice: defaultDevice)
+            return
+        }
+
+        if let currentUID = selectedDevice?.uid {
+            lastDisconnectedSelectedUID = currentUID
+            applySelection(defaultDevice ?? availableDevices.first, persist: true)
             return
         }
 
         let savedUID = userDefaults.string(forKey: selectedMicUIDKey)
         if let savedUID,
-           let restored = availableDevices.first(where: { $0.uid == savedUID }) {
+           let restored = device(withUID: savedUID) {
             applySelection(restored, persist: false)
             return
         }
@@ -279,8 +299,7 @@ final class AudioDeviceService: ObservableObject, AudioDeviceServiceProtocol {
             userDefaults.removeObject(forKey: selectedMicUIDKey)
         }
 
-        if let defaultInputID = hardware.defaultInputDeviceID(),
-           let defaultDevice = availableDevices.first(where: { $0.id == defaultInputID }) {
+        if let defaultDevice {
             applySelection(defaultDevice, persist: false)
             return
         }
@@ -321,6 +340,59 @@ final class AudioDeviceService: ObservableObject, AudioDeviceServiceProtocol {
                 result[entry.key] = value.intValue
             }
         }
+    }
+
+    private func registerHardwarePropertyListeners() {
+        var devicesAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        _ = withUnsafePointer(to: &devicesAddress) { addressPointer in
+            AudioObjectAddPropertyListenerBlock(
+                audioObjectSystemObjectID,
+                addressPointer,
+                hardwareListenerQueue,
+                hardwarePropertyListener
+            )
+        }
+
+        var defaultInputAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        _ = withUnsafePointer(to: &defaultInputAddress) { addressPointer in
+            AudioObjectAddPropertyListenerBlock(
+                audioObjectSystemObjectID,
+                addressPointer,
+                hardwareListenerQueue,
+                hardwarePropertyListener
+            )
+        }
+    }
+
+    private func currentDefaultInputDevice() -> AudioInputDevice? {
+        guard let defaultInputID = hardware.defaultInputDeviceID() else {
+            return nil
+        }
+        return availableDevices.first(where: { $0.id == defaultInputID })
+    }
+
+    private func device(withUID uid: String) -> AudioInputDevice? {
+        availableDevices.first(where: { $0.uid == uid })
+    }
+
+    private func recoverDisconnectedDeviceIfNeeded(defaultDevice: AudioInputDevice?) {
+        guard let disconnectedUID = lastDisconnectedSelectedUID,
+              let recoveredDevice = device(withUID: disconnectedUID),
+              let selectedDevice,
+              let defaultDevice,
+              selectedDevice.uid == defaultDevice.uid else {
+            return
+        }
+        lastDisconnectedSelectedUID = nil
+        applySelection(recoveredDevice, persist: true)
     }
 
     private func applySelection(_ device: AudioInputDevice?, persist: Bool) {
