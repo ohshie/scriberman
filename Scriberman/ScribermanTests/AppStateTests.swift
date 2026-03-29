@@ -38,11 +38,16 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(permissionService.checkAllCalls, 1)
     }
 
-    func testAppBodyContainsSettingsScene() {
-        let description = String(describing: ScribermanApp().body)
+    func testAppSourceDeclaresSettingsScene() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let appFileURL = testsDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("ScribermanApp.swift")
+        let appSource = try String(contentsOf: appFileURL, encoding: .utf8)
+
         XCTAssertTrue(
-            description.contains("Settings<"),
-            "Expected ScribermanApp scene tree to contain a SwiftUI Settings scene."
+            appSource.contains("Settings {"),
+            "Expected ScribermanApp.swift to declare a SwiftUI Settings scene."
         )
     }
 
