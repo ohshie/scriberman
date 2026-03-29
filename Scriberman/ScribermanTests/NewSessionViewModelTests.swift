@@ -128,6 +128,7 @@ final class NewSessionViewModelTests: XCTestCase {
 
     func testCanRecordRequiresSelectedAppWhenAppAudioEnabled() {
         permissionService.micStatus = .granted
+        permissionService.screenRecordingStatus = .granted
         viewModel.recordAppAudio = true
         viewModel.selectedApp = nil
         XCTAssertFalse(viewModel.canRecord)
@@ -135,6 +136,15 @@ final class NewSessionViewModelTests: XCTestCase {
         let app = CapturedApp(bundleID: "com.apple.Music", name: "Music", pid: 123, icon: nil)
         viewModel.selectedApp = app
         XCTAssertTrue(viewModel.canRecord)
+    }
+
+    func testRecordAppAudioToggleRequestsScreenPermissionWhenNotGranted() {
+        permissionService.screenRecordingStatus = .notDetermined
+
+        viewModel.recordAppAudio = true
+
+        XCTAssertEqual(permissionService.requestScreenRecordingCalls, 1)
+        XCTAssertFalse(viewModel.recordAppAudio)
     }
 
     func testMicrophonePermissionPromptStateTracksMicStatus() {
@@ -148,6 +158,24 @@ final class NewSessionViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.shouldShowMicrophonePermissionPrompt)
     }
 
+    func testPermissionStatusWarningTextReflectsMicAndScreenVerificationState() {
+        permissionService.micStatus = .notDetermined
+        XCTAssertEqual(
+            viewModel.permissionStatusWarningText,
+            "Microphone permission is not verified. Recording is unavailable until access is granted."
+        )
+
+        permissionService.micStatus = .granted
+        permissionService.screenRecordingStatus = .denied
+        XCTAssertEqual(
+            viewModel.permissionStatusWarningText,
+            "Screen Recording permission verification failed. App audio capture may be unavailable until access is re-enabled in System Settings."
+        )
+
+        permissionService.screenRecordingStatus = .granted
+        XCTAssertNil(viewModel.permissionStatusWarningText)
+    }
+
     func testRequestMicrophonePermissionInvokesPermissionService() async {
         permissionService.requestMicResult = true
         permissionService.micStatus = .notDetermined
@@ -158,6 +186,18 @@ final class NewSessionViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.microphonePermissionGranted)
     }
 
+    func testRequestScreenRecordingPermissionInvokesPermissionService() {
+        viewModel.requestScreenRecordingPermission()
+        XCTAssertEqual(permissionService.requestScreenRecordingCalls, 1)
+    }
+
+    func testRecheckPermissionsInvokesCheckAndVerifyMethods() async {
+        await viewModel.recheckPermissions()
+        XCTAssertEqual(permissionService.checkAllCalls, 1)
+        XCTAssertEqual(permissionService.verifyMicCalls, 1)
+        XCTAssertEqual(permissionService.verifyScreenRecordingCalls, 1)
+    }
+
     func testRefreshAudioDevicesOnAppearCallsAudioDeviceServiceRefresh() {
         viewModel.refreshAudioDevicesOnAppear()
         XCTAssertEqual(audioDeviceService.refreshDevicesCalls, 1)
@@ -166,6 +206,11 @@ final class NewSessionViewModelTests: XCTestCase {
     func testRefreshAudioDevicesOnPanelExpandedCallsAudioDeviceServiceRefresh() {
         viewModel.refreshAudioDevicesOnPanelExpanded()
         XCTAssertEqual(audioDeviceService.refreshDevicesCalls, 1)
+    }
+
+    func testAppAudioToggleRemainsEnabledWhenScreenPermissionNotGranted() {
+        permissionService.screenRecordingStatus = .denied
+        XCTAssertTrue(viewModel.appAudioToggleEnabled)
     }
 
     func testAirPodsDisconnectScenarioUpdatesSelectedDeviceStateFromService() {
@@ -200,6 +245,15 @@ final class NewSessionViewModelTests: XCTestCase {
     func testNewSessionPanelRefreshesAudioDevicesOnAppear() throws {
         let source = try newSessionPanelSource()
         XCTAssertTrue(source.contains("viewModel.refreshAudioDevicesOnAppear()"))
+    }
+
+    func testNewSessionPanelShowsPermissionStatusWarningBanner() throws {
+        let source = try newSessionPanelSource()
+        XCTAssertTrue(source.contains("if let permissionStatusWarningText = viewModel.permissionStatusWarningText"))
+        XCTAssertTrue(source.contains("exclamationmark.triangle.fill"))
+        XCTAssertTrue(source.contains("Re-check Permissions"))
+        XCTAssertTrue(source.contains("Request Screen Access"))
+        XCTAssertTrue(source.contains("Open Privacy Settings"))
     }
 
     private func newSessionPanelSource() throws -> String {

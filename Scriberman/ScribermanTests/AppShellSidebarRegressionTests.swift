@@ -157,6 +157,14 @@ final class AppShellSidebarRegressionTests: XCTestCase {
         )
     }
 
+    func testAppActivationRefreshesPermissionsViaAppState() throws {
+        let source = try appShellSource()
+        XCTAssertTrue(
+            source.contains("await appState.refreshPermissionsOnActivation()"),
+            "Scene activation should trigger strict permission refresh through AppState."
+        )
+    }
+
     private func appShellSource() throws -> String {
         try readSourceFile(relativePathFromTests: "../UI/AppShellView.swift")
     }

@@ -119,8 +119,9 @@ struct AppShellView: View {
                 return
             }
 
-            appState.permissionService.checkAll()
-            appState.showPermissionsOnboarding = !appState.workspaceSelectionRequired && appState.permissionService.needsOnboarding
+            Task {
+                await appState.refreshPermissionsOnActivation()
+            }
         }
         .onChange(of: selectedSession) { oldValue, newValue in
             guard oldValue?.id != newValue?.id else {

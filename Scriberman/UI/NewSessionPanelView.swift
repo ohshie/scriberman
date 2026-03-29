@@ -1,3 +1,4 @@
+import AppKit
 import SwiftData
 import SwiftUI
 
@@ -11,6 +12,54 @@ struct NewSessionPanelView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            if let permissionStatusWarningText = viewModel.permissionStatusWarningText {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label(permissionStatusWarningText, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.yellow)
+
+                    HStack(spacing: 8) {
+                        Button("Re-check Permissions") {
+                            Task {
+                                await viewModel.recheckPermissions()
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+
+                        if !viewModel.microphonePermissionGranted {
+                            Button("Grant Mic Access") {
+                                Task {
+                                    await viewModel.requestMicrophonePermission()
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+
+                        if !viewModel.screenRecordingPermissionGranted {
+                            Button("Request Screen Access") {
+                                viewModel.requestScreenRecordingPermission()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+
+                        Button("Open Privacy Settings") {
+                            openPrivacySettings()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(.yellow.opacity(0.16))
+                )
+            }
+
             switch viewModel.state {
             case .idle:
                 idleState
@@ -185,5 +234,14 @@ struct NewSessionPanelView: View {
         let minutes = totalSeconds / 60
         let seconds = totalSeconds % 60
         return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    private func openPrivacySettings() {
+        if let micURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+            NSWorkspace.shared.open(micURL)
+        }
+        if let screenURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+            NSWorkspace.shared.open(screenURL)
+        }
     }
 }

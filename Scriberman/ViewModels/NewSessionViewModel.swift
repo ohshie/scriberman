@@ -53,6 +53,11 @@ final class NewSessionViewModel: ObservableObject {
                 return
             }
             if recordAppAudio {
+                guard screenRecordingPermissionGranted else {
+                    recordAppAudio = false
+                    requestScreenRecordingPermission()
+                    return
+                }
                 restoreLastUsedApp()
             } else {
                 appAudioService.selectedApp = nil
@@ -61,7 +66,7 @@ final class NewSessionViewModel: ObservableObject {
     }
 
     var appAudioToggleEnabled: Bool {
-        screenRecordingStatus == .granted
+        true
     }
 
     var microphonePermissionGranted: Bool {
@@ -88,6 +93,22 @@ final class NewSessionViewModel: ObservableObject {
 
     var showAppPicker: Bool {
         recordAppAudio && screenRecordingStatus == .granted
+    }
+
+    var screenRecordingPermissionGranted: Bool {
+        screenRecordingStatus == .granted
+    }
+
+    var permissionStatusWarningText: String? {
+        if micStatus != .granted {
+            return "Microphone permission is not verified. Recording is unavailable until access is granted."
+        }
+
+        if screenRecordingStatus == .denied {
+            return "Screen Recording permission verification failed. App audio capture may be unavailable until access is re-enabled in System Settings."
+        }
+
+        return nil
     }
 
     var canRecord: Bool {
@@ -189,14 +210,30 @@ final class NewSessionViewModel: ObservableObject {
 
     func refreshAudioDevicesOnAppear() {
         audioDeviceService.refreshDevices()
+        Task {
+            await recheckPermissions()
+        }
     }
 
     func refreshAudioDevicesOnPanelExpanded() {
         audioDeviceService.refreshDevices()
+        Task {
+            await recheckPermissions()
+        }
     }
 
     func requestMicrophonePermission() async {
         _ = await permissionService.requestMic()
+    }
+
+    func requestScreenRecordingPermission() {
+        _ = permissionService.requestScreenRecording()
+    }
+
+    func recheckPermissions() async {
+        permissionService.checkAll()
+        _ = await permissionService.verifyMic()
+        _ = await permissionService.verifyScreenRecording()
     }
 
     func restoreLastUsedApp() {
