@@ -4,11 +4,17 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct AppShellView: View {
+    private enum SidebarToggleLocation {
+        case toolbar
+        case sidebar
+    }
+
     @EnvironmentObject private var appState: AppState
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \RecordingSession.createdAt, order: .reverse) private var recordingSessions: [RecordingSession]
     @Query(sort: \ImportedSession.createdAt, order: .reverse) private var importedSessions: [ImportedSession]
     @State private var selectedSession: JobsViewModel.SessionListItem?
+    @State private var sidebarToggleLocation: SidebarToggleLocation = .sidebar
 
     private var allSessionItems: [JobsViewModel.SessionListItem] {
         let recordingItems = recordingSessions.map(JobsViewModel.SessionListItem.recording)
@@ -21,7 +27,9 @@ struct AppShellView: View {
             JobsView(
                 viewModel: appState.jobsViewModel,
                 items: allSessionItems,
-                selection: $selectedSession
+                selection: $selectedSession,
+                showsInlineSidebarToggle: sidebarToggleLocation == .sidebar,
+                onInlineSidebarToggle: toggleSidebarFromSidebar
             )
             .toolbar(removing: .sidebarToggle)
         } detail: {
@@ -175,13 +183,15 @@ struct AppShellView: View {
 
     @ToolbarContentBuilder
     private var sidebarToolbar: some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
-            Button {
-                NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
-            } label: {
-                Image(systemName: "sidebar.left")
+        if sidebarToggleLocation == .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    toggleSidebarFromToolbar()
+                } label: {
+                    Image(systemName: "sidebar.left")
+                }
+                .help("Show Sidebar")
             }
-            .help("Toggle Sidebar")
         }
     }
 
@@ -197,6 +207,20 @@ struct AppShellView: View {
                 Label("New Session", systemImage: "plus")
             }
         }
+    }
+
+    private func toggleSidebarFromToolbar() {
+        NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(220))
+            sidebarToggleLocation = .sidebar
+        }
+    }
+
+    private func toggleSidebarFromSidebar() {
+        sidebarToggleLocation = .toolbar
+        NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
     }
 
 }
