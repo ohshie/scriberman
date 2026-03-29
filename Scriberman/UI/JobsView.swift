@@ -27,18 +27,6 @@ struct JobsView: View {
             }
         }
         .navigationTitle("Jobs")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    appState.selectPendingSession()
-                    if let pendingSession = appState.pendingSession {
-                        selection = .pending(pendingSession)
-                    }
-                } label: {
-                    Label("New Session", systemImage: "plus")
-                }
-            }
-        }
         .confirmationDialog(
             "Clear All Sessions",
             isPresented: $showClearAllConfirmation,

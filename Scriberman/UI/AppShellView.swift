@@ -36,6 +36,9 @@ struct AppShellView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
+        .toolbar {
+            jobsToolbar
+        }
         .toolbar(removing: .sidebarToggle)
         .toolbar(removing: .title)
         .toolbar(removing: .search)
@@ -167,6 +170,20 @@ struct AppShellView: View {
         Task {
             await appState.jobsViewModel.importAudio(urls: panel.urls, context: modelContext)
             appState.discardPendingSession()
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var jobsToolbar: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                appState.selectPendingSession()
+                if let pendingSession = appState.pendingSession {
+                    selectedSession = .pending(pendingSession)
+                }
+            } label: {
+                Label("New Session", systemImage: "plus")
+            }
         }
     }
 }
