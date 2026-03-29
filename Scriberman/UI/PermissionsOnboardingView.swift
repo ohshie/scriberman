@@ -36,11 +36,20 @@ struct PermissionsOnboardingView: View {
 
             Divider()
 
-            Button("Skip All") {
-                skipAll()
+            HStack(spacing: 10) {
+                Button("Skip All") {
+                    skipAll()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Button("Quit Scriberman") {
+                    terminateApplication()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .keyboardShortcut("q", modifiers: [.command])
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
         }
         .padding(24)
         .frame(minWidth: 520)
@@ -200,6 +209,10 @@ struct PermissionsOnboardingView: View {
     private func skipAll() {
         infoMessage = nil
         dismissOnboarding()
+    }
+
+    private func terminateApplication() {
+        NSApp.terminate(nil)
     }
 
     private func autoVerifyMicIfPossible() async {

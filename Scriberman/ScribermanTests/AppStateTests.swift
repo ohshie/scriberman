@@ -172,6 +172,8 @@ final class AppStateTests: XCTestCase {
         let source = try permissionsOnboardingSource()
         XCTAssertTrue(source.contains("Button(\"Skip All\")"))
         XCTAssertTrue(source.contains("skipAll()"))
+        XCTAssertTrue(source.contains("Button(\"Quit Scriberman\")"))
+        XCTAssertTrue(source.contains("NSApp.terminate(nil)"))
     }
 
     private func permissionsOnboardingSource() throws -> String {
