@@ -37,12 +37,6 @@ struct PermissionsOnboardingView: View {
             Divider()
 
             HStack(spacing: 10) {
-                Button("Skip All") {
-                    skipAll()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-
                 Button("Quit Scriberman") {
                     terminateApplication()
                 }
@@ -204,11 +198,6 @@ struct PermissionsOnboardingView: View {
     private func dismissOnboarding() {
         permissionService.markOnboardingShown()
         appState.showPermissionsOnboarding = false
-    }
-
-    private func skipAll() {
-        infoMessage = nil
-        dismissOnboarding()
     }
 
     private func terminateApplication() {
