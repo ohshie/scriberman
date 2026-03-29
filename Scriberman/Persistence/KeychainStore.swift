@@ -14,6 +14,9 @@ enum KeychainStoreError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case let .unexpectedStatus(status):
+            if status == errSecMissingEntitlement {
+                return "Keychain access failed (missing entitlement/signing context: \(status))."
+            }
             return "Keychain operation failed with status: \(status)"
         case .invalidData:
             return "Stored keychain value is not valid UTF-8."
@@ -30,64 +33,113 @@ struct LiveKeychainStore: KeychainStore {
 
     func save(key: String, value: String) throws {
         let encodedValue = Data(value.utf8)
-        let query = baseQuery(for: key)
-        let status = SecItemCopyMatching(query as CFDictionary, nil)
+        for (index, baseQuery) in queryVariants(for: key).enumerated() {
+            var query = baseQuery
+            let status = SecItemCopyMatching(query as CFDictionary, nil)
 
-        if status == errSecSuccess {
-            let attributes: [CFString: Any] = [kSecValueData: encodedValue]
-            let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-            guard updateStatus == errSecSuccess else {
+            if status == errSecSuccess {
+                let attributes: [CFString: Any] = [kSecValueData: encodedValue]
+                let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+                if updateStatus == errSecSuccess {
+                    return
+                }
+                if shouldFallback(status: updateStatus, variantIndex: index) {
+                    continue
+                }
                 throw KeychainStoreError.unexpectedStatus(updateStatus)
             }
-            return
-        }
 
-        guard status == errSecItemNotFound else {
+            if status == errSecItemNotFound {
+                query[kSecValueData] = encodedValue
+                query[kSecAttrAccessible] = kSecAttrAccessibleWhenUnlocked
+                let addStatus = SecItemAdd(query as CFDictionary, nil)
+                if addStatus == errSecSuccess {
+                    return
+                }
+                if shouldFallback(status: addStatus, variantIndex: index) {
+                    continue
+                }
+                throw KeychainStoreError.unexpectedStatus(addStatus)
+            }
+
+            if shouldFallback(status: status, variantIndex: index) {
+                continue
+            }
             throw KeychainStoreError.unexpectedStatus(status)
         }
 
-        var createQuery = query
-        createQuery[kSecValueData] = encodedValue
-        createQuery[kSecAttrAccessible] = kSecAttrAccessibleWhenUnlocked
-        let addStatus = SecItemAdd(createQuery as CFDictionary, nil)
-        guard addStatus == errSecSuccess else {
-            throw KeychainStoreError.unexpectedStatus(addStatus)
-        }
+        throw KeychainStoreError.unexpectedStatus(errSecMissingEntitlement)
     }
 
     func read(key: String) -> String? {
-        var query = baseQuery(for: key)
-        query[kSecReturnData] = true
-        query[kSecMatchLimit] = kSecMatchLimitOne
+        for (index, baseQuery) in queryVariants(for: key).enumerated() {
+            var query = baseQuery
+            query[kSecReturnData] = true
+            query[kSecMatchLimit] = kSecMatchLimitOne
 
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecItemNotFound {
-            return nil
-        }
-        guard status == errSecSuccess else {
+            var result: CFTypeRef?
+            let status = SecItemCopyMatching(query as CFDictionary, &result)
+            if status == errSecSuccess {
+                guard let data = result as? Data else {
+                    return nil
+                }
+                return String(data: data, encoding: .utf8)
+            }
+
+            if status == errSecItemNotFound || shouldFallback(status: status, variantIndex: index) {
+                continue
+            }
             return nil
         }
 
-        guard let data = result as? Data else {
-            return nil
-        }
-        return String(data: data, encoding: .utf8)
+        return nil
     }
 
     func delete(key: String) throws {
-        let status = SecItemDelete(baseQuery(for: key) as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
+        var sawItemNotFound = false
+
+        for (index, query) in queryVariants(for: key).enumerated() {
+            let status = SecItemDelete(query as CFDictionary)
+            if status == errSecSuccess {
+                return
+            }
+            if status == errSecItemNotFound {
+                sawItemNotFound = true
+                continue
+            }
+            if shouldFallback(status: status, variantIndex: index) {
+                continue
+            }
             throw KeychainStoreError.unexpectedStatus(status)
         }
+
+        if sawItemNotFound {
+            return
+        }
+
+        throw KeychainStoreError.unexpectedStatus(errSecMissingEntitlement)
     }
 
-    private func baseQuery(for key: String) -> [CFString: Any] {
+    private func queryVariants(for key: String) -> [[CFString: Any]] {
         [
+            baseQuery(for: key, useDataProtectionKeychain: true),
+            baseQuery(for: key, useDataProtectionKeychain: false),
+        ]
+    }
+
+    private func shouldFallback(status: OSStatus, variantIndex: Int) -> Bool {
+        variantIndex == 0 && status == errSecMissingEntitlement
+    }
+
+    private func baseQuery(for key: String, useDataProtectionKeychain: Bool) -> [CFString: Any] {
+        var query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
-            kSecUseDataProtectionKeychain: true,
             kSecAttrService: service,
             kSecAttrAccount: key,
         ]
+        if useDataProtectionKeychain {
+            query[kSecUseDataProtectionKeychain] = true
+        }
+        return query
     }
 }

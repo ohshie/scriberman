@@ -66,7 +66,7 @@ final class AIProviderServiceTests: XCTestCase {
 
         await service.fetchModels()
 
-        XCTAssertEqual(service.availableModels, ["gpt-4o", "gpt-4.1", "gpt-4.1-mini"])
+        XCTAssertEqual(service.availableModels, ["gpt-5.2"])
     }
 
     func testMakeClientReturnsNilWhenNoKeyStored() {

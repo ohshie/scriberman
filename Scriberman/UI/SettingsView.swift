@@ -1,11 +1,17 @@
 import SwiftUI
 
 struct SettingsView: View {
+    private enum Field: Hashable {
+        case apiKey
+    }
+
     @ObservedObject var viewModel: SettingsViewModel
     @EnvironmentObject private var appState: AppState
     @Environment(AIProviderService.self) private var aiProviderService
     @State private var isModelsExpanded = false
     @State private var apiKeyDraft = ""
+    @State private var lastCommittedAPIKeyDraft = ""
+    @FocusState private var focusedField: Field?
 
     var body: some View {
         @Bindable var aiProvider = aiProviderService
@@ -65,9 +71,14 @@ struct SettingsView: View {
 
                     LabeledContent("API Key") {
                         SecureField("sk-...", text: $apiKeyDraft)
+                            .focused($focusedField, equals: .apiKey)
                             .onSubmit {
-                                aiProvider.saveAPIKey(apiKeyDraft)
-                                apiKeyDraft = ""
+                                commitAPIKeyIfNeeded()
+                            }
+                            .onChange(of: focusedField) { _, newValue in
+                                if newValue != .apiKey {
+                                    commitAPIKeyIfNeeded()
+                                }
                             }
                     }
 
@@ -128,6 +139,15 @@ struct SettingsView: View {
             await appState.selectWorkspace(url: url)
             await viewModel.refresh()
         }
+    }
+
+    private func commitAPIKeyIfNeeded() {
+        let normalized = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized != lastCommittedAPIKeyDraft else {
+            return
+        }
+        aiProviderService.saveAPIKey(normalized)
+        lastCommittedAPIKeyDraft = normalized
     }
 }
 

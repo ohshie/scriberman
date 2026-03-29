@@ -17,6 +17,7 @@
 		A55A55A55A55A55A55A55A55 /* OpenAI in Frameworks */ = {isa = PBXBuildFile; productRef = D11D11D11D11D11D11D11D11 /* OpenAI */; };
 		A66A66A66A66A66A66A66A66 /* MockKeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B66B66B66B66B66B66B66B66 /* MockKeychainStore.swift */; };
 		A77A77A77A77A77A77A77A77 /* AIProviderServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B77B77B77B77B77B77B77B77 /* AIProviderServiceTests.swift */; };
+		A88A88A88A88A88A88A88A88 /* ConnectionStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B88B88B88B88B88B88B88B88 /* ConnectionStatusTests.swift */; };
 		2A2B3C4D5E6F708192A3B4C5 /* RecordingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4C5 /* RecordingSession.swift */; };
 		2A2B3C4D5E6F708192A3B4C6 /* RecordingStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4C6 /* RecordingStatus.swift */; };
 		2A2B3C4D5E6F708192A3B4C7 /* Transcript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4C7 /* Transcript.swift */; };
@@ -189,6 +190,7 @@
 		B44B44B44B44B44B44B44B44 /* AIProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderService.swift; sourceTree = "<group>"; };
 		B66B66B66B66B66B66B66B66 /* MockKeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockKeychainStore.swift; sourceTree = "<group>"; };
 		B77B77B77B77B77B77B77B77 /* AIProviderServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderServiceTests.swift; sourceTree = "<group>"; };
+		B88B88B88B88B88B88B88B88 /* ConnectionStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStatusTests.swift; sourceTree = "<group>"; };
 		AC3C4EF936A2E2BEA0BD4CAF /* MarkdownRenderer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MarkdownRenderer.swift; sourceTree = "<group>"; };
 		ADD6117B43940D993554EB33 /* ServiceContainer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ServiceContainer.swift; sourceTree = "<group>"; };
 		B5871E10D502FAEB70EDC99F /* MarkdownRendererTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MarkdownRendererTests.swift; sourceTree = "<group>"; };
@@ -230,6 +232,7 @@
 			isa = PBXGroup;
 			children = (
 				B77B77B77B77B77B77B77B77 /* AIProviderServiceTests.swift */,
+				B88B88B88B88B88B88B88B88 /* ConnectionStatusTests.swift */,
 				B5871E10D502FAEB70EDC99F /* MarkdownRendererTests.swift */,
 				8E2E0F5F51DABC96146DE26B /* RecordingStatusTests.swift */,
 				B1C2D3E4F5061728394A5B6D /* StatusTagViewTests.swift */,
@@ -588,6 +591,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A77A77A77A77A77A77A77A77 /* AIProviderServiceTests.swift in Sources */,
+				A88A88A88A88A88A88A88A88 /* ConnectionStatusTests.swift in Sources */,
 				A0E794CEB3C68D77E20749D6 /* MarkdownRendererTests.swift in Sources */,
 				791009572F7832AD00225294 /* M4AChannelExtractorTests.swift in Sources */,
 				A2E8F18069EB9CB0F14A58BA /* RecordingStatusTests.swift in Sources */,

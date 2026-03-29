@@ -22,7 +22,7 @@ protocol AIProviderServiceProtocol: AnyObject {
 final class AIProviderService: AIProviderServiceProtocol {
     private enum Constants {
         static let keychainKey = "aiProvider.openAI.apiKey"
-        static let fallbackModels = ["gpt-4o", "gpt-4.1", "gpt-4.1-mini"]
+        static let fallbackModels = ["gpt-5.2"]
     }
 
     var isEnabled: Bool {
@@ -124,26 +124,9 @@ final class AIProviderService: AIProviderServiceProtocol {
     }
 
     func fetchModels() async {
-        guard let client = makeClient() else {
-            availableModels = []
-            return
-        }
-
-        do {
-            let modelsList = try await modelsFetcher(client)
-            availableModels = modelsList.data
-                .filter { $0.ownedBy == "openai" && $0.id.localizedCaseInsensitiveContains("gpt") }
-                .map(\.id)
-                .sorted()
-
-            if selectedModelID == nil || !(availableModels.contains(selectedModelID ?? "")) {
-                selectedModelID = availableModels.first
-            }
-        } catch {
-            availableModels = Constants.fallbackModels
-            if selectedModelID == nil || !(availableModels.contains(selectedModelID ?? "")) {
-                selectedModelID = availableModels.first
-            }
+        availableModels = Constants.fallbackModels
+        if selectedModelID == nil || !(availableModels.contains(selectedModelID ?? "")) {
+            selectedModelID = availableModels.first
         }
     }
 
