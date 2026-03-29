@@ -131,6 +131,12 @@ struct AppShellView: View {
     @ViewBuilder
     private func detailView(for item: JobsViewModel.SessionListItem) -> some View {
         switch item {
+        case .pending:
+            ContentUnavailableView(
+                "Pending Session",
+                systemImage: "plus.circle",
+                description: Text("Session setup will appear here.")
+            )
         case .recording(let session):
             TranscriptDetailView(
                 session: session,

@@ -85,6 +85,8 @@ struct JobsView: View {
     @ViewBuilder
     private func row(for item: JobsViewModel.SessionListItem) -> some View {
         switch item {
+        case .pending(let session):
+            Text(session.title)
         case .recording(let session):
             RecordingSessionRow(
                 session: session,
@@ -102,6 +104,8 @@ struct JobsView: View {
     @ViewBuilder
     private func deleteButton(for item: JobsViewModel.SessionListItem) -> some View {
         switch item {
+        case .pending:
+            EmptyView()
         case .recording(let session):
             Button(role: .destructive) {
                 viewModel.delete(session: session, context: modelContext)
@@ -154,6 +158,8 @@ struct JobsView: View {
     private func clearAll() {
         for item in items {
             switch item {
+            case .pending:
+                continue
             case .recording(let session):
                 viewModel.delete(session: session, context: modelContext)
             case .imported(let session):

@@ -12,12 +12,14 @@ final class AppState: ObservableObject {
     let services: ServiceContainer
     let permissionService: PermissionServiceProtocol
     let studioViewModel: StudioViewModel
+    let newSessionViewModel: NewSessionViewModel
     let jobsViewModel: JobsViewModel
     let settingsViewModel: SettingsViewModel
     private let restoreWorkspaceHandler: () async throws -> Workspace
     private let setWorkspaceHandler: (URL) async throws -> Workspace
 
     @Published var selectedDestination: SidebarDestination = .studio
+    @Published var pendingSession: PendingSession?
     @Published private(set) var workspace: Workspace?
     @Published private(set) var workspaceErrorMessage: String?
     @Published var workspaceSelectionRequired = false
@@ -47,6 +49,7 @@ final class AppState: ObservableObject {
             appAudioService: services.appAudioService,
             permissionService: services.permissionService
         )
+        self.newSessionViewModel = NewSessionViewModel()
         self.jobsViewModel = JobsViewModel(
             workspaceService: services.workspaceService,
             transcriptionService: services.transcriptionService,
@@ -61,6 +64,18 @@ final class AppState: ObservableObject {
             self?.studioViewModel.clearStoppedCTAIfNeeded()
             self?.selectDestination(.jobs)
         }
+    }
+
+    func selectPendingSession() {
+        if pendingSession == nil {
+            pendingSession = PendingSession(title: Self.defaultPendingSessionTitle())
+        }
+        selectedDestination = .jobs
+    }
+
+    func discardPendingSession() {
+        pendingSession = nil
+        newSessionViewModel.reset()
     }
 
     func selectDestination(_ destination: SidebarDestination) {
@@ -134,5 +149,13 @@ final class AppState: ObservableObject {
             workspaceSelectionRequired = true
             return false
         }
+    }
+
+    private static func defaultPendingSessionTitle(referenceDate: Date = .now) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return "Session \(formatter.string(from: referenceDate))"
     }
 }

@@ -50,6 +50,42 @@ final class AppStateTests: XCTestCase {
         )
     }
 
+    func testSelectPendingSessionCreatesSinglePendingSession() {
+        let permissionService = MockPermissionService()
+        let services = makeServiceContainer(permissionService: permissionService)
+        let appState = AppState(services: services)
+
+        appState.selectPendingSession()
+        let firstPending = appState.pendingSession
+        appState.selectPendingSession()
+
+        XCTAssertNotNil(firstPending)
+        XCTAssertEqual(appState.pendingSession?.id, firstPending?.id)
+        XCTAssertEqual(appState.selectedDestination, .jobs)
+    }
+
+    func testDiscardPendingSessionClearsPendingAndResetsNewSessionState() {
+        let permissionService = MockPermissionService()
+        let services = makeServiceContainer(permissionService: permissionService)
+        let appState = AppState(services: services)
+        let recording = RecordingSession(
+            createdAt: .now,
+            duration: 5,
+            micAudioURL: "/tmp/recording.wav",
+            title: "Recorded",
+            status: .recorded
+        )
+
+        appState.selectPendingSession()
+        appState.newSessionViewModel.state = .stopped(session: recording)
+        appState.discardPendingSession()
+
+        XCTAssertNil(appState.pendingSession)
+        guard case .idle = appState.newSessionViewModel.state else {
+            return XCTFail("Expected new session state to reset to idle")
+        }
+    }
+
     private func makeServiceContainer(permissionService: PermissionServiceProtocol) -> ServiceContainer {
         let bookmarkStore = TestBookmarkStore()
         let workspaceService = WorkspaceService(bookmarkStore: bookmarkStore)
