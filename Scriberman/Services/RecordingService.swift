@@ -110,7 +110,8 @@ actor RecordingService: @preconcurrency RecordingServiceProtocol {
         in workspace: Workspace,
         micDeviceID: AudioDeviceID? = nil,
         capturedAppName: String? = nil,
-        appProcessID: pid_t? = nil
+        appProcessID: pid_t? = nil,
+        title: String? = nil
     ) async throws {
         guard !isRecordingValue else {
             throw RecordingError.alreadyRecording
@@ -211,6 +212,7 @@ actor RecordingService: @preconcurrency RecordingServiceProtocol {
             self.audioLevelValue = 0
             self.pendingError = nil
             self.activeCapturedAppName = capturedAppName
+            self.pendingTitle = title
 
             if let appProcessID {
                 let session = AppAudioCaptureSession(
@@ -405,6 +407,7 @@ actor RecordingService: @preconcurrency RecordingServiceProtocol {
         recordingStartedAt = nil
         recordingIdentifier = nil
         activeCapturedAppName = nil
+        pendingTitle = nil
         micStartHostTime = nil
         appStartHostTime = nil
     }
