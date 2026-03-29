@@ -201,3 +201,59 @@ final class RecordingStatusTests: XCTestCase {
         XCTAssertNil(imported.applicationName)
     }
 }
+
+final class RecordingSessionTests: XCTestCase {
+    func testRecordingSessionAITransformationHistoryRoundTrips() {
+        let session = RecordingSession(
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 42,
+            micAudioURL: "/tmp/mic.wav",
+            title: "Demo",
+            status: .done
+        )
+        let transformations = [
+            AITransformation(
+                promptName: "Summary",
+                modelID: "gpt-5.2",
+                resultText: "Short summary",
+                createdAt: Date(timeIntervalSince1970: 100)
+            ),
+            AITransformation(
+                promptName: "Action Items",
+                modelID: "gpt-5.2",
+                resultText: "1. Follow up",
+                createdAt: Date(timeIntervalSince1970: 200)
+            )
+        ]
+
+        session.aiTransformations = transformations
+
+        XCTAssertEqual(session.aiTransformations, transformations)
+        XCTAssertNotNil(session.aiTransformationsData)
+    }
+
+    func testImportedSessionAITransformationHistoryRoundTrips() {
+        let session = ImportedSession(
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 12,
+            mixdownURL: "/tmp/mix.m4a",
+            title: "Imported",
+            originalFileName: "sample.wav",
+            originalFormat: "wav",
+            status: .done
+        )
+        let transformations = [
+            AITransformation(
+                promptName: "Summary",
+                modelID: "gpt-5.2",
+                resultText: "Imported summary",
+                createdAt: Date(timeIntervalSince1970: 300)
+            )
+        ]
+
+        session.aiTransformations = transformations
+
+        XCTAssertEqual(session.aiTransformations, transformations)
+        XCTAssertNotNil(session.aiTransformationsData)
+    }
+}
