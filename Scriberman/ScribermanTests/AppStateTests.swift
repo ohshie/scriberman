@@ -168,10 +168,10 @@ final class AppStateTests: XCTestCase {
         XCTAssertTrue(source.contains("await autoVerifyScreenRecordingIfPossible()"))
     }
 
-    func testPermissionsOnboardingProvidesSkipAllEscapeHatch() throws {
+    func testPermissionsOnboardingProvidesQuitEscapeHatchWithoutSkipAll() throws {
         let source = try permissionsOnboardingSource()
-        XCTAssertTrue(source.contains("Button(\"Skip All\")"))
-        XCTAssertTrue(source.contains("skipAll()"))
+        XCTAssertFalse(source.contains("Button(\"Skip All\")"))
+        XCTAssertFalse(source.contains("skipAll()"))
         XCTAssertTrue(source.contains("Button(\"Quit Scriberman\")"))
         XCTAssertTrue(source.contains("NSApp.terminate(nil)"))
     }
