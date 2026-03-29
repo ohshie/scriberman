@@ -24,6 +24,7 @@ struct AppShellView: View {
                 items: allSessionItems,
                 selection: $selectedSession
             )
+            .toolbar(removing: .sidebarToggle)
         } detail: {
             if let selectedSession {
                 detailView(for: selectedSession)
@@ -36,10 +37,6 @@ struct AppShellView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
-        .toolbar {
-            jobsToolbar
-        }
-        .toolbar(removing: .sidebarToggle)
         .toolbar(removing: .title)
         .toolbar(removing: .search)
         .frame(minWidth: 860, minHeight: 580)
@@ -173,17 +170,4 @@ struct AppShellView: View {
         }
     }
 
-    @ToolbarContentBuilder
-    private var jobsToolbar: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            Button {
-                appState.selectPendingSession()
-                if let pendingSession = appState.pendingSession {
-                    selectedSession = .pending(pendingSession)
-                }
-            } label: {
-                Label("New Session", systemImage: "plus")
-            }
-        }
-    }
 }
