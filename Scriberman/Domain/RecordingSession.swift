@@ -15,6 +15,7 @@ final class RecordingSession {
     var errorMessage: String?
     var transcriptData: Data?
     var retranscriptData: Data?
+    var aiTransformationsData: Data?
 
     var status: RecordingStatus {
         get { RecordingStatus(persistedValue: statusRawValue, errorMessage: errorMessage) }
@@ -69,7 +70,8 @@ final class RecordingSession {
         status: RecordingStatus = .recorded,
         errorMessage: String? = nil,
         transcriptData: Data? = nil,
-        retranscriptData: Data? = nil
+        retranscriptData: Data? = nil,
+        aiTransformationsData: Data? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -83,6 +85,7 @@ final class RecordingSession {
         self.errorMessage = errorMessage
         self.transcriptData = transcriptData
         self.retranscriptData = retranscriptData
+        self.aiTransformationsData = aiTransformationsData
         if case .error = status {
             self.status = status
         }

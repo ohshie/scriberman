@@ -13,6 +13,7 @@
 		A11A11A11A11A11A11A11A11 /* AIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11B11B11B11B11B11B11B11 /* AIProvider.swift */; };
 		A22A22A22A22A22A22A22A22 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22B22B22B22B22B22B22B22 /* KeychainStore.swift */; };
 		A33A33A33A33A33A33A33A33 /* AIProviderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B33B33B33B33B33B33B33B33 /* AIProviderStore.swift */; };
+		C9B001B001B001B001B001B1 /* AIPromptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9A001A001A001A001A001A1 /* AIPromptStore.swift */; };
 		A44A44A44A44A44A44A44A44 /* AIProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B44B44B44B44B44B44B44B44 /* AIProviderService.swift */; };
 		A55A55A55A55A55A55A55A55 /* OpenAI in Frameworks */ = {isa = PBXBuildFile; productRef = D11D11D11D11D11D11D11D11 /* OpenAI */; };
 		A66A66A66A66A66A66A66A66 /* MockKeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B66B66B66B66B66B66B66B66 /* MockKeychainStore.swift */; };
@@ -28,6 +29,7 @@
 		2A2B3C4D5E6F708192A3B4CC /* WaveformView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4CC /* WaveformView.swift */; };
 		2A2B3C4D5E6F708192A3B4CD /* RecordingSessionRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4CD /* RecordingSessionRow.swift */; };
 		2A2B3C4D5E6F708192A3B4CE /* TranscriptDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4CE /* TranscriptDetailView.swift */; };
+		C9B001B001B001B001B001B2 /* SkeletonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9A001A001A001A001A001A2 /* SkeletonView.swift */; };
 		2A2B3C4D5E6F708192A3B4CF /* TranscriptSegmentRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4CF /* TranscriptSegmentRow.swift */; };
 		2A2B3C4D5E6F708192A3B4D0 /* TimeFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4D0 /* TimeFormatter.swift */; };
 		2A2B3C4D5E6F708192A3B4D1 /* TranscriptExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4D1 /* TranscriptExportService.swift */; };
@@ -187,6 +189,7 @@
 		B11B11B11B11B11B11B11B11 /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
 		B22B22B22B22B22B22B22B22 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		B33B33B33B33B33B33B33B33 /* AIProviderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderStore.swift; sourceTree = "<group>"; };
+		C9A001A001A001A001A001A1 /* AIPromptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPromptStore.swift; sourceTree = "<group>"; };
 		B44B44B44B44B44B44B44B44 /* AIProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderService.swift; sourceTree = "<group>"; };
 		B66B66B66B66B66B66B66B66 /* MockKeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockKeychainStore.swift; sourceTree = "<group>"; };
 		B77B77B77B77B77B77B77B77 /* AIProviderServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderServiceTests.swift; sourceTree = "<group>"; };
@@ -196,6 +199,7 @@
 		B5871E10D502FAEB70EDC99F /* MarkdownRendererTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MarkdownRendererTests.swift; sourceTree = "<group>"; };
 		B6128A7DC3799D329B8DB2FE /* ModelGroup.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelGroup.swift; sourceTree = "<group>"; };
 		BA65604F12187C96E37A1413 /* WorkspacePicker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WorkspacePicker.swift; sourceTree = "<group>"; };
+		C9A001A001A001A001A001A2 /* SkeletonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkeletonView.swift; sourceTree = "<group>"; };
 		C4A24E4069AF734D90C9236E /* MockWorkspaceService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MockWorkspaceService.swift; sourceTree = "<group>"; };
 		C4F2C579DEA6DCCA2A080BC3 /* JobsViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JobsViewModel.swift; sourceTree = "<group>"; };
 		D4D635DCD4938EB7B6FA9A36 /* ScribermanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ScribermanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -309,6 +313,7 @@
 				1A2B3C4D5E6F708192A3B4CD /* RecordingSessionRow.swift */,
 				D1A2B3C4D5E6F708192A3B4F /* StatusTagView.swift */,
 				1A2B3C4D5E6F708192A3B4CE /* TranscriptDetailView.swift */,
+				C9A001A001A001A001A001A2 /* SkeletonView.swift */,
 				1A2B3C4D5E6F708192A3B4CF /* TranscriptSegmentRow.swift */,
 				BA65604F12187C96E37A1413 /* WorkspacePicker.swift */,
 				AAB646F914C2425E3CBEE33D /* ModelsSettingsView.swift */,
@@ -360,6 +365,7 @@
 			isa = PBXGroup;
 			children = (
 				B33B33B33B33B33B33B33B33 /* AIProviderStore.swift */,
+				C9A001A001A001A001A001A1 /* AIPromptStore.swift */,
 				B22B22B22B22B22B22B22B22 /* KeychainStore.swift */,
 				27994768D463D730435539F3 /* BookmarkStore.swift */,
 			);
@@ -531,6 +537,7 @@
 				6C07E0AE252F7D34AF16F2C2 /* BookmarkStore.swift in Sources */,
 				A22A22A22A22A22A22A22A22 /* KeychainStore.swift in Sources */,
 				A33A33A33A33A33A33A33A33 /* AIProviderStore.swift in Sources */,
+				C9B001B001B001B001B001B1 /* AIPromptStore.swift in Sources */,
 				71945CF7DD78D3B6644C4EC7 /* WorkspaceService.swift in Sources */,
 				50A7C19DA8252ABCC743D2F2 /* ModelInstallService.swift in Sources */,
 				A44A44A44A44A44A44A44A44 /* AIProviderService.swift in Sources */,
@@ -562,6 +569,7 @@
 				791009552F78328500225294 /* M4AChannelExtractor.swift in Sources */,
 				79E005E22F767E5300D3EAD9 /* AggregateDeviceBuilder.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CE /* TranscriptDetailView.swift in Sources */,
+				C9B001B001B001B001B001B2 /* SkeletonView.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CF /* TranscriptSegmentRow.swift in Sources */,
 				BE05D8275352276E509B5A6A /* WorkspacePicker.swift in Sources */,
 				3428B3A8DAFDF0891C460E3C /* ModelGroup.swift in Sources */,
