@@ -5,7 +5,9 @@ struct ModelsSettingsScreen: View {
 
     var body: some View {
         Form {
-            ModelsSettingsView(viewModel: viewModel)
+            Section("Models") {
+                ModelsSettingsView(viewModel: viewModel)
+            }
         }
         .navigationTitle("Models")
         .task {

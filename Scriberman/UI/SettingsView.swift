@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
     @EnvironmentObject private var appState: AppState
+    @State private var isModelsExpanded = false
 
     var body: some View {
         NavigationStack {
@@ -22,10 +23,6 @@ struct SettingsView: View {
                         Text(errorMessage)
                             .font(.footnote)
                             .foregroundStyle(.red)
-                    } else {
-                        Text("Recommended location: ~/Documents/Scriberman")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -39,8 +36,17 @@ struct SettingsView: View {
                             .foregroundStyle(viewModel.currentModelStatusText == "Installed" ? .green : .secondary)
                     }
 
-                    NavigationLink("Manage Models") {
-                        ModelsSettingsScreen(viewModel: viewModel)
+                    DisclosureGroup(isExpanded: $isModelsExpanded) {
+                        ModelsSettingsView(viewModel: viewModel)
+                    } label: {
+                        Text("Manage Models")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                withAnimation {
+                                    isModelsExpanded.toggle()
+                                }
+                            }
                     }
                 }
 

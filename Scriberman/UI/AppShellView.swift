@@ -29,13 +29,10 @@ struct AppShellView: View {
                     items: allSessionItems,
                     selection: $selectedSession
                 )
-
-            case .settings:
-                SettingsView(viewModel: appState.settingsViewModel)
             }
         } detail: {
             switch appState.selectedDestination {
-            case .studio, .settings:
+            case .studio:
                 EmptyView()
 
             case .jobs:
@@ -170,8 +167,6 @@ private extension AppState.SidebarDestination {
             return "Studio"
         case .jobs:
             return "Jobs"
-        case .settings:
-            return "Settings"
         }
     }
 
@@ -181,8 +176,6 @@ private extension AppState.SidebarDestination {
             return "waveform"
         case .jobs:
             return "list.bullet.rectangle"
-        case .settings:
-            return "gearshape"
         }
     }
 }

@@ -62,7 +62,8 @@ actor ModelInstallService {
     @discardableResult
     func installModelGroup(
         _ group: ModelGroup,
-        progress: (@Sendable (ModelGroupReadinessState) -> Void)? = nil
+        progress: (@Sendable (ModelGroupReadinessState) -> Void)? = nil,
+        downloadProgress: (@Sendable (Double) -> Void)? = nil
     ) async throws -> URL {
         let workspace: Workspace
         do {
@@ -74,9 +75,11 @@ actor ModelInstallService {
         // Best-effort pre-cleanup so stale staged repos never short-circuit a fresh install.
         cleanupStagingCache(for: group)
 
+        let progressHandler = Self.makeDownloadProgressHandler(downloadProgress: downloadProgress)
+
         progress?(.downloading)
         do {
-            try await triggerFluidAudioDownload(for: group)
+            try await triggerFluidAudioDownload(for: group, progressHandler: progressHandler)
         } catch {
             throw mapDownloadError(error, for: group)
         }
@@ -131,18 +134,37 @@ actor ModelInstallService {
 
     // MARK: - Download (FluidAudio helpers)
 
-    private func triggerFluidAudioDownload(for group: ModelGroup) async throws {
+    static func normalizedDownloadProgress(from fractionCompleted: Double) -> Double {
+        min(fractionCompleted * 2.0, 1.0)
+    }
+
+    static func makeDownloadProgressHandler(
+        downloadProgress: (@Sendable (Double) -> Void)?
+    ) -> DownloadUtils.ProgressHandler? {
+        guard let downloadProgress else {
+            return nil
+        }
+
+        return { progress in
+            downloadProgress(normalizedDownloadProgress(from: progress.fractionCompleted))
+        }
+    }
+
+    private func triggerFluidAudioDownload(
+        for group: ModelGroup,
+        progressHandler: DownloadUtils.ProgressHandler?
+    ) async throws {
         let stagingRoot = try preparePrimaryStagingRoot()
 
         switch group {
         case .asrParakeetV3:
-            try await DownloadUtils.downloadRepo(.parakeet, to: stagingRoot)
+            try await DownloadUtils.downloadRepo(.parakeet, to: stagingRoot, progressHandler: progressHandler)
 
         case .vadSilero:
-            try await DownloadUtils.downloadRepo(.vad, to: stagingRoot)
+            try await DownloadUtils.downloadRepo(.vad, to: stagingRoot, progressHandler: progressHandler)
 
         case .diarization:
-            try await DownloadUtils.downloadRepo(.diarizer, to: stagingRoot)
+            try await DownloadUtils.downloadRepo(.diarizer, to: stagingRoot, progressHandler: progressHandler)
         }
     }
 

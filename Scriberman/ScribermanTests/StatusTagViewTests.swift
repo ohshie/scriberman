@@ -20,4 +20,52 @@ final class StatusTagViewTests: XCTestCase {
         XCTAssertEqual(style.label, "Failed")
         XCTAssertEqual(style.tint, .red)
     }
+
+    func testNormalizedDownloadProgressScalesAndCapsAtOne() {
+        XCTAssertEqual(ModelInstallService.normalizedDownloadProgress(from: 0.0), 0.0, accuracy: 0.0001)
+        XCTAssertEqual(ModelInstallService.normalizedDownloadProgress(from: 0.25), 0.5, accuracy: 0.0001)
+        XCTAssertEqual(ModelInstallService.normalizedDownloadProgress(from: 0.5), 1.0, accuracy: 0.0001)
+        XCTAssertEqual(ModelInstallService.normalizedDownloadProgress(from: 0.9), 1.0, accuracy: 0.0001)
+    }
+
+    func testMakeDownloadProgressHandlerReturnsNilWhenCallbackIsNil() {
+        let handler = ModelInstallService.makeDownloadProgressHandler(downloadProgress: nil)
+        XCTAssertNil(handler)
+    }
+
+    func testDownloadingWithProgressUsesDeterminateIndicatorAndHidesAction() {
+        let presentation = ModelsSettingsView.makeRowPresentation(
+            state: .downloading,
+            progress: 0.42,
+            canDownloadModels: true
+        )
+
+        XCTAssertEqual(presentation.indicator, .determinateProgress(value: 0.42, phaseLabel: "Downloading…"))
+        XCTAssertNil(presentation.actionTitle)
+        XCTAssertFalse(presentation.isActionEnabled)
+    }
+
+    func testInstallingUsesIndeterminateIndicatorAndHidesAction() {
+        let presentation = ModelsSettingsView.makeRowPresentation(
+            state: .installing,
+            progress: nil,
+            canDownloadModels: true
+        )
+
+        XCTAssertEqual(presentation.indicator, .indeterminateProgress(phaseLabel: "Installing…"))
+        XCTAssertNil(presentation.actionTitle)
+        XCTAssertFalse(presentation.isActionEnabled)
+    }
+
+    func testErrorStateShowsRetryAction() {
+        let presentation = ModelsSettingsView.makeRowPresentation(
+            state: .error,
+            progress: nil,
+            canDownloadModels: true
+        )
+
+        XCTAssertEqual(presentation.indicator, .capsule(label: ModelGroupReadinessState.error.rawValue))
+        XCTAssertEqual(presentation.actionTitle, "Retry")
+        XCTAssertTrue(presentation.isActionEnabled)
+    }
 }

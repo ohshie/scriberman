@@ -38,6 +38,18 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(permissionService.checkAllCalls, 1)
     }
 
+    func testSidebarDestinationsContainOnlyStudioAndJobs() {
+        XCTAssertEqual(AppState.SidebarDestination.allCases, [.studio, .jobs])
+    }
+
+    func testAppBodyContainsSettingsScene() {
+        let description = String(describing: ScribermanApp().body)
+        XCTAssertTrue(
+            description.contains("Settings<"),
+            "Expected ScribermanApp scene tree to contain a SwiftUI Settings scene."
+        )
+    }
+
     private func makeServiceContainer(permissionService: PermissionServiceProtocol) -> ServiceContainer {
         let bookmarkStore = TestBookmarkStore()
         let workspaceService = WorkspaceService(bookmarkStore: bookmarkStore)
