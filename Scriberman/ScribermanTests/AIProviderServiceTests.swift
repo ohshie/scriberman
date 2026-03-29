@@ -200,3 +200,33 @@ final class AIPromptStoreTests: XCTestCase {
         XCTAssertNil(store.loadLastUsedPromptID())
     }
 }
+
+final class SettingsViewSourceTests: XCTestCase {
+    func testSettingsViewUsesTabViewWithGeneralAndPromptsTabs() throws {
+        let source = try settingsSource()
+
+        XCTAssertTrue(source.contains("TabView(selection: $selectedTab)"))
+        XCTAssertTrue(source.contains("Label(\"General\", systemImage: \"gearshape\")"))
+        XCTAssertTrue(source.contains("Label(\"Prompts\", systemImage: \"text.bubble\")"))
+    }
+
+    func testPromptsTabSupportsCRUDAndValidationHooks() throws {
+        let source = try settingsSource()
+
+        XCTAssertTrue(source.contains("Button(\"Add Prompt\")"))
+        XCTAssertTrue(source.contains("Button(\"Edit\")"))
+        XCTAssertTrue(source.contains("Button(\"Delete\", role: .destructive)"))
+        XCTAssertTrue(source.contains("\"Prompt name is required.\""))
+        XCTAssertTrue(source.contains("\"Prompt content is required.\""))
+        XCTAssertTrue(source.contains("\"Prompt name must be unique.\""))
+        XCTAssertTrue(source.contains("promptStore.addPrompt"))
+        XCTAssertTrue(source.contains("promptStore.updatePrompt"))
+        XCTAssertTrue(source.contains("promptStore.deletePrompt"))
+    }
+
+    private func settingsSource() throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let fileURL = testsDirectory.appendingPathComponent("../UI/SettingsView.swift")
+        return try String(contentsOf: fileURL, encoding: .utf8)
+    }
+}
