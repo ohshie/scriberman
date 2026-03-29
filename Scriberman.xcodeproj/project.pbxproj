@@ -10,6 +10,11 @@
 		06B30512C65DF04AFA9A0026 /* MarkdownRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC3C4EF936A2E2BEA0BD4CAF /* MarkdownRenderer.swift */; };
 		0779163432BE273DD07FC2E9 /* TranscriptAlignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D3289E92C029611DDA5CB75 /* TranscriptAlignerTests.swift */; };
 		0A81963A9F600E19F5F698ED /* ModelsSettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AD764C83EECDAD9A42F5993 /* ModelsSettingsScreen.swift */; };
+		A11A11A11A11A11A11A11A11 /* AIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11B11B11B11B11B11B11B11 /* AIProvider.swift */; };
+		A22A22A22A22A22A22A22A22 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22B22B22B22B22B22B22B22 /* KeychainStore.swift */; };
+		A33A33A33A33A33A33A33A33 /* AIProviderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B33B33B33B33B33B33B33B33 /* AIProviderStore.swift */; };
+		A44A44A44A44A44A44A44A44 /* AIProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B44B44B44B44B44B44B44B44 /* AIProviderService.swift */; };
+		A55A55A55A55A55A55A55A55 /* OpenAI in Frameworks */ = {isa = PBXBuildFile; productRef = D11D11D11D11D11D11D11D11 /* OpenAI */; };
 		2A2B3C4D5E6F708192A3B4C5 /* RecordingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4C5 /* RecordingSession.swift */; };
 		2A2B3C4D5E6F708192A3B4C6 /* RecordingStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4C6 /* RecordingStatus.swift */; };
 		2A2B3C4D5E6F708192A3B4C7 /* Transcript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4C7 /* Transcript.swift */; };
@@ -176,6 +181,10 @@
 		A7C1BF32211A4FE21342466B /* Scriberman.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = Scriberman.entitlements; sourceTree = "<group>"; };
 		A8F3DE0F4D65F9DD94E5DEFC /* SettingsViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
 		AAB646F914C2425E3CBEE33D /* ModelsSettingsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelsSettingsView.swift; sourceTree = "<group>"; };
+		B11B11B11B11B11B11B11B11 /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
+		B22B22B22B22B22B22B22B22 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
+		B33B33B33B33B33B33B33B33 /* AIProviderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderStore.swift; sourceTree = "<group>"; };
+		B44B44B44B44B44B44B44B44 /* AIProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderService.swift; sourceTree = "<group>"; };
 		AC3C4EF936A2E2BEA0BD4CAF /* MarkdownRenderer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MarkdownRenderer.swift; sourceTree = "<group>"; };
 		ADD6117B43940D993554EB33 /* ServiceContainer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ServiceContainer.swift; sourceTree = "<group>"; };
 		B5871E10D502FAEB70EDC99F /* MarkdownRendererTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MarkdownRendererTests.swift; sourceTree = "<group>"; };
@@ -205,6 +214,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				72E17286721922EFD739F74A /* Cocoa.framework in Frameworks */,
+				A55A55A55A55A55A55A55A55 /* OpenAI in Frameworks */,
 				C3EE37FB3F5E384076FF1B4E /* FluidAudio in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -304,6 +314,7 @@
 		80C4362271C3C0CE86FD7034 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				B44B44B44B44B44B44B44B44 /* AIProviderService.swift */,
 				DED532C3817A6E0B1536EE8C /* WorkspaceService.swift */,
 				7B92B3F0C81C97B847246777 /* ModelInstallService.swift */,
 				1A2B3C4D5E6F708192A3B4CA /* RecordingService.swift */,
@@ -339,6 +350,8 @@
 		8880B4E13E4B3CE440F0B1E3 /* Persistence */ = {
 			isa = PBXGroup;
 			children = (
+				B33B33B33B33B33B33B33B33 /* AIProviderStore.swift */,
+				B22B22B22B22B22B22B22B22 /* KeychainStore.swift */,
 				27994768D463D730435539F3 /* BookmarkStore.swift */,
 			);
 			path = Persistence;
@@ -347,6 +360,7 @@
 		8FBBB62FE5947236ADB6D664 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				B11B11B11B11B11B11B11B11 /* AIProvider.swift */,
 				7DFBA039128F2B74BE4BB578 /* Workspace.swift */,
 				B6128A7DC3799D329B8DB2FE /* ModelGroup.swift */,
 				1A2B3C4D5E6F708192A3B4C5 /* RecordingSession.swift */,
@@ -418,6 +432,7 @@
 			name = Scriberman;
 			packageProductDependencies = (
 				DDA5336F2945D8E09B308BC2 /* FluidAudio */,
+				D11D11D11D11D11D11D11D11 /* OpenAI */,
 			);
 			productName = Scriberman;
 			productReference = 5542239A238BB9A1883C5B5A /* Scriberman.app */;
@@ -466,6 +481,7 @@
 			mainGroup = 833D237DF391F82B6A6CE6E7;
 			packageReferences = (
 				C9C9D7C4E41BA2318ED6E595 /* XCRemoteSwiftPackageReference "FluidAudio" */,
+				C11C11C11C11C11C11C11C11 /* XCRemoteSwiftPackageReference "OpenAI" */,
 			);
 			productRefGroup = 43993D81DB3C75CD2DC1BB1F /* Products */;
 			projectDirPath = "";
@@ -501,10 +517,14 @@
 			files = (
 				9B0A47F88ECCCF249F0581C9 /* ScribermanApp.swift in Sources */,
 				4540437FF944A6BA6E754CE5 /* ContentView.swift in Sources */,
+				A11A11A11A11A11A11A11A11 /* AIProvider.swift in Sources */,
 				EF15FDA2B169C6BE3CB9FB4A /* Workspace.swift in Sources */,
 				6C07E0AE252F7D34AF16F2C2 /* BookmarkStore.swift in Sources */,
+				A22A22A22A22A22A22A22A22 /* KeychainStore.swift in Sources */,
+				A33A33A33A33A33A33A33A33 /* AIProviderStore.swift in Sources */,
 				71945CF7DD78D3B6644C4EC7 /* WorkspaceService.swift in Sources */,
 				50A7C19DA8252ABCC743D2F2 /* ModelInstallService.swift in Sources */,
+				A44A44A44A44A44A44A44A44 /* AIProviderService.swift in Sources */,
 				791009512F78184900225294 /* AudioMixdownService.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CA /* RecordingService.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CB /* TranscriptionService.swift in Sources */,
@@ -867,9 +887,22 @@
 				minimumVersion = 0.7.9;
 			};
 		};
+		C11C11C11C11C11C11C11C11 /* XCRemoteSwiftPackageReference "OpenAI" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/MacPaw/OpenAI.git";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		D11D11D11D11D11D11D11D11 /* OpenAI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C11C11C11C11C11C11C11C11 /* XCRemoteSwiftPackageReference "OpenAI" */;
+			productName = OpenAI;
+		};
 		DDA5336F2945D8E09B308BC2 /* FluidAudio */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = C9C9D7C4E41BA2318ED6E595 /* XCRemoteSwiftPackageReference "FluidAudio" */;

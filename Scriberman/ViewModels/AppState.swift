@@ -16,6 +16,10 @@ final class AppState: ObservableObject {
     @Published var workspaceSelectionRequired = false
     @Published var showPermissionsOnboarding = false
 
+    var aiProviderService: AIProviderService {
+        services.aiProviderService
+    }
+
     convenience init() {
         self.init(services: .live())
     }
