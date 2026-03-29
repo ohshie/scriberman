@@ -24,6 +24,7 @@ struct AppShellView: View {
                 items: allSessionItems,
                 selection: $selectedSession
             )
+            .toolbar(removing: .sidebarToggle)
         } detail: {
             if let selectedSession {
                 detailView(for: selectedSession)
@@ -40,7 +41,6 @@ struct AppShellView: View {
             sidebarToolbar
             jobsToolbar
         }
-        .toolbar(removing: .sidebarToggle)
         .toolbar(removing: .title)
         .toolbar(removing: .search)
         .frame(minWidth: 860, minHeight: 580)
@@ -178,11 +178,9 @@ struct AppShellView: View {
     private var sidebarToolbar: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             Button {
-                withAnimation(.snappy(duration: 0.22)) {
-                    toggleSidebarVisibility()
-                }
+                toggleSidebarVisibility()
             } label: {
-                Image(systemName: isSidebarVisible ? "sidebar.left" : "sidebar.right")
+                Image(systemName: "sidebar.left")
             }
             .help(isSidebarVisible ? "Hide Sidebar" : "Show Sidebar")
         }
