@@ -214,12 +214,16 @@ struct AppShellView: View {
 
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(220))
-            sidebarToggleLocation = .sidebar
+            withAnimation(.easeInOut(duration: 0.18)) {
+                sidebarToggleLocation = .sidebar
+            }
         }
     }
 
     private func toggleSidebarFromSidebar() {
-        sidebarToggleLocation = .toolbar
+        withAnimation(.easeInOut(duration: 0.12)) {
+            sidebarToggleLocation = .toolbar
+        }
         NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
     }
 
