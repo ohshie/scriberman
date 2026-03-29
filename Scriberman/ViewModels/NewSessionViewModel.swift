@@ -271,6 +271,10 @@ final class NewSessionViewModel: ObservableObject {
                 throw startError
             }
 
+            if let selectedDevice {
+                audioDeviceService.incrementUsage(for: selectedDevice.uid)
+            }
+
             if let fallbackMessage {
                 errorMessage = fallbackMessage
             }
