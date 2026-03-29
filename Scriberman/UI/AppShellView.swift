@@ -24,6 +24,7 @@ struct AppShellView: View {
                 items: allSessionItems,
                 selection: $selectedSession
             )
+            .backgroundExtensionEffect()
         } detail: {
             if let selectedSession {
                 detailView(for: selectedSession)
