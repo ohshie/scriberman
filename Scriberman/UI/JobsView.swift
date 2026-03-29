@@ -5,6 +5,8 @@ struct JobsView: View {
     @ObservedObject var viewModel: JobsViewModel
     let items: [JobsViewModel.SessionListItem]
     @Binding var selection: JobsViewModel.SessionListItem?
+    let showsInlineSidebarToggle: Bool
+    let onInlineSidebarToggle: () -> Void
 
     @EnvironmentObject private var appState: AppState
     @Environment(\.modelContext) private var modelContext
@@ -57,6 +59,16 @@ struct JobsView: View {
 
     private var listContent: some View {
         List(selection: $selection) {
+            if showsInlineSidebarToggle {
+                Section {
+                    Button {
+                        onInlineSidebarToggle()
+                    } label: {
+                        Label("Hide Sidebar", systemImage: "sidebar.left")
+                    }
+                }
+            }
+
             if let pendingSession = appState.pendingSession {
                 row(for: .pending(pendingSession))
                     .tag(JobsViewModel.SessionListItem.pending(pendingSession))
