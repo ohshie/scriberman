@@ -167,8 +167,9 @@ struct JobsView: View {
 
         return false
     }
-}
- .stopped = appState.newSessionViewModel.state {
+
+    private var isNewSessionStopped: Bool {
+        if case .stopped = appState.newSessionViewModel.state {
             return true
         }
 

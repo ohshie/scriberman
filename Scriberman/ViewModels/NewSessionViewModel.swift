@@ -273,7 +273,8 @@ final class NewSessionViewModel: ObservableObject {
                     in: workspace,
                     micDeviceID: selectedMicDeviceID,
                     capturedAppName: selectedCapturedAppName,
-                    appProcessID: selectedAppProcessID
+                    appProcessID: selectedAppProcessID,
+                    title: title
                 )
             } catch {
                 startError = error
@@ -287,7 +288,8 @@ final class NewSessionViewModel: ObservableObject {
                         in: workspace,
                         micDeviceID: selectedMicDeviceID,
                         capturedAppName: nil,
-                        appProcessID: nil
+                        appProcessID: nil,
+                        title: title
                     )
                     startError = nil
                 } catch {
@@ -301,7 +303,8 @@ final class NewSessionViewModel: ObservableObject {
                         in: workspace,
                         micDeviceID: nil,
                         capturedAppName: nil,
-                        appProcessID: nil
+                        appProcessID: nil,
+                        title: title
                     )
                     startError = nil
                     if fallbackMessage == nil {

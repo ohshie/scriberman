@@ -53,6 +53,7 @@ actor RecordingService: @preconcurrency RecordingServiceProtocol {
     private var hasScopedRecordingAccess = false
     private var recordingWorkspaceRootURL: URL?
     private var activeCapturedAppName: String?
+    private var pendingTitle: String?
     private var appAudioCaptureSession: AppAudioCaptureSession?
     private var pendingError: RecordingError?
     nonisolated(unsafe) private var engineConfigurationObserver: NSObjectProtocol?

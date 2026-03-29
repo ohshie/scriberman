@@ -168,7 +168,7 @@ final class RecordingServiceTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let workspaceService = MockWorkspaceService()
-        workspaceService.currentWorkspaceValue = workspace
+        workspaceService.currentWorkspaceResult = workspace
 
         let service = RecordingService(
             workspaceService: workspaceService,
