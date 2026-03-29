@@ -136,7 +136,8 @@ struct AppShellView: View {
                 onDelete: {
                     appState.jobsViewModel.delete(session: session, context: modelContext)
                     selectedSession = nil
-                }
+                },
+                onOpenStudy: nil
             )
 
         case .imported(let session):
@@ -148,7 +149,8 @@ struct AppShellView: View {
                 onDelete: {
                     appState.jobsViewModel.deleteImported(session: session, context: modelContext)
                     selectedSession = nil
-                }
+                },
+                onOpenStudy: nil
             )
         }
     }
