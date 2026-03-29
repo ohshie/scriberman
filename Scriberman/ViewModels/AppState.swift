@@ -2,23 +2,14 @@ import Foundation
 
 @MainActor
 final class AppState: ObservableObject {
-    enum SidebarDestination: String, CaseIterable, Hashable, Identifiable {
-        case studio
-        case jobs
-
-        var id: String { rawValue }
-    }
-
     let services: ServiceContainer
     let permissionService: PermissionServiceProtocol
-    let studioViewModel: StudioViewModel
     let newSessionViewModel: NewSessionViewModel
     let jobsViewModel: JobsViewModel
     let settingsViewModel: SettingsViewModel
     private let restoreWorkspaceHandler: () async throws -> Workspace
     private let setWorkspaceHandler: (URL) async throws -> Workspace
 
-    @Published var selectedDestination: SidebarDestination = .studio
     @Published var pendingSession: PendingSession?
     @Published private(set) var workspace: Workspace?
     @Published private(set) var workspaceErrorMessage: String?
@@ -42,13 +33,6 @@ final class AppState: ObservableObject {
         self.setWorkspaceHandler = setWorkspaceHandler ?? { url in
             try await services.workspaceService.setWorkspace(url: url)
         }
-        self.studioViewModel = StudioViewModel(
-            workspaceService: services.workspaceService,
-            recordingService: services.recordingService,
-            audioDeviceService: services.audioDeviceService,
-            appAudioService: services.appAudioService,
-            permissionService: services.permissionService
-        )
         self.newSessionViewModel = NewSessionViewModel(
             workspaceService: services.workspaceService,
             recordingService: services.recordingService,
@@ -66,40 +50,17 @@ final class AppState: ObservableObject {
             workspaceService: services.workspaceService,
             modelInstallService: services.modelInstallService
         )
-        self.studioViewModel.onSessionStopped = { [weak self] _ in
-            self?.studioViewModel.clearStoppedCTAIfNeeded()
-            self?.selectDestination(.jobs)
-        }
     }
 
     func selectPendingSession() {
         if pendingSession == nil {
             pendingSession = PendingSession(title: Self.defaultPendingSessionTitle())
         }
-        selectedDestination = .jobs
     }
 
     func discardPendingSession() {
         pendingSession = nil
         newSessionViewModel.reset()
-    }
-
-    func selectDestination(_ destination: SidebarDestination) {
-        guard selectedDestination != destination else {
-            return
-        }
-        selectedDestination = destination
-        applyDestinationSideEffects(for: destination)
-    }
-
-    private func applyDestinationSideEffects(for destination: SidebarDestination) {
-        Task { @MainActor in
-            if destination == .studio {
-                studioViewModel.refreshApps()
-            } else {
-                studioViewModel.clearStoppedCTAIfNeeded()
-            }
-        }
     }
 
     func bootstrapWorkspace() async {
