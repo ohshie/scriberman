@@ -83,8 +83,7 @@ final class AppState: ObservableObject {
             workspaceSelectionRequired = true
         }
 
-        permissionService.checkAll()
-        showPermissionsOnboarding = !workspaceSelectionRequired && permissionService.needsOnboarding
+        await refreshPermissionPresentationState(strictVerification: true)
 
         await settingsViewModel.refresh()
     }
@@ -95,8 +94,7 @@ final class AppState: ObservableObject {
             workspace = configuredWorkspace
             workspaceErrorMessage = nil
             workspaceSelectionRequired = false
-            permissionService.checkAll()
-            showPermissionsOnboarding = permissionService.needsOnboarding
+            await refreshPermissionPresentationState(strictVerification: true)
         } catch {
             workspace = nil
             workspaceErrorMessage = error.localizedDescription
@@ -128,5 +126,16 @@ final class AppState: ObservableObject {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return "Session \(formatter.string(from: referenceDate))"
+    }
+
+    private func refreshPermissionPresentationState(strictVerification: Bool) async {
+        permissionService.checkAll()
+
+        if strictVerification {
+            _ = await permissionService.verifyMic()
+            _ = await permissionService.verifyScreenRecording()
+        }
+
+        showPermissionsOnboarding = !workspaceSelectionRequired && permissionService.needsOnboarding
     }
 }
