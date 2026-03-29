@@ -57,6 +57,7 @@
 		79DCE41F2F77CDA90024DC26 /* PermissionsOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41E2F77CDA90024DC26 /* PermissionsOnboardingView.swift */; };
 		79DCE4212F77D02C0024DC26 /* PermissionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4202F77D02C0024DC26 /* PermissionServiceTests.swift */; };
 		79DCE4232F77D03C0024DC26 /* AppStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4222F77D03C0024DC26 /* AppStateTests.swift */; };
+		79DCE4272F77D13C0024DC26 /* AppShellSidebarRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4262F77D13C0024DC26 /* AppShellSidebarRegressionTests.swift */; };
 		79DCE4252F77D0A10024DC26 /* MockPermissionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4242F77D0A10024DC26 /* MockPermissionService.swift */; };
 		79E005D22F7673EF00D3EAD9 /* AudioInputDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E005D12F7673EF00D3EAD9 /* AudioInputDevice.swift */; };
 		79E005D42F76741900D3EAD9 /* CapturedApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E005D32F76741900D3EAD9 /* CapturedApp.swift */; };
@@ -144,6 +145,7 @@
 		79DCE41E2F77CDA90024DC26 /* PermissionsOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsOnboardingView.swift; sourceTree = "<group>"; };
 		79DCE4202F77D02C0024DC26 /* PermissionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionServiceTests.swift; sourceTree = "<group>"; };
 		79DCE4222F77D03C0024DC26 /* AppStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateTests.swift; sourceTree = "<group>"; };
+		79DCE4262F77D13C0024DC26 /* AppShellSidebarRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShellSidebarRegressionTests.swift; sourceTree = "<group>"; };
 		79DCE4242F77D0A10024DC26 /* MockPermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockPermissionService.swift; sourceTree = "<group>"; };
 		79E005D12F7673EF00D3EAD9 /* AudioInputDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioInputDevice.swift; sourceTree = "<group>"; };
 		79E005D32F76741900D3EAD9 /* CapturedApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapturedApp.swift; sourceTree = "<group>"; };
@@ -228,6 +230,7 @@
 				79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */,
 				79DCE4202F77D02C0024DC26 /* PermissionServiceTests.swift */,
 				79DCE4222F77D03C0024DC26 /* AppStateTests.swift */,
+				79DCE4262F77D13C0024DC26 /* AppShellSidebarRegressionTests.swift */,
 				7910094E2F78031A00225294 /* RecordingServiceTests.swift */,
 				791009522F78184E00225294 /* AudioMixdownServiceTests.swift */,
 				791009562F7832AD00225294 /* M4AChannelExtractorTests.swift */,
@@ -576,6 +579,7 @@
 				65E0EE498B357398375D8185 /* JobsViewModelTests.swift in Sources */,
 				C1B2C3D4E5F60718293A4B5C /* NewSessionViewModelTests.swift in Sources */,
 				79DCE4232F77D03C0024DC26 /* AppStateTests.swift in Sources */,
+				79DCE4272F77D13C0024DC26 /* AppShellSidebarRegressionTests.swift in Sources */,
 				79E005D82F76758000D3EAD9 /* AudioDeviceServiceTests.swift in Sources */,
 				7910095B2F783E9B00225294 /* RetranscriptionServiceTests.swift in Sources */,
 				86767BA4F9AF6E4E30782B9E /* MockRecordingService.swift in Sources */,
