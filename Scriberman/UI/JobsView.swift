@@ -54,6 +54,17 @@ struct JobsView: View {
         .task {
             await viewModel.refresh()
         }
+        .onChange(of: selection) { _, newSelection in
+            guard viewModel.shouldDiscardPendingSessionOnSelectionChange(
+                pendingSession: appState.pendingSession,
+                newSelection: newSelection,
+                isNewSessionIdle: isNewSessionIdle
+            ) else {
+                return
+            }
+
+            appState.discardPendingSession()
+        }
     }
 
     private var listContent: some View {
@@ -158,5 +169,13 @@ struct JobsView: View {
             }
         }
         selection = nil
+    }
+
+    private var isNewSessionIdle: Bool {
+        if case .idle = appState.newSessionViewModel.state {
+            return true
+        }
+
+        return false
     }
 }

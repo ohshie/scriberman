@@ -4,7 +4,7 @@ import SwiftUI
 struct NewSessionPanelView: View {
     @ObservedObject var viewModel: NewSessionViewModel
     @Binding var pendingSession: PendingSession
-    var onTranscribe: ((RecordingSession) -> Void)?
+    var onTranscribe: (RecordingSession) -> Void
     var onImportFile: () -> Void = {}
 
     @Environment(\.modelContext) private var modelContext
@@ -98,7 +98,7 @@ struct NewSessionPanelView: View {
                 .foregroundStyle(.secondary)
 
             Button {
-                onTranscribe?(session)
+                onTranscribe(session)
             } label: {
                 Label("Transcribe", systemImage: "text.bubble")
                     .frame(maxWidth: .infinity)

@@ -116,6 +116,22 @@ final class JobsViewModel: ObservableObject {
         }
     }
 
+    func shouldDiscardPendingSessionOnSelectionChange(
+        pendingSession: PendingSession?,
+        newSelection: SessionListItem?,
+        isNewSessionIdle: Bool
+    ) -> Bool {
+        guard pendingSession != nil, isNewSessionIdle, let newSelection else {
+            return false
+        }
+
+        if case .pending = newSelection {
+            return false
+        }
+
+        return true
+    }
+
     func sessionDateGroup(
         for date: Date,
         referenceDate: Date = .now,
