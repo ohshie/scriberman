@@ -30,7 +30,6 @@ final class AIProviderService: AIProviderServiceProtocol {
         case emptyPrompt
         case noOutput
         case providerFailure
-
         var errorDescription: String? {
             switch self {
             case .noAPIKeyConfigured:
