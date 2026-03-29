@@ -191,6 +191,7 @@ struct AppShellView: View {
         ToolbarItem(placement: .primaryAction) {
             Button {
                 appState.selectPendingSession()
+                appState.newSessionViewModel.refreshAudioDevicesOnPanelExpanded()
                 if let pendingSession = appState.pendingSession {
                     selectedSession = .pending(pendingSession)
                 }

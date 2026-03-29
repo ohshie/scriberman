@@ -187,6 +187,14 @@ final class NewSessionViewModel: ObservableObject {
         appAudioService.refreshRunningApps()
     }
 
+    func refreshAudioDevicesOnAppear() {
+        audioDeviceService.refreshDevices()
+    }
+
+    func refreshAudioDevicesOnPanelExpanded() {
+        audioDeviceService.refreshDevices()
+    }
+
     func requestMicrophonePermission() async {
         _ = await permissionService.requestMic()
     }
@@ -269,6 +277,10 @@ final class NewSessionViewModel: ObservableObject {
 
             if let startError {
                 throw startError
+            }
+
+            if let selectedDevice {
+                audioDeviceService.incrementUsage(for: selectedDevice.uid)
             }
 
             if let fallbackMessage {
