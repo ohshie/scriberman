@@ -50,13 +50,24 @@ final class AIProviderService: AIProviderServiceProtocol {
 
     private let keychainStore: KeychainStore
     private var store: AIProviderStore
+    private let clientFactory: (String) -> OpenAI
+    private let modelsFetcher: (OpenAI) async throws -> ModelsResult
+    private let responseCreator: (OpenAI, CreateModelResponseQuery) async throws -> ResponseObject
 
     init(
         keychainStore: KeychainStore,
-        store: AIProviderStore
+        store: AIProviderStore,
+        clientFactory: @escaping (String) -> OpenAI = { OpenAI(apiToken: $0) },
+        modelsFetcher: @escaping (OpenAI) async throws -> ModelsResult = { try await $0.models() },
+        responseCreator: @escaping (OpenAI, CreateModelResponseQuery) async throws -> ResponseObject = {
+            try await $0.responses.createResponse(query: $1)
+        }
     ) {
         self.keychainStore = keychainStore
         self.store = store
+        self.clientFactory = clientFactory
+        self.modelsFetcher = modelsFetcher
+        self.responseCreator = responseCreator
         self.isEnabled = store.isEnabled
         self.selectedProvider = store.selectedProvider
         self.selectedModelID = store.selectedModelID
@@ -86,7 +97,7 @@ final class AIProviderService: AIProviderServiceProtocol {
         guard let key = keychainStore.read(key: Constants.keychainKey), !key.isEmpty else {
             return nil
         }
-        return OpenAI(apiToken: key)
+        return clientFactory(key)
     }
 
     func testConnection() async {
@@ -105,7 +116,7 @@ final class AIProviderService: AIProviderServiceProtocol {
                 input: .textInput("Hi"),
                 model: .gpt4_1_nano
             )
-            _ = try await client.responses.createResponse(query: query)
+            _ = try await responseCreator(client, query)
             connectionStatus = .connected(Date())
         } catch {
             connectionStatus = .failed(error.localizedDescription)
@@ -119,7 +130,7 @@ final class AIProviderService: AIProviderServiceProtocol {
         }
 
         do {
-            let modelsList = try await client.models()
+            let modelsList = try await modelsFetcher(client)
             availableModels = modelsList.data
                 .filter { $0.ownedBy == "openai" && $0.id.localizedCaseInsensitiveContains("gpt") }
                 .map(\.id)
