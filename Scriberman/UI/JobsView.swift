@@ -29,6 +29,20 @@ struct JobsView: View {
             }
         }
         .navigationTitle("Jobs")
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    onInlineSidebarToggle()
+                } label: {
+                    Image(systemName: "sidebar.left")
+                }
+                .help("Hide Sidebar")
+                .opacity(showsInlineSidebarToggle ? 1 : 0)
+                .animation(.easeInOut(duration: 0.18), value: showsInlineSidebarToggle)
+                .allowsHitTesting(showsInlineSidebarToggle)
+                .accessibilityHidden(!showsInlineSidebarToggle)
+            }
+        }
         .confirmationDialog(
             "Clear All Sessions",
             isPresented: $showClearAllConfirmation,
@@ -59,16 +73,6 @@ struct JobsView: View {
 
     private var listContent: some View {
         List(selection: $selection) {
-            if showsInlineSidebarToggle {
-                Section {
-                    Button {
-                        onInlineSidebarToggle()
-                    } label: {
-                        Label("Hide Sidebar", systemImage: "sidebar.left")
-                    }
-                }
-            }
-
             if let pendingSession = appState.pendingSession {
                 row(for: .pending(pendingSession))
                     .tag(JobsViewModel.SessionListItem.pending(pendingSession))
