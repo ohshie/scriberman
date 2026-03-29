@@ -5,8 +5,6 @@ struct JobsView: View {
     @ObservedObject var viewModel: JobsViewModel
     let items: [JobsViewModel.SessionListItem]
     @Binding var selection: JobsViewModel.SessionListItem?
-    let showsInlineSidebarToggle: Bool
-    let onInlineSidebarToggle: () -> Void
 
     @EnvironmentObject private var appState: AppState
     @Environment(\.modelContext) private var modelContext
@@ -29,20 +27,6 @@ struct JobsView: View {
             }
         }
         .navigationTitle("Jobs")
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    onInlineSidebarToggle()
-                } label: {
-                    Image(systemName: "sidebar.left")
-                }
-                .help("Hide Sidebar")
-                .opacity(showsInlineSidebarToggle ? 1 : 0)
-                .animation(.easeInOut(duration: 0.18), value: showsInlineSidebarToggle)
-                .allowsHitTesting(showsInlineSidebarToggle)
-                .accessibilityHidden(!showsInlineSidebarToggle)
-            }
-        }
         .confirmationDialog(
             "Clear All Sessions",
             isPresented: $showClearAllConfirmation,
