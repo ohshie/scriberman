@@ -1,13 +1,12 @@
-import AppKit
 import SwiftData
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct JobsView: View {
     @ObservedObject var viewModel: JobsViewModel
     let items: [JobsViewModel.SessionListItem]
     @Binding var selection: JobsViewModel.SessionListItem?
 
+    @EnvironmentObject private var appState: AppState
     @Environment(\.modelContext) private var modelContext
     @State private var showClearAllConfirmation = false
 
@@ -17,7 +16,7 @@ struct JobsView: View {
 
     var body: some View {
         Group {
-            if items.isEmpty {
+            if items.isEmpty && appState.pendingSession == nil {
                 emptyState(
                     title: "No Sessions Yet",
                     systemImage: "list.bullet.rectangle",
@@ -31,9 +30,12 @@ struct JobsView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    openImportPanel()
+                    appState.selectPendingSession()
+                    if let pendingSession = appState.pendingSession {
+                        selection = .pending(pendingSession)
+                    }
                 } label: {
-                    Label("Import Audio", systemImage: "square.and.arrow.down")
+                    Label("New Session", systemImage: "plus")
                 }
             }
         }
@@ -56,6 +58,11 @@ struct JobsView: View {
 
     private var listContent: some View {
         List(selection: $selection) {
+            if let pendingSession = appState.pendingSession {
+                row(for: .pending(pendingSession))
+                    .tag(JobsViewModel.SessionListItem.pending(pendingSession))
+            }
+
             ForEach(sections) { section in
                 Section(section.title) {
                     ForEach(section.items) { item in
@@ -68,15 +75,17 @@ struct JobsView: View {
                 }
             }
 
-            Section {
-                Button(role: .destructive) {
-                    showClearAllConfirmation = true
-                } label: {
-                    Label("Clear All", systemImage: "trash")
+            if !items.isEmpty {
+                Section {
+                    Button(role: .destructive) {
+                        showClearAllConfirmation = true
+                    } label: {
+                        Label("Clear All", systemImage: "trash")
+                    }
+                    .disabled(items.isEmpty)
+                } footer: {
+                    Text("Deletes every session after confirmation.")
                 }
-                .disabled(items.isEmpty)
-            } footer: {
-                Text("Deletes every session after confirmation.")
             }
         }
         .listStyle(.sidebar)
@@ -124,24 +133,6 @@ struct JobsView: View {
             } label: {
                 Label("Delete", systemImage: "trash")
             }
-        }
-    }
-
-    private func openImportPanel() {
-        let panel = NSOpenPanel()
-        panel.title = "Import Audio"
-        panel.prompt = "Import"
-        panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.allowedContentTypes = [.audio]
-
-        guard panel.runModal() == .OK else {
-            return
-        }
-
-        Task {
-            await viewModel.importAudio(urls: panel.urls, context: modelContext)
         }
     }
 

@@ -97,12 +97,22 @@ struct AppShellView: View {
     @ViewBuilder
     private func detailView(for item: JobsViewModel.SessionListItem) -> some View {
         switch item {
-        case .pending:
-            ContentUnavailableView(
-                "Pending Session",
-                systemImage: "plus.circle",
-                description: Text("Session setup will appear here.")
-            )
+        case .pending(let pendingItem):
+            if let pendingSession = appState.pendingSession, pendingSession.id == pendingItem.id {
+                NewSessionPanelView(
+                    viewModel: appState.newSessionViewModel,
+                    pendingSession: Binding(
+                        get: { appState.pendingSession ?? pendingSession },
+                        set: { appState.pendingSession = $0 }
+                    )
+                )
+            } else {
+                ContentUnavailableView(
+                    "No Pending Session",
+                    systemImage: "plus.circle",
+                    description: Text("Create a new session from the + button.")
+                )
+            }
         case .recording(let session):
             TranscriptDetailView(
                 session: session,

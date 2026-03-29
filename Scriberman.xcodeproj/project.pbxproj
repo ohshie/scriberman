@@ -35,6 +35,7 @@
 		50A7C19DA8252ABCC743D2F2 /* ModelInstallService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B92B3F0C81C97B847246777 /* ModelInstallService.swift */; };
 		517B8995017388C7FC8E3644 /* ModelsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAB646F914C2425E3CBEE33D /* ModelsSettingsView.swift */; };
 		593A5B1DA131934EE90B4F7D /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E01B42C4D525868024537572 /* SettingsView.swift */; };
+		C2B2C3D4E5F60718293A4B5C /* NewSessionPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2B2C3D4E5F60718293A4B5D /* NewSessionPanelView.swift */; };
 		65E0EE498B357398375D8185 /* JobsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63F7B7CE8A7FE4E0F6C5539F /* JobsViewModelTests.swift */; };
 		C1B2C3D4E5F60718293A4B5C /* NewSessionViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1B2C3D4E5F60718293A4B5D /* NewSessionViewModelTests.swift */; };
 		6C07E0AE252F7D34AF16F2C2 /* BookmarkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27994768D463D730435539F3 /* BookmarkStore.swift */; };
@@ -127,6 +128,7 @@
 		5BB3D5811B6745E46A81D7DE /* AppShellView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppShellView.swift; sourceTree = "<group>"; };
 		63F7B7CE8A7FE4E0F6C5539F /* JobsViewModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JobsViewModelTests.swift; sourceTree = "<group>"; };
 		C1B2C3D4E5F60718293A4B5D /* NewSessionViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionViewModelTests.swift; sourceTree = "<group>"; };
+		C2B2C3D4E5F60718293A4B5D /* NewSessionPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionPanelView.swift; sourceTree = "<group>"; };
 		6A0DE555D53428ABBBCE123E /* TranscriptAligner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TranscriptAligner.swift; sourceTree = "<group>"; };
 		7910094E2F78031A00225294 /* RecordingServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingServiceTests.swift; sourceTree = "<group>"; };
 		791009502F78184900225294 /* AudioMixdownService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioMixdownService.swift; sourceTree = "<group>"; };
@@ -300,6 +302,7 @@
 				5AD764C83EECDAD9A42F5993 /* ModelsSettingsScreen.swift */,
 				79DCE41E2F77CDA90024DC26 /* PermissionsOnboardingView.swift */,
 				791009642F785B5900225294 /* ImportedSessionRow.swift */,
+				C2B2C3D4E5F60718293A4B5D /* NewSessionPanelView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -530,6 +533,7 @@
 				2FDE1F7065F222E3906F5122 /* JobsView.swift in Sources */,
 				791009592F783E6300225294 /* RetranscriptionService.swift in Sources */,
 				593A5B1DA131934EE90B4F7D /* SettingsView.swift in Sources */,
+				C2B2C3D4E5F60718293A4B5C /* NewSessionPanelView.swift in Sources */,
 				A0313B452C3199D5A6118FB9 /* AppShellView.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CC /* WaveformView.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CD /* RecordingSessionRow.swift in Sources */,
