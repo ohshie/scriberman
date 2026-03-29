@@ -22,6 +22,9 @@ struct NewSessionPanelView: View {
             Spacer(minLength: 0)
         }
         .padding(20)
+        .onAppear {
+            viewModel.refreshAudioDevicesOnAppear()
+        }
     }
 
     private var idleState: some View {

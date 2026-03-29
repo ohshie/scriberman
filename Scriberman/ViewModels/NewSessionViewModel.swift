@@ -187,6 +187,14 @@ final class NewSessionViewModel: ObservableObject {
         appAudioService.refreshRunningApps()
     }
 
+    func refreshAudioDevicesOnAppear() {
+        audioDeviceService.refreshDevices()
+    }
+
+    func refreshAudioDevicesOnPanelExpanded() {
+        audioDeviceService.refreshDevices()
+    }
+
     func requestMicrophonePermission() async {
         _ = await permissionService.requestMic()
     }

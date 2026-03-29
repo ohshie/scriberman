@@ -158,6 +158,34 @@ final class NewSessionViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.microphonePermissionGranted)
     }
 
+    func testRefreshAudioDevicesOnAppearCallsAudioDeviceServiceRefresh() {
+        viewModel.refreshAudioDevicesOnAppear()
+        XCTAssertEqual(audioDeviceService.refreshDevicesCalls, 1)
+    }
+
+    func testRefreshAudioDevicesOnPanelExpandedCallsAudioDeviceServiceRefresh() {
+        viewModel.refreshAudioDevicesOnPanelExpanded()
+        XCTAssertEqual(audioDeviceService.refreshDevicesCalls, 1)
+    }
+
+    func testAirPodsDisconnectScenarioUpdatesSelectedDeviceStateFromService() {
+        let airPods = AudioInputDevice(id: 2, uid: "uid-airpods", name: "AirPods")
+        let builtIn = AudioInputDevice(id: 1, uid: "uid-built-in", name: "Built-in Mic")
+        audioDeviceService.availableDevices = [airPods, builtIn]
+        audioDeviceService.selectedDevice = airPods
+        XCTAssertEqual(viewModel.selectedDevice?.uid, "uid-airpods")
+
+        // Simulate disconnect fallback emitted by AudioDeviceService.
+        audioDeviceService.availableDevices = [builtIn]
+        audioDeviceService.selectedDevice = builtIn
+        XCTAssertEqual(viewModel.selectedDevice?.uid, "uid-built-in")
+
+        // Simulate reconnect recovery emitted by AudioDeviceService.
+        audioDeviceService.availableDevices = [airPods, builtIn]
+        audioDeviceService.selectedDevice = airPods
+        XCTAssertEqual(viewModel.selectedDevice?.uid, "uid-airpods")
+    }
+
     func testNewSessionPanelShowsGrantMicrophoneAccessPrompt() throws {
         let source = try newSessionPanelSource()
         XCTAssertTrue(source.contains("if viewModel.shouldShowMicrophonePermissionPrompt"))
@@ -167,6 +195,11 @@ final class NewSessionViewModelTests: XCTestCase {
     func testNewSessionPanelPromptRequestsMicPermissionViaViewModel() throws {
         let source = try newSessionPanelSource()
         XCTAssertTrue(source.contains("await viewModel.requestMicrophonePermission()"))
+    }
+
+    func testNewSessionPanelRefreshesAudioDevicesOnAppear() throws {
+        let source = try newSessionPanelSource()
+        XCTAssertTrue(source.contains("viewModel.refreshAudioDevicesOnAppear()"))
     }
 
     private func newSessionPanelSource() throws -> String {

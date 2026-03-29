@@ -7,5 +7,6 @@ protocol AudioDeviceServiceProtocol: AnyObject {
     var selectedDevice: AudioInputDevice? { get set }
     var availableDevicesPublisher: AnyPublisher<[AudioInputDevice], Never> { get }
     var selectedDevicePublisher: AnyPublisher<AudioInputDevice?, Never> { get }
+    func refreshDevices()
     func incrementUsage(for uid: String)
 }
