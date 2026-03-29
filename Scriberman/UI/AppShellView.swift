@@ -24,7 +24,7 @@ struct AppShellView: View {
                 items: allSessionItems,
                 selection: $selectedSession
             )
-            .backgroundExtensionEffect()
+            .navigationSplitViewColumnWidth(min: 280, ideal: 320, max: 380)
         } detail: {
             if let selectedSession {
                 detailView(for: selectedSession)
