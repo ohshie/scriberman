@@ -90,6 +90,10 @@ final class NewSessionViewModel: ObservableObject {
         recordAppAudio && screenRecordingStatus == .granted
     }
 
+    var screenRecordingPermissionGranted: Bool {
+        screenRecordingStatus == .granted
+    }
+
     var permissionStatusWarningText: String? {
         if micStatus != .granted {
             return "Microphone permission is not verified. Recording is unavailable until access is granted."
@@ -209,6 +213,16 @@ final class NewSessionViewModel: ObservableObject {
 
     func requestMicrophonePermission() async {
         _ = await permissionService.requestMic()
+    }
+
+    func requestScreenRecordingPermission() {
+        _ = permissionService.requestScreenRecording()
+    }
+
+    func recheckPermissions() async {
+        permissionService.checkAll()
+        _ = await permissionService.verifyMic()
+        _ = await permissionService.verifyScreenRecording()
     }
 
     func restoreLastUsedApp() {

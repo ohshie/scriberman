@@ -176,6 +176,18 @@ final class NewSessionViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.microphonePermissionGranted)
     }
 
+    func testRequestScreenRecordingPermissionInvokesPermissionService() {
+        viewModel.requestScreenRecordingPermission()
+        XCTAssertEqual(permissionService.requestScreenRecordingCalls, 1)
+    }
+
+    func testRecheckPermissionsInvokesCheckAndVerifyMethods() async {
+        await viewModel.recheckPermissions()
+        XCTAssertEqual(permissionService.checkAllCalls, 1)
+        XCTAssertEqual(permissionService.verifyMicCalls, 1)
+        XCTAssertEqual(permissionService.verifyScreenRecordingCalls, 1)
+    }
+
     func testRefreshAudioDevicesOnAppearCallsAudioDeviceServiceRefresh() {
         viewModel.refreshAudioDevicesOnAppear()
         XCTAssertEqual(audioDeviceService.refreshDevicesCalls, 1)
@@ -224,6 +236,9 @@ final class NewSessionViewModelTests: XCTestCase {
         let source = try newSessionPanelSource()
         XCTAssertTrue(source.contains("if let permissionStatusWarningText = viewModel.permissionStatusWarningText"))
         XCTAssertTrue(source.contains("exclamationmark.triangle.fill"))
+        XCTAssertTrue(source.contains("Re-check Permissions"))
+        XCTAssertTrue(source.contains("Request Screen Access"))
+        XCTAssertTrue(source.contains("Open Privacy Settings"))
     }
 
     private func newSessionPanelSource() throws -> String {
