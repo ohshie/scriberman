@@ -86,6 +86,18 @@ final class NewSessionViewModelTests: XCTestCase {
         XCTAssertEqual(session.id, stoppedSession.id)
     }
 
+    func testStartRecordingIncrementsUsageForSelectedDevice() async {
+        permissionService.micStatus = .granted
+        let selectedDevice = AudioInputDevice(id: 7, uid: "uid-7", name: "Desk Mic")
+        audioDeviceService.availableDevices = [selectedDevice]
+        audioDeviceService.selectedDevice = selectedDevice
+        viewModel.selectedDevice = selectedDevice
+
+        await viewModel.startRecording(title: "Session", context: context)
+
+        XCTAssertEqual(audioDeviceService.incrementUsageCalls, ["uid-7"])
+    }
+
     func testResetReturnsIdleFromStoppedState() {
         let stoppedSession = RecordingSession(
             createdAt: .now,

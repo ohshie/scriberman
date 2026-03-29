@@ -6,6 +6,7 @@ import Foundation
 final class MockAudioDeviceService: AudioDeviceServiceProtocol {
     @Published var availableDevices: [AudioInputDevice] = []
     @Published var selectedDevice: AudioInputDevice?
+    private(set) var incrementUsageCalls: [String] = []
 
     var availableDevicesPublisher: AnyPublisher<[AudioInputDevice], Never> {
         $availableDevices.eraseToAnyPublisher()
@@ -13,5 +14,9 @@ final class MockAudioDeviceService: AudioDeviceServiceProtocol {
 
     var selectedDevicePublisher: AnyPublisher<AudioInputDevice?, Never> {
         $selectedDevice.eraseToAnyPublisher()
+    }
+
+    func incrementUsage(for uid: String) {
+        incrementUsageCalls.append(uid)
     }
 }
