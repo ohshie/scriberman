@@ -7,6 +7,7 @@ struct AppShellView: View {
     private enum SidebarToggleLocation {
         case toolbar
         case sidebar
+        case transitioning
     }
 
     @EnvironmentObject private var appState: AppState
@@ -210,6 +211,7 @@ struct AppShellView: View {
     }
 
     private func toggleSidebarFromToolbar() {
+        sidebarToggleLocation = .transitioning
         NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
 
         Task { @MainActor in
@@ -221,10 +223,15 @@ struct AppShellView: View {
     }
 
     private func toggleSidebarFromSidebar() {
-        withAnimation(.easeInOut(duration: 0.12)) {
-            sidebarToggleLocation = .toolbar
-        }
+        sidebarToggleLocation = .transitioning
         NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(220))
+            withAnimation(.easeInOut(duration: 0.18)) {
+                sidebarToggleLocation = .toolbar
+            }
+        }
     }
 
 }
