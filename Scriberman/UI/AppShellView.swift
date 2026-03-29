@@ -39,7 +39,6 @@ struct AppShellView: View {
         .toolbar {
             jobsToolbar
         }
-        .toolbar(removing: .sidebarToggle)
         .toolbar(removing: .title)
         .toolbar(removing: .search)
         .frame(minWidth: 860, minHeight: 580)
