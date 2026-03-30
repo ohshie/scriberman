@@ -2,7 +2,8 @@ import Foundation
 
 @MainActor
 final class AppState: ObservableObject {
-    let services: ServiceContainer
+    let mainServices: MainServiceContainer
+    let backgroundServices: BackgroundServiceContainer
     let permissionService: PermissionServiceProtocol
     let newSessionViewModel: NewSessionViewModel
     let jobsViewModel: JobsViewModel
@@ -17,7 +18,7 @@ final class AppState: ObservableObject {
     @Published var showPermissionsOnboarding = false
 
     var aiProviderService: AIProviderService {
-        services.aiProviderService
+        mainServices.aiProviderService
     }
 
     convenience init() {
@@ -29,31 +30,32 @@ final class AppState: ObservableObject {
         restoreWorkspaceHandler: (() async throws -> Workspace)? = nil,
         setWorkspaceHandler: ((URL) async throws -> Workspace)? = nil
     ) {
-        self.services = services
-        self.permissionService = services.permissionService
+        self.mainServices = services.main
+        self.backgroundServices = services.background
+        self.permissionService = services.main.permissionService
         self.restoreWorkspaceHandler = restoreWorkspaceHandler ?? {
-            try await services.workspaceService.restoreWorkspaceIfPossible()
+            try await services.background.workspaceService.restoreWorkspaceIfPossible()
         }
         self.setWorkspaceHandler = setWorkspaceHandler ?? { url in
-            try await services.workspaceService.setWorkspace(url: url)
+            try await services.background.workspaceService.setWorkspace(url: url)
         }
         self.newSessionViewModel = NewSessionViewModel(
-            workspaceService: services.workspaceService,
-            recordingService: services.recordingService,
-            audioDeviceService: services.audioDeviceService,
-            appAudioService: services.appAudioService,
-            permissionService: services.permissionService
+            workspaceService: services.background.workspaceService,
+            recordingService: services.background.recordingService,
+            audioDeviceService: services.main.audioDeviceService,
+            appAudioService: services.main.appAudioService,
+            permissionService: services.main.permissionService
         )
         self.jobsViewModel = JobsViewModel(
-            workspaceService: services.workspaceService,
-            transcriptionService: services.transcriptionService,
-            retranscriptionService: services.retranscriptionService,
-            audioImportService: services.audioImportService
+            workspaceService: services.background.workspaceService,
+            transcriptionService: services.background.transcriptionService,
+            retranscriptionService: services.background.retranscriptionService,
+            audioImportService: services.background.audioImportService
         )
         self.settingsViewModel = SettingsViewModel(
-            workspaceService: services.workspaceService,
-            modelInstallService: services.modelInstallService,
-            speakerEmbeddingStore: services.speakerEmbeddingStore
+            workspaceService: services.background.workspaceService,
+            modelInstallService: services.background.modelInstallService,
+            speakerEmbeddingStore: services.background.speakerEmbeddingStore
         )
     }
 
@@ -109,7 +111,7 @@ final class AppState: ObservableObject {
 
     func verifyWorkspaceForWrite() async -> Bool {
         do {
-            let writableWorkspace = try await services.workspaceService.requireWritableWorkspace()
+            let writableWorkspace = try await backgroundServices.workspaceService.requireWritableWorkspace()
             workspace = writableWorkspace
             workspaceErrorMessage = nil
             workspaceSelectionRequired = false

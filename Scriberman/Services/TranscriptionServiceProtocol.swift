@@ -1,6 +1,6 @@
 import Foundation
+import SwiftData
 
-@preconcurrency
 protocol TranscriptionServiceProtocol {
-    func transcribe(session: RecordingSession, workspace: Workspace) async throws -> Transcript
+    func transcribe(sessionID: UUID, modelContainer: ModelContainer, workspace: Workspace) async throws -> Transcript
 }

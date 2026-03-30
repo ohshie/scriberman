@@ -1,20 +1,29 @@
 import Foundation
 import SwiftData
 
-struct ServiceContainer {
+@MainActor
+struct MainServiceContainer {
     let bookmarkStore: BookmarkStore
     let aiProviderService: AIProviderService
-    let workspaceService: WorkspaceService
-    let modelInstallService: ModelInstallService
-    let recordingService: RecordingService
     let audioDeviceService: AudioDeviceService
     let appAudioService: AppAudioService
     let permissionService: PermissionServiceProtocol
+    let transcriptExportService: TranscriptExportService
+}
+
+struct BackgroundServiceContainer: Sendable {
+    let workspaceService: WorkspaceService
+    let modelInstallService: ModelInstallService
+    let recordingService: RecordingService
     let transcriptionService: TranscriptionService
     let retranscriptionService: RetranscriptionService
     let audioImportService: AudioImportService
-    let transcriptExportService: TranscriptExportService
     let speakerEmbeddingStore: SpeakerEmbeddingStore
+}
+
+struct ServiceContainer {
+    let main: MainServiceContainer
+    let background: BackgroundServiceContainer
 
     @MainActor
     static func live(modelContainer: ModelContainer = defaultModelContainer()) -> ServiceContainer {
@@ -27,25 +36,29 @@ struct ServiceContainer {
         let audioImportService = AudioImportService(retranscriptionService: retranscriptionService)
 
         return ServiceContainer(
-            bookmarkStore: bookmarkStore,
-            aiProviderService: AIProviderService(
-                keychainStore: LiveKeychainStore(),
-                store: aiProviderStore
+            main: MainServiceContainer(
+                bookmarkStore: bookmarkStore,
+                aiProviderService: AIProviderService(
+                    keychainStore: LiveKeychainStore(),
+                    store: aiProviderStore
+                ),
+                audioDeviceService: AudioDeviceService(),
+                appAudioService: AppAudioService(),
+                permissionService: PermissionService(),
+                transcriptExportService: TranscriptExportService()
             ),
-            workspaceService: workspaceService,
-            modelInstallService: ModelInstallService(workspaceService: workspaceService),
-            recordingService: RecordingService(
+            background: BackgroundServiceContainer(
                 workspaceService: workspaceService,
-                modelContainer: modelContainer
-            ),
-            audioDeviceService: AudioDeviceService(),
-            appAudioService: AppAudioService(),
-            permissionService: PermissionService(),
-            transcriptionService: transcriptionService,
-            retranscriptionService: retranscriptionService,
-            audioImportService: audioImportService,
-            transcriptExportService: TranscriptExportService(),
-            speakerEmbeddingStore: speakerEmbeddingStore
+                modelInstallService: ModelInstallService(workspaceService: workspaceService),
+                recordingService: RecordingService(
+                    workspaceService: workspaceService,
+                    modelContainer: modelContainer
+                ),
+                transcriptionService: transcriptionService,
+                retranscriptionService: retranscriptionService,
+                audioImportService: audioImportService,
+                speakerEmbeddingStore: speakerEmbeddingStore
+            )
         )
     }
 

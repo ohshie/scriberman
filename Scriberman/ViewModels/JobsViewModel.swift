@@ -196,10 +196,23 @@ final class JobsViewModel: ObservableObject {
         session.errorMessage = nil
         try? context.save()
 
+        let sessionID = session.id
+        let modelContainer = context.container
+
         Task {
             do {
                 let workspace = try await workspaceService.requireWritableWorkspace()
-                let transcript = try await transcriptionService.transcribe(session: session, workspace: workspace)
+                let transcript = try await transcriptionService.transcribe(
+                    sessionID: sessionID,
+                    modelContainer: modelContainer,
+                    workspace: workspace
+                )
+                
+                // Update session on MainActor since JobsViewModel is @MainActor
+                // and session is a SwiftData model.
+                // We need to fetch it again or use the one we have if it's safe.
+                // Since we are in a @MainActor Task, we can use the original session if it's still valid.
+                
                 session.transcript = transcript
                 session.status = .done
                 session.errorMessage = nil
@@ -236,8 +249,13 @@ final class JobsViewModel: ObservableObject {
 
         do {
             let workspace = try await workspaceService.requireWritableWorkspace()
+            let modelContainer = context.container
             for audioURL in audioURLs {
-                await audioImportService.importAudio(from: audioURL, workspace: workspace, context: context)
+                await audioImportService.importAudio(
+                    from: audioURL,
+                    workspace: workspace,
+                    modelContainer: modelContainer
+                )
             }
         } catch {
             logger.error("Import skipped because workspace is unavailable: \(error.localizedDescription, privacy: .public)")
@@ -252,10 +270,17 @@ final class JobsViewModel: ObservableObject {
         session.errorMessage = nil
         try? context.save()
 
+        let sessionID = session.id
+        let modelContainer = context.container
+
         Task {
             do {
                 let workspace = try await workspaceService.requireWritableWorkspace()
-                await retranscriptionService.retranscribe(session: session, workspace: workspace, context: context)
+                await retranscriptionService.retranscribe(
+                    sessionID: sessionID,
+                    modelContainer: modelContainer,
+                    workspace: workspace
+                )
             } catch {
                 session.status = .error(error.localizedDescription)
                 session.errorMessage = error.localizedDescription
@@ -276,10 +301,17 @@ final class JobsViewModel: ObservableObject {
         session.errorMessage = nil
         try? context.save()
 
+        let sessionID = session.id
+        let modelContainer = context.container
+
         Task {
             do {
                 let workspace = try await workspaceService.requireWritableWorkspace()
-                await retranscriptionService.retranscribe(session: session, workspace: workspace, context: context)
+                await retranscriptionService.retranscribe(
+                    sessionID: sessionID,
+                    modelContainer: modelContainer,
+                    workspace: workspace
+                )
             } catch {
                 session.status = .error(error.localizedDescription)
                 session.errorMessage = error.localizedDescription

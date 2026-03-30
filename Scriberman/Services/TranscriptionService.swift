@@ -1,6 +1,7 @@
 import FluidAudio
 import Foundation
 import OSLog
+import SwiftData
 
 enum TranscriptionError: LocalizedError {
     case missingAudioFile
@@ -22,7 +23,7 @@ enum TranscriptionError: LocalizedError {
     }
 }
 
-actor TranscriptionService: @preconcurrency TranscriptionServiceProtocol {
+actor TranscriptionService: TranscriptionServiceProtocol {
     typealias ResampleAudioFile = (URL) throws -> [Float]
     typealias SegmentSpeech = ([Float]) async throws -> [VadSegment]
     typealias ExtractSamples = (URL, Bool) throws -> (mic: [Float], app: [Float]?)
@@ -103,7 +104,16 @@ actor TranscriptionService: @preconcurrency TranscriptionServiceProtocol {
         segments.sorted { $0.startTime < $1.startTime }
     }
 
-    func transcribe(session: RecordingSession, workspace: Workspace) async throws -> Transcript {
+    func transcribe(sessionID: UUID, modelContainer: ModelContainer, workspace: Workspace) async throws -> Transcript {
+        let context = ModelContext(modelContainer)
+        let predicate = #Predicate<RecordingSession> { $0.id == sessionID }
+        var descriptor = FetchDescriptor<RecordingSession>(predicate: predicate)
+        descriptor.fetchLimit = 1
+        
+        guard let session = try? context.fetch(descriptor).first else {
+            throw TranscriptionError.failedToTranscribe("Session not found for ID \(sessionID)")
+        }
+
         logger.info("Starting transcription for session \(session.id, privacy: .public)")
         guard let mixdownPath = session.mixdownURL else {
             throw TranscriptionError.missingAudioFile

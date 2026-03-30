@@ -163,7 +163,7 @@ struct AppShellView: View {
                 TranscriptStudyView(
                     session: session,
                     transcript: transcript,
-                    store: appState.services.speakerEmbeddingStore
+                    store: appState.backgroundServices.speakerEmbeddingStore
                 )
             } else {
                 TranscriptDetailView(
@@ -186,7 +186,7 @@ struct AppShellView: View {
                 TranscriptStudyView(
                     session: session,
                     transcript: transcript,
-                    store: appState.services.speakerEmbeddingStore
+                    store: appState.backgroundServices.speakerEmbeddingStore
                 )
             } else {
                 TranscriptDetailView(
@@ -309,7 +309,7 @@ struct AppShellView: View {
     private func exportTranscript(for session: any TranscribableSession) {
         Task { @MainActor in
             do {
-                try await appState.services.transcriptExportService.export(
+                try await appState.mainServices.transcriptExportService.export(
                     session: session,
                     transcript: displayedTranscript(for: session)
                 )

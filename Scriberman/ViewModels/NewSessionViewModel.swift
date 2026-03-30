@@ -336,12 +336,21 @@ final class NewSessionViewModel: ObservableObject {
         }
     }
 
-    func stopRecording(context _: ModelContext) async {
+    func stopRecording(context: ModelContext) async {
         recordingMonitorTask?.cancel()
         recordingMonitorTask = nil
 
-        let session = await recordingService.stopRecording()
-        guard let session else {
+        let sessionID = await recordingService.stopRecording()
+        
+        var fetchedSession: RecordingSession?
+        if let sessionID = sessionID {
+            let predicate = #Predicate<RecordingSession> { $0.id == sessionID }
+            var descriptor = FetchDescriptor<RecordingSession>(predicate: predicate)
+            descriptor.fetchLimit = 1
+            fetchedSession = try? context.fetch(descriptor).first
+        }
+        
+        guard let session = fetchedSession else {
             state = .idle
             return
         }

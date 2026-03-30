@@ -1,4 +1,4 @@
-@preconcurrency import AVFoundation
+import AVFoundation
 import AudioToolbox
 import CoreMedia
 import Foundation

@@ -1,7 +1,7 @@
 import CoreAudio
 import Foundation
+import SwiftData
 
-@preconcurrency
 protocol RecordingServiceProtocol {
     func isRecording() async -> Bool
     func audioLevel() async -> Float
@@ -12,6 +12,6 @@ protocol RecordingServiceProtocol {
         appProcessID: pid_t?,
         title: String?
     ) async throws
-    func stopRecording() async -> RecordingSession?
+    func stopRecording() async -> UUID?
     func consumePendingError() async -> RecordingError?
 }

@@ -34,7 +34,7 @@ extension Notification.Name {
     static let appAudioCaptureAccessDenied = Notification.Name("appAudioCaptureAccessDenied")
 }
 
-actor RecordingService: @preconcurrency RecordingServiceProtocol {
+actor RecordingService: RecordingServiceProtocol {
     private let workspaceService: WorkspaceServiceProtocol
     private let modelContainer: ModelContainer
     private let notificationCenter: NotificationCenter
@@ -43,7 +43,7 @@ actor RecordingService: @preconcurrency RecordingServiceProtocol {
     private let logger = Logger(subsystem: "Scriberman", category: "RecordingService")
 
     private var audioEngine: AVAudioEngine?
-    private var audioFile: AVAudioFile?
+    private let micStreamer = AudioFileStreamer()
     private var audioRecorder: AVAudioRecorder?
     private var recordingStartedAt: Date?
     private var recordingIdentifier: String?
@@ -106,19 +106,25 @@ actor RecordingService: @preconcurrency RecordingServiceProtocol {
     #endif
 
     func audioLevel() async -> Float {
+        var currentMax: Float = 0
+        
         if let appAudioCaptureSession {
-            let appLevel = appAudioCaptureSession.audioLevel
-            audioLevelValue = max(audioLevelValue, appLevel)
+            currentMax = max(currentMax, appAudioCaptureSession.audioLevel)
         }
+        
         if let audioRecorder {
             audioRecorder.updateMeters()
             let averagePower = audioRecorder.averagePower(forChannel: 0)
             if averagePower.isFinite {
                 let normalized = powf(10, averagePower / 20)
-                audioLevelValue = min(max(normalized, 0), 1)
+                currentMax = max(currentMax, min(max(normalized, 0), 1))
             }
         }
-        return audioLevelValue
+        
+        currentMax = max(currentMax, micStreamer.audioLevel)
+        
+        audioLevelValue = currentMax
+        return currentMax
     }
 
     func startRecording(
@@ -181,12 +187,7 @@ actor RecordingService: @preconcurrency RecordingServiceProtocol {
             let inputFormat = inputNode.inputFormat(forBus: 0)
             if isValidTapFormat(inputFormat) {
                 do {
-                    let audioFile = try AVAudioFile(
-                        forWriting: micFileURL,
-                        settings: inputFormat.settings,
-                        commonFormat: inputFormat.commonFormat,
-                        interleaved: inputFormat.isInterleaved
-                    )
+                    try micStreamer.prepare(url: micFileURL, format: inputFormat)
 
                     inputNode.removeTap(onBus: 0)
                     inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, audioTime in
@@ -196,22 +197,13 @@ actor RecordingService: @preconcurrency RecordingServiceProtocol {
                             }
                         }
 
-                        do {
-                            try audioFile.write(from: buffer)
-                        } catch {
-                            return
-                        }
-
-                        Task { [weak self] in
-                            await self?.updateAudioLevel(from: buffer)
-                        }
+                        self?.micStreamer.write(buffer: buffer)
                     }
 
                     audioEngine.prepare()
                     try audioEngine.start()
 
                     self.audioEngine = audioEngine
-                    self.audioFile = audioFile
                     self.audioRecorder = nil
                 } catch {
                     inputNode.removeTap(onBus: 0)
@@ -257,7 +249,7 @@ actor RecordingService: @preconcurrency RecordingServiceProtocol {
         }
     }
 
-    func stopRecording() async -> RecordingSession? {
+    func stopRecording() async -> UUID? {
         guard isRecordingValue else {
             return nil
         }
@@ -271,12 +263,9 @@ actor RecordingService: @preconcurrency RecordingServiceProtocol {
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioRecorder?.stop()
+        micStreamer.close()
         await appAudioCaptureSession?.stop()
         appAudioCaptureSession = nil
-        if #available(macOS 15.0, *) {
-            audioFile?.close()
-            logger.info("Closed mic AVAudioFile writer before session folder promotion.")
-        }
 
         let startedAt = recordingStartedAt ?? Date()
         let createdAt = Date()
@@ -317,6 +306,7 @@ actor RecordingService: @preconcurrency RecordingServiceProtocol {
 
         do {
             let sessionID = session.id
+            let persistentID = session.id
             let micStartHostTime = self.micStartHostTime ?? self.appStartHostTime ?? 0
             let appStartHostTime = self.appStartHostTime
             let mixdownURL = finalRecordingURLs.mic.deletingLastPathComponent().appendingPathComponent("recording.m4a")
@@ -346,7 +336,7 @@ actor RecordingService: @preconcurrency RecordingServiceProtocol {
                 )
             }
 
-            return session
+            return persistentID
         } catch {
             cleanupRecordingState()
             return nil
@@ -379,34 +369,6 @@ actor RecordingService: @preconcurrency RecordingServiceProtocol {
         }
     }
 
-    private func updateAudioLevel(from buffer: AVAudioPCMBuffer) {
-        guard let channelData = buffer.floatChannelData else {
-            audioLevelValue = 0
-            return
-        }
-
-        let frameCount = Int(buffer.frameLength)
-        guard frameCount > 0 else {
-            audioLevelValue = 0
-            return
-        }
-
-        let channelCount = Int(buffer.format.channelCount)
-        var sumSquares: Float = 0
-
-        for channel in 0..<channelCount {
-            let samples = channelData[channel]
-            for sampleIndex in 0..<frameCount {
-                let sample = samples[sampleIndex]
-                sumSquares += sample * sample
-            }
-        }
-
-        let meanSquare = sumSquares / Float(frameCount * max(channelCount, 1))
-        let rms = sqrt(meanSquare)
-        audioLevelValue = min(max(rms, 0), 1)
-    }
-
     private func makeSessionTitle(createdAt: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM dd, HH:mm"
@@ -415,7 +377,7 @@ actor RecordingService: @preconcurrency RecordingServiceProtocol {
 
     private func cleanupRecordingState() {
         audioEngine = nil
-        audioFile = nil
+        micStreamer.close()
         audioRecorder = nil
         appAudioCaptureSession = nil
         appAudioURL = nil
@@ -477,7 +439,6 @@ actor RecordingService: @preconcurrency RecordingServiceProtocol {
         }
 
         self.audioEngine = nil
-        self.audioFile = nil
         self.audioRecorder = recorder
     }
 
@@ -723,35 +684,28 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate {
 final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
     private let lock = NSLock()
     private var fileURL: URL?
-    private var audioFile: AVAudioFile?
+    private let streamer = AudioFileStreamer()
     private var monoFormat: AVAudioFormat?
-    private var currentLevel: Float = 0
     private var firstBufferHostTime: UInt64?
     var onFirstBufferHostTime: (@Sendable (UInt64) -> Void)?
 
     var audioLevel: Float {
-        lock.lock()
-        defer { lock.unlock() }
-        return currentLevel
+        streamer.audioLevel
     }
+
+    private var hasPrepared = false
 
     func configureOutput(url: URL) {
         lock.lock()
         defer { lock.unlock() }
         self.fileURL = url
-        self.audioFile = nil
         self.monoFormat = nil
-        self.currentLevel = 0
         self.firstBufferHostTime = nil
+        self.hasPrepared = false
     }
 
     func closeOutput() {
-        lock.lock()
-        defer { lock.unlock() }
-        if #available(macOS 15.0, *) {
-            audioFile?.close()
-        }
-        audioFile = nil
+        streamer.close()
     }
 
     nonisolated func stream(
@@ -777,8 +731,6 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
         }
 
         lock.lock()
-        defer { lock.unlock() }
-
         if monoFormat == nil {
             monoFormat = AVAudioFormat(
                 standardFormatWithSampleRate: pcmBuffer.format.sampleRate,
@@ -786,19 +738,27 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
             )
         }
 
-        if audioFile == nil, let fileURL, let monoFormat {
-            audioFile = try? AVAudioFile(
-                forWriting: fileURL,
-                settings: monoFormat.settings,
-                commonFormat: monoFormat.commonFormat,
-                interleaved: monoFormat.isInterleaved
-            )
+        guard let fileURL, let monoFormat else {
+            lock.unlock()
+            return
         }
+        
+        if !hasPrepared {
+            do {
+                try streamer.prepare(url: fileURL, format: monoFormat)
+                hasPrepared = true
+            } catch {
+                lock.unlock()
+                return
+            }
+        }
+        
+        let format = monoFormat
+        lock.unlock()
 
         guard
-            let monoFormat,
             let monoBuffer = AVAudioPCMBuffer(
-                pcmFormat: monoFormat,
+                pcmFormat: format,
                 frameCapacity: AVAudioFrameCount(monoSamples.count)
             ),
             let channelData = monoBuffer.floatChannelData
@@ -813,33 +773,7 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
             }
         }
 
-        try? audioFile?.write(from: monoBuffer)
-        currentLevel = computeLevel(from: monoBuffer)
-    }
-
-    private func computeLevel(from buffer: AVAudioPCMBuffer) -> Float {
-        guard let channelData = buffer.floatChannelData else {
-            return 0
-        }
-
-        let frameCount = Int(buffer.frameLength)
-        guard frameCount > 0 else {
-            return 0
-        }
-
-        let channelCount = Int(buffer.format.channelCount)
-        var sumSquares: Float = 0
-
-        for channel in 0..<channelCount {
-            let samples = channelData[channel]
-            for sampleIndex in 0..<frameCount {
-                let sample = samples[sampleIndex]
-                sumSquares += sample * sample
-            }
-        }
-
-        let meanSquare = sumSquares / Float(frameCount * max(channelCount, 1))
-        return min(max(sqrt(meanSquare), 0), 1)
+        streamer.write(buffer: monoBuffer)
     }
 
     private func createPCMBuffer(from sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {

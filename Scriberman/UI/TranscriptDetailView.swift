@@ -377,7 +377,7 @@ private struct AnalyzableView: View {
         TranscriptStudyView(
             session: session,
             transcript: transcript,
-            store: appState.services.speakerEmbeddingStore
+            store: appState.backgroundServices.speakerEmbeddingStore
         )
         .environmentObject(appState)
         .environment(aiProviderService)

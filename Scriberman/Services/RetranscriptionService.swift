@@ -36,20 +36,37 @@ actor RetranscriptionService {
         }
     }
 
-    func retranscribe(session: any TranscribableSession, workspace: Workspace, context: ModelContext) async {
+    func retranscribe(sessionID: UUID, modelContainer: ModelContainer, workspace: Workspace) async {
+        let context = ModelContext(modelContainer)
+        
+        let recordingPredicate = #Predicate<RecordingSession> { $0.id == sessionID }
+        let importedPredicate = #Predicate<ImportedSession> { $0.id == sessionID }
+        
+        var session: (any TranscribableSession)?
+        
+        if let recording = try? context.fetch(FetchDescriptor<RecordingSession>(predicate: recordingPredicate)).first {
+            session = recording
+        } else if let imported = try? context.fetch(FetchDescriptor<ImportedSession>(predicate: importedPredicate)).first {
+            session = imported
+        }
+        
+        guard let session = session else {
+            return
+        }
+
         var mixdownPath: String?
         var isStereo = false
-        await MainActor.run {
-            mixdownPath = session.mixdownURL
-            isStereo = (session as? RecordingSession)?.appAudioURL != nil
-            if mixdownPath == nil {
-                session.status = .error("No mixdown available for retranscription")
-                try? saveContext(context)
-            } else {
-                session.status = .retranscribing
-                try? saveContext(context)
-            }
+        
+        mixdownPath = session.mixdownURL
+        isStereo = (session as? RecordingSession)?.appAudioURL != nil
+        if mixdownPath == nil {
+            session.status = .error("No mixdown available for retranscription")
+            try? saveContext(context)
+        } else {
+            session.status = .retranscribing
+            try? saveContext(context)
         }
+
         guard let mixdownPath else {
             return
         }
@@ -80,21 +97,17 @@ actor RetranscriptionService {
                 )
             }
 
-            await MainActor.run {
-                session.retranscript = Transcript(
-                    fullText: merged.map(\.text).joined(separator: " "),
-                    segments: merged,
-                    speakers: speakers,
-                    speakerEmbeddings: mergedEmbeddings
-                )
-                session.status = .done
-                try? saveContext(context)
-            }
+            session.retranscript = Transcript(
+                fullText: merged.map(\.text).joined(separator: " "),
+                segments: merged,
+                speakers: speakers,
+                speakerEmbeddings: mergedEmbeddings
+            )
+            session.status = .done
+            try? saveContext(context)
         } catch {
-            await MainActor.run {
-                session.status = .error(error.localizedDescription)
-                try? saveContext(context)
-            }
+            session.status = .error(error.localizedDescription)
+            try? saveContext(context)
         }
     }
 }

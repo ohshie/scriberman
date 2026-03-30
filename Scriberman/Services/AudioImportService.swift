@@ -16,7 +16,7 @@ actor AudioImportService {
     typealias CreateDirectory = @Sendable (URL) throws -> Void
     typealias WriteMonoAAC = @Sendable ([Float], URL) async throws -> Void
     typealias MixToMonoM4A = @Sendable (URL, URL) async throws -> Void
-    typealias Retranscribe = @Sendable (any TranscribableSession, Workspace, ModelContext) async -> Void
+    typealias Retranscribe = @Sendable (UUID, ModelContainer, Workspace) async -> Void
     typealias SaveContext = @Sendable (ModelContext) throws -> Void
 
     private let probeAudio: ProbeAudio
@@ -60,15 +60,16 @@ actor AudioImportService {
                 deleteSourceFiles: false
             )
         }
-        self.retranscribe = retranscribe ?? { session, workspace, context in
-            await retranscriptionService.retranscribe(session: session, workspace: workspace, context: context)
+        self.retranscribe = retranscribe ?? { sessionID, modelContainer, workspace in
+            await retranscriptionService.retranscribe(sessionID: sessionID, modelContainer: modelContainer, workspace: workspace)
         }
         self.saveContext = saveContext ?? { context in
             try context.save()
         }
     }
 
-    func importAudio(from url: URL, workspace: Workspace, context: ModelContext) async {
+    func importAudio(from url: URL, workspace: Workspace, modelContainer: ModelContainer) async {
+        let context = ModelContext(modelContainer)
         let fallbackTitle = Self.defaultTitle(from: url)
         let fallbackFileName = url.lastPathComponent
         let fallbackFormat = Self.defaultFormat(from: url)
@@ -91,24 +92,23 @@ actor AudioImportService {
             originalFormat: fallbackFormat,
             status: .converting
         )
-        await MainActor.run {
-            context.insert(session)
-            try? saveContext(context)
-        }
+        
+        context.insert(session)
+        try? saveContext(context)
+        
+        let sessionID = session.id
 
         do {
             let probe = try await probeAudio(url)
-            await MainActor.run {
-                session.title = probe.title
-                session.originalFileName = probe.originalFileName
-                session.originalFormat = probe.originalFormat
-                session.duration = probe.duration
-            }
+            session.title = probe.title
+            session.originalFileName = probe.originalFileName
+            session.originalFormat = probe.originalFormat
+            session.duration = probe.duration
+            try? saveContext(context)
 
-            let sessionSnapshot = await MainActor.run { (title: session.title, createdAt: session.createdAt) }
             let importFolderURL = makeUniqueImportFolderURL(
-                title: sessionSnapshot.title,
-                createdAt: sessionSnapshot.createdAt,
+                title: session.title,
+                createdAt: session.createdAt,
                 workspace: workspace
             )
             try createDirectory(importFolderURL)
@@ -126,18 +126,14 @@ actor AudioImportService {
                 }
             }
 
-            await MainActor.run {
-                session.mixdownURL = outputURL.path
-                session.status = .transcribing
-                try? saveContext(context)
-            }
+            session.mixdownURL = outputURL.path
+            session.status = .transcribing
+            try? saveContext(context)
 
-            await retranscribe(session, workspace, context)
+            await retranscribe(sessionID, modelContainer, workspace)
         } catch {
-            await MainActor.run {
-                session.status = .error(error.localizedDescription)
-                try? saveContext(context)
-            }
+            session.status = .error(error.localizedDescription)
+            try? saveContext(context)
         }
     }
 
