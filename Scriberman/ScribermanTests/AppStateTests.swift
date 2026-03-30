@@ -189,7 +189,8 @@ final class AppStateTests: XCTestCase {
     private func makeServiceContainer(permissionService: PermissionServiceProtocol) -> ServiceContainer {
         let bookmarkStore = TestBookmarkStore()
         let workspaceService = WorkspaceService(bookmarkStore: bookmarkStore)
-        let transcriptionService = TranscriptionService()
+        let speakerEmbeddingStore = SpeakerEmbeddingStore(modelContainer: modelContainer)
+        let transcriptionService = TranscriptionService(speakerEmbeddingStore: speakerEmbeddingStore)
         let retranscriptionService = RetranscriptionService(transcriptionService: transcriptionService)
         let keychainStore = InMemoryKeychainStore()
         let defaultsSuite = "AppStateTests.\(UUID().uuidString)"
@@ -215,7 +216,8 @@ final class AppStateTests: XCTestCase {
             transcriptionService: transcriptionService,
             retranscriptionService: retranscriptionService,
             audioImportService: AudioImportService(retranscriptionService: retranscriptionService),
-            transcriptExportService: TranscriptExportService()
+            transcriptExportService: TranscriptExportService(),
+            speakerEmbeddingStore: speakerEmbeddingStore
         )
     }
 }

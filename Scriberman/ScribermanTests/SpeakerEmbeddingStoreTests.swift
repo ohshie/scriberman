@@ -1,29 +1,33 @@
-import XCTest
+import Testing
 import SwiftData
 import FluidAudio
+import Foundation
 @testable import Scriberman
 
-final class SpeakerEmbeddingStoreTests: XCTestCase {
-    var container: ModelContainer!
-    var store: SpeakerEmbeddingStore!
+@Suite("SpeakerEmbeddingStore Tests")
+struct SpeakerEmbeddingStoreTests {
+    private let container: ModelContainer
+    private let store: SpeakerEmbeddingStore
 
-    override func setUp() async throws {
+    init() throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        container = try ModelContainer(for: SpeakerProfile.self, configurations: config)
-        store = SpeakerEmbeddingStore(modelContainer: container)
+        self.container = try ModelContainer(for: SpeakerProfile.self, configurations: config)
+        self.store = SpeakerEmbeddingStore(modelContainer: container)
     }
 
-    func testEnrollNewSpeaker() async throws {
+    @Test("Enroll a new speaker")
+    func enrollNewSpeaker() async throws {
         let embedding: [Float] = Array(repeating: 0.1, count: 256)
         try await store.enrollSpeaker(name: "Alice", embedding: embedding)
         
         let all = try await store.fetchAll()
-        XCTAssertEqual(all.count, 1)
-        XCTAssertEqual(all.first?.name, "Alice")
-        XCTAssertEqual(all.first?.embedding, embedding)
+        #expect(all.count == 1)
+        #expect(all.first?.name == "Alice")
+        #expect(all.first?.embedding == embedding)
     }
 
-    func testUpdateExistingSpeaker() async throws {
+    @Test("Update an existing speaker's profile")
+    func updateExistingSpeaker() async throws {
         let embedding1: [Float] = Array(repeating: 0.1, count: 256)
         try await store.enrollSpeaker(name: "Alice", embedding: embedding1)
         
@@ -31,12 +35,13 @@ final class SpeakerEmbeddingStoreTests: XCTestCase {
         try await store.enrollSpeaker(name: "Alice", embedding: embedding2)
         
         let all = try await store.fetchAll()
-        XCTAssertEqual(all.count, 1)
-        XCTAssertEqual(all.first?.name, "Alice")
-        XCTAssertEqual(all.first?.embedding, embedding2)
+        #expect(all.count == 1)
+        #expect(all.first?.name == "Alice")
+        #expect(all.first?.embedding == embedding2)
     }
 
-    func testDeleteSpeaker() async throws {
+    @Test("Delete a speaker profile")
+    func deleteSpeaker() async throws {
         let embedding: [Float] = Array(repeating: 0.1, count: 256)
         try await store.enrollSpeaker(name: "Alice", embedding: embedding)
         
@@ -44,18 +49,19 @@ final class SpeakerEmbeddingStoreTests: XCTestCase {
         try await store.delete(all.first!)
         
         let allAfter = try await store.fetchAll()
-        XCTAssertTrue(allAfter.isEmpty)
+        #expect(allAfter.isEmpty)
     }
 
-    func testFindProfileByID() async throws {
+    @Test("Find a profile by ID")
+    func findProfileByID() async throws {
         let embedding: [Float] = Array(repeating: 0.1, count: 256)
         try await store.enrollSpeaker(name: "Alice", embedding: embedding)
         
         let all = try await store.fetchAll()
-        let id = all.first!.id
+        let id = try #require(all.first?.id)
         
         let found = try await store.findProfile(byID: id)
-        XCTAssertNotNil(found)
-        XCTAssertEqual(found?.name, "Alice")
+        #expect(found != nil)
+        #expect(found?.name == "Alice")
     }
 }

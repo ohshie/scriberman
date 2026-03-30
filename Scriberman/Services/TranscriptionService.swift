@@ -209,7 +209,6 @@ actor TranscriptionService: @preconcurrency TranscriptionServiceProtocol {
             let diarizerModels = try await OfflineDiarizerModels.load(from: workspace.modelsURL)
             offlineDiarizerManager.initialize(models: diarizerModels)
         } catch {
-        } catch {
             throw TranscriptionError.failedToTranscribe("\(passName) pass: model initialization failed - \(error.localizedDescription)")
         }
 
@@ -348,5 +347,39 @@ actor TranscriptionService: @preconcurrency TranscriptionServiceProtocol {
         workspace: Workspace
     ) async throws -> ([TranscriptSegment], [String: [Float]]) {
         try await transcribePassFromSamples(samples: samples, source: source, workspace: workspace)
+    }
+
+    internal func matchSpeakers(diarizationResult: DiarizationResult) async throws -> [String: String] {
+        var speakerMapping: [String: String] = [:] // Map local ID to Profile Name
+        guard let store = speakerEmbeddingStore, let db = diarizationResult.speakerDatabase else {
+            return [:]
+        }
+
+        let threshold: Float = 0.28
+        let profiles = (try? await store.fetchAll()) ?? []
+
+        for (clusterId, embedding) in db {
+            var bestMatch: SpeakerProfile?
+            var bestDistance = threshold
+
+            for profile in profiles {
+                let distance = SpeakerUtilities.cosineDistance(embedding, profile.embedding)
+                if distance < bestDistance {
+                    bestDistance = distance
+                    bestMatch = profile
+                } else if distance == bestDistance && bestMatch != nil {
+                    // Tie-breaker: prefer earlier seen profile if distance is identical
+                    if profile.lastSeen < (bestMatch?.lastSeen ?? .distantFuture) {
+                        bestMatch = profile
+                    }
+                }
+            }
+
+            if let match = bestMatch {
+                speakerMapping[clusterId] = match.name
+                try? await store.updateProfile(id: match.id)
+            }
+        }
+        return speakerMapping
     }
 }

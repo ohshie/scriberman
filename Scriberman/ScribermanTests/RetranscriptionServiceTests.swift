@@ -1,28 +1,24 @@
+import Testing
 import SwiftData
-import XCTest
+import Foundation
 @testable import Scriberman
 
+@Suite("RetranscriptionService Tests")
 @MainActor
-final class RetranscriptionServiceTests: XCTestCase {
-    private var container: ModelContainer!
-    private var context: ModelContext!
+struct RetranscriptionServiceTests {
+    private let container: ModelContainer
+    private let context: ModelContext
 
-    override func setUpWithError() throws {
-        try super.setUpWithError()
-        container = try ModelContainer(
+    init() throws {
+        self.container = try ModelContainer(
             for: RecordingSession.self, ImportedSession.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
-        context = ModelContext(container)
+        self.context = ModelContext(container)
     }
 
-    override func tearDown() {
-        context = nil
-        container = nil
-        super.tearDown()
-    }
-
-    func testRetranscribeStereoSuccessStoresRetranscriptAndSetsDone() async {
+    @Test("Stereo retranscription success stores retranscript and sets done status")
+    func retranscribeStereoSuccess() async throws {
         let transcriptionService = TranscriptionService()
         let service = RetranscriptionService(
             transcriptionService: transcriptionService,
@@ -33,7 +29,7 @@ final class RetranscriptionServiceTests: XCTestCase {
             transcribePassFromSamplesHandler: { _, source, _ in
                 switch source {
                 case .mic:
-                    return [
+                    return ([
                         TranscriptSegment(
                             speakerId: "S1",
                             text: "mic line",
@@ -41,9 +37,9 @@ final class RetranscriptionServiceTests: XCTestCase {
                             endTime: 2.2,
                             audioSource: .mic
                         )
-                    ]
+                    ], [:])
                 case .app:
-                    return [
+                    return ([
                         TranscriptSegment(
                             speakerId: "app:S1",
                             text: "app line",
@@ -51,7 +47,7 @@ final class RetranscriptionServiceTests: XCTestCase {
                             endTime: 1.2,
                             audioSource: .app
                         )
-                    ]
+                    ], [:])
                 }
             }
         )
@@ -80,17 +76,18 @@ final class RetranscriptionServiceTests: XCTestCase {
         )
 
         context.insert(session)
-        try? context.save()
+        try context.save()
 
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()))
         await service.retranscribe(session: session, workspace: workspace, context: context)
 
-        XCTAssertEqual(session.status, .done)
-        XCTAssertEqual(session.retranscript?.segments.map(\.text), ["app line", "mic line"])
-        XCTAssertEqual(session.transcript?.fullText, "original")
+        #expect(session.status == .done)
+        #expect(session.retranscript?.segments.map(\.text) == ["app line", "mic line"])
+        #expect(session.transcript?.fullText == "original")
     }
 
-    func testRetranscribeMonoSuccessStoresMicOnlyRetranscript() async {
+    @Test("Mono retranscription success stores mic-only retranscript")
+    func retranscribeMonoSuccess() async throws {
         let transcriptionService = TranscriptionService()
         let service = RetranscriptionService(
             transcriptionService: transcriptionService,
@@ -99,8 +96,8 @@ final class RetranscriptionServiceTests: XCTestCase {
             },
             prepareModelsHandler: { _ in },
             transcribePassFromSamplesHandler: { _, source, _ in
-                XCTAssertEqual(source, .mic)
-                return [
+                #expect(source == .mic)
+                return ([
                     TranscriptSegment(
                         speakerId: "S1",
                         text: "mic only",
@@ -108,7 +105,7 @@ final class RetranscriptionServiceTests: XCTestCase {
                         endTime: 0.5,
                         audioSource: .mic
                     )
-                ]
+                ], [:])
             }
         )
 
@@ -123,17 +120,18 @@ final class RetranscriptionServiceTests: XCTestCase {
         )
 
         context.insert(session)
-        try? context.save()
+        try context.save()
 
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()))
         await service.retranscribe(session: session, workspace: workspace, context: context)
 
-        XCTAssertEqual(session.status, .done)
-        XCTAssertEqual(session.retranscript?.segments.count, 1)
-        XCTAssertEqual(session.retranscript?.segments.first?.audioSource, .mic)
+        #expect(session.status == .done)
+        #expect(session.retranscript?.segments.count == 1)
+        #expect(session.retranscript?.segments.first?.audioSource == .mic)
     }
 
-    func testRetranscribeWithNilMixdownSetsExpectedError() async {
+    @Test("Retranscription with nil mixdown sets error status")
+    func retranscribeWithNilMixdown() async throws {
         let service = RetranscriptionService(transcriptionService: TranscriptionService())
         let session = RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
@@ -146,19 +144,19 @@ final class RetranscriptionServiceTests: XCTestCase {
         )
 
         context.insert(session)
-        try? context.save()
+        try context.save()
 
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()))
         await service.retranscribe(session: session, workspace: workspace, context: context)
 
-        XCTAssertEqual(session.status, .error("No mixdown available for retranscription"))
-        XCTAssertNil(session.retranscript)
+        #expect(session.status == .error("No mixdown available for retranscription"))
+        #expect(session.retranscript == nil)
     }
 
-    func testRetranscribeExtractionFailureSetsErrorStatus() async {
+    @Test("Extraction failure during retranscription sets error status")
+    func retranscribeExtractionFailure() async throws {
         enum ForcedError: LocalizedError {
             case extraction
-
             var errorDescription: String? { "Forced extraction failure" }
         }
 
@@ -169,11 +167,11 @@ final class RetranscriptionServiceTests: XCTestCase {
                 throw ForcedError.extraction
             },
             prepareModelsHandler: { _ in
-                XCTFail("prepareModels should not be called when extraction fails")
+                Issue.record("prepareModels should not be called when extraction fails")
             },
             transcribePassFromSamplesHandler: { _, _, _ in
-                XCTFail("transcribePassFromSamples should not be called when extraction fails")
-                return []
+                Issue.record("transcribePassFromSamples should not be called when extraction fails")
+                return ([], [:])
             }
         )
 
@@ -188,20 +186,21 @@ final class RetranscriptionServiceTests: XCTestCase {
         )
 
         context.insert(session)
-        try? context.save()
+        try context.save()
 
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()))
         await service.retranscribe(session: session, workspace: workspace, context: context)
 
         if case .error(let message) = session.status {
-            XCTAssertEqual(message, "Forced extraction failure")
+            #expect(message == "Forced extraction failure")
         } else {
-            XCTFail("Expected error status")
+            Issue.record("Expected error status")
         }
-        XCTAssertNil(session.retranscript)
+        #expect(session.retranscript == nil)
     }
 
-    func testRetranscribeImportedSessionUsesMonoExtraction() async {
+    @Test("Imported session retranscription uses mono extraction")
+    func retranscribeImportedSession() async throws {
         let transcriptionService = TranscriptionService()
         var capturedIsStereo: Bool?
         let service = RetranscriptionService(
@@ -212,8 +211,8 @@ final class RetranscriptionServiceTests: XCTestCase {
             },
             prepareModelsHandler: { _ in },
             transcribePassFromSamplesHandler: { _, source, _ in
-                XCTAssertEqual(source, .mic)
-                return [
+                #expect(source == .mic)
+                return ([
                     TranscriptSegment(
                         speakerId: "S1",
                         text: "imported",
@@ -221,7 +220,7 @@ final class RetranscriptionServiceTests: XCTestCase {
                         endTime: 0.5,
                         audioSource: .mic
                     )
-                ]
+                ], [:])
             }
         )
 
@@ -235,13 +234,13 @@ final class RetranscriptionServiceTests: XCTestCase {
             status: .done
         )
         context.insert(session)
-        try? context.save()
+        try context.save()
 
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()))
         await service.retranscribe(session: session, workspace: workspace, context: context)
 
-        XCTAssertEqual(capturedIsStereo, false)
-        XCTAssertEqual(session.status, .done)
-        XCTAssertEqual(session.retranscript?.segments.first?.text, "imported")
+        #expect(capturedIsStereo == false)
+        #expect(session.status == .done)
+        #expect(session.retranscript?.segments.first?.text == "imported")
     }
 }

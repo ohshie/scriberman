@@ -429,8 +429,10 @@ final class AudioMixdownServiceTests: XCTestCase {
 
     private func shouldSkipForSandboxAudioIO(_ error: Error) -> Bool {
         let message = String(describing: error)
+        let nsError = error as NSError
         return message.contains("Foundation._GenericObjCError")
             || message.contains("nilError")
+            || (nsError.domain == "com.apple.coreaudio.avfaudio" && nsError.code == 2003334207)
     }
 
     private func readAudioStreamDescription(from url: URL) throws -> AudioStreamBasicDescription {
