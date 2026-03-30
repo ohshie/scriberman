@@ -56,13 +56,17 @@ final class AudioImportServiceTests: XCTestCase {
                 try FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
                 FileManager.default.createFile(atPath: outputURL.path, contents: Data("aac".utf8))
             },
-            retranscribe: { session, _, context in
-                session.status = .done
-                try? context.save()
+            retranscribe: { sessionID, modelContainer, _ in
+                let ctx = ModelContext(modelContainer)
+                let pred = #Predicate<ImportedSession> { $0.id == sessionID }
+                if let session = try? ctx.fetch(FetchDescriptor<ImportedSession>(predicate: pred)).first {
+                    session.status = .done
+                    try? ctx.save()
+                }
             }
         )
 
-        await service.importAudio(from: inputURL, workspace: workspace, context: context)
+        await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
 
         let imported = try XCTUnwrap(fetchImportedSession())
         XCTAssertEqual(imported.title, "meeting")
@@ -105,7 +109,7 @@ final class AudioImportServiceTests: XCTestCase {
             }
         )
 
-        await service.importAudio(from: inputURL, workspace: workspace, context: context)
+        await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
 
         XCTAssertEqual(capturedWrittenSamples.count, 3)
         XCTAssertEqual(capturedWrittenSamples[0], 0.3, accuracy: 0.0001)
@@ -136,7 +140,7 @@ final class AudioImportServiceTests: XCTestCase {
             }
         )
 
-        await service.importAudio(from: inputURL, workspace: workspace, context: context)
+        await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
 
         let imported = try XCTUnwrap(fetchImportedSession())
         if case .error(let message) = imported.status {
@@ -169,7 +173,7 @@ final class AudioImportServiceTests: XCTestCase {
             }
         )
 
-        await service.importAudio(from: inputURL, workspace: workspace, context: context)
+        await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
 
         let imported = try XCTUnwrap(fetchImportedSession())
         if case .error(let message) = imported.status {
@@ -205,13 +209,17 @@ final class AudioImportServiceTests: XCTestCase {
                 )
                 FileManager.default.createFile(atPath: outputURL.path, contents: Data("aac".utf8))
             },
-            retranscribe: { session, _, context in
-                session.status = .done
-                try? context.save()
+            retranscribe: { sessionID, modelContainer, _ in
+                let ctx = ModelContext(modelContainer)
+                let pred = #Predicate<ImportedSession> { $0.id == sessionID }
+                if let session = try? ctx.fetch(FetchDescriptor<ImportedSession>(predicate: pred)).first {
+                    session.status = .done
+                    try? ctx.save()
+                }
             }
         )
 
-        await service.importAudio(from: inputURL, workspace: workspace, context: context)
+        await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
 
         let imported = try XCTUnwrap(fetchImportedSession())
         XCTAssertTrue(fallbackCalled)
@@ -221,8 +229,9 @@ final class AudioImportServiceTests: XCTestCase {
     }
 
     private func fetchImportedSession() -> ImportedSession? {
+        let verifyContext = ModelContext(container)
         var descriptor = FetchDescriptor<ImportedSession>()
         descriptor.fetchLimit = 1
-        return try? context.fetch(descriptor).first
+        return try? verifyContext.fetch(descriptor).first
     }
 }

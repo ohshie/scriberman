@@ -62,7 +62,7 @@ final class NewSessionViewModelTests: XCTestCase {
         super.tearDown()
     }
 
-    func testStateMachineTransitionsIdleToRecordingToStopped() async {
+    func testStateMachineTransitionsIdleToRecordingToStopped() async throws {
         recordingService.isRecordingOverride = false
         recordingService.audioLevelOverride = 0
         let stoppedSession = RecordingSession(
@@ -72,7 +72,9 @@ final class NewSessionViewModelTests: XCTestCase {
             title: "Recorded",
             status: .recorded
         )
-        recordingService.stopReturns = stoppedSession
+        context.insert(stoppedSession)
+        try context.save()
+        recordingService.stopReturns = stoppedSession.id
 
         await viewModel.startRecording(title: "Session", context: context)
         guard case .recording = viewModel.state else {

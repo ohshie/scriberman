@@ -1,3 +1,4 @@
+import SwiftData
 import XCTest
 @testable import Scriberman
 
@@ -77,9 +78,13 @@ final class TranscriptionServiceTests: XCTestCase {
         XCTAssertTrue(embeddings.isEmpty)
     }
 
-    func testTranscribeThrowsMissingAudioWhenMixdownURLIsNil() async {
+    func testTranscribeThrowsMissingAudioWhenMixdownURLIsNil() async throws {
         let service = TranscriptionService()
         let workspace = Workspace(rootURL: FileManager.default.temporaryDirectory)
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
         let session = RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
             duration: 3,
@@ -89,9 +94,12 @@ final class TranscriptionServiceTests: XCTestCase {
             title: "Session",
             status: .recorded
         )
+        let context = ModelContext(container)
+        context.insert(session)
+        try context.save()
 
         do {
-            _ = try await service.transcribe(session: session, workspace: workspace)
+            _ = try await service.transcribe(sessionID: session.id, modelContainer: container, workspace: workspace)
             XCTFail("Expected missing audio file error.")
         } catch {
             guard case TranscriptionError.missingAudioFile = error else {
@@ -120,6 +128,10 @@ final class TranscriptionServiceTests: XCTestCase {
             }
         )
 
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
         let session = RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
             duration: 6,
@@ -129,9 +141,12 @@ final class TranscriptionServiceTests: XCTestCase {
             title: "Session",
             status: .recorded
         )
+        let context = ModelContext(container)
+        context.insert(session)
+        try context.save()
         let workspace = Workspace(rootURL: FileManager.default.temporaryDirectory)
 
-        let transcript = try await service.transcribe(session: session, workspace: workspace)
+        let transcript = try await service.transcribe(sessionID: session.id, modelContainer: container, workspace: workspace)
 
         XCTAssertTrue(transcript.segments.isEmpty)
         XCTAssertTrue(transcript.fullText.isEmpty)

@@ -75,15 +75,18 @@ struct RetranscriptionServiceTests {
             speakers: [TranscriptSpeaker(id: "S0", label: "Speaker 1", colorHex: "#111111")]
         )
 
+        let sessionID = session.id
         context.insert(session)
         try context.save()
 
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()))
-        await service.retranscribe(session: session, workspace: workspace, context: context)
+        await service.retranscribe(sessionID: sessionID, modelContainer: container, workspace: workspace)
 
-        #expect(session.status == .done)
-        #expect(session.retranscript?.segments.map(\.text) == ["app line", "mic line"])
-        #expect(session.transcript?.fullText == "original")
+        let verifyContext = ModelContext(container)
+        let fetched = try verifyContext.fetch(FetchDescriptor<RecordingSession>(predicate: #Predicate { $0.id == sessionID })).first
+        #expect(fetched?.status == .done)
+        #expect(fetched?.retranscript?.segments.map(\.text) == ["app line", "mic line"])
+        #expect(fetched?.transcript?.fullText == "original")
     }
 
     @Test("Mono retranscription success stores mic-only retranscript")
@@ -119,15 +122,18 @@ struct RetranscriptionServiceTests {
             status: .done
         )
 
+        let sessionID = session.id
         context.insert(session)
         try context.save()
 
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()))
-        await service.retranscribe(session: session, workspace: workspace, context: context)
+        await service.retranscribe(sessionID: sessionID, modelContainer: container, workspace: workspace)
 
-        #expect(session.status == .done)
-        #expect(session.retranscript?.segments.count == 1)
-        #expect(session.retranscript?.segments.first?.audioSource == .mic)
+        let verifyContext = ModelContext(container)
+        let fetched = try verifyContext.fetch(FetchDescriptor<RecordingSession>(predicate: #Predicate { $0.id == sessionID })).first
+        #expect(fetched?.status == .done)
+        #expect(fetched?.retranscript?.segments.count == 1)
+        #expect(fetched?.retranscript?.segments.first?.audioSource == .mic)
     }
 
     @Test("Retranscription with nil mixdown sets error status")
@@ -143,14 +149,17 @@ struct RetranscriptionServiceTests {
             status: .done
         )
 
+        let sessionID = session.id
         context.insert(session)
         try context.save()
 
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()))
-        await service.retranscribe(session: session, workspace: workspace, context: context)
+        await service.retranscribe(sessionID: sessionID, modelContainer: container, workspace: workspace)
 
-        #expect(session.status == .error("No mixdown available for retranscription"))
-        #expect(session.retranscript == nil)
+        let verifyContext = ModelContext(container)
+        let fetched = try verifyContext.fetch(FetchDescriptor<RecordingSession>(predicate: #Predicate { $0.id == sessionID })).first
+        #expect(fetched?.status == .error("No mixdown available for retranscription"))
+        #expect(fetched?.retranscript == nil)
     }
 
     @Test("Extraction failure during retranscription sets error status")
@@ -185,18 +194,21 @@ struct RetranscriptionServiceTests {
             status: .done
         )
 
+        let sessionID = session.id
         context.insert(session)
         try context.save()
 
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()))
-        await service.retranscribe(session: session, workspace: workspace, context: context)
+        await service.retranscribe(sessionID: sessionID, modelContainer: container, workspace: workspace)
 
-        if case .error(let message) = session.status {
+        let verifyContext = ModelContext(container)
+        let fetched = try verifyContext.fetch(FetchDescriptor<RecordingSession>(predicate: #Predicate { $0.id == sessionID })).first
+        if case .error(let message) = fetched?.status {
             #expect(message == "Forced extraction failure")
         } else {
             Issue.record("Expected error status")
         }
-        #expect(session.retranscript == nil)
+        #expect(fetched?.retranscript == nil)
     }
 
     @Test("Imported session retranscription uses mono extraction")
@@ -233,14 +245,17 @@ struct RetranscriptionServiceTests {
             originalFormat: "mp3",
             status: .done
         )
+        let sessionID = session.id
         context.insert(session)
         try context.save()
 
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()))
-        await service.retranscribe(session: session, workspace: workspace, context: context)
+        await service.retranscribe(sessionID: sessionID, modelContainer: container, workspace: workspace)
 
         #expect(capturedIsStereo == false)
-        #expect(session.status == .done)
-        #expect(session.retranscript?.segments.first?.text == "imported")
+        let verifyContext = ModelContext(container)
+        let fetched = try verifyContext.fetch(FetchDescriptor<ImportedSession>(predicate: #Predicate { $0.id == sessionID })).first
+        #expect(fetched?.status == .done)
+        #expect(fetched?.retranscript?.segments.first?.text == "imported")
     }
 }

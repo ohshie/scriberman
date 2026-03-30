@@ -222,7 +222,10 @@ actor TranscriptionService: TranscriptionServiceProtocol {
             throw TranscriptionError.failedToTranscribe("\(passName) pass: model initialization failed - \(error.localizedDescription)")
         }
 
-        var asrSegments: [TranscriptSegment] = []
+        // 1.1 Collect tokenTimings from each VAD chunk's ASR result
+        // 1.2 Offset each timing by speechSegment.startTime to produce global TimedWords
+        var globalTokenTimings: [TokenTiming] = []
+        var allASRTexts: [String] = []
         for speechSegment in speechSegments {
             let startIndex = max(0, Int(speechSegment.startTime * 16_000.0))
             let endIndex = min(samples.count, max(startIndex + 1, Int(speechSegment.endTime * 16_000.0)))
@@ -243,22 +246,25 @@ actor TranscriptionService: TranscriptionServiceProtocol {
                 throw TranscriptionError.failedToTranscribe("\(passName) pass: ASR failed - \(error.localizedDescription)")
             }
 
-            // Map ASR result tokens to segments with global timestamps
-            let tokens = asrResult.tokenTimings ?? []
-            if !tokens.isEmpty {
-                // For simplicity in this refactor, we'll create a single segment per VAD chunk for now
-                // but aligned with global timestamps. 
-                // In a full implementation, we might split by words.
-                let segment = TranscriptSegment(
-                    speakerId: "unknown",
-                    text: asrResult.text,
-                    startTime: Float(speechSegment.startTime),
-                    endTime: Float(speechSegment.endTime),
-                    audioSource: source
-                )
-                asrSegments.append(segment)
+            let trimmedText = asrResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedText.isEmpty {
+                allASRTexts.append(trimmedText)
             }
+
+            // Offset each token timing by the chunk's global start time
+            let offsetTimings = (asrResult.tokenTimings ?? []).map { timing in
+                TokenTiming(
+                    token: timing.token,
+                    tokenId: timing.tokenId,
+                    startTime: timing.startTime + speechSegment.startTime,
+                    endTime: timing.endTime + speechSegment.startTime,
+                    confidence: timing.confidence
+                )
+            }
+            globalTokenTimings.append(contentsOf: offsetTimings)
         }
+
+        let fullASRText = allASRTexts.joined(separator: " ")
 
         // Global Offline Diarization
         let diarizationResult: DiarizationResult
@@ -294,10 +300,10 @@ actor TranscriptionService: TranscriptionServiceProtocol {
             }
         }
 
-        // Align ASR segments with global diarization
+        // 1.3 Align using global token timings for precise word-to-speaker mapping
         let alignedSegments = transcriptAligner.alignTranscript(
-            fullText: asrSegments.map(\.text).joined(separator: " "),
-            tokenTimings: [], // We already have coarse segments
+            fullText: fullASRText,
+            tokenTimings: globalTokenTimings,
             diarizedSegments: diarizationResult.segments,
             source: source
         )

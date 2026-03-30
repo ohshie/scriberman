@@ -1,8 +1,10 @@
 import FluidAudio
 import Foundation
+import OSLog
 
 struct TranscriptAligner {
     private let tokenStitcher = TokenStitcher()
+    private let logger = Logger(subsystem: "Scriberman", category: "TranscriptAligner")
 
     func alignTranscript(
         fullText: String,
@@ -35,6 +37,7 @@ struct TranscriptAligner {
                 )
             }
         } else {
+            logger.warning("tokenTimings is empty — falling back to coarse alignment")
             if sortedDiarized.isEmpty {
                 mappedSegments = fullText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     ? []

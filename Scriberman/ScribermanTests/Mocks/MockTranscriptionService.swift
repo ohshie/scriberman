@@ -1,10 +1,11 @@
 import Foundation
+import SwiftData
 @testable import Scriberman
 
 final class MockTranscriptionService: TranscriptionServiceProtocol {
     var transcribeResult: Result<Transcript, Error> = .failure(MockTranscriptionServiceError.notConfigured)
 
-    func transcribe(session: RecordingSession, workspace: Workspace) async throws -> Transcript {
+    func transcribe(sessionID: UUID, modelContainer: ModelContainer, workspace: Workspace) async throws -> Transcript {
         try transcribeResult.get()
     }
 }
