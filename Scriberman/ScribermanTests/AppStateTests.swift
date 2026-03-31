@@ -111,7 +111,7 @@ final class AppStateTests: XCTestCase {
         )
 
         appState.selectPendingSession()
-        appState.newSessionViewModel.state = .stopped(session: recording)
+        appState.newSessionViewModel.state = .recording(duration: 10, level: 0)
         appState.discardPendingSession()
 
         XCTAssertNil(appState.pendingSession)

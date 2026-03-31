@@ -8,7 +8,6 @@ final class NewSessionViewModel: ObservableObject {
     enum State {
         case idle
         case recording(duration: TimeInterval, level: Float)
-        case stopped(session: RecordingSession)
     }
 
     private let workspaceService: WorkspaceServiceProtocol
@@ -16,6 +15,7 @@ final class NewSessionViewModel: ObservableObject {
     private let audioDeviceService: AudioDeviceServiceProtocol
     private let appAudioService: AppAudioServiceProtocol
     private let permissionService: PermissionServiceProtocol
+    private let liveTranscriptionService = LiveTranscriptionService()
     private let userDefaults: UserDefaults
     private let lastUsedAppNameKey = "lastUsedAppName"
     private var recordingMonitorTask: Task<Void, Never>?
@@ -25,6 +25,7 @@ final class NewSessionViewModel: ObservableObject {
     private var isApplyingAppSelection = false
 
     @Published var state: State = .idle
+    @Published var liveSegments: [TranscriptSegment] = []
     @Published var errorMessage: String?
     @Published var availableDevices: [AudioInputDevice]
     @Published var selectedDevice: AudioInputDevice? {
@@ -329,6 +330,16 @@ final class NewSessionViewModel: ObservableObject {
 
             recordingStartedAt = .now
             state = .recording(duration: 0, level: 0)
+            liveSegments = []
+            
+            // Start Live Transcription
+            do {
+                try await liveTranscriptionService.start(workspace: workspace)
+                startLiveTranscriptionPipeline()
+            } catch {
+                errorMessage = "Live transcription unavailable: \(error.localizedDescription)"
+            }
+            
             startRecordingMonitor()
         } catch {
             errorMessage = error.localizedDescription
@@ -336,10 +347,11 @@ final class NewSessionViewModel: ObservableObject {
         }
     }
 
-    func stopRecording(context: ModelContext) async {
+    func stopRecording(context: ModelContext) async -> RecordingSession? {
         recordingMonitorTask?.cancel()
         recordingMonitorTask = nil
 
+        let liveFinalSegments = await liveTranscriptionService.stop()
         let sessionID = await recordingService.stopRecording()
         
         var fetchedSession: RecordingSession?
@@ -352,10 +364,49 @@ final class NewSessionViewModel: ObservableObject {
         
         guard let session = fetchedSession else {
             state = .idle
-            return
+            return nil
         }
 
-        state = .stopped(session: session)
+        saveLiveTranscript(liveFinalSegments, to: session)
+        try? context.save()
+        
+        state = .idle
+        return session
+    }
+
+    private func saveLiveTranscript(_ segments: [TranscriptSegment], to session: RecordingSession) {
+        let finalSegments = segments.filter { $0.isFinal }
+        
+        if finalSegments.isEmpty {
+            let transcript = Transcript(
+                fullText: "",
+                segments: [],
+                speakers: []
+            )
+            session.transcript = transcript
+            session.status = .done
+            return
+        }
+        
+        let speakerIds = Array(Set(finalSegments.map { $0.speakerId })).sorted()
+        let speakers = speakerIds.enumerated().map { index, id in
+            // "speaker_N" IDs come from the live diarizer; "unknown" is the fallback
+            // when no diarizer match was found. Both map to a human-readable label.
+            let isInternalId = id == "unknown" || id.hasPrefix("speaker_")
+            return TranscriptSpeaker(
+                id: id,
+                label: isInternalId ? "Speaker \(index + 1)" : id,
+                colorHex: "#007AFF"
+            )
+        }
+
+        let transcript = Transcript(
+            fullText: finalSegments.map { $0.text }.joined(separator: " "),
+            segments: finalSegments,
+            speakers: speakers
+        )
+        session.transcript = transcript
+        session.status = .done
     }
 
     private func handleScreenRecordingStatusChange(_ status: PermissionStatus) {
@@ -422,5 +473,46 @@ final class NewSessionViewModel: ObservableObject {
             appProcessID: appProcessID,
             title: title
         )
+    }
+
+    private func startLiveTranscriptionPipeline() {
+        // Pipeline: buffers -> processor
+        Task {
+            for await (samples, source, sampleRate) in await recordingService.liveAudioStream() {
+                await liveTranscriptionService.process(samples: samples, source: source, sampleRate: sampleRate)
+            }
+        }
+
+        // Pipeline: results -> UI
+        Task {
+            for await segment in liveTranscriptionService.transcriptStream {
+                await MainActor.run {
+                    updateLiveSegments(with: segment)
+                }
+            }
+        }
+    }
+
+    private func updateLiveSegments(with segment: TranscriptSegment) {
+        // 1. Retroactive speaker correction: a segment with this id already exists in
+        //    liveSegments and the diarizer has now assigned it a real speaker.
+        if let existingIndex = liveSegments.firstIndex(where: { $0.id == segment.id }) {
+            liveSegments[existingIndex] = segment
+            return
+        }
+
+        // 2. Rolling partial update: replace the last non-final segment from the same source.
+        if let lastIndex = liveSegments.indices.last, !liveSegments[lastIndex].isFinal {
+            if liveSegments[lastIndex].audioSource == segment.audioSource {
+                liveSegments[lastIndex] = segment
+                return
+            }
+        }
+
+        // 3. New segment — append and cap the buffer.
+        liveSegments.append(segment)
+        if liveSegments.count > 100 {
+            liveSegments.removeFirst(liveSegments.count - 100)
+        }
     }
 }

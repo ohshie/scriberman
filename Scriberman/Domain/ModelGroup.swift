@@ -5,6 +5,8 @@ enum ModelGroup: String, CaseIterable, Identifiable {
     case vadSilero
     case diarization
     case offlineDiarization
+    case streamingAsr
+    case streamingDiarization
 
     var id: String { rawValue }
 
@@ -18,6 +20,10 @@ enum ModelGroup: String, CaseIterable, Identifiable {
             return "Diarization (Online)"
         case .offlineDiarization:
             return "Diarization (Global Offline)"
+        case .streamingAsr:
+            return "Streaming ASR"
+        case .streamingDiarization:
+            return "Streaming Diarization"
         }
     }
 
@@ -31,6 +37,10 @@ enum ModelGroup: String, CaseIterable, Identifiable {
             return "speaker-diarization-coreml"
         case .offlineDiarization:
             return "speaker-diarization-coreml"
+        case .streamingAsr:
+            return "parakeet-eou-streaming/320ms"
+        case .streamingDiarization:
+            return "ls-eend"
         }
     }
 }

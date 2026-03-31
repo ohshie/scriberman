@@ -81,11 +81,11 @@ final class NewSessionViewModelTests: XCTestCase {
             return XCTFail("Expected recording state after start")
         }
 
-        await viewModel.stopRecording(context: context)
-        guard case let .stopped(session) = viewModel.state else {
-            return XCTFail("Expected stopped state after stop")
+        let session = await viewModel.stopRecording(context: context)
+        guard case .idle = viewModel.state else {
+            return XCTFail("Expected idle state after stop")
         }
-        XCTAssertEqual(session.id, stoppedSession.id)
+        XCTAssertEqual(session?.id, stoppedSession.id)
     }
 
     func testStartRecordingIncrementsUsageForSelectedDevice() async {
@@ -110,15 +110,8 @@ final class NewSessionViewModelTests: XCTestCase {
         XCTAssertEqual(recordingService.startCalls.first?.title, customTitle)
     }
 
-    func testResetReturnsIdleFromStoppedState() {
-        let stoppedSession = RecordingSession(
-            createdAt: .now,
-            duration: 3,
-            micAudioURL: "/tmp/test.wav",
-            title: "Recorded",
-            status: .recorded
-        )
-        viewModel.state = .stopped(session: stoppedSession)
+    func testResetReturnsIdleFromRecordingState() {
+        viewModel.state = .recording(duration: 10, level: 0)
 
         viewModel.reset()
 

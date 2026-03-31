@@ -5,7 +5,7 @@ import SwiftUI
 struct NewSessionPanelView: View {
     @ObservedObject var viewModel: NewSessionViewModel
     @Binding var pendingSession: PendingSession
-    var onTranscribe: (RecordingSession) -> Void
+    var onRecordingFinished: (RecordingSession) -> Void
     var onImportFile: () -> Void = {}
 
     @Environment(\.modelContext) private var modelContext
@@ -60,13 +60,25 @@ struct NewSessionPanelView: View {
                 )
             }
 
+            if let errorMessage = viewModel.errorMessage {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.yellow)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(.yellow.opacity(0.16))
+                )
+            }
+
             switch viewModel.state {
             case .idle:
                 idleState
             case let .recording(duration, level):
                 recordingState(duration: duration, level: level)
-            case let .stopped(session):
-                stoppedState(session: session)
             }
             Spacer(minLength: 0)
         }
@@ -131,9 +143,42 @@ struct NewSessionPanelView: View {
                 .font(.title3.monospacedDigit())
                 .foregroundStyle(.secondary)
 
+            if !viewModel.liveSegments.isEmpty {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(Array(viewModel.liveSegments.enumerated()), id: \.offset) { _, segment in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text(segment.audioSource == .mic ? "Mic" : "App")
+                                        .font(.caption2.bold())
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 2)
+                                        .background(Capsule().stroke(.secondary.opacity(0.3)))
+
+                                    Text(segment.text)
+                                        .font(.callout)
+                                        .foregroundStyle(segment.isFinal ? .primary : .secondary)
+                                }
+                                .id(segment.startTime)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    .frame(height: 120)
+                    .onChange(of: viewModel.liveSegments.count) { _ in
+                        if let last = viewModel.liveSegments.last {
+                            proxy.scrollTo(last.startTime, anchor: .bottom)
+                        }
+                    }
+                }
+            }
+
             Button {
                 Task {
-                    await viewModel.stopRecording(context: modelContext)
+                    if let session = await viewModel.stopRecording(context: modelContext) {
+                        onRecordingFinished(session)
+                    }
                 }
             } label: {
                 Label("Stop", systemImage: "stop.circle.fill")
@@ -143,34 +188,6 @@ struct NewSessionPanelView: View {
             .tint(.red)
 
             controlsSection(isInteractive: false)
-        }
-    }
-
-    private func stoppedState(session: RecordingSession) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Ready to Transcribe")
-                .font(.title2.weight(.semibold))
-
-            TextField(
-                "Session name",
-                text: Binding(
-                    get: { session.title },
-                    set: { session.title = $0 }
-                )
-            )
-            .textFieldStyle(.roundedBorder)
-
-            Text(durationText(session.duration))
-                .font(.headline.monospacedDigit())
-                .foregroundStyle(.secondary)
-
-            Button {
-                onTranscribe(session)
-            } label: {
-                Label("Transcribe", systemImage: "text.bubble")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.glassProminent)
         }
     }
 

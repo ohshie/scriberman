@@ -20,8 +20,16 @@ final class TranscriptAlignerTests: XCTestCase {
         )
 
         XCTAssertEqual(transcript.segments.count, 2)
-        XCTAssertEqual(transcript.segments[0], TranscriptSegment(speakerId: "S1", text: "hello", startTime: 0.0, endTime: 0.5))
-        XCTAssertEqual(transcript.segments[1], TranscriptSegment(speakerId: "S2", text: "world", startTime: 0.5, endTime: 1.1))
+        XCTAssertEqual(transcript.segments[0].speakerId, "S1")
+        XCTAssertEqual(transcript.segments[0].text, "hello")
+        XCTAssertEqual(transcript.segments[0].startTime, 0.0)
+        XCTAssertEqual(transcript.segments[0].endTime, 0.5)
+
+        XCTAssertEqual(transcript.segments[1].speakerId, "S2")
+        XCTAssertEqual(transcript.segments[1].text, "world")
+        XCTAssertEqual(transcript.segments[1].startTime, 0.5)
+        XCTAssertEqual(transcript.segments[1].endTime, 1.1)
+
         XCTAssertEqual(transcript.fullText, "hello world")
         XCTAssertEqual(transcript.speakers.map(\.colorHex), ["#4F46E5", "#16A34A"])
     }

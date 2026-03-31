@@ -1,8 +1,10 @@
+import AVFoundation
 import CoreAudio
 import Foundation
 import SwiftData
 
 protocol RecordingServiceProtocol {
+    func liveAudioStream() async -> AsyncStream<([Float], AudioSource, Double)>
     func isRecording() async -> Bool
     func audioLevel() async -> Float
     func startRecording(

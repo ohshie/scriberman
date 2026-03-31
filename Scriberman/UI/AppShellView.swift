@@ -18,8 +18,16 @@ struct AppShellView: View {
     @State private var studyActionErrorMessage: String?
 
     private var allSessionItems: [JobsViewModel.SessionListItem] {
-        let recordingItems = recordingSessions.map(JobsViewModel.SessionListItem.recording)
+        var recordingItems = recordingSessions.map(JobsViewModel.SessionListItem.recording)
         let importedItems = importedSessions.map(JobsViewModel.SessionListItem.imported)
+        
+        // Ensure the newly selected session isn't dropped by the List before the @Query updates
+        if let selectedSession,
+           case .recording = selectedSession,
+           !recordingItems.contains(where: { $0.id == selectedSession.id }) {
+            recordingItems.append(selectedSession)
+        }
+        
         return (recordingItems + importedItems).sorted { $0.createdAt > $1.createdAt }
     }
 
@@ -142,8 +150,7 @@ struct AppShellView: View {
                         get: { appState.pendingSession ?? pendingSession },
                         set: { appState.pendingSession = $0 }
                     ),
-                    onTranscribe: { session in
-                        appState.jobsViewModel.transcribe(session: session, context: modelContext)
+                    onRecordingFinished: { session in
                         appState.discardPendingSession()
                         selectedSession = .recording(session)
                     },

@@ -56,10 +56,15 @@ actor RecordingService: RecordingServiceProtocol {
     private var pendingTitle: String?
     private var appAudioCaptureSession: AppAudioCaptureSession?
     private var pendingError: RecordingError?
+    private let liveAudioStreamTuple: (stream: AsyncStream<([Float], AudioSource, Double)>, continuation: AsyncStream<([Float], AudioSource, Double)>.Continuation)
     nonisolated(unsafe) private var engineConfigurationObserver: NSObjectProtocol?
 
     private var isRecordingValue = false
     private var audioLevelValue: Float = 0
+
+    func liveAudioStream() async -> AsyncStream<([Float], AudioSource, Double)> {
+        liveAudioStreamTuple.stream
+    }
 
     init(
         workspaceService: WorkspaceServiceProtocol,
@@ -69,6 +74,7 @@ actor RecordingService: RecordingServiceProtocol {
         self.workspaceService = workspaceService
         self.modelContainer = modelContainer
         self.notificationCenter = notificationCenter
+        self.liveAudioStreamTuple = AsyncStream<([Float], AudioSource, Double)>.makeStream()
 
         engineConfigurationObserver = notificationCenter.addObserver(
             forName: .AVAudioEngineConfigurationChange,
@@ -198,6 +204,9 @@ actor RecordingService: RecordingServiceProtocol {
                         }
 
                         self?.micStreamer.write(buffer: buffer)
+                        if let samples = self?.extractSamples(from: buffer) {
+                            self?.liveAudioStreamTuple.continuation.yield((samples, .mic, buffer.format.sampleRate))
+                        }
                     }
 
                     audioEngine.prepare()
@@ -229,7 +238,8 @@ actor RecordingService: RecordingServiceProtocol {
                         Task { [weak self] in
                             await self?.captureAppStartHostTimeIfNeeded(hostTime)
                         }
-                    }
+                    },
+                    liveAudioContinuation: liveAudioStreamTuple.continuation
                 )
                 try await session.start()
                 self.appAudioCaptureSession = session
@@ -442,6 +452,25 @@ actor RecordingService: RecordingServiceProtocol {
         self.audioRecorder = recorder
     }
 
+    private func extractSamples(from buffer: AVAudioPCMBuffer) -> [Float] {
+        guard let channelData = buffer.floatChannelData else { return [] }
+        let frameCount = Int(buffer.frameLength)
+        if buffer.format.channelCount == 1 {
+            return Array(UnsafeBufferPointer(start: channelData[0], count: frameCount))
+        } else {
+            // Downmix to mono
+            var mono = [Float](repeating: 0, count: frameCount)
+            for i in 0..<frameCount {
+                var sum: Float = 0
+                for c in 0..<Int(buffer.format.channelCount) {
+                    sum += channelData[c][i]
+                }
+                mono[i] = sum / Float(buffer.format.channelCount)
+            }
+            return mono
+        }
+    }
+
     private func isValidTapFormat(_ format: AVAudioFormat) -> Bool {
         format.sampleRate.isFinite && format.sampleRate > 0 && format.channelCount > 0
     }
@@ -576,7 +605,7 @@ extension RecordingService {
 final class AppAudioCaptureSession: NSObject, SCStreamDelegate {
     private let fileURL: URL
     private let processID: pid_t
-    private let outputHandler = AppAudioStreamOutputHandler()
+    private let outputHandler: AppAudioStreamOutputHandler
     private let sampleQueue = DispatchQueue(label: "com.scriberman.app-audio.stream")
     private let notificationCenter: NotificationCenter
     private let logger = Logger(subsystem: "Scriberman", category: "AppAudioCaptureSession")
@@ -590,11 +619,13 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate {
         fileURL: URL,
         processID: pid_t,
         onFirstBufferHostTime: (@Sendable (UInt64) -> Void)? = nil,
+        liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil,
         notificationCenter: NotificationCenter = .default
     ) {
         self.fileURL = fileURL
         self.processID = processID
         self.notificationCenter = notificationCenter
+        self.outputHandler = AppAudioStreamOutputHandler(liveAudioContinuation: liveAudioContinuation)
         outputHandler.onFirstBufferHostTime = onFirstBufferHostTime
         super.init()
     }
@@ -687,6 +718,7 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
     private let streamer = AudioFileStreamer()
     private var monoFormat: AVAudioFormat?
     private var firstBufferHostTime: UInt64?
+    private let liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation?
     var onFirstBufferHostTime: (@Sendable (UInt64) -> Void)?
 
     var audioLevel: Float {
@@ -694,6 +726,11 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
     }
 
     private var hasPrepared = false
+
+    init(liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil) {
+        self.liveAudioContinuation = liveAudioContinuation
+        super.init()
+    }
 
     func configureOutput(url: URL) {
         lock.lock()
@@ -774,6 +811,7 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
         }
 
         streamer.write(buffer: monoBuffer)
+        liveAudioContinuation?.yield((monoSamples, .app, format.sampleRate))
     }
 
     private func createPCMBuffer(from sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {

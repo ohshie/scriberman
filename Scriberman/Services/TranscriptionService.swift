@@ -70,7 +70,7 @@ actor TranscriptionService: TranscriptionServiceProtocol {
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
 
-        let requiredGroups: [ModelGroup] = [.asrParakeetV3, .vadSilero, .offlineDiarization]
+        let requiredGroups: [ModelGroup] = [.asrParakeetV3, .vadSilero, .offlineDiarization, .streamingAsr, .streamingDiarization]
         var missingRepos: [String] = []
 
         for group in requiredGroups {
@@ -88,7 +88,7 @@ actor TranscriptionService: TranscriptionServiceProtocol {
             }
 
             do {
-                try fileManager.createDirectory(at: cacheRoot, withIntermediateDirectories: true)
+                try fileManager.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try fileManager.copyItem(at: sourceURL, to: destinationURL)
             } catch {
                 throw TranscriptionError.failedToPrepareModels(error.localizedDescription)
