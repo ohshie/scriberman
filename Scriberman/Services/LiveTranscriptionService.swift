@@ -16,12 +16,12 @@ actor LiveTranscriptionService {
     private static let CHUNK_SAMPLES = Int(SAMPLE_RATE * CHUNK_SECONDS)
     
     // Chunk accumulation buffers
-    private var micBuffer: [Float] = []
-    private var audioConverter: AudioConverter?
+    private var buffers: [AudioSource: [Float]] = [:]
+    private var audioConverters: [AudioSource: AudioConverter] = [:]
     
     // Timing
-    private var chunkStartTime: Date?
-    private var totalSamplesProcessed: Int = 0
+    private var chunkStartTimes: [AudioSource: Date] = [:]
+    private var totalSamplesProcessed: [AudioSource: Int] = [:]
 
     // Authoritative record of all final segments accumulated this session
     private var collectedFinalSegments: [TranscriptSegment] = []
@@ -41,10 +41,11 @@ actor LiveTranscriptionService {
     func start(workspace: Workspace) async throws {
         logger.info("Starting live transcription service (Offline Chunking Mode)")
         
-        micBuffer.removeAll()
-        totalSamplesProcessed = 0
+        buffers.removeAll()
+        totalSamplesProcessed.removeAll()
+        chunkStartTimes.removeAll()
+        audioConverters.removeAll()
         collectedFinalSegments.removeAll()
-        chunkStartTime = nil
 
         let resolver = ModelPathResolver()
 
@@ -62,27 +63,29 @@ actor LiveTranscriptionService {
         offlineDiarizer.initialize(models: diarizerModels)
         self.diarizer = offlineDiarizer
         logger.info("OfflineDiarizerManager initialized")
-
-        audioConverter = AudioConverter()
     }
 
     func stop() async -> [TranscriptSegment] {
         logger.info("Stopping live transcription service")
 
-        // Process any remaining audio in the buffer
-        if !micBuffer.isEmpty {
-            let remainingSamples = micBuffer
-            micBuffer.removeAll()
-            await processChunk(samples: remainingSamples)
+        // Process any remaining audio in the buffers
+        for (source, buffer) in buffers {
+            if !buffer.isEmpty {
+                let currentOffset = Float(totalSamplesProcessed[source] ?? 0) / Self.SAMPLE_RATE
+                await processChunk(samples: buffer, source: source, currentOffset: currentOffset)
+            }
         }
 
         let segments = collectedFinalSegments
         
         // Cleanup
         collectedFinalSegments.removeAll()
+        buffers.removeAll()
+        totalSamplesProcessed.removeAll()
+        chunkStartTimes.removeAll()
+        audioConverters.removeAll()
         asrManager = nil
         diarizer = nil
-        audioConverter = nil
         
         return segments
     }
@@ -90,45 +93,47 @@ actor LiveTranscriptionService {
     // MARK: - Audio Processing
 
     func process(samples: [Float], source: AudioSource, sampleRate: Double) async {
-        // We only process mic right now in this simple live implementation
-        guard source == .mic else { return }
-        
         do {
-            if audioConverter == nil {
-                audioConverter = AudioConverter()
+            if audioConverters[source] == nil {
+                audioConverters[source] = AudioConverter()
             }
-            let resampled = try audioConverter!.resample(samples, from: sampleRate)
+            let resampled = try audioConverters[source]!.resample(samples, from: sampleRate)
             guard !resampled.isEmpty else { return }
 
-            if chunkStartTime == nil {
-                chunkStartTime = .now
+            if chunkStartTimes[source] == nil {
+                chunkStartTimes[source] = .now
             }
 
-            micBuffer.append(contentsOf: resampled)
+            var currentBuffer = buffers[source] ?? []
+            currentBuffer.append(contentsOf: resampled)
 
-            if micBuffer.count >= Self.CHUNK_SAMPLES {
-                let chunkToProcess = micBuffer
-                micBuffer.removeAll()
-                chunkStartTime = nil
+            if currentBuffer.count >= Self.CHUNK_SAMPLES {
+                let chunkToProcess = currentBuffer
+                currentBuffer.removeAll()
+                buffers[source] = currentBuffer
+                chunkStartTimes[source] = nil
                 
-                await processChunk(samples: chunkToProcess)
+                let currentOffset = Float(totalSamplesProcessed[source] ?? 0) / Self.SAMPLE_RATE
+                totalSamplesProcessed[source] = (totalSamplesProcessed[source] ?? 0) + chunkToProcess.count
+                
+                await processChunk(samples: chunkToProcess, source: source, currentOffset: currentOffset)
+            } else {
+                buffers[source] = currentBuffer
             }
         } catch {
-            logger.error("Error processing live audio: \(error.localizedDescription)")
+            logger.error("Error processing live audio (\(source.rawValue)): \(error.localizedDescription)")
         }
     }
 
-    private func processChunk(samples: [Float]) async {
+    private func processChunk(samples: [Float], source: AudioSource, currentOffset: Float) async {
         guard let asrManager = asrManager else { return }
 
         let chunkDuration = Float(samples.count) / Self.SAMPLE_RATE
-        let currentOffset = Float(totalSamplesProcessed) / Self.SAMPLE_RATE
-        totalSamplesProcessed += samples.count
         
         do {
             let maxAmplitude = samples.map { abs($0) }.max() ?? 0.0
             
-            logger.info("🎤 Transcribing chunk (\(samples.count) samples = \(String(format: "%.1f", chunkDuration))s, max amplitude: \(String(format: "%.6f", maxAmplitude)))...")
+            logger.info("🎤 Transcribing \(source.rawValue) chunk (\(samples.count) samples = \(String(format: "%.1f", chunkDuration))s, max amplitude: \(String(format: "%.6f", maxAmplitude)))...")
             
             if maxAmplitude < 0.001 {
                 logger.info("⚠️ AUDIO IS SILENT - Skipping transcription")
@@ -162,14 +167,14 @@ actor LiveTranscriptionService {
                 }
             }
             
-            logger.info("📝 RESULT: \(speakerID): \(cleanedText)")
+            logger.info("📝 RESULT [\(source.rawValue)]: \(speakerID): \(cleanedText)")
             
             let segment = TranscriptSegment(
                 speakerId: speakerID,
                 text: cleanedText,
                 startTime: currentOffset,
                 endTime: currentOffset + chunkDuration,
-                audioSource: .mic,
+                audioSource: source,
                 isFinal: true
             )
             
