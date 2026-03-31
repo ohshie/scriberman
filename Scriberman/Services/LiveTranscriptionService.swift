@@ -3,22 +3,32 @@ import FluidAudio
 import Foundation
 import OSLog
 
+enum LiveTranscriptionError: Error {
+    case initializationFailed
+}
+
 actor LiveTranscriptionService {
     private let logger = Logger(subsystem: "Scriberman", category: "LiveTranscriptionService")
-    
+
     // Core managers
     private var asrManager: AsrManager?
-    private var diarizer: OfflineDiarizerManager?
-    
-    // Audio processing constants
-    private static let CHUNK_SECONDS: Float = 5.0
+    private var diarizer: DiarizerManager?
+
+    // Dependencies
+    private let speakerEmbeddingStore: SpeakerEmbeddingStore?
+
+    // Model initialization guard (tasks 4.1, 4.2)
+    private(set) var isInitialized = false
+
+    // Audio processing constants (task 2.1: 5.0 → 10.0)
+    private static let CHUNK_SECONDS: Float = 10.0
     private static let SAMPLE_RATE: Float = 16000
     private static let CHUNK_SAMPLES = Int(SAMPLE_RATE * CHUNK_SECONDS)
-    
+
     // Chunk accumulation buffers
     private var buffers: [AudioSource: [Float]] = [:]
     private var audioConverters: [AudioSource: AudioConverter] = [:]
-    
+
     // Timing
     private var chunkStartTimes: [AudioSource: Date] = [:]
     private var totalSamplesProcessed: [AudioSource: Int] = [:]
@@ -26,43 +36,103 @@ actor LiveTranscriptionService {
     // Authoritative record of all final segments accumulated this session
     private var collectedFinalSegments: [TranscriptSegment] = []
 
+    // Speaker tracking across session (task 3.4)
+    // Key: session-local speaker ID ("speaker_SPEAKER_0" etc.)
+    // Value: (embedding, wasMatched, matchedProfileID)
+    var sessionSpeakers: [String: (embedding: [Float], wasMatched: Bool, matchedProfileID: UUID?)] = [:]
+
     nonisolated(unsafe) private let resultsTuple: (stream: AsyncStream<TranscriptSegment>, continuation: AsyncStream<TranscriptSegment>.Continuation)
 
     nonisolated var transcriptStream: AsyncStream<TranscriptSegment> {
         resultsTuple.stream
     }
 
-    init() {
+    // task 3.1: SpeakerEmbeddingStore injected via init
+    init(speakerEmbeddingStore: SpeakerEmbeddingStore? = nil) {
+        self.speakerEmbeddingStore = speakerEmbeddingStore
         self.resultsTuple = AsyncStream<TranscriptSegment>.makeStream()
+    }
+
+    // MARK: - Model Pre-warming (task 4.1)
+
+    /// Loads ASR and diarizer models without starting the audio pipeline.
+    /// Idempotent: subsequent calls are no-ops if already initialized.
+    func prepare() async {
+        guard !isInitialized else {
+            logger.info("LiveTranscriptionService already initialized, skipping prepare()")
+            return
+        }
+
+        logger.info("Pre-warming live transcription models...")
+
+        // 1. Initialize ASR
+        do {
+            let asrConfig = ASRConfig()
+            let asr = AsrManager(config: asrConfig)
+            let asrModels = try await AsrModels.downloadAndLoad()
+            try await asr.initialize(models: asrModels)
+            self.asrManager = asr
+            logger.info("AsrManager initialized")
+        } catch {
+            logger.error("ASR initialization failed during prepare(): \(error). Live transcription unavailable.")
+            // Leave isInitialized = false so start() can surface the error
+            return
+        }
+
+        // 2. Initialize DiarizerManager with retry (task 1.2, 1.3, 1.5)
+        let diarizerConfig = DiarizerConfig(
+            clusteringThreshold: 0.5,
+            minSpeechDuration: 0.5,
+            minSilenceGap: 0.2
+        )
+        let mgr = DiarizerManager(config: diarizerConfig)
+
+        let maxAttempts = 3
+        for attempt in 1...maxAttempts {
+            do {
+                // task 1.3: use DiarizerModels.downloadIfNeeded() instead of OfflineDiarizerModels.load()
+                let models = try await DiarizerModels.downloadIfNeeded()
+                mgr.initialize(models: models)
+                self.diarizer = mgr
+                logger.info("DiarizerManager initialized (attempt \(attempt)/\(maxAttempts))")
+                break
+            } catch {
+                logger.warning("Diarizer init attempt \(attempt)/\(maxAttempts) failed: \(error)")
+                if attempt < maxAttempts {
+                    logger.info("Retrying in 15 seconds...")
+                    try? await Task.sleep(for: .seconds(15))
+                } else {
+                    logger.error("Diarizer initialization failed after \(maxAttempts) attempts. Proceeding in ASR-only mode.")
+                }
+            }
+        }
+
+        isInitialized = true
+        logger.info("LiveTranscriptionService pre-warming complete (diarizer available: \(self.diarizer != nil))")
     }
 
     // MARK: - Lifecycle
 
     func start(workspace: Workspace) async throws {
         logger.info("Starting live transcription service (Offline Chunking Mode)")
-        
+
         buffers.removeAll()
         totalSamplesProcessed.removeAll()
         chunkStartTimes.removeAll()
         audioConverters.removeAll()
         collectedFinalSegments.removeAll()
+        sessionSpeakers.removeAll()
 
-        let resolver = ModelPathResolver()
+        // task 4.2: skip model loading if already initialized by prepare()
+        if !isInitialized {
+            await prepare()
+        }
 
-        // 1. Initialize offline ASR
-        let asrConfig = ASRConfig()
-        let asr = AsrManager(config: asrConfig)
-        let asrModels = try await AsrModels.downloadAndLoad()
-        try await asr.initialize(models: asrModels)
-        self.asrManager = asr
-        logger.info("AsrManager initialized")
+        guard asrManager != nil else {
+            throw LiveTranscriptionError.initializationFailed
+        }
 
-        // 2. Initialize offline Diarizer
-        let offlineDiarizer = OfflineDiarizerManager(config: .default)
-        let diarizerModels = try await OfflineDiarizerModels.load(from: workspace.modelsURL)
-        offlineDiarizer.initialize(models: diarizerModels)
-        self.diarizer = offlineDiarizer
-        logger.info("OfflineDiarizerManager initialized")
+        logger.info("LiveTranscriptionService started (diarizer: \(self.diarizer != nil))")
     }
 
     func stop() async -> [TranscriptSegment] {
@@ -76,17 +146,47 @@ actor LiveTranscriptionService {
             }
         }
 
+        // tasks 3.5, 3.6: Speaker enrollment at session end
+        if let store = speakerEmbeddingStore, !sessionSpeakers.isEmpty {
+            do {
+                let allProfiles = try await store.fetchAll()
+                let existingCount = allProfiles.count
+                var newSpeakerIndex = 0
+
+                // Sort by session-local ID for deterministic name assignment
+                for sessionLocalId in sessionSpeakers.keys.sorted() {
+                    guard let info = sessionSpeakers[sessionLocalId] else { continue }
+
+                    if info.wasMatched, let profileID = info.matchedProfileID {
+                        // task 3.6: refresh lastSeen for matched speaker
+                        try? await store.updateProfile(id: profileID)
+                        logger.info("Updated lastSeen for matched speaker \(sessionLocalId)")
+                    } else if !info.embedding.isEmpty {
+                        // task 3.5: enroll new unmatched speaker with auto-generated name
+                        let name = "Speaker \(existingCount + newSpeakerIndex + 1)"
+                        newSpeakerIndex += 1
+                        try? await store.enrollSpeaker(name: name, embedding: info.embedding)
+                        logger.info("Enrolled new speaker '\(name)' for session speaker \(sessionLocalId)")
+                    }
+                }
+            } catch {
+                logger.error("Failed to read speaker profiles during stop(): \(error)")
+            }
+        }
+
         let segments = collectedFinalSegments
-        
-        // Cleanup
+
+        // Cleanup — reset isInitialized so next session creates a fresh DiarizerManager
         collectedFinalSegments.removeAll()
+        sessionSpeakers.removeAll()
         buffers.removeAll()
         totalSamplesProcessed.removeAll()
         chunkStartTimes.removeAll()
         audioConverters.removeAll()
         asrManager = nil
         diarizer = nil
-        
+        isInitialized = false
+
         return segments
     }
 
@@ -112,10 +212,10 @@ actor LiveTranscriptionService {
                 currentBuffer.removeAll()
                 buffers[source] = currentBuffer
                 chunkStartTimes[source] = nil
-                
+
                 let currentOffset = Float(totalSamplesProcessed[source] ?? 0) / Self.SAMPLE_RATE
                 totalSamplesProcessed[source] = (totalSamplesProcessed[source] ?? 0) + chunkToProcess.count
-                
+
                 await processChunk(samples: chunkToProcess, source: source, currentOffset: currentOffset)
             } else {
                 buffers[source] = currentBuffer
@@ -129,18 +229,23 @@ actor LiveTranscriptionService {
         guard let asrManager = asrManager else { return }
 
         let chunkDuration = Float(samples.count) / Self.SAMPLE_RATE
-        
+
         do {
             let maxAmplitude = samples.map { abs($0) }.max() ?? 0.0
-            
+
             logger.info("🎤 Transcribing \(source.rawValue) chunk (\(samples.count) samples = \(String(format: "%.1f", chunkDuration))s, max amplitude: \(String(format: "%.6f", maxAmplitude)))...")
-            
+
             if maxAmplitude < 0.001 {
                 logger.info("⚠️ AUDIO IS SILENT - Skipping transcription")
                 return
             }
 
-            let asrResult = try await asrManager.transcribe(samples, source: .system)
+            // task 2.2: pass correct ASR source based on audio origin
+            // (.microphone for mic, .system for app — inferred as FluidAudio.AudioSource from call-site)
+            let asrResult = try await asrManager.transcribe(
+                samples,
+                source: source == .mic ? .microphone : .system
+            )
             let cleanedText = asrResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
             guard !cleanedText.isEmpty else {
@@ -149,16 +254,55 @@ actor LiveTranscriptionService {
             }
 
             var speakerID = "unknown"
-            
+
             if let diarizer = diarizer {
                 logger.info("🔊 Diarizing chunk...")
                 do {
-                    let diarizationResult = try await diarizer.process(audio: samples)
-                    
+                    // task 1.4: use synchronous performCompleteDiarization instead of async process(audio:)
+                    let diarizationResult = try diarizer.performCompleteDiarization(samples, sampleRate: 16000)
+
                     if let longestSegment = findLongestSpeaker(from: diarizationResult) {
-                        speakerID = "speaker_\(longestSegment.speakerId)"
+                        let sessionLocalId = "speaker_\(longestSegment.speakerId)"
+                        let embedding = longestSegment.embedding
                         let duration = longestSegment.endTimeSeconds - longestSegment.startTimeSeconds
-                        logger.info("📍 Longest speaker: \(speakerID) (\(String(format: "%.1f", duration))s)")
+
+                        // tasks 3.2, 3.3: match embedding against SpeakerEmbeddingStore
+                        if let store = speakerEmbeddingStore, !embedding.isEmpty {
+                            if let match = await store.findBestMatch(embedding: embedding) {
+                                // Known speaker recognized
+                                speakerID = match.name
+                                // task 3.4: accumulate matched speaker info (keep latest embedding)
+                                sessionSpeakers[sessionLocalId] = (
+                                    embedding: embedding,
+                                    wasMatched: true,
+                                    matchedProfileID: match.id
+                                )
+                                logger.info("📍 Matched speaker: \(speakerID) (profile match, \(String(format: "%.1f", duration))s)")
+                            } else {
+                                // Unknown speaker — use session-local ID
+                                speakerID = sessionLocalId
+                                // task 3.4: accumulate unmatched speaker info (only set once per speaker)
+                                if sessionSpeakers[sessionLocalId] == nil {
+                                    sessionSpeakers[sessionLocalId] = (
+                                        embedding: embedding,
+                                        wasMatched: false,
+                                        matchedProfileID: nil
+                                    )
+                                }
+                                logger.info("📍 New/unmatched speaker: \(speakerID) (\(String(format: "%.1f", duration))s)")
+                            }
+                        } else {
+                            // No store or empty embedding — use session-local ID
+                            speakerID = sessionLocalId
+                            if sessionSpeakers[sessionLocalId] == nil && !embedding.isEmpty {
+                                sessionSpeakers[sessionLocalId] = (
+                                    embedding: embedding,
+                                    wasMatched: false,
+                                    matchedProfileID: nil
+                                )
+                            }
+                            logger.info("📍 Longest speaker: \(speakerID) (\(String(format: "%.1f", duration))s)")
+                        }
                     } else {
                         logger.info("📍 No speaker detected in audio chunk")
                     }
@@ -166,9 +310,9 @@ actor LiveTranscriptionService {
                     logger.error("Diarization failed: \(error)")
                 }
             }
-            
+
             logger.info("📝 RESULT [\(source.rawValue)]: \(speakerID): \(cleanedText)")
-            
+
             let segment = TranscriptSegment(
                 speakerId: speakerID,
                 text: cleanedText,
@@ -177,7 +321,7 @@ actor LiveTranscriptionService {
                 audioSource: source,
                 isFinal: true
             )
-            
+
             collectedFinalSegments.append(segment)
             resultsTuple.continuation.yield(segment)
 
@@ -185,9 +329,9 @@ actor LiveTranscriptionService {
             logger.error("Chunk processing failed: \(error)")
         }
     }
-    
+
     private func findLongestSpeaker(from result: DiarizationResult) -> TimedSpeakerSegment? {
-        var longestSegment: TimedSpeakerSegment? = nil
+        var longestSegment: TimedSpeakerSegment?
         var maxDuration: Float = 0
 
         for segment in result.segments {

@@ -15,7 +15,7 @@ final class NewSessionViewModel: ObservableObject {
     private let audioDeviceService: AudioDeviceServiceProtocol
     private let appAudioService: AppAudioServiceProtocol
     private let permissionService: PermissionServiceProtocol
-    private let liveTranscriptionService = LiveTranscriptionService()
+    private let liveTranscriptionService: LiveTranscriptionService
     private let userDefaults: UserDefaults
     private let lastUsedAppNameKey = "lastUsedAppName"
     private var recordingMonitorTask: Task<Void, Never>?
@@ -139,8 +139,10 @@ final class NewSessionViewModel: ObservableObject {
         audioDeviceService: AudioDeviceServiceProtocol,
         appAudioService: AppAudioServiceProtocol,
         permissionService: PermissionServiceProtocol,
+        speakerEmbeddingStore: SpeakerEmbeddingStore? = nil,
         userDefaults: UserDefaults = .standard
     ) {
+        self.liveTranscriptionService = LiveTranscriptionService(speakerEmbeddingStore: speakerEmbeddingStore)
         self.workspaceService = workspaceService
         self.recordingService = recordingService
         self.audioDeviceService = audioDeviceService
@@ -213,6 +215,10 @@ final class NewSessionViewModel: ObservableObject {
         audioDeviceService.refreshDevices()
         Task {
             await recheckPermissions()
+        }
+        // task 4.3: pre-warm ASR + diarizer models as early as possible
+        Task {
+            await liveTranscriptionService.prepare()
         }
     }
 

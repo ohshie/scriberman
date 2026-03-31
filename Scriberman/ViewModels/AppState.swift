@@ -44,7 +44,8 @@ final class AppState: ObservableObject {
             recordingService: services.background.recordingService,
             audioDeviceService: services.main.audioDeviceService,
             appAudioService: services.main.appAudioService,
-            permissionService: services.main.permissionService
+            permissionService: services.main.permissionService,
+            speakerEmbeddingStore: services.background.speakerEmbeddingStore
         )
         self.jobsViewModel = JobsViewModel(
             workspaceService: services.background.workspaceService,
