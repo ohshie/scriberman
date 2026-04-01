@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import OSLog
@@ -79,18 +80,27 @@ final class JobsViewModel {
     private let transcriptionService: TranscriptionServiceProtocol
     private let retranscriptionService: RetranscriptionService
     private let audioImportService: AudioImportService
+    private let transcriptExportService: TranscriptExportService
+    private let markdownRenderer: MarkdownRenderer
+    private let savePanelPresenter: @MainActor (_ suggestedName: String) -> URL?
     private let logger = Logger(subsystem: "Scriberman", category: "JobsViewModel")
 
     init(
         workspaceService: WorkspaceServiceProtocol,
         transcriptionService: TranscriptionServiceProtocol,
         retranscriptionService: RetranscriptionService,
-        audioImportService: AudioImportService
+        audioImportService: AudioImportService,
+        transcriptExportService: TranscriptExportService = TranscriptExportService(),
+        markdownRenderer: MarkdownRenderer = MarkdownRenderer(),
+        savePanelPresenter: @escaping @MainActor (_ suggestedName: String) -> URL? = JobsViewModel.defaultSavePanelPresenter(suggestedName:)
     ) {
         self.workspaceService = workspaceService
         self.transcriptionService = transcriptionService
         self.retranscriptionService = retranscriptionService
         self.audioImportService = audioImportService
+        self.transcriptExportService = transcriptExportService
+        self.markdownRenderer = markdownRenderer
+        self.savePanelPresenter = savePanelPresenter
     }
 
     func refresh() async {
@@ -321,6 +331,21 @@ final class JobsViewModel {
         }
     }
 
+    func exportTranscript(for session: any TranscribableSession) async throws {
+        guard let transcript = displayedTranscript(for: session) else {
+            throw TranscriptExportError.transcriptUnavailable
+        }
+
+        let markdown = markdownRenderer.renderMarkdown(session: session, transcript: transcript)
+        let suggestedName = markdownRenderer.defaultFileName(for: session.title)
+
+        guard let destinationURL = savePanelPresenter(suggestedName) else {
+            return
+        }
+
+        try transcriptExportService.write(markdown, to: destinationURL)
+    }
+
     func deleteImported(session: ImportedSession, context: ModelContext) {
         if let mixdownPath = session.mixdownURL {
             let mixdownURL = URL(fileURLWithPath: mixdownPath)
@@ -334,6 +359,25 @@ final class JobsViewModel {
         }
         context.delete(session)
         try? context.save()
+    }
+
+    private func displayedTranscript(for session: any TranscribableSession) -> Transcript? {
+        session.retranscript ?? session.transcript
+    }
+
+    private static func defaultSavePanelPresenter(suggestedName: String) -> URL? {
+        let panel = NSSavePanel()
+        panel.title = "Export Transcript"
+        panel.prompt = "Export"
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        panel.nameFieldStringValue = suggestedName
+
+        guard panel.runModal() == .OK else {
+            return nil
+        }
+
+        return panel.url
     }
 
     private static func isAudioURL(_ url: URL) -> Bool {
