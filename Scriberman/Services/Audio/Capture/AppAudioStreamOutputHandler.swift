@@ -1,0 +1,231 @@
+import AVFoundation
+import CoreMedia
+import Foundation
+import ScreenCaptureKit
+
+final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
+    private let lock = NSLock()
+    private var fileURL: URL?
+    private let streamer = AudioFileStreamer()
+    private var monoFormat: AVAudioFormat?
+    private var firstBufferHostTime: UInt64?
+    private let liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation?
+    var onFirstBufferHostTime: (@Sendable (UInt64) -> Void)?
+
+    var audioLevel: Float {
+        streamer.audioLevel
+    }
+
+    private var hasPrepared = false
+
+    init(liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil) {
+        self.liveAudioContinuation = liveAudioContinuation
+        super.init()
+    }
+
+    func configureOutput(url: URL) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.fileURL = url
+        self.monoFormat = nil
+        self.firstBufferHostTime = nil
+        self.hasPrepared = false
+    }
+
+    func closeOutput() {
+        streamer.close()
+    }
+
+    nonisolated func stream(
+        _ stream: SCStream,
+        didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
+        of outputType: SCStreamOutputType
+    ) {
+        guard outputType == .audio else {
+            return
+        }
+        process(sampleBuffer)
+    }
+
+    private func process(_ sampleBuffer: CMSampleBuffer) {
+        captureFirstBufferHostTimeIfNeeded(from: sampleBuffer)
+
+        guard let pcmBuffer = createPCMBuffer(from: sampleBuffer) else {
+            return
+        }
+        let monoSamples = downmixToMonoSamples(from: pcmBuffer)
+        guard !monoSamples.isEmpty else {
+            return
+        }
+
+        lock.lock()
+        if monoFormat == nil {
+            monoFormat = AVAudioFormat(
+                standardFormatWithSampleRate: pcmBuffer.format.sampleRate,
+                channels: 1
+            )
+        }
+
+        guard let fileURL, let monoFormat else {
+            lock.unlock()
+            return
+        }
+
+        if !hasPrepared {
+            do {
+                try streamer.prepare(url: fileURL, format: monoFormat)
+                hasPrepared = true
+            } catch {
+                lock.unlock()
+                return
+            }
+        }
+
+        let format = monoFormat
+        lock.unlock()
+
+        guard
+            let monoBuffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(monoSamples.count)
+            ),
+            let channelData = monoBuffer.floatChannelData
+        else {
+            return
+        }
+
+        monoBuffer.frameLength = AVAudioFrameCount(monoSamples.count)
+        monoSamples.withUnsafeBufferPointer { source in
+            if let sourceBaseAddress = source.baseAddress {
+                channelData[0].update(from: sourceBaseAddress, count: monoSamples.count)
+            }
+        }
+
+        streamer.write(buffer: monoBuffer)
+        liveAudioContinuation?.yield((monoSamples, .app, format.sampleRate))
+    }
+
+    private func createPCMBuffer(from sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else {
+            return nil
+        }
+        guard let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) else {
+            return nil
+        }
+        guard let format = AVAudioFormat(streamDescription: asbd) else {
+            return nil
+        }
+
+        let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
+        guard let pcmBuffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: AVAudioFrameCount(numSamples)
+        ) else {
+            return nil
+        }
+
+        pcmBuffer.frameLength = AVAudioFrameCount(numSamples)
+
+        var requiredSize = 0
+        let queryStatus = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer,
+            bufferListSizeNeededOut: &requiredSize,
+            bufferListOut: nil,
+            bufferListSize: 0,
+            blockBufferAllocator: nil,
+            blockBufferMemoryAllocator: nil,
+            flags: 0,
+            blockBufferOut: nil
+        )
+        guard queryStatus == noErr, requiredSize > 0 else {
+            return nil
+        }
+
+        let audioBufferListRawPtr = UnsafeMutableRawPointer.allocate(
+            byteCount: requiredSize,
+            alignment: MemoryLayout<AudioBufferList>.alignment
+        )
+        defer { audioBufferListRawPtr.deallocate() }
+
+        let audioBufferListPtr = audioBufferListRawPtr.bindMemory(to: AudioBufferList.self, capacity: 1)
+        let audioBufferList = UnsafeMutableAudioBufferListPointer(audioBufferListPtr)
+
+        var blockBuffer: CMBlockBuffer?
+        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer,
+            bufferListSizeNeededOut: nil,
+            bufferListOut: audioBufferListPtr,
+            bufferListSize: requiredSize,
+            blockBufferAllocator: nil,
+            blockBufferMemoryAllocator: nil,
+            flags: 0,
+            blockBufferOut: &blockBuffer
+        )
+        guard status == noErr else {
+            return nil
+        }
+
+        if let channelData = pcmBuffer.floatChannelData {
+            let channelCount = Int(format.channelCount)
+            for channel in 0..<min(audioBufferList.count, channelCount) {
+                let audioBuffer = audioBufferList[channel]
+                if let sourceData = audioBuffer.mData?.assumingMemoryBound(to: Float.self) {
+                    channelData[channel].initialize(from: sourceData, count: Int(pcmBuffer.frameLength))
+                }
+            }
+        }
+
+        return pcmBuffer
+    }
+
+    private func downmixToMonoSamples(from buffer: AVAudioPCMBuffer) -> [Float] {
+        guard let channelData = buffer.floatChannelData else {
+            return []
+        }
+
+        let frameCount = Int(buffer.frameLength)
+        let channelCount = Int(buffer.format.channelCount)
+        guard frameCount > 0, channelCount > 0 else {
+            return []
+        }
+
+        var mono = Array(repeating: Float(0), count: frameCount)
+        for frame in 0..<frameCount {
+            var sum: Float = 0
+            for channel in 0..<channelCount {
+                sum += channelData[channel][frame]
+            }
+            mono[frame] = sum / Float(channelCount)
+        }
+        return mono
+    }
+
+    private func captureFirstBufferHostTimeIfNeeded(from sampleBuffer: CMSampleBuffer) {
+        let callback: (@Sendable (UInt64) -> Void)?
+        let hostTimeToEmit: UInt64?
+        var didCaptureFirstHostTime = false
+
+        lock.lock()
+        if firstBufferHostTime == nil {
+            let presentationTimestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            let hostTimeClock = CMClockGetHostTimeClock()
+            let hostTime = CMSyncConvertTime(
+                presentationTimestamp,
+                from: hostTimeClock,
+                to: hostTimeClock
+            )
+
+            if CMTIME_IS_VALID(hostTime), CMTIME_IS_NUMERIC(hostTime) {
+                firstBufferHostTime = CMClockConvertHostTimeToSystemUnits(hostTime)
+                didCaptureFirstHostTime = true
+            }
+        }
+        callback = onFirstBufferHostTime
+        hostTimeToEmit = didCaptureFirstHostTime ? firstBufferHostTime : nil
+        lock.unlock()
+
+        if let hostTimeToEmit {
+            callback?(hostTimeToEmit)
+        }
+    }
+}
