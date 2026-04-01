@@ -29,7 +29,8 @@ actor RetranscriptionService {
             try await transcriptionService.prepareModels(workspace: workspace)
         }
         self.transcribePassFromSamplesHandler = transcribePassFromSamplesHandler ?? { samples, source, workspace in
-            try await transcriptionService.transcribePassFromSamples(samples: samples, source: source, workspace: workspace)
+            let passRunner = await transcriptionService.makeTranscriptionPassRunner()
+            return try await passRunner.run(samples: samples, source: source, workspace: workspace)
         }
         self.saveContext = saveContext ?? { context in
             try context.save()
