@@ -23,17 +23,11 @@ actor LiveTranscriptionService {
     private(set) var isInitialized = false
 
     // Audio processing constants (task 2.1: 5.0 → 10.0)
-    private static let CHUNK_SECONDS: Float = 10.0
     private static let SAMPLE_RATE: Float = 16000
-    private static let CHUNK_SAMPLES = Int(SAMPLE_RATE * CHUNK_SECONDS)
 
-    // Chunk accumulation buffers
-    private var buffers: [AudioSource: [Float]] = [:]
+    // Chunk accumulation state
+    private let liveBuffer = LiveTranscriptionBuffer()
     private var audioConverters: [AudioSource: AudioConverter] = [:]
-
-    // Timing
-    private var chunkStartTimes: [AudioSource: Date] = [:]
-    private var totalSamplesProcessed: [AudioSource: Int] = [:]
 
     // Authoritative record of all final segments accumulated this session
     private var collectedFinalSegments: [TranscriptSegment] = []
@@ -134,9 +128,7 @@ actor LiveTranscriptionService {
     func start(workspace: Workspace) async throws {
         logger.info("Starting live transcription service (Offline Chunking Mode)")
 
-        buffers.removeAll()
-        totalSamplesProcessed.removeAll()
-        chunkStartTimes.removeAll()
+        await liveBuffer.reset()
         audioConverters.removeAll()
         collectedFinalSegments.removeAll()
         sessionSpeakers.removeAll()
@@ -157,9 +149,10 @@ actor LiveTranscriptionService {
         logger.info("Stopping live transcription service")
 
         // Process any remaining audio in the buffers
-        for (source, buffer) in buffers {
+        let remainingBuffers = await liveBuffer.remainingBuffers()
+        for (source, buffer) in remainingBuffers {
             if !buffer.isEmpty {
-                let currentOffset = Float(totalSamplesProcessed[source] ?? 0) / Self.SAMPLE_RATE
+                let currentOffset = await liveBuffer.currentOffset(for: source)
                 await processChunk(samples: buffer, source: source, currentOffset: currentOffset)
             }
         }
@@ -197,9 +190,7 @@ actor LiveTranscriptionService {
         // Cleanup — reset isInitialized so next session creates a fresh DiarizerManager
         collectedFinalSegments.removeAll()
         sessionSpeakers.removeAll()
-        buffers.removeAll()
-        totalSamplesProcessed.removeAll()
-        chunkStartTimes.removeAll()
+        await liveBuffer.reset()
         audioConverters.removeAll()
         asrManager = nil
         diarizer = nil
@@ -218,25 +209,9 @@ actor LiveTranscriptionService {
             let resampled = try audioConverters[source]!.resample(samples, from: sampleRate)
             guard !resampled.isEmpty else { return }
 
-            if chunkStartTimes[source] == nil {
-                chunkStartTimes[source] = .now
-            }
-
-            var currentBuffer = buffers[source] ?? []
-            currentBuffer.append(contentsOf: resampled)
-
-            if currentBuffer.count >= Self.CHUNK_SAMPLES {
-                let chunkToProcess = currentBuffer
-                currentBuffer.removeAll()
-                buffers[source] = currentBuffer
-                chunkStartTimes[source] = nil
-
-                let currentOffset = Float(totalSamplesProcessed[source] ?? 0) / Self.SAMPLE_RATE
-                totalSamplesProcessed[source] = (totalSamplesProcessed[source] ?? 0) + chunkToProcess.count
-
+            if let chunkToProcess = await liveBuffer.append(samples: resampled, source: source) {
+                let currentOffset = await liveBuffer.takePendingChunkOffset(for: source) ?? 0
                 await processChunk(samples: chunkToProcess, source: source, currentOffset: currentOffset)
-            } else {
-                buffers[source] = currentBuffer
             }
         } catch {
             logger.error("Error processing live audio (\(source.rawValue)): \(error.localizedDescription)")
