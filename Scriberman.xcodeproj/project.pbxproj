@@ -80,6 +80,7 @@
 		798732882F7DA3ED00570A03 /* SpeakerMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798732872F7DA3ED00570A03 /* SpeakerMatcher.swift */; };
 		7987328A2F7DA41C00570A03 /* SpeakerMatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798732892F7DA41C00570A03 /* SpeakerMatcherTests.swift */; };
 		7987328C2F7DB47F00570A03 /* ModelInstallServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987328B2F7DB47F00570A03 /* ModelInstallServiceTests.swift */; };
+		7987328E2F7DBC2800570A03 /* SettingsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987328D2F7DBC2800570A03 /* SettingsViewModelTests.swift */; };
 		79DCE41A2F77BC3D0024DC26 /* TranscriptionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */; };
 		79DCE41D2F77CC1E0024DC26 /* PermissionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */; };
 		79DCE41F2F77CDA90024DC26 /* PermissionsOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41E2F77CDA90024DC26 /* PermissionsOnboardingView.swift */; };
@@ -223,6 +224,7 @@
 		798732872F7DA3ED00570A03 /* SpeakerMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMatcher.swift; sourceTree = "<group>"; };
 		798732892F7DA41C00570A03 /* SpeakerMatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMatcherTests.swift; sourceTree = "<group>"; };
 		7987328B2F7DB47F00570A03 /* ModelInstallServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelInstallServiceTests.swift; sourceTree = "<group>"; };
+		7987328D2F7DBC2800570A03 /* SettingsViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModelTests.swift; sourceTree = "<group>"; };
 		79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionServiceTests.swift; sourceTree = "<group>"; };
 		79DCE41B2F77CC0B0024DC26 /* Scriberman.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = Scriberman.xctestplan; sourceTree = "<group>"; };
 		79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionService.swift; sourceTree = "<group>"; };
@@ -363,6 +365,7 @@
 				798732852F7DA2F900570A03 /* AudioResamplerTests.swift */,
 				798732892F7DA41C00570A03 /* SpeakerMatcherTests.swift */,
 				7987328B2F7DB47F00570A03 /* ModelInstallServiceTests.swift */,
+				7987328D2F7DBC2800570A03 /* SettingsViewModelTests.swift */,
 			);
 			path = ScribermanTests;
 			sourceTree = "<group>";
@@ -918,6 +921,7 @@
 				D0AD07DBAD50A6EF4CD90C2B /* MockWorkspaceService.swift in Sources */,
 				7ABB63E28F5C4843C5203244 /* MockTranscriptionService.swift in Sources */,
 				7910094F2F78031A00225294 /* RecordingServiceTests.swift in Sources */,
+				7987328E2F7DBC2800570A03 /* SettingsViewModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

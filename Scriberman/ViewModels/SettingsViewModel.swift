@@ -1,11 +1,20 @@
 import Foundation
 import Observation
 
+enum BundleInstallPhase: Equatable {
+    case idle
+    case allReady
+    case downloading(label: String, progress: Double)
+    case installing
+    case warmingUp
+    case error(String)
+}
+
 @MainActor
 @Observable
 final class SettingsViewModel {
-    private let workspaceService: WorkspaceService
-    private let modelInstallService: ModelInstallService
+    private let workspaceService: any WorkspaceServiceProtocol
+    private let modelInstallService: any ModelInstallServicing
     let speakerEmbeddingStore: SpeakerEmbeddingStore
 
     var workspacePathText: String = "Not configured"
@@ -13,7 +22,7 @@ final class SettingsViewModel {
 
     var modelStates: [ModelGroup: ModelGroupReadinessState] = [:]
     var modelStatusMessages: [ModelGroup: String] = [:]
-    var modelDownloadProgress: [ModelGroup: Double] = [:]
+    var bundlePhase: BundleInstallPhase = .idle
     var canDownloadModels = false
 
     var speakerThreshold: Double {
@@ -23,7 +32,7 @@ final class SettingsViewModel {
         didSet { UserDefaults.standard.set(minSilenceGap, forKey: "minSilenceGap") }
     }
 
-    init(workspaceService: WorkspaceService, modelInstallService: ModelInstallService, speakerEmbeddingStore: SpeakerEmbeddingStore) {
+    init(workspaceService: any WorkspaceServiceProtocol, modelInstallService: any ModelInstallServicing, speakerEmbeddingStore: SpeakerEmbeddingStore) {
         self.workspaceService = workspaceService
         self.modelInstallService = modelInstallService
         self.speakerEmbeddingStore = speakerEmbeddingStore
@@ -57,6 +66,12 @@ final class SettingsViewModel {
                 modelStatusMessages[group] = nil
             }
         }
+
+        guard !Self.isInProgress(bundlePhase) else {
+            return
+        }
+
+        bundlePhase = modelStates.values.allSatisfy { $0 == .ready } ? .allReady : .idle
     }
 
     var currentModelNameText: String {
@@ -76,38 +91,67 @@ final class SettingsViewModel {
         }
     }
 
-    func downloadTapped(for group: ModelGroup) async {
+    func downloadAllTapped() async {
         guard canDownloadModels else {
-            modelStates[group] = .error
-            modelStatusMessages[group] = "Configure or re-authorize workspace before downloading."
+            bundlePhase = .error("Configure or re-authorize workspace before downloading.")
             return
         }
 
-        modelStates[group] = .downloading
-        modelStatusMessages[group] = nil
+        modelStatusMessages = [:]
+
+        let groupsInOrder: [(group: ModelGroup, label: String, start: Double)] = [
+            (.asrParakeetV3, "Downloading ASR…", 0.0),
+            (.vadSilero, "Downloading VAD…", 0.8 / 3.0),
+            (.offlineDiarization, "Downloading Diarizer…", (0.8 / 3.0) * 2.0)
+        ]
+        let segmentWidth = 0.8 / 3.0
 
         do {
-            _ = try await modelInstallService.installModelGroup(
-                group,
-                progress: { [weak self] state in
-                    Task { @MainActor in
-                        self?.modelStates[group] = state
-                    }
-                },
-                downloadProgress: { [weak self] value in
-                    Task { @MainActor in
-                        self?.modelDownloadProgress[group] = value
-                    }
-                }
-            )
+            for item in groupsInOrder {
+                let group = item.group
+                bundlePhase = .downloading(label: item.label, progress: item.start)
+                modelStates[group] = .downloading
 
-            modelStates[group] = .ready
-            modelStatusMessages[group] = nil
-            modelDownloadProgress[group] = nil
+                _ = try await modelInstallService.installModelGroup(
+                    group,
+                    progress: { [weak self] state in
+                        Task { @MainActor in
+                            self?.modelStates[group] = state
+                        }
+                    },
+                    downloadProgress: { [weak self] value in
+                        Task { @MainActor in
+                            let clamped = min(max(value, 0.0), 1.0)
+                            let progress = min(item.start + (clamped * segmentWidth), 0.8)
+                            self?.bundlePhase = .downloading(label: item.label, progress: progress)
+                        }
+                    }
+                )
+
+                modelStates[group] = .ready
+                modelStatusMessages[group] = nil
+            }
+
+            bundlePhase = .installing
+            await Task.yield()
+
+            if let workspace = await workspaceService.currentWorkspace() {
+                bundlePhase = .warmingUp
+                await modelInstallService.warmUpModels(workspace: workspace)
+            }
+
+            bundlePhase = .allReady
         } catch {
-            modelStates[group] = .error
-            modelStatusMessages[group] = error.localizedDescription
-            modelDownloadProgress[group] = nil
+            bundlePhase = .error(error.localizedDescription)
+        }
+    }
+
+    private static func isInProgress(_ phase: BundleInstallPhase) -> Bool {
+        switch phase {
+        case .downloading, .installing, .warmingUp:
+            return true
+        default:
+            return false
         }
     }
 }

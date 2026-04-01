@@ -41,6 +41,24 @@ final class ModelInstallServiceTests: XCTestCase {
         XCTAssertFalse(isValid)
     }
 
+    func testWarmUpModelsCompletesWithoutThrowWhenModelDirectoriesExist() async throws {
+        let service = makeService()
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let workspace = Workspace(rootURL: tempRoot)
+        try FileManager.default.createDirectory(
+            at: workspace.modelsURL.appendingPathComponent(ModelGroup.asrParakeetV3.repoFolderName, isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: workspace.modelsURL.appendingPathComponent(ModelGroup.offlineDiarization.repoFolderName, isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        await service.warmUpModels(workspace: workspace)
+    }
+
     private func makeService() -> ModelInstallService {
         ModelInstallService(workspaceService: WorkspaceService(bookmarkStore: InMemoryBookmarkStore()))
     }
