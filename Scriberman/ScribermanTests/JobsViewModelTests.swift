@@ -216,6 +216,76 @@ final class JobsViewModelTests: XCTestCase {
         XCTAssertFalse(shouldDiscardWhenPendingSelected)
     }
 
+    func testExportTranscriptWritesMarkdownWhenDestinationSelected() async throws {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("md")
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+
+        let exportViewModel = JobsViewModel(
+            workspaceService: workspaceService,
+            transcriptionService: transcriptionService,
+            retranscriptionService: retranscriptionService,
+            audioImportService: audioImportService,
+            transcriptExportService: TranscriptExportService(),
+            savePanelPresenter: { _ in outputURL }
+        )
+
+        let session = makeSession(status: .done)
+        session.transcript = makeTranscript()
+
+        try await exportViewModel.exportTranscript(for: session)
+
+        let content = try String(contentsOf: outputURL, encoding: .utf8)
+        XCTAssertTrue(content.hasPrefix("# Session"))
+        XCTAssertTrue(content.contains("**Speaker 1** [00:00 – 00:02]"))
+    }
+
+    func testExportTranscriptReturnsWithoutWritingWhenSavePanelCancelled() async throws {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("md")
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+
+        let exportViewModel = JobsViewModel(
+            workspaceService: workspaceService,
+            transcriptionService: transcriptionService,
+            retranscriptionService: retranscriptionService,
+            audioImportService: audioImportService,
+            transcriptExportService: TranscriptExportService(),
+            savePanelPresenter: { _ in nil }
+        )
+
+        let session = makeSession(status: .done)
+        session.transcript = makeTranscript()
+
+        try await exportViewModel.exportTranscript(for: session)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: outputURL.path))
+    }
+
+    func testExportTranscriptThrowsWhenTranscriptUnavailable() async {
+        let exportViewModel = JobsViewModel(
+            workspaceService: workspaceService,
+            transcriptionService: transcriptionService,
+            retranscriptionService: retranscriptionService,
+            audioImportService: audioImportService,
+            transcriptExportService: TranscriptExportService(),
+            savePanelPresenter: { _ in nil }
+        )
+
+        let session = makeSession(status: .done)
+
+        do {
+            try await exportViewModel.exportTranscript(for: session)
+            XCTFail("Expected transcriptUnavailable error")
+        } catch let error as TranscriptExportError {
+            XCTAssertEqual(error, .transcriptUnavailable)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     private func makeSession(
         createdAt: Date = Date(timeIntervalSince1970: 0),
         status: RecordingStatus
@@ -242,5 +312,19 @@ final class JobsViewModelTests: XCTestCase {
             minute: minute
         )
         return calendar.date(from: components) ?? .now
+    }
+
+    private func makeTranscript() -> Transcript {
+        Transcript(
+            fullText: "hello there",
+            segments: [
+                TranscriptSegment(speakerId: "S1", text: "hello", startTime: 0, endTime: 2),
+                TranscriptSegment(speakerId: "S2", text: "there", startTime: 3, endTime: 5)
+            ],
+            speakers: [
+                TranscriptSpeaker(id: "S1", label: "Speaker 1", colorHex: "#4F46E5"),
+                TranscriptSpeaker(id: "S2", label: "Speaker 2", colorHex: "#16A34A")
+            ]
+        )
     }
 }
