@@ -38,6 +38,7 @@ actor TranscriptionService: TranscriptionServiceProtocol {
     private let prepareModelsHandler: PrepareModelsHandler?
     private let speakerEmbeddingStore: SpeakerEmbeddingStore?
     private let minimumChunkSamples = 16_000
+    private let modelPathResolver = ModelPathResolver()
 
     init(
         speakerEmbeddingStore: SpeakerEmbeddingStore? = nil,
@@ -61,37 +62,16 @@ actor TranscriptionService: TranscriptionServiceProtocol {
     }
 
     func prepareModels(workspace: Workspace) async throws {
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-        guard let appSupport else {
-            throw TranscriptionError.failedToPrepareModels("Application Support path is unavailable.")
-        }
-
-        let cacheRoot = appSupport
-            .appendingPathComponent("FluidAudio", isDirectory: true)
-            .appendingPathComponent("Models", isDirectory: true)
-
-        let requiredGroups: [ModelGroup] = [.asrParakeetV3, .vadSilero, .offlineDiarization, .streamingAsr, .streamingDiarization]
+        let requiredGroups: [ModelGroup] = [.asrParakeetV3, .vadSilero, .offlineDiarization]
         var missingRepos: [String] = []
 
         for group in requiredGroups {
-            let sourceURL = workspace.modelsURL.appendingPathComponent(group.repoFolderName, isDirectory: true)
-            var isDirectory: ObjCBool = false
-            let sourceExists = fileManager.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory)
-            if !sourceExists || !isDirectory.boolValue {
-                missingRepos.append(group.repoFolderName)
-                continue
-            }
-
-            let destinationURL = cacheRoot.appendingPathComponent(group.repoFolderName, isDirectory: true)
-            if fileManager.fileExists(atPath: destinationURL.path) {
-                continue
-            }
-
             do {
-                try fileManager.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try fileManager.copyItem(at: sourceURL, to: destinationURL)
+                _ = try modelPathResolver.modelDirectory(for: group, in: workspace)
+            } catch TranscriptionError.missingWorkspaceModels(let repos) {
+                missingRepos.append(contentsOf: repos)
             } catch {
-                throw TranscriptionError.failedToPrepareModels(error.localizedDescription)
+                missingRepos.append(group.repoFolderName)
             }
         }
 
@@ -196,7 +176,6 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         source: AudioSource,
         workspace: Workspace
     ) async throws -> ([TranscriptSegment], [String: [Float]]) {
-        _ = workspace
         let passName = source == .app ? "app" : "mic"
         let speechSegments: [VadSegment]
         do {
@@ -213,11 +192,14 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         let asrManager = AsrManager(config: .default)
         let offlineDiarizerManager = OfflineDiarizerManager(config: .default)
         do {
-            let asrModels = try await AsrModels.downloadAndLoad()
+            let asrModelDirectory = try modelPathResolver.modelDirectory(for: .asrParakeetV3, in: workspace)
+            let asrModels = try await AsrModels.load(from: asrModelDirectory)
             try await asrManager.initialize(models: asrModels)
             
             let diarizerModels = try await OfflineDiarizerModels.load(from: workspace.modelsURL)
             offlineDiarizerManager.initialize(models: diarizerModels)
+        } catch let error as TranscriptionError {
+            throw error
         } catch {
             throw TranscriptionError.failedToTranscribe("\(passName) pass: model initialization failed - \(error.localizedDescription)")
         }

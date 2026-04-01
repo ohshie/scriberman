@@ -216,9 +216,11 @@ final class NewSessionViewModel: ObservableObject {
         Task {
             await recheckPermissions()
         }
-        // task 4.3: pre-warm ASR + diarizer models as early as possible
+        // Pre-warm ASR + diarizer models when a workspace is available.
         Task {
-            await liveTranscriptionService.prepare()
+            if let workspace = await workspaceService.currentWorkspace() {
+                await liveTranscriptionService.prepare(workspace: workspace)
+            }
         }
     }
 
@@ -342,6 +344,8 @@ final class NewSessionViewModel: ObservableObject {
             do {
                 try await liveTranscriptionService.start(workspace: workspace)
                 startLiveTranscriptionPipeline()
+            } catch LiveTranscriptionError.initializationFailed {
+                errorMessage = "Live transcription unavailable: Required models are missing. Open Settings → Models to install ASR and Speaker Diarization models."
             } catch {
                 errorMessage = "Live transcription unavailable: \(error.localizedDescription)"
             }

@@ -163,14 +163,8 @@ actor ModelInstallService {
         case .vadSilero:
             try await DownloadUtils.downloadRepo(.vad, to: stagingRoot, progressHandler: progressHandler)
 
-        case .diarization, .offlineDiarization:
+        case .offlineDiarization:
             try await DownloadUtils.downloadRepo(.diarizer, to: stagingRoot, progressHandler: progressHandler)
-
-        case .streamingAsr:
-            try await DownloadUtils.downloadRepo(.parakeetEou320, to: stagingRoot, progressHandler: progressHandler)
-
-        case .streamingDiarization:
-            try await DownloadUtils.downloadRepo(.lseend, to: stagingRoot, progressHandler: progressHandler)
         }
     }
 
@@ -280,21 +274,11 @@ actor ModelInstallService {
             )
             return modelFilesPresent && vocabPresent
 
-        case .streamingAsr:
-            // Relaxed validation for streaming ASR
-            let contents = try? fileManager.contentsOfDirectory(at: repoURL, includingPropertiesForKeys: nil)
-            return contents?.isEmpty == false
-
         case .vadSilero:
             return requiredFilesExist(in: repoURL, required: ModelNames.VAD.requiredModels)
 
-        case .diarization, .offlineDiarization:
+        case .offlineDiarization:
             return requiredFilesExist(in: repoURL, required: ModelNames.Diarizer.requiredModels)
-
-        case .streamingDiarization:
-            // Relaxed validation for LSEEND
-            let contents = try? fileManager.contentsOfDirectory(at: repoURL, includingPropertiesForKeys: nil)
-            return contents?.isEmpty == false
         }
     }
 
@@ -317,12 +301,8 @@ actor ModelInstallService {
             repoName = .parakeet
         case .vadSilero:
             repoName = .vad
-        case .diarization, .offlineDiarization:
+        case .offlineDiarization:
             repoName = .diarizer
-        case .streamingAsr:
-            repoName = .parakeetEou320
-        case .streamingDiarization:
-            repoName = .lseend
         }
 
         for root in roots {

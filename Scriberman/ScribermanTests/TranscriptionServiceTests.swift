@@ -157,6 +157,47 @@ final class TranscriptionServiceTests: XCTestCase {
         let prepared = await recorder.prepared
         XCTAssertTrue(prepared)
     }
+
+    func testPrepareModelsSucceedsWhenThreeRequiredWorkspaceGroupsExist() async throws {
+        let service = TranscriptionService()
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let workspace = Workspace(rootURL: tempRoot)
+        let requiredGroups: [ModelGroup] = [.asrParakeetV3, .vadSilero, .offlineDiarization]
+        for group in requiredGroups {
+            let directory = workspace.modelsURL.appendingPathComponent(group.repoFolderName, isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+
+        try await service.prepareModels(workspace: workspace)
+    }
+
+    func testPrepareModelsThrowsMissingWorkspaceModelsWhenAnyRequiredGroupMissing() async throws {
+        let service = TranscriptionService()
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let workspace = Workspace(rootURL: tempRoot)
+        let presentGroups: [ModelGroup] = [.asrParakeetV3, .vadSilero]
+        for group in presentGroups {
+            let directory = workspace.modelsURL.appendingPathComponent(group.repoFolderName, isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+
+        do {
+            try await service.prepareModels(workspace: workspace)
+            XCTFail("Expected missingWorkspaceModels error.")
+        } catch let error as TranscriptionError {
+            guard case .missingWorkspaceModels(let repos) = error else {
+                XCTFail("Expected missingWorkspaceModels, got \(error)")
+                return
+            }
+            XCTAssertTrue(repos.contains(ModelGroup.offlineDiarization.repoFolderName))
+        }
+    }
 }
 
 private actor SampleRecorder {
