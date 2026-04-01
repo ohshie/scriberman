@@ -261,8 +261,24 @@ final class NewSessionViewModelTests: XCTestCase {
         XCTAssertTrue(source.contains("Open Privacy Settings"))
     }
 
+    func testRefreshAudioDevicesOnAppearPreparesLiveTranscriptionWithWorkspace() throws {
+        let source = try newSessionViewModelSource()
+        XCTAssertTrue(source.contains("if let workspace = await workspaceService.currentWorkspace()"))
+        XCTAssertTrue(source.contains("await liveTranscriptionService.prepare(workspace: workspace)"))
+    }
+
+    func testInitializationFailureMessageDirectsUserToSettingsModels() throws {
+        let source = try newSessionViewModelSource()
+        XCTAssertTrue(source.contains("catch LiveTranscriptionError.initializationFailed"))
+        XCTAssertTrue(source.contains("Open Settings → Models to install ASR and Speaker Diarization models."))
+    }
+
     private func newSessionPanelSource() throws -> String {
         try readSourceFile(relativePathFromTests: "../UI/NewSessionPanelView.swift")
+    }
+
+    private func newSessionViewModelSource() throws -> String {
+        try readSourceFile(relativePathFromTests: "../ViewModels/NewSessionViewModel.swift")
     }
 
     private func readSourceFile(relativePathFromTests: String) throws -> String {

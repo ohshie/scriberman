@@ -9,6 +9,8 @@ enum LiveTranscriptionError: Error {
 
 actor LiveTranscriptionService {
     private let logger = Logger(subsystem: "Scriberman", category: "LiveTranscriptionService")
+    private let fileManager = FileManager.default
+    private let modelPathResolver = ModelPathResolver()
 
     // Core managers
     private var asrManager: AsrManager?
@@ -57,7 +59,7 @@ actor LiveTranscriptionService {
 
     /// Loads ASR and diarizer models without starting the audio pipeline.
     /// Idempotent: subsequent calls are no-ops if already initialized.
-    func prepare() async {
+    func prepare(workspace: Workspace) async {
         guard !isInitialized else {
             logger.info("LiveTranscriptionService already initialized, skipping prepare()")
             return
@@ -69,13 +71,16 @@ actor LiveTranscriptionService {
         do {
             let asrConfig = ASRConfig()
             let asr = AsrManager(config: asrConfig)
-            let asrModels = try await AsrModels.downloadAndLoad()
+            let asrDirectory = try modelPathResolver.modelDirectory(for: .asrParakeetV3, in: workspace)
+            let asrModels = try await AsrModels.load(from: asrDirectory)
             try await asr.initialize(models: asrModels)
             self.asrManager = asr
             logger.info("AsrManager initialized")
         } catch {
             logger.error("ASR initialization failed during prepare(): \(error). Live transcription unavailable.")
             // Leave isInitialized = false so start() can surface the error
+            asrManager = nil
+            diarizer = nil
             return
         }
 
@@ -87,24 +92,37 @@ actor LiveTranscriptionService {
         )
         let mgr = DiarizerManager(config: diarizerConfig)
 
-        let maxAttempts = 3
-        for attempt in 1...maxAttempts {
-            do {
-                // task 1.3: use DiarizerModels.downloadIfNeeded() instead of OfflineDiarizerModels.load()
-                let models = try await DiarizerModels.downloadIfNeeded()
-                mgr.initialize(models: models)
-                self.diarizer = mgr
-                logger.info("DiarizerManager initialized (attempt \(attempt)/\(maxAttempts))")
-                break
-            } catch {
-                logger.warning("Diarizer init attempt \(attempt)/\(maxAttempts) failed: \(error)")
-                if attempt < maxAttempts {
-                    logger.info("Retrying in 15 seconds...")
-                    try? await Task.sleep(for: .seconds(15))
-                } else {
-                    logger.error("Diarizer initialization failed after \(maxAttempts) attempts. Proceeding in ASR-only mode.")
-                }
-            }
+        let diarizerRepo: URL
+        do {
+            diarizerRepo = try modelPathResolver.modelDirectory(for: .offlineDiarization, in: workspace)
+        } catch {
+            logger.error("Diarizer initialization failed during prepare(): missing workspace diarizer repo — \(error).")
+            asrManager = nil
+            diarizer = nil
+            return
+        }
+        let segmentationURL = diarizerRepo.appendingPathComponent("pyannote_segmentation.mlmodelc", isDirectory: true)
+        let embeddingURL = diarizerRepo.appendingPathComponent("wespeaker_v2.mlmodelc", isDirectory: true)
+        guard fileManager.fileExists(atPath: segmentationURL.path), fileManager.fileExists(atPath: embeddingURL.path) else {
+            logger.error("Diarizer initialization failed during prepare(): missing workspace diarizer files.")
+            asrManager = nil
+            diarizer = nil
+            return
+        }
+
+        do {
+            let models = try await DiarizerModels.load(
+                localSegmentationModel: segmentationURL,
+                localEmbeddingModel: embeddingURL
+            )
+            mgr.initialize(models: models)
+            self.diarizer = mgr
+            logger.info("DiarizerManager initialized from workspace models")
+        } catch {
+            logger.error("Diarizer initialization failed during prepare(): \(error). Live transcription unavailable.")
+            asrManager = nil
+            diarizer = nil
+            return
         }
 
         isInitialized = true
@@ -125,10 +143,10 @@ actor LiveTranscriptionService {
 
         // task 4.2: skip model loading if already initialized by prepare()
         if !isInitialized {
-            await prepare()
+            await prepare(workspace: workspace)
         }
 
-        guard asrManager != nil else {
+        guard isInitialized, asrManager != nil, diarizer != nil else {
             throw LiveTranscriptionError.initializationFailed
         }
 
