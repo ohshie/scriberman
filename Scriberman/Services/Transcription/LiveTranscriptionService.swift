@@ -18,6 +18,7 @@ actor LiveTranscriptionService {
 
     // Dependencies
     private let speakerEmbeddingStore: SpeakerEmbeddingStore?
+    private let speakerMatcher = SpeakerMatcher()
 
     // Model initialization guard (tasks 4.1, 4.2)
     private(set) var isInitialized = false
@@ -259,33 +260,15 @@ actor LiveTranscriptionService {
                         let embedding = longestSegment.embedding
                         let duration = longestSegment.endTimeSeconds - longestSegment.startTimeSeconds
 
-                        // tasks 3.2, 3.3: match embedding against SpeakerEmbeddingStore
-                        if let store = speakerEmbeddingStore, !embedding.isEmpty {
-                            if let match = await store.findBestMatch(embedding: embedding) {
-                                // Known speaker recognized
-                                speakerID = match.name
-                                // task 3.4: accumulate matched speaker info (keep latest embedding)
-                                sessionSpeakers[sessionLocalId] = (
-                                    embedding: embedding,
-                                    wasMatched: true,
-                                    matchedProfileID: match.id
-                                )
-                                logger.info("📍 Matched speaker: \(speakerID) (profile match, \(String(format: "%.1f", duration))s)")
-                            } else {
-                                // Unknown speaker — use session-local ID
-                                speakerID = sessionLocalId
-                                // task 3.4: accumulate unmatched speaker info (only set once per speaker)
-                                if sessionSpeakers[sessionLocalId] == nil {
-                                    sessionSpeakers[sessionLocalId] = (
-                                        embedding: embedding,
-                                        wasMatched: false,
-                                        matchedProfileID: nil
-                                    )
-                                }
-                                logger.info("📍 New/unmatched speaker: \(speakerID) (\(String(format: "%.1f", duration))s)")
-                            }
+                        if let match = await findBestSpeakerMatch(for: embedding) {
+                            speakerID = match.name
+                            sessionSpeakers[sessionLocalId] = (
+                                embedding: embedding,
+                                wasMatched: true,
+                                matchedProfileID: match.id
+                            )
+                            logger.info("📍 Matched speaker: \(speakerID) (profile match, \(String(format: "%.1f", duration))s)")
                         } else {
-                            // No store or empty embedding — use session-local ID
                             speakerID = sessionLocalId
                             if sessionSpeakers[sessionLocalId] == nil && !embedding.isEmpty {
                                 sessionSpeakers[sessionLocalId] = (
@@ -294,7 +277,7 @@ actor LiveTranscriptionService {
                                     matchedProfileID: nil
                                 )
                             }
-                            logger.info("📍 Longest speaker: \(speakerID) (\(String(format: "%.1f", duration))s)")
+                            logger.info("📍 New/unmatched speaker: \(speakerID) (\(String(format: "%.1f", duration))s)")
                         }
                     } else {
                         logger.info("📍 No speaker detected in audio chunk")
@@ -336,5 +319,24 @@ actor LiveTranscriptionService {
         }
 
         return longestSegment
+    }
+
+    private func findBestSpeakerMatch(for embedding: [Float]) async -> SpeakerProfile? {
+        guard !embedding.isEmpty, let store = speakerEmbeddingStore else {
+            return nil
+        }
+
+        // Keep using the store-level fast path when available.
+        if let match = await store.findBestMatch(
+            embedding: embedding,
+            threshold: 1.0 - speakerMatcher.threshold
+        ) {
+            return match
+        }
+
+        guard let profiles = try? await store.fetchAll() else {
+            return nil
+        }
+        return speakerMatcher.findBestMatch(for: embedding, in: profiles)
     }
 }

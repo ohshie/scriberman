@@ -10,6 +10,7 @@ actor AudioSampleReader {
 
     private let outputSampleRate: Double
     private let processingChunkSize: AVAudioFrameCount
+    private let resampler: AudioResampler
     private let avAudioFileReadHandler: AVAudioFileReadHandler?
     private let extAudioFileReadHandler: ExtAudioFileReadHandler?
     private let sleep: Sleep
@@ -26,6 +27,7 @@ actor AudioSampleReader {
     ) {
         self.outputSampleRate = outputSampleRate
         self.processingChunkSize = processingChunkSize
+        resampler = AudioResampler(targetSampleRate: outputSampleRate)
         avAudioFileReadHandler = avAudioFileRead
         extAudioFileReadHandler = extAudioFileRead
         self.sleep = sleep
@@ -124,126 +126,19 @@ actor AudioSampleReader {
             }
 
             let frameCount = Int(buffer.frameLength)
-            let writeStart = monoSamplesAtSourceRate.count
-            monoSamplesAtSourceRate.append(contentsOf: repeatElement(0, count: frameCount))
-            let channelScale = Float(1.0 / Double(channelCount))
-
-            switch inputFormat.commonFormat {
-            case .pcmFormatFloat32:
-                guard let channelData = buffer.floatChannelData else {
-                    throw RecordingError.failedToStart("Missing float channel data while reading mixdown input.")
-                }
-                for channelIndex in 0..<channelCount {
-                    let channel = UnsafeBufferPointer(start: channelData[channelIndex], count: frameCount)
-                    for sampleIndex in 0..<frameCount {
-                        monoSamplesAtSourceRate[writeStart + sampleIndex] += channel[sampleIndex] * channelScale
-                    }
-                }
-            case .pcmFormatInt16:
-                guard let channelData = buffer.int16ChannelData else {
-                    throw RecordingError.failedToStart("Missing int16 channel data while reading mixdown input.")
-                }
-                let maxValue = Float(Int16.max)
-                for channelIndex in 0..<channelCount {
-                    let channel = UnsafeBufferPointer(start: channelData[channelIndex], count: frameCount)
-                    for sampleIndex in 0..<frameCount {
-                        monoSamplesAtSourceRate[writeStart + sampleIndex] += (Float(channel[sampleIndex]) / maxValue) * channelScale
-                    }
-                }
-            case .pcmFormatInt32:
-                guard let channelData = buffer.int32ChannelData else {
-                    throw RecordingError.failedToStart("Missing int32 channel data while reading mixdown input.")
-                }
-                let maxValue = Float(Int32.max)
-                for channelIndex in 0..<channelCount {
-                    let channel = UnsafeBufferPointer(start: channelData[channelIndex], count: frameCount)
-                    for sampleIndex in 0..<frameCount {
-                        monoSamplesAtSourceRate[writeStart + sampleIndex] += (Float(channel[sampleIndex]) / maxValue) * channelScale
-                    }
-                }
-            default:
-                throw RecordingError.failedToStart("Unsupported input common format for mixdown: \(inputFormat.commonFormat.rawValue)")
-            }
+            let monoSamples = try monoSamplesFromBuffer(
+                buffer,
+                inputFormat: inputFormat,
+                frameCount: frameCount,
+                channelCount: channelCount
+            )
+            monoSamplesAtSourceRate.append(contentsOf: monoSamples)
         }
 
         if abs(inputFormat.sampleRate - outputSampleRate) < 0.0001 {
             return monoSamplesAtSourceRate
         }
-        return try resampleMonoSamples(
-            monoSamplesAtSourceRate,
-            sourceSampleRate: inputFormat.sampleRate
-        )
-    }
-
-    private func resampleMonoSamples(_ samples: [Float], sourceSampleRate: Double) throws -> [Float] {
-        guard !samples.isEmpty else { return [] }
-        guard let inputFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: sourceSampleRate,
-            channels: 1,
-            interleaved: false
-        ), let targetFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: outputSampleRate,
-            channels: 1,
-            interleaved: false
-        ) else {
-            throw RecordingError.failedToStart("Failed to create target mixdown format.")
-        }
-        guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
-            throw RecordingError.failedToStart("Failed to create audio converter for mixdown.")
-        }
-
-        guard let inputBuffer = AVAudioPCMBuffer(
-            pcmFormat: inputFormat,
-            frameCapacity: AVAudioFrameCount(samples.count)
-        ), let inputChannelData = inputBuffer.floatChannelData else {
-            throw RecordingError.failedToStart("Failed to allocate mixdown input buffer.")
-        }
-        inputBuffer.frameLength = AVAudioFrameCount(samples.count)
-        samples.withUnsafeBufferPointer { pointer in
-            guard let baseAddress = pointer.baseAddress else { return }
-            inputChannelData[0].update(from: baseAddress, count: samples.count)
-        }
-
-        var deliveredInput = false
-        var outputSamples: [Float] = []
-        while true {
-            guard let convertedBuffer = AVAudioPCMBuffer(
-                pcmFormat: targetFormat,
-                frameCapacity: processingChunkSize
-            ) else {
-                throw RecordingError.failedToStart("Failed to allocate mixdown buffer.")
-            }
-
-            var conversionError: NSError?
-            let status = converter.convert(to: convertedBuffer, error: &conversionError) { _, outputStatus in
-                if deliveredInput {
-                    outputStatus.pointee = .endOfStream
-                    return nil
-                }
-                deliveredInput = true
-                outputStatus.pointee = .haveData
-                return inputBuffer
-            }
-
-            if let conversionError {
-                throw conversionError
-            }
-            if convertedBuffer.frameLength > 0, let channelData = convertedBuffer.floatChannelData {
-                let frameCount = Int(convertedBuffer.frameLength)
-                outputSamples.append(contentsOf: UnsafeBufferPointer(start: channelData[0], count: frameCount))
-            }
-
-            switch status {
-            case .error:
-                throw RecordingError.failedToStart("Audio conversion failed during mixdown.")
-            case .endOfStream:
-                return outputSamples
-            default:
-                continue
-            }
-        }
+        return try resampler.resample(monoSamplesAtSourceRate, from: inputFormat.sampleRate)
     }
 
     private func readResampledMonoSamplesViaExtAudioFile(from inputURL: URL, label: String) throws -> [Float] {
@@ -320,20 +215,71 @@ actor AudioSampleReader {
                 break
             }
             let frameCount = Int(frames)
-            let channelScale = Float(1.0 / Double(sourceChannelCount))
+            var channelSamples = Array(repeating: [Float](), count: sourceChannelCount)
+            for channelIndex in 0..<sourceChannelCount {
+                channelSamples[channelIndex].reserveCapacity(frameCount)
+            }
             for frameIndex in 0..<frameCount {
-                var mixed: Float = 0
                 let baseIndex = frameIndex * sourceChannelCount
                 for channelIndex in 0..<sourceChannelCount {
-                    mixed += chunk[baseIndex + channelIndex] * channelScale
+                    channelSamples[channelIndex].append(chunk[baseIndex + channelIndex])
                 }
-                samples.append(mixed)
             }
+            samples.append(contentsOf: AudioDownmixer.toMono(channelSamples: channelSamples))
         }
 
         logger.info(
             "\(label, privacy: .public) ExtAudioFile fallback succeeded. sampleCount=\(samples.count, privacy: .public)"
         )
         return samples
+    }
+
+    private func monoSamplesFromBuffer(
+        _ buffer: AVAudioPCMBuffer,
+        inputFormat: AVAudioFormat,
+        frameCount: Int,
+        channelCount: Int
+    ) throws -> [Float] {
+        let stride = max(1, buffer.stride)
+
+        switch inputFormat.commonFormat {
+        case .pcmFormatFloat32:
+            guard let channelData = buffer.floatChannelData else {
+                throw RecordingError.failedToStart("Missing float channel data while reading mixdown input.")
+            }
+            let channelSamples = (0..<channelCount).map { channelIndex in
+                (0..<frameCount).map { frameIndex in
+                    channelData[channelIndex][frameIndex * stride]
+                }
+            }
+            return AudioDownmixer.toMono(channelSamples: channelSamples)
+
+        case .pcmFormatInt16:
+            guard let channelData = buffer.int16ChannelData else {
+                throw RecordingError.failedToStart("Missing int16 channel data while reading mixdown input.")
+            }
+            let maxValue = Float(Int16.max)
+            let channelSamples = (0..<channelCount).map { channelIndex in
+                (0..<frameCount).map { frameIndex in
+                    Float(channelData[channelIndex][frameIndex * stride]) / maxValue
+                }
+            }
+            return AudioDownmixer.toMono(channelSamples: channelSamples)
+
+        case .pcmFormatInt32:
+            guard let channelData = buffer.int32ChannelData else {
+                throw RecordingError.failedToStart("Missing int32 channel data while reading mixdown input.")
+            }
+            let maxValue = Float(Int32.max)
+            let channelSamples = (0..<channelCount).map { channelIndex in
+                (0..<frameCount).map { frameIndex in
+                    Float(channelData[channelIndex][frameIndex * stride]) / maxValue
+                }
+            }
+            return AudioDownmixer.toMono(channelSamples: channelSamples)
+
+        default:
+            throw RecordingError.failedToStart("Unsupported input common format for mixdown: \(inputFormat.commonFormat.rawValue)")
+        }
     }
 }

@@ -451,22 +451,7 @@ actor RecordingService: RecordingServiceProtocol {
     }
 
     private func extractSamples(from buffer: AVAudioPCMBuffer) -> [Float] {
-        guard let channelData = buffer.floatChannelData else { return [] }
-        let frameCount = Int(buffer.frameLength)
-        if buffer.format.channelCount == 1 {
-            return Array(UnsafeBufferPointer(start: channelData[0], count: frameCount))
-        } else {
-            // Downmix to mono
-            var mono = [Float](repeating: 0, count: frameCount)
-            for i in 0..<frameCount {
-                var sum: Float = 0
-                for c in 0..<Int(buffer.format.channelCount) {
-                    sum += channelData[c][i]
-                }
-                mono[i] = sum / Float(buffer.format.channelCount)
-            }
-            return mono
-        }
+        AudioDownmixer.toMono(buffer: buffer)
     }
 
     private func isValidTapFormat(_ format: AVAudioFormat) -> Bool {
