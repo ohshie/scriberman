@@ -28,6 +28,7 @@ struct TranscriptionPassRunner {
 
     private let speakerEmbeddingStore: SpeakerEmbeddingStore?
     private let minimumChunkSamples: Int
+    private let speakerMatcher: SpeakerMatcher
     private let segmentSpeech: SegmentSpeech
     private let makePassEngines: MakePassEngines
     private let alignTranscript: AlignTranscript
@@ -35,6 +36,7 @@ struct TranscriptionPassRunner {
     init(
         speakerEmbeddingStore: SpeakerEmbeddingStore? = nil,
         minimumChunkSamples: Int = 16_000,
+        speakerMatcher: SpeakerMatcher = SpeakerMatcher(),
         segmentSpeech: @escaping SegmentSpeech = { samples in
             let vadManager = try await VadManager(config: VadConfig(defaultThreshold: 0.75))
             let segments = try await vadManager.segmentSpeech(samples, config: VadSegmentationConfig.default)
@@ -47,6 +49,7 @@ struct TranscriptionPassRunner {
     ) {
         self.speakerEmbeddingStore = speakerEmbeddingStore
         self.minimumChunkSamples = minimumChunkSamples
+        self.speakerMatcher = speakerMatcher
         self.segmentSpeech = segmentSpeech
         self.makePassEngines = makePassEngines ?? Self.defaultMakePassEngines(modelPathResolver: ModelPathResolver())
         let transcriptAligner = TranscriptAligner()
@@ -188,26 +191,10 @@ struct TranscriptionPassRunner {
             return [:]
         }
 
-        let threshold: Float = 0.28
         let profiles = (try? await store.fetchAll()) ?? []
 
         for (clusterId, embedding) in db {
-            var bestMatch: SpeakerProfile?
-            var bestDistance = threshold
-
-            for profile in profiles {
-                let distance = SpeakerUtilities.cosineDistance(embedding, profile.embedding)
-                if distance < bestDistance {
-                    bestDistance = distance
-                    bestMatch = profile
-                } else if distance == bestDistance && bestMatch != nil {
-                    if profile.lastSeen < (bestMatch?.lastSeen ?? .distantFuture) {
-                        bestMatch = profile
-                    }
-                }
-            }
-
-            if let match = bestMatch {
+            if let match = speakerMatcher.findBestMatch(for: embedding, in: profiles) {
                 speakerMapping[clusterId] = match.name
                 try? await store.updateProfile(id: match.id)
             }
