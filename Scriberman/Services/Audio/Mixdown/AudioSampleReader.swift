@@ -10,6 +10,7 @@ actor AudioSampleReader {
 
     private let outputSampleRate: Double
     private let processingChunkSize: AVAudioFrameCount
+    private let resampler: AudioResampler
     private let avAudioFileReadHandler: AVAudioFileReadHandler?
     private let extAudioFileReadHandler: ExtAudioFileReadHandler?
     private let sleep: Sleep
@@ -26,6 +27,7 @@ actor AudioSampleReader {
     ) {
         self.outputSampleRate = outputSampleRate
         self.processingChunkSize = processingChunkSize
+        resampler = AudioResampler(targetSampleRate: outputSampleRate)
         avAudioFileReadHandler = avAudioFileRead
         extAudioFileReadHandler = extAudioFileRead
         self.sleep = sleep
@@ -136,81 +138,7 @@ actor AudioSampleReader {
         if abs(inputFormat.sampleRate - outputSampleRate) < 0.0001 {
             return monoSamplesAtSourceRate
         }
-        return try resampleMonoSamples(
-            monoSamplesAtSourceRate,
-            sourceSampleRate: inputFormat.sampleRate
-        )
-    }
-
-    private func resampleMonoSamples(_ samples: [Float], sourceSampleRate: Double) throws -> [Float] {
-        guard !samples.isEmpty else { return [] }
-        guard let inputFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: sourceSampleRate,
-            channels: 1,
-            interleaved: false
-        ), let targetFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: outputSampleRate,
-            channels: 1,
-            interleaved: false
-        ) else {
-            throw RecordingError.failedToStart("Failed to create target mixdown format.")
-        }
-        guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
-            throw RecordingError.failedToStart("Failed to create audio converter for mixdown.")
-        }
-
-        guard let inputBuffer = AVAudioPCMBuffer(
-            pcmFormat: inputFormat,
-            frameCapacity: AVAudioFrameCount(samples.count)
-        ), let inputChannelData = inputBuffer.floatChannelData else {
-            throw RecordingError.failedToStart("Failed to allocate mixdown input buffer.")
-        }
-        inputBuffer.frameLength = AVAudioFrameCount(samples.count)
-        samples.withUnsafeBufferPointer { pointer in
-            guard let baseAddress = pointer.baseAddress else { return }
-            inputChannelData[0].update(from: baseAddress, count: samples.count)
-        }
-
-        var deliveredInput = false
-        var outputSamples: [Float] = []
-        while true {
-            guard let convertedBuffer = AVAudioPCMBuffer(
-                pcmFormat: targetFormat,
-                frameCapacity: processingChunkSize
-            ) else {
-                throw RecordingError.failedToStart("Failed to allocate mixdown buffer.")
-            }
-
-            var conversionError: NSError?
-            let status = converter.convert(to: convertedBuffer, error: &conversionError) { _, outputStatus in
-                if deliveredInput {
-                    outputStatus.pointee = .endOfStream
-                    return nil
-                }
-                deliveredInput = true
-                outputStatus.pointee = .haveData
-                return inputBuffer
-            }
-
-            if let conversionError {
-                throw conversionError
-            }
-            if convertedBuffer.frameLength > 0, let channelData = convertedBuffer.floatChannelData {
-                let frameCount = Int(convertedBuffer.frameLength)
-                outputSamples.append(contentsOf: UnsafeBufferPointer(start: channelData[0], count: frameCount))
-            }
-
-            switch status {
-            case .error:
-                throw RecordingError.failedToStart("Audio conversion failed during mixdown.")
-            case .endOfStream:
-                return outputSamples
-            default:
-                continue
-            }
-        }
+        return try resampler.resample(monoSamplesAtSourceRate, from: inputFormat.sampleRate)
     }
 
     private func readResampledMonoSamplesViaExtAudioFile(from inputURL: URL, label: String) throws -> [Float] {
