@@ -165,6 +165,7 @@ actor ModelInstallService {
 
         case .offlineDiarization:
             try await DownloadUtils.downloadRepo(.diarizer, to: stagingRoot, progressHandler: progressHandler)
+            try await DownloadUtils.downloadRepo(.diarizer, to: stagingRoot, variant: "offline")
         }
     }
 
@@ -279,6 +280,7 @@ actor ModelInstallService {
 
         case .offlineDiarization:
             return requiredFilesExist(in: repoURL, required: ModelNames.Diarizer.requiredModels)
+                && requiredFilesExist(in: repoURL, required: ModelNames.OfflineDiarizer.requiredModels)
         }
     }
 
@@ -336,3 +338,11 @@ actor ModelInstallService {
         }
     }
 }
+
+#if DEBUG
+extension ModelInstallService {
+    func validateInstalledRepoForTesting(for group: ModelGroup, at repoURL: URL) throws -> Bool {
+        try validateInstalledRepo(for: group, at: repoURL)
+    }
+}
+#endif
