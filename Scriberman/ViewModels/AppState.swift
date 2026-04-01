@@ -51,7 +51,8 @@ final class AppState: ObservableObject {
             workspaceService: services.background.workspaceService,
             transcriptionService: services.background.transcriptionService,
             retranscriptionService: services.background.retranscriptionService,
-            audioImportService: services.background.audioImportService
+            audioImportService: services.background.audioImportService,
+            transcriptExportService: services.main.transcriptExportService
         )
         self.settingsViewModel = SettingsViewModel(
             workspaceService: services.background.workspaceService,

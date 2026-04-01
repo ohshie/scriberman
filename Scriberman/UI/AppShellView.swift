@@ -316,12 +316,7 @@ struct AppShellView: View {
     private func exportTranscript(for session: any TranscribableSession) {
         Task { @MainActor in
             do {
-                try await appState.mainServices.transcriptExportService.export(
-                    session: session,
-                    transcript: displayedTranscript(for: session)
-                )
-            } catch TranscriptExportError.exportCancelled {
-                return
+                try await appState.jobsViewModel.exportTranscript(for: session)
             } catch {
                 studyActionErrorMessage = error.localizedDescription
             }
