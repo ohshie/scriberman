@@ -53,7 +53,7 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
         guard let pcmBuffer = createPCMBuffer(from: sampleBuffer) else {
             return
         }
-        let monoSamples = downmixToMonoSamples(from: pcmBuffer)
+        let monoSamples = AudioDownmixer.toMono(buffer: pcmBuffer)
         guard !monoSamples.isEmpty else {
             return
         }
@@ -176,28 +176,6 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
         }
 
         return pcmBuffer
-    }
-
-    private func downmixToMonoSamples(from buffer: AVAudioPCMBuffer) -> [Float] {
-        guard let channelData = buffer.floatChannelData else {
-            return []
-        }
-
-        let frameCount = Int(buffer.frameLength)
-        let channelCount = Int(buffer.format.channelCount)
-        guard frameCount > 0, channelCount > 0 else {
-            return []
-        }
-
-        var mono = Array(repeating: Float(0), count: frameCount)
-        for frame in 0..<frameCount {
-            var sum: Float = 0
-            for channel in 0..<channelCount {
-                sum += channelData[channel][frame]
-            }
-            mono[frame] = sum / Float(channelCount)
-        }
-        return mono
     }
 
     private func captureFirstBufferHostTimeIfNeeded(from sampleBuffer: CMSampleBuffer) {
