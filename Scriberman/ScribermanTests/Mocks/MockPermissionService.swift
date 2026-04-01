@@ -1,11 +1,10 @@
-import Combine
 import Foundation
 @testable import Scriberman
 
 @MainActor
 final class MockPermissionService: PermissionServiceProtocol {
-    @Published var micStatus: PermissionStatus = .notDetermined
-    @Published var screenRecordingStatus: PermissionStatus = .notDetermined
+    var micStatus: PermissionStatus = .notDetermined
+    var screenRecordingStatus: PermissionStatus = .notDetermined
     var checkAllCalls = 0
     var requestMicResult = false
     var requestMicCalls = 0
@@ -17,14 +16,6 @@ final class MockPermissionService: PermissionServiceProtocol {
     var verifyScreenRecordingCalls = 0
     var onboardingMarked = false
     var needsOnboardingValue = false
-
-    var micStatusPublisher: AnyPublisher<PermissionStatus, Never> {
-        $micStatus.eraseToAnyPublisher()
-    }
-
-    var screenRecordingStatusPublisher: AnyPublisher<PermissionStatus, Never> {
-        $screenRecordingStatus.eraseToAnyPublisher()
-    }
 
     var needsOnboarding: Bool {
         needsOnboardingValue

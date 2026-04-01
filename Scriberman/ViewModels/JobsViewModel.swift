@@ -1,10 +1,12 @@
 import Foundation
+import Observation
 import OSLog
 import SwiftData
 import UniformTypeIdentifiers
 
 @MainActor
-final class JobsViewModel: ObservableObject {
+@Observable
+final class JobsViewModel {
     enum SessionListItem: Identifiable, Hashable {
         case pending(PendingSession)
         case recording(RecordingSession)

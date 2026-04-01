@@ -1,23 +1,25 @@
 import Foundation
+import Observation
 
 @MainActor
-final class SettingsViewModel: ObservableObject {
+@Observable
+final class SettingsViewModel {
     private let workspaceService: WorkspaceService
     private let modelInstallService: ModelInstallService
     let speakerEmbeddingStore: SpeakerEmbeddingStore
 
-    @Published var workspacePathText: String = "Not configured"
-    @Published var workspaceStatusText: String = "Select a workspace to enable model installs."
+    var workspacePathText: String = "Not configured"
+    var workspaceStatusText: String = "Select a workspace to enable model installs."
 
-    @Published var modelStates: [ModelGroup: ModelGroupReadinessState] = [:]
-    @Published var modelStatusMessages: [ModelGroup: String] = [:]
-    @Published var modelDownloadProgress: [ModelGroup: Double] = [:]
-    @Published var canDownloadModels = false
+    var modelStates: [ModelGroup: ModelGroupReadinessState] = [:]
+    var modelStatusMessages: [ModelGroup: String] = [:]
+    var modelDownloadProgress: [ModelGroup: Double] = [:]
+    var canDownloadModels = false
 
-    @Published var speakerThreshold: Double {
+    var speakerThreshold: Double {
         didSet { UserDefaults.standard.set(speakerThreshold, forKey: "speakerThreshold") }
     }
-    @Published var minSilenceGap: Double {
+    var minSilenceGap: Double {
         didSet { UserDefaults.standard.set(minSilenceGap, forKey: "minSilenceGap") }
     }
 

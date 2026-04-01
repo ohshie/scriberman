@@ -2,7 +2,7 @@ import SwiftData
 import SwiftUI
 
 struct JobsView: View {
-    @ObservedObject var viewModel: JobsViewModel
+    var viewModel: JobsViewModel
     let items: [JobsViewModel.SessionListItem]
     @Binding var selection: JobsViewModel.SessionListItem?
 

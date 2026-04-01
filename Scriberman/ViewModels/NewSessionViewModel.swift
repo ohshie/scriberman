@@ -1,10 +1,11 @@
-import Combine
 import CoreAudio
 import Foundation
+import Observation
 import SwiftData
 
 @MainActor
-final class NewSessionViewModel: ObservableObject {
+@Observable
+final class NewSessionViewModel {
     enum State {
         case idle
         case recording(duration: TimeInterval, level: Float)
@@ -20,35 +21,34 @@ final class NewSessionViewModel: ObservableObject {
     private let lastUsedAppNameKey = "lastUsedAppName"
     private var recordingMonitorTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
-    private var cancellables = Set<AnyCancellable>()
-    private var isApplyingServiceSelection = false
-    private var isApplyingAppSelection = false
 
-    @Published var state: State = .idle
-    @Published var liveSegments: [TranscriptSegment] = []
-    @Published var errorMessage: String?
-    @Published var availableDevices: [AudioInputDevice]
-    @Published var selectedDevice: AudioInputDevice? {
-        didSet {
-            guard !isApplyingServiceSelection else {
-                return
-            }
-            audioDeviceService.selectedDevice = selectedDevice
+    var state: State = .idle
+    var liveSegments: [TranscriptSegment] = []
+    var errorMessage: String?
+    var availableDevices: [AudioInputDevice] {
+        audioDeviceService.availableDevices
+    }
+    var selectedDevice: AudioInputDevice? {
+        get { audioDeviceService.selectedDevice }
+        set { audioDeviceService.selectedDevice = newValue }
+    }
+    var runningApps: [CapturedApp] {
+        appAudioService.runningApps
+    }
+    var selectedApp: CapturedApp? {
+        get { appAudioService.selectedApp }
+        set {
+            lastUsedAppName = newValue?.name
+            appAudioService.selectedApp = newValue
         }
     }
-    @Published var runningApps: [CapturedApp]
-    @Published var selectedApp: CapturedApp? {
-        didSet {
-            lastUsedAppName = selectedApp?.name
-            guard !isApplyingAppSelection else {
-                return
-            }
-            appAudioService.selectedApp = selectedApp
-        }
+    private var screenRecordingStatus: PermissionStatus {
+        permissionService.screenRecordingStatus
     }
-    @Published private var screenRecordingStatus: PermissionStatus
-    @Published private var micStatus: PermissionStatus
-    @Published var recordAppAudio: Bool = false {
+    private var micStatus: PermissionStatus {
+        permissionService.micStatus
+    }
+    var recordAppAudio: Bool = false {
         didSet {
             guard oldValue != recordAppAudio else {
                 return
@@ -61,7 +61,7 @@ final class NewSessionViewModel: ObservableObject {
                 }
                 restoreLastUsedApp()
             } else {
-                appAudioService.selectedApp = nil
+                selectedApp = nil
             }
         }
     }
@@ -149,50 +149,7 @@ final class NewSessionViewModel: ObservableObject {
         self.appAudioService = appAudioService
         self.permissionService = permissionService
         self.userDefaults = userDefaults
-        self.availableDevices = audioDeviceService.availableDevices
-        self.selectedDevice = audioDeviceService.selectedDevice
-        self.runningApps = appAudioService.runningApps
-        self.selectedApp = appAudioService.selectedApp
-        self.screenRecordingStatus = permissionService.screenRecordingStatus
-        self.micStatus = permissionService.micStatus
-
-        handleScreenRecordingStatusChange(permissionService.screenRecordingStatus)
-
-        audioDeviceService.availableDevicesPublisher
-            .sink { [weak self] devices in
-                self?.availableDevices = devices
-            }
-            .store(in: &cancellables)
-
-        audioDeviceService.selectedDevicePublisher
-            .sink { [weak self] device in
-                self?.applySelectedDeviceFromService(device)
-            }
-            .store(in: &cancellables)
-
-        appAudioService.runningAppsPublisher
-            .sink { [weak self] apps in
-                self?.runningApps = apps
-            }
-            .store(in: &cancellables)
-
-        appAudioService.selectedAppPublisher
-            .sink { [weak self] app in
-                self?.applySelectedAppFromService(app)
-            }
-            .store(in: &cancellables)
-
-        permissionService.screenRecordingStatusPublisher
-            .sink { [weak self] status in
-                self?.handleScreenRecordingStatusChange(status)
-            }
-            .store(in: &cancellables)
-
-        permissionService.micStatusPublisher
-            .sink { [weak self] status in
-                self?.micStatus = status
-            }
-            .store(in: &cancellables)
+        enforceAppAudioSelectionForCurrentPermissions()
     }
 
     func reset() {
@@ -243,6 +200,7 @@ final class NewSessionViewModel: ObservableObject {
         permissionService.checkAll()
         _ = await permissionService.verifyMic()
         _ = await permissionService.verifyScreenRecording()
+        enforceAppAudioSelectionForCurrentPermissions()
     }
 
     func restoreLastUsedApp() {
@@ -419,31 +377,14 @@ final class NewSessionViewModel: ObservableObject {
         session.status = .done
     }
 
-    private func handleScreenRecordingStatusChange(_ status: PermissionStatus) {
-        screenRecordingStatus = status
-
-        guard status == .granted else {
+    private func enforceAppAudioSelectionForCurrentPermissions() {
+        guard screenRecordingStatus == .granted else {
             recordAppAudio = false
             selectedApp = nil
             appAudioService.selectedApp = nil
             lastUsedAppName = nil
             return
         }
-    }
-
-    private func applySelectedDeviceFromService(_ device: AudioInputDevice?) {
-        isApplyingServiceSelection = true
-        selectedDevice = device
-        isApplyingServiceSelection = false
-    }
-
-    private func applySelectedAppFromService(_ app: CapturedApp?) {
-        if app == nil, !recordAppAudio, selectedApp != nil {
-            return
-        }
-        isApplyingAppSelection = true
-        selectedApp = app
-        isApplyingAppSelection = false
     }
 
     private func startRecordingMonitor() {
