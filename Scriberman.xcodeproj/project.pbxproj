@@ -113,6 +113,8 @@
 		C9B001B001B001B001B001B2 /* SkeletonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9A001A001A001A001A001A2 /* SkeletonView.swift */; };
 		F0A1B2C3D4E5F60718293B41 /* AppAudioCaptureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F60718293A41 /* AppAudioCaptureSession.swift */; };
 		F0A1B2C3D4E5F60718293B42 /* AppAudioStreamOutputHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F60718293A42 /* AppAudioStreamOutputHandler.swift */; };
+		F0A1B2C3D4E5F60718293B43 /* RunningApplicationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F60718293A43 /* RunningApplicationProvider.swift */; };
+		F0A1B2C3D4E5F60718293B44 /* AppAudioServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F60718293A44 /* AppAudioServiceProtocol.swift */; };
 		D0AD07DBAD50A6EF4CD90C2B /* MockWorkspaceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4A24E4069AF734D90C9236E /* MockWorkspaceService.swift */; };
 		D1A2B3C4D5E6F708192A3B4E /* StatusTagView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A2B3C4D5E6F708192A3B4F /* StatusTagView.swift */; };
 		E1A2B3C4D5E6F708192A3B4C /* TranscriptGrouperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A2B3C4D5E6F708192A3B4D /* TranscriptGrouperTests.swift */; };
@@ -235,6 +237,8 @@
 		C9A001A001A001A001A001A2 /* SkeletonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkeletonView.swift; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F60718293A41 /* AppAudioCaptureSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAudioCaptureSession.swift; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F60718293A42 /* AppAudioStreamOutputHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAudioStreamOutputHandler.swift; sourceTree = "<group>"; };
+		F0A1B2C3D4E5F60718293A43 /* RunningApplicationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunningApplicationProvider.swift; sourceTree = "<group>"; };
+		F0A1B2C3D4E5F60718293A44 /* AppAudioServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAudioServiceProtocol.swift; sourceTree = "<group>"; };
 		D1A2B3C4D5E6F708192A3B4F /* StatusTagView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusTagView.swift; sourceTree = "<group>"; };
 		D4D635DCD4938EB7B6FA9A36 /* ScribermanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ScribermanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		DB0AB1FDEB9B0DFCA6700F39 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -374,6 +378,7 @@
 			isa = PBXGroup;
 			children = (
 				F0A1B2C3D4E5F60718293C42 /* Capture */,
+				F0A1B2C3D4E5F60718293C43 /* App */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -385,6 +390,15 @@
 				F0A1B2C3D4E5F60718293A42 /* AppAudioStreamOutputHandler.swift */,
 			);
 			path = Capture;
+			sourceTree = "<group>";
+		};
+		F0A1B2C3D4E5F60718293C43 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				F0A1B2C3D4E5F60718293A43 /* RunningApplicationProvider.swift */,
+				F0A1B2C3D4E5F60718293A44 /* AppAudioServiceProtocol.swift */,
+			);
+			path = App;
 			sourceTree = "<group>";
 		};
 		80C4362271C3C0CE86FD7034 /* Services */ = {
@@ -621,6 +635,8 @@
 				79E005DE2F767ABC00D3EAD9 /* AppAudioService.swift in Sources */,
 				F0A1B2C3D4E5F60718293B41 /* AppAudioCaptureSession.swift in Sources */,
 				F0A1B2C3D4E5F60718293B42 /* AppAudioStreamOutputHandler.swift in Sources */,
+				F0A1B2C3D4E5F60718293B43 /* RunningApplicationProvider.swift in Sources */,
+				F0A1B2C3D4E5F60718293B44 /* AppAudioServiceProtocol.swift in Sources */,
 				797571722F79C752006AEFB6 /* SpeakerEmbeddingStore.swift in Sources */,
 				79E005DA2F76774E00D3EAD9 /* AudioDeviceServiceProtocol.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4D1 /* TranscriptExportService.swift in Sources */,
