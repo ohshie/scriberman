@@ -1,9 +1,7 @@
 import AVFoundation
-import Combine
-import CoreGraphics
 import Foundation
+import Observation
 import OSLog
-import ScreenCaptureKit
 
 enum PermissionStatus: Equatable {
     case notDetermined
@@ -11,94 +9,16 @@ enum PermissionStatus: Equatable {
     case denied
 }
 
-protocol MicrophonePermissionProviding {
-    func authorizationStatus() -> AVAuthorizationStatus
-    func requestAccess() async -> Bool
-}
-
-struct AVCaptureMicrophonePermissionProvider: MicrophonePermissionProviding {
-    func authorizationStatus() -> AVAuthorizationStatus {
-        AVCaptureDevice.authorizationStatus(for: .audio)
-    }
-
-    func requestAccess() async -> Bool {
-        await AVCaptureDevice.requestAccess(for: .audio)
-    }
-}
-
-protocol ScreenRecordingPermissionProviding {
-    func preflightAccess() -> Bool
-    func requestAccess() -> Bool
-}
-
-struct CoreGraphicsScreenRecordingPermissionProvider: ScreenRecordingPermissionProviding {
-    func preflightAccess() -> Bool {
-        CGPreflightScreenCaptureAccess()
-    }
-
-    func requestAccess() -> Bool {
-        CGRequestScreenCaptureAccess()
-    }
-}
-
-struct ScreenRecordingShareableContentSnapshot {
-    let windowCount: Int
-    let applicationCount: Int
-
-    var hasVisibleContent: Bool {
-        windowCount > 0 || applicationCount > 0
-    }
-}
-
-protocol ScreenRecordingFunctionalPermissionProviding {
-    func shareableContentSnapshot() async throws -> ScreenRecordingShareableContentSnapshot
-}
-
-struct ScreenCaptureKitFunctionalPermissionProvider: ScreenRecordingFunctionalPermissionProviding {
-    func shareableContentSnapshot() async throws -> ScreenRecordingShareableContentSnapshot {
-        let content = try await SCShareableContent.excludingDesktopWindows(
-            false,
-            onScreenWindowsOnly: false
-        )
-        return ScreenRecordingShareableContentSnapshot(
-            windowCount: content.windows.count,
-            applicationCount: content.applications.count
-        )
-    }
-}
-
 @MainActor
-protocol PermissionServiceProtocol: AnyObject {
-    var micStatus: PermissionStatus { get }
-    var screenRecordingStatus: PermissionStatus { get }
-    var micStatusPublisher: AnyPublisher<PermissionStatus, Never> { get }
-    var screenRecordingStatusPublisher: AnyPublisher<PermissionStatus, Never> { get }
-    var needsOnboarding: Bool { get }
-    func checkAll()
-    func requestMic() async -> Bool
-    func requestScreenRecording() -> Bool
-    func verifyMic() async -> Bool
-    func verifyScreenRecording() async -> Bool
-    func markOnboardingShown()
-}
-
-@MainActor
-final class PermissionService: ObservableObject, PermissionServiceProtocol {
+@Observable
+final class PermissionService: PermissionServiceProtocol {
     enum DefaultsKey {
         static let screenRecordingPromptHasBeenShown = "screenRecordingPromptHasBeenShown"
         static let permissionsOnboardingHasBeenShown = "permissionsOnboardingHasBeenShown"
     }
 
-    @Published private(set) var micStatus: PermissionStatus = .notDetermined
-    @Published private(set) var screenRecordingStatus: PermissionStatus = .notDetermined
-
-    var micStatusPublisher: AnyPublisher<PermissionStatus, Never> {
-        $micStatus.eraseToAnyPublisher()
-    }
-
-    var screenRecordingStatusPublisher: AnyPublisher<PermissionStatus, Never> {
-        $screenRecordingStatus.eraseToAnyPublisher()
-    }
+    private(set) var micStatus: PermissionStatus = .notDetermined
+    private(set) var screenRecordingStatus: PermissionStatus = .notDetermined
 
     var needsOnboarding: Bool {
         let hasShownOnboarding = userDefaults.bool(forKey: DefaultsKey.permissionsOnboardingHasBeenShown)
@@ -110,8 +30,9 @@ final class PermissionService: ObservableObject, PermissionServiceProtocol {
     private let screenRecordingPermissions: ScreenRecordingPermissionProviding
     private let screenRecordingFunctionalPermissions: ScreenRecordingFunctionalPermissionProviding
     private let userDefaults: UserDefaults
+    nonisolated(unsafe) private let notificationCenter: NotificationCenter
     private let logger = Logger(subsystem: "Scriberman", category: "PermissionService")
-    private var cancellables = Set<AnyCancellable>()
+    nonisolated(unsafe) private var appAudioCaptureAccessDeniedObserver: NSObjectProtocol?
 
     init(
         microphonePermissions: MicrophonePermissionProviding = AVCaptureMicrophonePermissionProvider(),
@@ -124,17 +45,25 @@ final class PermissionService: ObservableObject, PermissionServiceProtocol {
         self.screenRecordingPermissions = screenRecordingPermissions
         self.screenRecordingFunctionalPermissions = screenRecordingFunctionalPermissions
         self.userDefaults = userDefaults
+        self.notificationCenter = notificationCenter
 
-        notificationCenter
-            .publisher(for: .appAudioCaptureAccessDenied)
-            .sink { [weak self] notification in
-                Task { @MainActor [weak self] in
-                    self?.handleAppAudioCaptureAccessDenied(notification)
-                }
+        appAudioCaptureAccessDeniedObserver = notificationCenter.addObserver(
+            forName: .appAudioCaptureAccessDenied,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor [weak self] in
+                self?.handleAppAudioCaptureAccessDenied(notification)
             }
-            .store(in: &cancellables)
+        }
 
         checkAll()
+    }
+
+    deinit {
+        if let appAudioCaptureAccessDeniedObserver {
+            notificationCenter.removeObserver(appAudioCaptureAccessDeniedObserver)
+        }
     }
 
     func checkAll() {
