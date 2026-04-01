@@ -68,4 +68,15 @@ final class StatusTagViewTests: XCTestCase {
         XCTAssertEqual(presentation.actionTitle, "Retry")
         XCTAssertTrue(presentation.isActionEnabled)
     }
+
+    func testModelGroupsListContainsExactlyThreeRequiredRows() {
+        XCTAssertEqual(ModelGroup.allCases.count, 3)
+        XCTAssertEqual(ModelGroup.allCases, [.asrParakeetV3, .vadSilero, .offlineDiarization])
+    }
+
+    func testModelGroupTitlesMatchSettingsRows() {
+        XCTAssertEqual(ModelGroup.asrParakeetV3.title, "ASR (Parakeet v3)")
+        XCTAssertEqual(ModelGroup.vadSilero.title, "VAD (Silero CoreML)")
+        XCTAssertEqual(ModelGroup.offlineDiarization.title, "Diarization (Global Offline)")
+    }
 }

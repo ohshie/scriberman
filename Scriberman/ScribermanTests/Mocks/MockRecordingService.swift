@@ -7,9 +7,15 @@ final class MockRecordingService: RecordingServiceProtocol {
     var audioLevelOverride: Float = 0
     var startShouldThrow: Error?
     var startThrowSequence: [Error] = []
-    var stopReturns: RecordingSession?
+    var stopReturns: UUID?
     var startCalls: [(workspace: Workspace, micDeviceID: AudioDeviceID?, capturedAppName: String?, appProcessID: pid_t?, title: String?)] = []
     var pendingError: RecordingError?
+
+    func liveAudioStream() async -> AsyncStream<([Float], AudioSource, Double)> {
+        AsyncStream { continuation in
+            continuation.finish()
+        }
+    }
 
     func isRecording() async -> Bool {
         isRecordingOverride
@@ -41,7 +47,7 @@ final class MockRecordingService: RecordingServiceProtocol {
         }
     }
 
-    func stopRecording() async -> RecordingSession? {
+    func stopRecording() async -> UUID? {
         stopReturns
     }
 

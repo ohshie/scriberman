@@ -38,6 +38,7 @@ actor TranscriptionService: TranscriptionServiceProtocol {
     private let prepareModelsHandler: PrepareModelsHandler?
     private let speakerEmbeddingStore: SpeakerEmbeddingStore?
     private let minimumChunkSamples = 16_000
+    private let modelPathResolver = ModelPathResolver()
 
     init(
         speakerEmbeddingStore: SpeakerEmbeddingStore? = nil,
@@ -61,37 +62,16 @@ actor TranscriptionService: TranscriptionServiceProtocol {
     }
 
     func prepareModels(workspace: Workspace) async throws {
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-        guard let appSupport else {
-            throw TranscriptionError.failedToPrepareModels("Application Support path is unavailable.")
-        }
-
-        let cacheRoot = appSupport
-            .appendingPathComponent("FluidAudio", isDirectory: true)
-            .appendingPathComponent("Models", isDirectory: true)
-
         let requiredGroups: [ModelGroup] = [.asrParakeetV3, .vadSilero, .offlineDiarization]
         var missingRepos: [String] = []
 
         for group in requiredGroups {
-            let sourceURL = workspace.modelsURL.appendingPathComponent(group.repoFolderName, isDirectory: true)
-            var isDirectory: ObjCBool = false
-            let sourceExists = fileManager.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory)
-            if !sourceExists || !isDirectory.boolValue {
-                missingRepos.append(group.repoFolderName)
-                continue
-            }
-
-            let destinationURL = cacheRoot.appendingPathComponent(group.repoFolderName, isDirectory: true)
-            if fileManager.fileExists(atPath: destinationURL.path) {
-                continue
-            }
-
             do {
-                try fileManager.createDirectory(at: cacheRoot, withIntermediateDirectories: true)
-                try fileManager.copyItem(at: sourceURL, to: destinationURL)
+                _ = try modelPathResolver.modelDirectory(for: group, in: workspace)
+            } catch TranscriptionError.missingWorkspaceModels(let repos) {
+                missingRepos.append(contentsOf: repos)
             } catch {
-                throw TranscriptionError.failedToPrepareModels(error.localizedDescription)
+                missingRepos.append(group.repoFolderName)
             }
         }
 
@@ -196,7 +176,6 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         source: AudioSource,
         workspace: Workspace
     ) async throws -> ([TranscriptSegment], [String: [Float]]) {
-        _ = workspace
         let passName = source == .app ? "app" : "mic"
         let speechSegments: [VadSegment]
         do {
@@ -213,16 +192,22 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         let asrManager = AsrManager(config: .default)
         let offlineDiarizerManager = OfflineDiarizerManager(config: .default)
         do {
-            let asrModels = try await AsrModels.downloadAndLoad()
+            let asrModelDirectory = try modelPathResolver.modelDirectory(for: .asrParakeetV3, in: workspace)
+            let asrModels = try await AsrModels.load(from: asrModelDirectory)
             try await asrManager.initialize(models: asrModels)
             
             let diarizerModels = try await OfflineDiarizerModels.load(from: workspace.modelsURL)
             offlineDiarizerManager.initialize(models: diarizerModels)
+        } catch let error as TranscriptionError {
+            throw error
         } catch {
             throw TranscriptionError.failedToTranscribe("\(passName) pass: model initialization failed - \(error.localizedDescription)")
         }
 
-        var asrSegments: [TranscriptSegment] = []
+        // 1.1 Collect tokenTimings from each VAD chunk's ASR result
+        // 1.2 Offset each timing by speechSegment.startTime to produce global TimedWords
+        var globalTokenTimings: [TokenTiming] = []
+        var allASRTexts: [String] = []
         for speechSegment in speechSegments {
             let startIndex = max(0, Int(speechSegment.startTime * 16_000.0))
             let endIndex = min(samples.count, max(startIndex + 1, Int(speechSegment.endTime * 16_000.0)))
@@ -243,22 +228,25 @@ actor TranscriptionService: TranscriptionServiceProtocol {
                 throw TranscriptionError.failedToTranscribe("\(passName) pass: ASR failed - \(error.localizedDescription)")
             }
 
-            // Map ASR result tokens to segments with global timestamps
-            let tokens = asrResult.tokenTimings ?? []
-            if !tokens.isEmpty {
-                // For simplicity in this refactor, we'll create a single segment per VAD chunk for now
-                // but aligned with global timestamps. 
-                // In a full implementation, we might split by words.
-                let segment = TranscriptSegment(
-                    speakerId: "unknown",
-                    text: asrResult.text,
-                    startTime: Float(speechSegment.startTime),
-                    endTime: Float(speechSegment.endTime),
-                    audioSource: source
-                )
-                asrSegments.append(segment)
+            let trimmedText = asrResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedText.isEmpty {
+                allASRTexts.append(trimmedText)
             }
+
+            // Offset each token timing by the chunk's global start time
+            let offsetTimings = (asrResult.tokenTimings ?? []).map { timing in
+                TokenTiming(
+                    token: timing.token,
+                    tokenId: timing.tokenId,
+                    startTime: timing.startTime + speechSegment.startTime,
+                    endTime: timing.endTime + speechSegment.startTime,
+                    confidence: timing.confidence
+                )
+            }
+            globalTokenTimings.append(contentsOf: offsetTimings)
         }
+
+        let fullASRText = allASRTexts.joined(separator: " ")
 
         // Global Offline Diarization
         let diarizationResult: DiarizationResult
@@ -294,10 +282,10 @@ actor TranscriptionService: TranscriptionServiceProtocol {
             }
         }
 
-        // Align ASR segments with global diarization
+        // 1.3 Align using global token timings for precise word-to-speaker mapping
         let alignedSegments = transcriptAligner.alignTranscript(
-            fullText: asrSegments.map(\.text).joined(separator: " "),
-            tokenTimings: [], // We already have coarse segments
+            fullText: fullASRText,
+            tokenTimings: globalTokenTimings,
             diarizedSegments: diarizationResult.segments,
             source: source
         )

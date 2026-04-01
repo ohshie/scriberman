@@ -188,9 +188,12 @@ final class RecordingServiceTests: XCTestCase {
             pendingTitle: customTitle
         )
 
-        let session = await service.stopRecording()
-        XCTAssertNotNil(session)
-        XCTAssertEqual(session?.title, customTitle)
+        let sessionID = await service.stopRecording()
+        XCTAssertNotNil(sessionID)
+        let ctx = ModelContext(container)
+        let predicate = #Predicate<RecordingSession> { $0.id == sessionID! }
+        let fetched = try ctx.fetch(FetchDescriptor<RecordingSession>(predicate: predicate)).first
+        XCTAssertEqual(fetched?.title, customTitle)
     }
 
     func testStopRecordingFallbacksToDefaultTitleWhenNoPendingTitle() async throws {
@@ -217,9 +220,12 @@ final class RecordingServiceTests: XCTestCase {
             pendingTitle: nil
         )
 
-        let session = await service.stopRecording()
-        XCTAssertNotNil(session)
-        XCTAssertTrue(session?.title.hasPrefix("Recording ") ?? false)
+        let sessionID = await service.stopRecording()
+        XCTAssertNotNil(sessionID)
+        let ctx = ModelContext(container)
+        let predicate = #Predicate<RecordingSession> { $0.id == sessionID! }
+        let fetched = try ctx.fetch(FetchDescriptor<RecordingSession>(predicate: predicate)).first
+        XCTAssertTrue(fetched?.title.hasPrefix("Recording ") ?? false)
     }
 
     private func makeWorkspace() -> Workspace {

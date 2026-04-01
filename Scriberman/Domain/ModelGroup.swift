@@ -3,7 +3,6 @@ import Foundation
 enum ModelGroup: String, CaseIterable, Identifiable {
     case asrParakeetV3
     case vadSilero
-    case diarization
     case offlineDiarization
 
     var id: String { rawValue }
@@ -14,8 +13,6 @@ enum ModelGroup: String, CaseIterable, Identifiable {
             return "ASR (Parakeet v3)"
         case .vadSilero:
             return "VAD (Silero CoreML)"
-        case .diarization:
-            return "Diarization (Online)"
         case .offlineDiarization:
             return "Diarization (Global Offline)"
         }
@@ -27,8 +24,6 @@ enum ModelGroup: String, CaseIterable, Identifiable {
             return "parakeet-tdt-0.6b-v3-coreml"
         case .vadSilero:
             return "silero-vad-coreml"
-        case .diarization:
-            return "speaker-diarization-coreml"
         case .offlineDiarization:
             return "speaker-diarization-coreml"
         }

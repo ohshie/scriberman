@@ -163,7 +163,7 @@ actor ModelInstallService {
         case .vadSilero:
             try await DownloadUtils.downloadRepo(.vad, to: stagingRoot, progressHandler: progressHandler)
 
-        case .diarization, .offlineDiarization:
+        case .offlineDiarization:
             try await DownloadUtils.downloadRepo(.diarizer, to: stagingRoot, progressHandler: progressHandler)
         }
     }
@@ -221,11 +221,11 @@ actor ModelInstallService {
         stagedRepoURL: URL,
         workspaceModelsURL: URL
     ) throws -> URL {
-        try fileManager.createDirectory(at: workspaceModelsURL, withIntermediateDirectories: true)
-
         let finalURL = workspaceModelsURL.appendingPathComponent(group.repoFolderName, isDirectory: true)
-        let partialURL = workspaceModelsURL.appendingPathComponent("\(group.repoFolderName).partial", isDirectory: true)
-        let backupURL = workspaceModelsURL.appendingPathComponent("\(group.repoFolderName).backup", isDirectory: true)
+        try fileManager.createDirectory(at: finalURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+        let partialURL = workspaceModelsURL.appendingPathComponent("\(group.repoFolderName.replacingOccurrences(of: "/", with: "_")).partial", isDirectory: true)
+        let backupURL = workspaceModelsURL.appendingPathComponent("\(group.repoFolderName.replacingOccurrences(of: "/", with: "_")).backup", isDirectory: true)
 
         try removeIfExists(partialURL)
         try removeIfExists(backupURL)
@@ -277,7 +277,7 @@ actor ModelInstallService {
         case .vadSilero:
             return requiredFilesExist(in: repoURL, required: ModelNames.VAD.requiredModels)
 
-        case .diarization, .offlineDiarization:
+        case .offlineDiarization:
             return requiredFilesExist(in: repoURL, required: ModelNames.Diarizer.requiredModels)
         }
     }
@@ -301,7 +301,7 @@ actor ModelInstallService {
             repoName = .parakeet
         case .vadSilero:
             repoName = .vad
-        case .diarization, .offlineDiarization:
+        case .offlineDiarization:
             repoName = .diarizer
         }
 
@@ -309,8 +309,8 @@ actor ModelInstallService {
             DownloadUtils.clearModelCache(forRepo: repoName, directory: root)
 
             let directRepo = root.appendingPathComponent(group.repoFolderName, isDirectory: true)
-            let partialRepo = root.appendingPathComponent("\(group.repoFolderName).partial", isDirectory: true)
-            let backupRepo = root.appendingPathComponent("\(group.repoFolderName).backup", isDirectory: true)
+            let partialRepo = root.appendingPathComponent("\(group.repoFolderName.replacingOccurrences(of: "/", with: "_")).partial", isDirectory: true)
+            let backupRepo = root.appendingPathComponent("\(group.repoFolderName.replacingOccurrences(of: "/", with: "_")).backup", isDirectory: true)
 
             do {
                 try removeIfExists(directRepo)

@@ -111,7 +111,7 @@ final class AppStateTests: XCTestCase {
         )
 
         appState.selectPendingSession()
-        appState.newSessionViewModel.state = .stopped(session: recording)
+        appState.newSessionViewModel.state = .recording(duration: 10, level: 0)
         appState.discardPendingSession()
 
         XCTAssertNil(appState.pendingSession)
@@ -199,25 +199,29 @@ final class AppStateTests: XCTestCase {
         let aiProviderStore = AIProviderStore(defaults: userDefaults)
 
         return ServiceContainer(
-            bookmarkStore: bookmarkStore,
-            aiProviderService: AIProviderService(
-                keychainStore: keychainStore,
-                store: aiProviderStore
+            main: MainServiceContainer(
+                bookmarkStore: bookmarkStore,
+                aiProviderService: AIProviderService(
+                    keychainStore: keychainStore,
+                    store: aiProviderStore
+                ),
+                audioDeviceService: AudioDeviceService(),
+                appAudioService: AppAudioService(),
+                permissionService: permissionService,
+                transcriptExportService: TranscriptExportService()
             ),
-            workspaceService: workspaceService,
-            modelInstallService: ModelInstallService(workspaceService: workspaceService),
-            recordingService: RecordingService(
+            background: BackgroundServiceContainer(
                 workspaceService: workspaceService,
-                modelContainer: modelContainer
-            ),
-            audioDeviceService: AudioDeviceService(),
-            appAudioService: AppAudioService(),
-            permissionService: permissionService,
-            transcriptionService: transcriptionService,
-            retranscriptionService: retranscriptionService,
-            audioImportService: AudioImportService(retranscriptionService: retranscriptionService),
-            transcriptExportService: TranscriptExportService(),
-            speakerEmbeddingStore: speakerEmbeddingStore
+                modelInstallService: ModelInstallService(workspaceService: workspaceService),
+                recordingService: RecordingService(
+                    workspaceService: workspaceService,
+                    modelContainer: modelContainer
+                ),
+                transcriptionService: transcriptionService,
+                retranscriptionService: retranscriptionService,
+                audioImportService: AudioImportService(retranscriptionService: retranscriptionService),
+                speakerEmbeddingStore: speakerEmbeddingStore
+            )
         )
     }
 }

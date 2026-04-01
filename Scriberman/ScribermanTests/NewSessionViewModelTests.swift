@@ -62,7 +62,7 @@ final class NewSessionViewModelTests: XCTestCase {
         super.tearDown()
     }
 
-    func testStateMachineTransitionsIdleToRecordingToStopped() async {
+    func testStateMachineTransitionsIdleToRecordingToStopped() async throws {
         recordingService.isRecordingOverride = false
         recordingService.audioLevelOverride = 0
         let stoppedSession = RecordingSession(
@@ -72,18 +72,20 @@ final class NewSessionViewModelTests: XCTestCase {
             title: "Recorded",
             status: .recorded
         )
-        recordingService.stopReturns = stoppedSession
+        context.insert(stoppedSession)
+        try context.save()
+        recordingService.stopReturns = stoppedSession.id
 
         await viewModel.startRecording(title: "Session", context: context)
         guard case .recording = viewModel.state else {
             return XCTFail("Expected recording state after start")
         }
 
-        await viewModel.stopRecording(context: context)
-        guard case let .stopped(session) = viewModel.state else {
-            return XCTFail("Expected stopped state after stop")
+        let session = await viewModel.stopRecording(context: context)
+        guard case .idle = viewModel.state else {
+            return XCTFail("Expected idle state after stop")
         }
-        XCTAssertEqual(session.id, stoppedSession.id)
+        XCTAssertEqual(session?.id, stoppedSession.id)
     }
 
     func testStartRecordingIncrementsUsageForSelectedDevice() async {
@@ -108,15 +110,8 @@ final class NewSessionViewModelTests: XCTestCase {
         XCTAssertEqual(recordingService.startCalls.first?.title, customTitle)
     }
 
-    func testResetReturnsIdleFromStoppedState() {
-        let stoppedSession = RecordingSession(
-            createdAt: .now,
-            duration: 3,
-            micAudioURL: "/tmp/test.wav",
-            title: "Recorded",
-            status: .recorded
-        )
-        viewModel.state = .stopped(session: stoppedSession)
+    func testResetReturnsIdleFromRecordingState() {
+        viewModel.state = .recording(duration: 10, level: 0)
 
         viewModel.reset()
 
@@ -266,8 +261,24 @@ final class NewSessionViewModelTests: XCTestCase {
         XCTAssertTrue(source.contains("Open Privacy Settings"))
     }
 
+    func testRefreshAudioDevicesOnAppearPreparesLiveTranscriptionWithWorkspace() throws {
+        let source = try newSessionViewModelSource()
+        XCTAssertTrue(source.contains("if let workspace = await workspaceService.currentWorkspace()"))
+        XCTAssertTrue(source.contains("await liveTranscriptionService.prepare(workspace: workspace)"))
+    }
+
+    func testInitializationFailureMessageDirectsUserToSettingsModels() throws {
+        let source = try newSessionViewModelSource()
+        XCTAssertTrue(source.contains("catch LiveTranscriptionError.initializationFailed"))
+        XCTAssertTrue(source.contains("Open Settings → Models to install ASR and Speaker Diarization models."))
+    }
+
     private func newSessionPanelSource() throws -> String {
         try readSourceFile(relativePathFromTests: "../UI/NewSessionPanelView.swift")
+    }
+
+    private func newSessionViewModelSource() throws -> String {
+        try readSourceFile(relativePathFromTests: "../ViewModels/NewSessionViewModel.swift")
     }
 
     private func readSourceFile(relativePathFromTests: String) throws -> String {
