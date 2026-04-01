@@ -1,5 +1,4 @@
 import AVFoundation
-import Combine
 import CoreAudio
 import XCTest
 @testable import Scriberman
@@ -11,7 +10,6 @@ final class AudioDeviceServiceTests: XCTestCase {
     private var notificationCenter: NotificationCenter!
     private var service: AudioDeviceService!
     private var userDefaultsSuiteName: String!
-    private var cancellables = Set<AnyCancellable>()
 
     override func setUp() {
         super.setUp()
@@ -31,7 +29,6 @@ final class AudioDeviceServiceTests: XCTestCase {
         userDefaultsSuiteName = nil
         notificationCenter = nil
         hardware = nil
-        cancellables.removeAll()
         super.tearDown()
     }
 
@@ -173,17 +170,11 @@ final class AudioDeviceServiceTests: XCTestCase {
         ]
         hardware.defaultInputID = 2
 
-        let refreshExpectation = expectation(description: "Audio devices refreshed after configuration change")
-        service.availableDevicesPublisher
-            .dropFirst()
-            .sink { devices in
-                if devices.map(\.uid) == ["uid-2"] {
-                    refreshExpectation.fulfill()
-                }
-            }
-            .store(in: &cancellables)
-
         notificationCenter.post(name: .AVAudioEngineConfigurationChange, object: nil)
+        let refreshExpectation = expectation(description: "Audio devices refreshed after configuration change")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            refreshExpectation.fulfill()
+        }
         wait(for: [refreshExpectation], timeout: 1.0)
 
         XCTAssertEqual(service.availableDevices.map(\.uid), ["uid-2"])
@@ -204,23 +195,12 @@ final class AudioDeviceServiceTests: XCTestCase {
         )
         service.selectedDevice = service.availableDevices.first(where: { $0.uid == "uid-2" })
 
-        let fallbackExpectation = expectation(description: "Selected device publishes fallback selection")
-        service.selectedDevicePublisher
-            .dropFirst()
-            .sink { device in
-                if device?.uid == "uid-1" {
-                    fallbackExpectation.fulfill()
-                }
-            }
-            .store(in: &cancellables)
-
         hardware.devices = [
             MockAudioDevice(id: 1, uid: "uid-1", name: "Built-in Mic", hasInput: true)
         ]
         hardware.defaultInputID = 1
 
         service.refreshDevices()
-        wait(for: [fallbackExpectation], timeout: 1.0)
 
         XCTAssertEqual(service.selectedDevice?.uid, "uid-1")
     }
@@ -245,16 +225,6 @@ final class AudioDeviceServiceTests: XCTestCase {
         service.refreshDevices()
         XCTAssertEqual(service.selectedDevice?.uid, "uid-1")
 
-        let recoveryExpectation = expectation(description: "Selected device publishes recovery selection")
-        service.selectedDevicePublisher
-            .dropFirst()
-            .sink { device in
-                if device?.uid == "uid-2" {
-                    recoveryExpectation.fulfill()
-                }
-            }
-            .store(in: &cancellables)
-
         hardware.devices = [
             MockAudioDevice(id: 1, uid: "uid-1", name: "Built-in Mic", hasInput: true),
             MockAudioDevice(id: 2, uid: "uid-2", name: "AirPods Mic", hasInput: true)
@@ -262,7 +232,6 @@ final class AudioDeviceServiceTests: XCTestCase {
         hardware.defaultInputID = 1
 
         service.refreshDevices()
-        wait(for: [recoveryExpectation], timeout: 1.0)
 
         XCTAssertEqual(service.selectedDevice?.uid, "uid-2")
     }

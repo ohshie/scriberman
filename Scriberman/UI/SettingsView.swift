@@ -11,7 +11,7 @@ struct SettingsView: View {
         case apiKey
     }
 
-    @ObservedObject var viewModel: SettingsViewModel
+    var viewModel: SettingsViewModel
     @EnvironmentObject private var appState: AppState
     @Environment(AIProviderService.self) private var aiProviderService
     @State private var selectedTab: SettingsTab = .general
@@ -28,6 +28,7 @@ struct SettingsView: View {
     @FocusState private var focusedField: Field?
 
     var body: some View {
+        @Bindable var bindableViewModel = viewModel
         @Bindable var aiProvider = aiProviderService
 
         NavigationStack {
@@ -180,10 +181,10 @@ struct SettingsView: View {
                             HStack {
                                 Text("Speaker Similarity")
                                 Spacer()
-                                Text(String(format: "%.2f", viewModel.speakerThreshold))
+                                Text(String(format: "%.2f", bindableViewModel.speakerThreshold))
                                     .monospacedDigit()
                             }
-                            Slider(value: $viewModel.speakerThreshold, in: 0.1...0.9, step: 0.01)
+                            Slider(value: $bindableViewModel.speakerThreshold, in: 0.1...0.9, step: 0.01)
                             Text("Lower values are stricter, higher values group more aggressively.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -193,10 +194,10 @@ struct SettingsView: View {
                             HStack {
                                 Text("Min Silence Gap")
                                 Spacer()
-                                Text(String(format: "%.2fs", viewModel.minSilenceGap))
+                                Text(String(format: "%.2fs", bindableViewModel.minSilenceGap))
                                     .monospacedDigit()
                             }
-                            Slider(value: $viewModel.minSilenceGap, in: 0.1...2.0, step: 0.1)
+                            Slider(value: $bindableViewModel.minSilenceGap, in: 0.1...2.0, step: 0.1)
                             Text("Minimum duration of silence between speaker turns.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)

@@ -1,4 +1,3 @@
-import Combine
 import CoreAudio
 import SwiftData
 import XCTest
@@ -290,17 +289,9 @@ final class NewSessionViewModelTests: XCTestCase {
 
 @MainActor
 private final class MockNewSessionAppAudioService: AppAudioServiceProtocol {
-    @Published var runningApps: [CapturedApp] = []
-    @Published var selectedApp: CapturedApp?
+    var runningApps: [CapturedApp] = []
+    var selectedApp: CapturedApp?
     var refreshCalls = 0
-
-    var runningAppsPublisher: AnyPublisher<[CapturedApp], Never> {
-        $runningApps.eraseToAnyPublisher()
-    }
-
-    var selectedAppPublisher: AnyPublisher<CapturedApp?, Never> {
-        $selectedApp.eraseToAnyPublisher()
-    }
 
     func refreshRunningApps() {
         refreshCalls += 1

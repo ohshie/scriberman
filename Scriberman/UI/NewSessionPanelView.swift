@@ -3,7 +3,7 @@ import SwiftData
 import SwiftUI
 
 struct NewSessionPanelView: View {
-    @ObservedObject var viewModel: NewSessionViewModel
+    var viewModel: NewSessionViewModel
     @Binding var pendingSession: PendingSession
     var onRecordingFinished: (RecordingSession) -> Void
     var onImportFile: () -> Void = {}
@@ -192,11 +192,13 @@ struct NewSessionPanelView: View {
     }
 
     private func controlsSection(isInteractive: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        @Bindable var bindableViewModel = viewModel
+
+        return VStack(alignment: .leading, spacing: 12) {
             microphoneMenu
                 .disabled(!isInteractive)
 
-            Toggle(isOn: $viewModel.recordAppAudio) {
+            Toggle(isOn: $bindableViewModel.recordAppAudio) {
                 Label("Record app audio", systemImage: "waveform")
             }
             .disabled(!isInteractive || !viewModel.appAudioToggleEnabled)

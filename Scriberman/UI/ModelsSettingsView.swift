@@ -13,7 +13,7 @@ struct ModelsSettingsView: View {
         let isActionEnabled: Bool
     }
 
-    @ObservedObject var viewModel: SettingsViewModel
+    var viewModel: SettingsViewModel
 
     var body: some View {
         ForEach(ModelGroup.allCases) { group in
