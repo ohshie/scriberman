@@ -117,6 +117,7 @@
 		F0A1B2C3D4E5F60718293B44 /* AppAudioServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F60718293A44 /* AppAudioServiceProtocol.swift */; };
 		F0A1B2C3D4E5F60718293B45 /* AudioDeviceHardware.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F60718293A45 /* AudioDeviceHardware.swift */; };
 		F0A1B2C3D4E5F60718293B46 /* AggregateDeviceHardware.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F60718293A46 /* AggregateDeviceHardware.swift */; };
+		F0A1B2C3D4E5F60718293B47 /* AIProviderServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F60718293A47 /* AIProviderServiceProtocol.swift */; };
 		D0AD07DBAD50A6EF4CD90C2B /* MockWorkspaceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4A24E4069AF734D90C9236E /* MockWorkspaceService.swift */; };
 		D1A2B3C4D5E6F708192A3B4E /* StatusTagView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A2B3C4D5E6F708192A3B4F /* StatusTagView.swift */; };
 		E1A2B3C4D5E6F708192A3B4C /* TranscriptGrouperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A2B3C4D5E6F708192A3B4D /* TranscriptGrouperTests.swift */; };
@@ -243,6 +244,7 @@
 		F0A1B2C3D4E5F60718293A44 /* AppAudioServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAudioServiceProtocol.swift; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F60718293A45 /* AudioDeviceHardware.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDeviceHardware.swift; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F60718293A46 /* AggregateDeviceHardware.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AggregateDeviceHardware.swift; sourceTree = "<group>"; };
+		F0A1B2C3D4E5F60718293A47 /* AIProviderServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderServiceProtocol.swift; sourceTree = "<group>"; };
 		D1A2B3C4D5E6F708192A3B4F /* StatusTagView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusTagView.swift; sourceTree = "<group>"; };
 		D4D635DCD4938EB7B6FA9A36 /* ScribermanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ScribermanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		DB0AB1FDEB9B0DFCA6700F39 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -389,6 +391,14 @@
 			path = Audio;
 			sourceTree = "<group>";
 		};
+		F0A1B2C3D4E5F60718293C46 /* AI */ = {
+			isa = PBXGroup;
+			children = (
+				F0A1B2C3D4E5F60718293A47 /* AIProviderServiceProtocol.swift */,
+			);
+			path = AI;
+			sourceTree = "<group>";
+		};
 		F0A1B2C3D4E5F60718293C42 /* Capture */ = {
 			isa = PBXGroup;
 			children = (
@@ -448,6 +458,7 @@
 				7987325B2F7B157200570A03 /* LiveTranscriptionService.swift */,
 				7987325D2F7C191B00570A03 /* ModelPathResolver.swift */,
 				7987325F2F7D819800570A03 /* Audio */,
+				F0A1B2C3D4E5F60718293C46 /* AI */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -661,6 +672,7 @@
 				F0A1B2C3D4E5F60718293B44 /* AppAudioServiceProtocol.swift in Sources */,
 				F0A1B2C3D4E5F60718293B45 /* AudioDeviceHardware.swift in Sources */,
 				F0A1B2C3D4E5F60718293B46 /* AggregateDeviceHardware.swift in Sources */,
+				F0A1B2C3D4E5F60718293B47 /* AIProviderServiceProtocol.swift in Sources */,
 				797571722F79C752006AEFB6 /* SpeakerEmbeddingStore.swift in Sources */,
 				79E005DA2F76774E00D3EAD9 /* AudioDeviceServiceProtocol.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4D1 /* TranscriptExportService.swift in Sources */,
