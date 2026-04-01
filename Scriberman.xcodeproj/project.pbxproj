@@ -61,6 +61,18 @@
 		797571822F7A78AC006AEFB6 /* AudioFileStreamer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 797571812F7A78AC006AEFB6 /* AudioFileStreamer.swift */; };
 		7987325C2F7B157200570A03 /* LiveTranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987325B2F7B157200570A03 /* LiveTranscriptionService.swift */; };
 		7987325E2F7C191B00570A03 /* ModelPathResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987325D2F7C191B00570A03 /* ModelPathResolver.swift */; };
+		798732672F7D8B9B00570A03 /* AudioDeviceUsageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798732662F7D8B9B00570A03 /* AudioDeviceUsageStore.swift */; };
+		798732692F7D8BC600570A03 /* AudioDeviceUsageStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798732682F7D8BC600570A03 /* AudioDeviceUsageStoreTests.swift */; };
+		7987326B2F7D8D1700570A03 /* AudioSampleReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987326A2F7D8D1700570A03 /* AudioSampleReader.swift */; };
+		7987326D2F7D8D6F00570A03 /* AudioSampleReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987326C2F7D8D6F00570A03 /* AudioSampleReaderTests.swift */; };
+		7987326F2F7D8EB100570A03 /* AudioFileProber.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987326E2F7D8EB100570A03 /* AudioFileProber.swift */; };
+		798732712F7D8EB600570A03 /* AudioChannelReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798732702F7D8EB600570A03 /* AudioChannelReader.swift */; };
+		798732732F7D8EE600570A03 /* AudioFileProberTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798732722F7D8EE600570A03 /* AudioFileProberTests.swift */; };
+		798732752F7D8EEA00570A03 /* AudioChannelReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798732742F7D8EEA00570A03 /* AudioChannelReaderTests.swift */; };
+		798732772F7D985400570A03 /* TranscriptionPassRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798732762F7D985400570A03 /* TranscriptionPassRunner.swift */; };
+		798732792F7D98A800570A03 /* TranscriptionPassRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798732782F7D98A800570A03 /* TranscriptionPassRunnerTests.swift */; };
+		7987327B2F7D996700570A03 /* LiveTranscriptionBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987327A2F7D996700570A03 /* LiveTranscriptionBuffer.swift */; };
+		7987327D2F7D998E00570A03 /* LiveTranscriptionBufferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987327C2F7D998E00570A03 /* LiveTranscriptionBufferTests.swift */; };
 		79DCE41A2F77BC3D0024DC26 /* TranscriptionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */; };
 		79DCE41D2F77CC1E0024DC26 /* PermissionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */; };
 		79DCE41F2F77CDA90024DC26 /* PermissionsOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41E2F77CDA90024DC26 /* PermissionsOnboardingView.swift */; };
@@ -185,6 +197,18 @@
 		797571812F7A78AC006AEFB6 /* AudioFileStreamer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioFileStreamer.swift; sourceTree = "<group>"; };
 		7987325B2F7B157200570A03 /* LiveTranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranscriptionService.swift; sourceTree = "<group>"; };
 		7987325D2F7C191B00570A03 /* ModelPathResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelPathResolver.swift; sourceTree = "<group>"; };
+		798732662F7D8B9B00570A03 /* AudioDeviceUsageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDeviceUsageStore.swift; sourceTree = "<group>"; };
+		798732682F7D8BC600570A03 /* AudioDeviceUsageStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDeviceUsageStoreTests.swift; sourceTree = "<group>"; };
+		7987326A2F7D8D1700570A03 /* AudioSampleReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSampleReader.swift; sourceTree = "<group>"; };
+		7987326C2F7D8D6F00570A03 /* AudioSampleReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSampleReaderTests.swift; sourceTree = "<group>"; };
+		7987326E2F7D8EB100570A03 /* AudioFileProber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioFileProber.swift; sourceTree = "<group>"; };
+		798732702F7D8EB600570A03 /* AudioChannelReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioChannelReader.swift; sourceTree = "<group>"; };
+		798732722F7D8EE600570A03 /* AudioFileProberTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioFileProberTests.swift; sourceTree = "<group>"; };
+		798732742F7D8EEA00570A03 /* AudioChannelReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioChannelReaderTests.swift; sourceTree = "<group>"; };
+		798732762F7D985400570A03 /* TranscriptionPassRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionPassRunner.swift; sourceTree = "<group>"; };
+		798732782F7D98A800570A03 /* TranscriptionPassRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionPassRunnerTests.swift; sourceTree = "<group>"; };
+		7987327A2F7D996700570A03 /* LiveTranscriptionBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranscriptionBuffer.swift; sourceTree = "<group>"; };
+		7987327C2F7D998E00570A03 /* LiveTranscriptionBufferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranscriptionBufferTests.swift; sourceTree = "<group>"; };
 		79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionServiceTests.swift; sourceTree = "<group>"; };
 		79DCE41B2F77CC0B0024DC26 /* Scriberman.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = Scriberman.xctestplan; sourceTree = "<group>"; };
 		79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionService.swift; sourceTree = "<group>"; };
@@ -315,6 +339,12 @@
 				7975717D2F7A4005006AEFB6 /* SpeakerMatchingTests.swift */,
 				7975717F2F7A400D006AEFB6 /* SpeakerRecognitionTests.swift */,
 				C42E7AD216AF405CB255E7F1 /* LiveTranscriptionServiceTests.swift */,
+				798732682F7D8BC600570A03 /* AudioDeviceUsageStoreTests.swift */,
+				7987326C2F7D8D6F00570A03 /* AudioSampleReaderTests.swift */,
+				798732722F7D8EE600570A03 /* AudioFileProberTests.swift */,
+				798732742F7D8EEA00570A03 /* AudioChannelReaderTests.swift */,
+				798732782F7D98A800570A03 /* TranscriptionPassRunnerTests.swift */,
+				7987327C2F7D998E00570A03 /* LiveTranscriptionBufferTests.swift */,
 			);
 			path = ScribermanTests;
 			sourceTree = "<group>";
@@ -403,6 +433,8 @@
 			isa = PBXGroup;
 			children = (
 				791009602F7859DF00225294 /* AudioImportService.swift */,
+				7987326E2F7D8EB100570A03 /* AudioFileProber.swift */,
+				798732702F7D8EB600570A03 /* AudioChannelReader.swift */,
 			);
 			path = Import;
 			sourceTree = "<group>";
@@ -412,6 +444,7 @@
 			children = (
 				791009502F78184900225294 /* AudioMixdownService.swift */,
 				791009542F78328500225294 /* M4AChannelExtractor.swift */,
+				7987326A2F7D8D1700570A03 /* AudioSampleReader.swift */,
 			);
 			path = Mixdown;
 			sourceTree = "<group>";
@@ -423,6 +456,8 @@
 				1A2B3C4D5E6F708192A3B4CB /* TranscriptionService.swift */,
 				791009582F783E6300225294 /* RetranscriptionService.swift */,
 				7987325B2F7B157200570A03 /* LiveTranscriptionService.swift */,
+				798732762F7D985400570A03 /* TranscriptionPassRunner.swift */,
+				7987327A2F7D996700570A03 /* LiveTranscriptionBuffer.swift */,
 			);
 			path = Transcription;
 			sourceTree = "<group>";
@@ -578,6 +613,7 @@
 				F0A1B2C3D4E5F60718293A45 /* AudioDeviceHardware.swift */,
 				79E005D92F76774E00D3EAD9 /* AudioDeviceServiceProtocol.swift */,
 				79E005D52F76756000D3EAD9 /* AudioDeviceService.swift */,
+				798732662F7D8B9B00570A03 /* AudioDeviceUsageStore.swift */,
 			);
 			path = Device;
 			sourceTree = "<group>";
@@ -725,6 +761,7 @@
 				C9B001B001B001B001B001B1 /* AIPromptStore.swift in Sources */,
 				71945CF7DD78D3B6644C4EC7 /* WorkspaceService.swift in Sources */,
 				50A7C19DA8252ABCC743D2F2 /* ModelInstallService.swift in Sources */,
+				7987326B2F7D8D1700570A03 /* AudioSampleReader.swift in Sources */,
 				A44A44A44A44A44A44A44A44 /* AIProviderService.swift in Sources */,
 				791009512F78184900225294 /* AudioMixdownService.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CA /* RecordingService.swift in Sources */,
@@ -737,6 +774,7 @@
 				F0A1B2C3D4E5F60718293B44 /* AppAudioServiceProtocol.swift in Sources */,
 				F0A1B2C3D4E5F60718293B45 /* AudioDeviceHardware.swift in Sources */,
 				F0A1B2C3D4E5F60718293B46 /* AggregateDeviceHardware.swift in Sources */,
+				7987327B2F7D996700570A03 /* LiveTranscriptionBuffer.swift in Sources */,
 				F0A1B2C3D4E5F60718293B47 /* AIProviderServiceProtocol.swift in Sources */,
 				F0A1B2C3D4E5F60718293B48 /* MicrophonePermissionProvider.swift in Sources */,
 				F0A1B2C3D4E5F60718293B49 /* ScreenRecordingPermissionProvider.swift in Sources */,
@@ -744,6 +782,7 @@
 				797571722F79C752006AEFB6 /* SpeakerEmbeddingStore.swift in Sources */,
 				79E005DA2F76774E00D3EAD9 /* AudioDeviceServiceProtocol.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4D1 /* TranscriptExportService.swift in Sources */,
+				798732712F7D8EB600570A03 /* AudioChannelReader.swift in Sources */,
 				8875A7B9DB44C4468FE50F93 /* ServiceContainer.swift in Sources */,
 				A1B2C3D4E5F60718293A4B5D /* NewSessionViewModel.swift in Sources */,
 				79E005D62F76756000D3EAD9 /* AudioDeviceService.swift in Sources */,
@@ -753,11 +792,13 @@
 				79E005D42F76741900D3EAD9 /* CapturedApp.swift in Sources */,
 				7910095D2F7855EB00225294 /* TranscribableSession.swift in Sources */,
 				32B148C17ADF330AB64F25B9 /* AppState.swift in Sources */,
+				798732772F7D985400570A03 /* TranscriptionPassRunner.swift in Sources */,
 				79E005D22F7673EF00D3EAD9 /* AudioInputDevice.swift in Sources */,
 				2FDE1F7065F222E3906F5122 /* JobsView.swift in Sources */,
 				7975716C2F7983A7006AEFB6 /* TranscriptPreviewView.swift in Sources */,
 				791009592F783E6300225294 /* RetranscriptionService.swift in Sources */,
 				593A5B1DA131934EE90B4F7D /* SettingsView.swift in Sources */,
+				7987326F2F7D8EB100570A03 /* AudioFileProber.swift in Sources */,
 				C2B2C3D4E5F60718293A4B5C /* NewSessionPanelView.swift in Sources */,
 				A0313B452C3199D5A6118FB9 /* AppShellView.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CC /* WaveformView.swift in Sources */,
@@ -792,6 +833,7 @@
 				C16E1FE0441F3C95A965E4C0 /* RecordingServiceProtocol.swift in Sources */,
 				791009612F7859DF00225294 /* AudioImportService.swift in Sources */,
 				7975716E2F7983AC006AEFB6 /* TranscriptStudyView.swift in Sources */,
+				798732672F7D8B9B00570A03 /* AudioDeviceUsageStore.swift in Sources */,
 				79DCE41F2F77CDA90024DC26 /* PermissionsOnboardingView.swift in Sources */,
 				B2FBF1E99346D1C849214837 /* TranscriptionServiceProtocol.swift in Sources */,
 			);
@@ -802,13 +844,16 @@
 			buildActionMask = 2147483647;
 			files = (
 				A77A77A77A77A77A77A77A77 /* AIProviderServiceTests.swift in Sources */,
+				798732752F7D8EEA00570A03 /* AudioChannelReaderTests.swift in Sources */,
 				A88A88A88A88A88A88A88A88 /* ConnectionStatusTests.swift in Sources */,
 				A0E794CEB3C68D77E20749D6 /* MarkdownRendererTests.swift in Sources */,
 				791009572F7832AD00225294 /* M4AChannelExtractorTests.swift in Sources */,
+				798732732F7D8EE600570A03 /* AudioFileProberTests.swift in Sources */,
 				A2E8F18069EB9CB0F14A58BA /* RecordingStatusTests.swift in Sources */,
 				79DCE4252F77D0A10024DC26 /* MockPermissionService.swift in Sources */,
 				C4EC45D56DEE48C672BEE45A /* TimeFormatterTests.swift in Sources */,
 				79DCE41A2F77BC3D0024DC26 /* TranscriptionServiceTests.swift in Sources */,
+				7987327D2F7D998E00570A03 /* LiveTranscriptionBufferTests.swift in Sources */,
 				791009532F78184E00225294 /* AudioMixdownServiceTests.swift in Sources */,
 				79DCE4212F77D02C0024DC26 /* PermissionServiceTests.swift in Sources */,
 				7975717E2F7A4005006AEFB6 /* SpeakerMatchingTests.swift in Sources */,
@@ -817,10 +862,13 @@
 				7975717C2F79CC6C006AEFB6 /* SpeakerEmbeddingStoreTests.swift in Sources */,
 				45F958AA2B0B410EABA60D86 /* LiveTranscriptionServiceTests.swift in Sources */,
 				0779163432BE273DD07FC2E9 /* TranscriptAlignerTests.swift in Sources */,
+				798732692F7D8BC600570A03 /* AudioDeviceUsageStoreTests.swift in Sources */,
+				798732792F7D98A800570A03 /* TranscriptionPassRunnerTests.swift in Sources */,
 				E1A2B3C4D5E6F708192A3B4C /* TranscriptGrouperTests.swift in Sources */,
 				79E005DC2F76777E00D3EAD9 /* MockAudioDeviceService.swift in Sources */,
 				A66A66A66A66A66A66A66A66 /* MockKeychainStore.swift in Sources */,
 				79E005E02F767AE100D3EAD9 /* AppAudioServiceTests.swift in Sources */,
+				7987326D2F7D8D6F00570A03 /* AudioSampleReaderTests.swift in Sources */,
 				79E005E42F767E7900D3EAD9 /* AggregateDeviceBuilderTests.swift in Sources */,
 				B1C2D3E4F5061728394A5B6C /* StatusTagViewTests.swift in Sources */,
 				65E0EE498B357398375D8185 /* JobsViewModelTests.swift in Sources */,

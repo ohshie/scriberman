@@ -29,10 +29,9 @@ final class AudioDeviceService: AudioDeviceServiceProtocol {
         }
     }
     @ObservationIgnored private let selectedMicUIDKey = "selectedMicUID"
-    @ObservationIgnored private let deviceUsageScoresKey = "deviceUsageScores"
     @ObservationIgnored nonisolated(unsafe) private var configurationObserver: NSObjectProtocol?
     @ObservationIgnored private var isApplyingSelection = false
-    @ObservationIgnored private var deviceUsageScores: [String: Int]
+    @ObservationIgnored private let usageStore: AudioDeviceUsageStore
     @ObservationIgnored private var lastDisconnectedSelectedUID: String?
 
     init(
@@ -45,7 +44,7 @@ final class AudioDeviceService: AudioDeviceServiceProtocol {
         self.userDefaults = userDefaults
         self.notificationCenter = notificationCenter
         self.hardwareListenerQueue = hardwareListenerQueue
-        self.deviceUsageScores = Self.loadUsageScores(from: userDefaults, key: "deviceUsageScores")
+        usageStore = AudioDeviceUsageStore(userDefaults: userDefaults)
 
         availableDevices = enumerateInputDevices()
         revalidateSelectedDevice()
@@ -81,7 +80,7 @@ final class AudioDeviceService: AudioDeviceServiceProtocol {
                 return AudioInputDevice(id: deviceID, uid: uid, name: name)
             }
 
-            return sortedDevices(devices)
+            return usageStore.sort(devices)
         } catch {
             return []
         }
@@ -96,9 +95,8 @@ final class AudioDeviceService: AudioDeviceServiceProtocol {
         guard !uid.isEmpty else {
             return
         }
-        deviceUsageScores[uid, default: 0] += 1
-        persistUsageScores()
-        availableDevices = sortedDevices(availableDevices)
+        usageStore.increment(uid: uid)
+        availableDevices = usageStore.sort(availableDevices)
     }
 
     private func persistSelectedUID() {
@@ -142,41 +140,6 @@ final class AudioDeviceService: AudioDeviceServiceProtocol {
         }
 
         applySelection(availableDevices.first, persist: false)
-    }
-
-    private func sortedDevices(_ devices: [AudioInputDevice]) -> [AudioInputDevice] {
-        devices.sorted { lhs, rhs in
-            let lhsUsage = deviceUsageScores[lhs.uid, default: 0]
-            let rhsUsage = deviceUsageScores[rhs.uid, default: 0]
-            if lhsUsage != rhsUsage {
-                return lhsUsage > rhsUsage
-            }
-
-            let nameCompare = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
-            if nameCompare != .orderedSame {
-                return nameCompare == .orderedAscending
-            }
-            return lhs.uid < rhs.uid
-        }
-    }
-
-    private func persistUsageScores() {
-        userDefaults.set(deviceUsageScores, forKey: deviceUsageScoresKey)
-    }
-
-    private static func loadUsageScores(from userDefaults: UserDefaults, key: String) -> [String: Int] {
-        guard let rawScores = userDefaults.dictionary(forKey: key) else {
-            return [:]
-        }
-        return rawScores.reduce(into: [String: Int]()) { result, entry in
-            if let value = entry.value as? Int {
-                result[entry.key] = value
-                return
-            }
-            if let value = entry.value as? NSNumber {
-                result[entry.key] = value.intValue
-            }
-        }
     }
 
     private func registerHardwarePropertyListeners() {

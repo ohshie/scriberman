@@ -1,5 +1,3 @@
-import AVFoundation
-import CoreMedia
 import Foundation
 import SwiftData
 
@@ -29,6 +27,8 @@ actor AudioImportService {
 
     init(
         retranscriptionService: RetranscriptionService,
+        audioFileProber: AudioFileProber = AudioFileProber(),
+        audioChannelReader: AudioChannelReader = AudioChannelReader(),
         probeAudio: ProbeAudio? = nil,
         readChannelSamples: ReadChannelSamples? = nil,
         createDirectory: CreateDirectory? = nil,
@@ -39,10 +39,10 @@ actor AudioImportService {
     ) {
         let mixdownService = AudioMixdownService()
         self.probeAudio = probeAudio ?? { url in
-            try await Self.probeAudio(url: url)
+            try await audioFileProber.probe(url: url)
         }
         self.readChannelSamples = readChannelSamples ?? { url in
-            try Self.readChannelSamples(url: url)
+            try audioChannelReader.read(url: url)
         }
         self.createDirectory = createDirectory ?? { url in
             try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -149,71 +149,6 @@ actor AudioImportService {
             suffix += 1
         }
         return candidate
-    }
-
-    private static func probeAudio(url: URL) async throws -> AudioImportProbeResult {
-        let originalFileName = url.lastPathComponent
-        let originalFormat = defaultFormat(from: url)
-        let title = defaultTitle(from: url)
-
-        let audioFile = try AVAudioFile(forReading: url)
-        let fileDuration = audioFile.processingFormat.sampleRate > 0
-            ? Double(audioFile.length) / audioFile.processingFormat.sampleRate
-            : 0
-
-        let asset = AVURLAsset(url: url)
-        let loadedDuration = try await asset.load(.duration)
-        let assetDuration = CMTimeGetSeconds(loadedDuration)
-        let duration: TimeInterval
-        if assetDuration.isFinite, assetDuration > 0 {
-            duration = assetDuration
-        } else {
-            duration = max(0, fileDuration)
-        }
-
-        return AudioImportProbeResult(
-            title: title,
-            originalFileName: originalFileName,
-            originalFormat: originalFormat,
-            duration: duration
-        )
-    }
-
-    private static func readChannelSamples(url: URL) throws -> [[Float]] {
-        let file = try AVAudioFile(
-            forReading: url,
-            commonFormat: .pcmFormatFloat32,
-            interleaved: false
-        )
-        let format = file.processingFormat
-        let channelCount = Int(format.channelCount)
-        guard channelCount > 0 else {
-            throw RecordingError.failedToStart("Import failed: invalid channel count.")
-        }
-
-        var samplesByChannel = Array(repeating: [Float](), count: channelCount)
-        let frameCapacity: AVAudioFrameCount = 4_096
-
-        while true {
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCapacity) else {
-                throw RecordingError.failedToStart("Import failed: buffer allocation failed.")
-            }
-            try file.read(into: buffer, frameCount: frameCapacity)
-            guard buffer.frameLength > 0 else {
-                break
-            }
-            guard let channelData = buffer.floatChannelData else {
-                throw RecordingError.failedToStart("Import failed: missing channel data.")
-            }
-
-            let frameCount = Int(buffer.frameLength)
-            for channelIndex in 0..<channelCount {
-                let channelSamples = Array(UnsafeBufferPointer(start: channelData[channelIndex], count: frameCount))
-                samplesByChannel[channelIndex].append(contentsOf: channelSamples)
-            }
-        }
-
-        return samplesByChannel
     }
 
     private func downmixToMono(channelSamples: [[Float]]) -> [Float] {

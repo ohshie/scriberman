@@ -176,159 +176,11 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         source: AudioSource,
         workspace: Workspace
     ) async throws -> ([TranscriptSegment], [String: [Float]]) {
-        let passName = source == .app ? "app" : "mic"
-        let speechSegments: [VadSegment]
-        do {
-            speechSegments = try await segmentSpeech(samples)
-        } catch {
-            throw TranscriptionError.failedToTranscribe("\(passName) pass: VAD failed - \(error.localizedDescription)")
-        }
-
-        guard !speechSegments.isEmpty else {
-            logger.info("\(passName, privacy: .public) pass produced no speech segments")
-            return ([], [:])
-        }
-
-        let asrManager = AsrManager(config: .default)
-        let offlineDiarizerManager = OfflineDiarizerManager(config: .default)
-        do {
-            let asrModelDirectory = try modelPathResolver.modelDirectory(for: .asrParakeetV3, in: workspace)
-            let asrModels = try await AsrModels.load(from: asrModelDirectory)
-            try await asrManager.initialize(models: asrModels)
-            
-            let diarizerModels = try await OfflineDiarizerModels.load(from: workspace.modelsURL)
-            offlineDiarizerManager.initialize(models: diarizerModels)
-        } catch let error as TranscriptionError {
-            throw error
-        } catch {
-            throw TranscriptionError.failedToTranscribe("\(passName) pass: model initialization failed - \(error.localizedDescription)")
-        }
-
-        // 1.1 Collect tokenTimings from each VAD chunk's ASR result
-        // 1.2 Offset each timing by speechSegment.startTime to produce global TimedWords
-        var globalTokenTimings: [TokenTiming] = []
-        var allASRTexts: [String] = []
-        for speechSegment in speechSegments {
-            let startIndex = max(0, Int(speechSegment.startTime * 16_000.0))
-            let endIndex = min(samples.count, max(startIndex + 1, Int(speechSegment.endTime * 16_000.0)))
-            guard startIndex < endIndex else {
-                continue
-            }
-
-            var chunkSamples = Array(samples[startIndex..<endIndex])
-            if chunkSamples.count < minimumChunkSamples {
-                let missing = minimumChunkSamples - chunkSamples.count
-                chunkSamples.append(contentsOf: Array(repeating: 0, count: missing))
-            }
-
-            let asrResult: ASRResult
-            do {
-                asrResult = try await asrManager.transcribe(chunkSamples, source: .system)
-            } catch {
-                throw TranscriptionError.failedToTranscribe("\(passName) pass: ASR failed - \(error.localizedDescription)")
-            }
-
-            let trimmedText = asrResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmedText.isEmpty {
-                allASRTexts.append(trimmedText)
-            }
-
-            // Offset each token timing by the chunk's global start time
-            let offsetTimings = (asrResult.tokenTimings ?? []).map { timing in
-                TokenTiming(
-                    token: timing.token,
-                    tokenId: timing.tokenId,
-                    startTime: timing.startTime + speechSegment.startTime,
-                    endTime: timing.endTime + speechSegment.startTime,
-                    confidence: timing.confidence
-                )
-            }
-            globalTokenTimings.append(contentsOf: offsetTimings)
-        }
-
-        let fullASRText = allASRTexts.joined(separator: " ")
-
-        // Global Offline Diarization
-        let diarizationResult: DiarizationResult
-        do {
-            diarizationResult = try await offlineDiarizerManager.process(audio: samples)
-        } catch {
-            throw TranscriptionError.failedToTranscribe("\(passName) pass: Offline diarization failed - \(error.localizedDescription)")
-        }
-
-        // Speaker Matching logic for Task 2.3
-        var speakerMapping: [String: String] = [:] // Map local ID to Profile Name
-        if let store = speakerEmbeddingStore {
-            if let db = diarizationResult.speakerDatabase {
-                for (clusterId, embedding) in db {
-                    // Try to find a match in the store
-                    let profiles = try? await store.fetchAll()
-                    var bestMatch: SpeakerProfile?
-                    var bestSimilarity: Float = Float.greatestFiniteMagnitude
-
-                    for profile in profiles ?? [] {
-                        let distance = SpeakerUtilities.cosineDistance(embedding, profile.embedding)
-                        if distance < bestSimilarity && distance < 0.28 { 
-                            bestSimilarity = distance
-                            bestMatch = profile
-                        }
-                    }
-
-                    if let match = bestMatch {
-                        speakerMapping[clusterId] = match.name
-                        try? await store.updateProfile(id: match.id)
-                    }
-                }
-            }
-        }
-
-        // 1.3 Align using global token timings for precise word-to-speaker mapping
-        let alignedSegments = transcriptAligner.alignTranscript(
-            fullText: fullASRText,
-            tokenTimings: globalTokenTimings,
-            diarizedSegments: diarizationResult.segments,
-            source: source
+        try await makeTranscriptionPassRunner().run(
+            samples: samples,
+            source: source,
+            workspace: workspace
         )
-
-        // Adjust speaker IDs for app source and apply global speaker names
-        let finalSegments = alignedSegments.segments.map { segment in
-            let baseId = segment.speakerId
-            let mappedName = speakerMapping[baseId]
-            let finalSpeakerId = mappedName ?? baseId
-
-            let speakerId: String
-            if source == .app {
-                speakerId = finalSpeakerId.hasPrefix("app:") ? finalSpeakerId : "app:\(finalSpeakerId)"
-            } else {
-                speakerId = finalSpeakerId
-            }
-            return TranscriptSegment(
-                speakerId: speakerId,
-                text: segment.text,
-                startTime: segment.startTime,
-                endTime: segment.endTime,
-                audioSource: source
-            )
-        }
-
-        // Map embeddings to final speaker IDs
-        var finalEmbeddings: [String: [Float]] = [:]
-        if let db = diarizationResult.speakerDatabase {
-            for (baseId, embedding) in db {
-                let mappedName = speakerMapping[baseId]
-                let finalSpeakerId = mappedName ?? baseId
-                
-                let speakerId: String
-                if source == .app {
-                    speakerId = finalSpeakerId.hasPrefix("app:") ? finalSpeakerId : "app:\(finalSpeakerId)"
-                } else {
-                    speakerId = finalSpeakerId
-                }
-                finalEmbeddings[speakerId] = embedding
-            }
-        }
-
-        return (finalSegments, finalEmbeddings)
     }
 
     func transcribePassForTesting(
@@ -348,36 +200,22 @@ actor TranscriptionService: TranscriptionServiceProtocol {
     }
 
     internal func matchSpeakers(diarizationResult: DiarizationResult) async throws -> [String: String] {
-        var speakerMapping: [String: String] = [:] // Map local ID to Profile Name
-        guard let store = speakerEmbeddingStore, let db = diarizationResult.speakerDatabase else {
-            return [:]
-        }
+        try await makeTranscriptionPassRunner().matchSpeakers(diarizationResult: diarizationResult)
+    }
 
-        let threshold: Float = 0.28
-        let profiles = (try? await store.fetchAll()) ?? []
-
-        for (clusterId, embedding) in db {
-            var bestMatch: SpeakerProfile?
-            var bestDistance = threshold
-
-            for profile in profiles {
-                let distance = SpeakerUtilities.cosineDistance(embedding, profile.embedding)
-                if distance < bestDistance {
-                    bestDistance = distance
-                    bestMatch = profile
-                } else if distance == bestDistance && bestMatch != nil {
-                    // Tie-breaker: prefer earlier seen profile if distance is identical
-                    if profile.lastSeen < (bestMatch?.lastSeen ?? .distantFuture) {
-                        bestMatch = profile
-                    }
+    func makeTranscriptionPassRunner() -> TranscriptionPassRunner {
+        TranscriptionPassRunner(
+            speakerEmbeddingStore: speakerEmbeddingStore,
+            minimumChunkSamples: minimumChunkSamples,
+            segmentSpeech: { samples in
+                let vadSegments = try await self.segmentSpeech(samples)
+                return vadSegments.map { segment in
+                    TranscriptionPassRunner.SpeechSegment(
+                        startTime: segment.startTime,
+                        endTime: segment.endTime
+                    )
                 }
             }
-
-            if let match = bestMatch {
-                speakerMapping[clusterId] = match.name
-                try? await store.updateProfile(id: match.id)
-            }
-        }
-        return speakerMapping
+        )
     }
 }
