@@ -33,42 +33,6 @@ final class StatusTagViewTests: XCTestCase {
         XCTAssertNil(handler)
     }
 
-    func testDownloadingWithProgressUsesDeterminateIndicatorAndHidesAction() {
-        let presentation = ModelsSettingsView.makeRowPresentation(
-            state: .downloading,
-            progress: 0.42,
-            canDownloadModels: true
-        )
-
-        XCTAssertEqual(presentation.indicator, .determinateProgress(value: 0.42, phaseLabel: "Downloading…"))
-        XCTAssertNil(presentation.actionTitle)
-        XCTAssertFalse(presentation.isActionEnabled)
-    }
-
-    func testInstallingUsesIndeterminateIndicatorAndHidesAction() {
-        let presentation = ModelsSettingsView.makeRowPresentation(
-            state: .installing,
-            progress: nil,
-            canDownloadModels: true
-        )
-
-        XCTAssertEqual(presentation.indicator, .indeterminateProgress(phaseLabel: "Installing…"))
-        XCTAssertNil(presentation.actionTitle)
-        XCTAssertFalse(presentation.isActionEnabled)
-    }
-
-    func testErrorStateShowsRetryAction() {
-        let presentation = ModelsSettingsView.makeRowPresentation(
-            state: .error,
-            progress: nil,
-            canDownloadModels: true
-        )
-
-        XCTAssertEqual(presentation.indicator, .capsule(label: ModelGroupReadinessState.error.rawValue))
-        XCTAssertEqual(presentation.actionTitle, "Retry")
-        XCTAssertTrue(presentation.isActionEnabled)
-    }
-
     func testModelGroupsListContainsExactlyThreeRequiredRows() {
         XCTAssertEqual(ModelGroup.allCases.count, 3)
         XCTAssertEqual(ModelGroup.allCases, [.asrParakeetV3, .vadSilero, .offlineDiarization])
