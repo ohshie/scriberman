@@ -1,170 +1,15 @@
 import AVFoundation
-import Combine
 import CoreAudio
 import Foundation
+import Observation
 
 private let audioObjectSystemObjectID = AudioObjectID(kAudioObjectSystemObject)
-private let audioStreamDirectionInput: UInt32 = 1
-
-protocol AudioDeviceHardwareProviding {
-    func allDeviceIDs() throws -> [AudioDeviceID]
-    func hasInputStream(deviceID: AudioDeviceID) -> Bool
-    func deviceUID(deviceID: AudioDeviceID) -> String?
-    func deviceName(deviceID: AudioDeviceID) -> String?
-    func defaultInputDeviceID() -> AudioDeviceID?
-}
-
-struct CoreAudioDeviceHardware: AudioDeviceHardwareProviding {
-    func allDeviceIDs() throws -> [AudioDeviceID] {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDevices,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        var dataSize: UInt32 = 0
-        var status = AudioObjectGetPropertyDataSize(
-            audioObjectSystemObjectID,
-            &address,
-            0,
-            nil,
-            &dataSize
-        )
-        guard status == noErr else {
-            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
-        }
-
-        let count = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
-        guard count > 0 else {
-            return []
-        }
-        var deviceIDs = Array(repeating: AudioDeviceID(), count: count)
-        status = deviceIDs.withUnsafeMutableBufferPointer { buffer in
-            AudioObjectGetPropertyData(
-                audioObjectSystemObjectID,
-                &address,
-                0,
-                nil,
-                &dataSize,
-                buffer.baseAddress!
-            )
-        }
-
-        guard status == noErr else {
-            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
-        }
-
-        return deviceIDs
-    }
-
-    func hasInputStream(deviceID: AudioDeviceID) -> Bool {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyStreams,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var direction = audioStreamDirectionInput
-        var dataSize: UInt32 = 0
-
-        let status = withUnsafePointer(to: &direction) { directionPointer in
-            AudioObjectGetPropertyDataSize(
-                deviceID,
-                &address,
-                UInt32(MemoryLayout<UInt32>.size),
-                directionPointer,
-                &dataSize
-            )
-        }
-
-        return status == noErr && dataSize >= UInt32(MemoryLayout<AudioStreamID>.size)
-    }
-
-    func deviceUID(deviceID: AudioDeviceID) -> String? {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDeviceUID,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        var uid: CFString?
-        var dataSize = UInt32(MemoryLayout<CFString?>.size)
-        let status = withUnsafeMutablePointer(to: &uid) { uidPointer in
-            AudioObjectGetPropertyData(
-                deviceID,
-                &address,
-                0,
-                nil,
-                &dataSize,
-                uidPointer
-            )
-        }
-
-        guard status == noErr, let uid else {
-            return nil
-        }
-
-        return uid as String
-    }
-
-    func deviceName(deviceID: AudioDeviceID) -> String? {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioObjectPropertyName,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        var name: CFString?
-        var dataSize = UInt32(MemoryLayout<CFString?>.size)
-        let status = withUnsafeMutablePointer(to: &name) { namePointer in
-            AudioObjectGetPropertyData(
-                deviceID,
-                &address,
-                0,
-                nil,
-                &dataSize,
-                namePointer
-            )
-        }
-
-        guard status == noErr, let name else {
-            return nil
-        }
-
-        return name as String
-    }
-
-    func defaultInputDeviceID() -> AudioDeviceID? {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        var deviceID: AudioDeviceID = 0
-        var dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
-        let status = withUnsafeMutablePointer(to: &deviceID) { deviceIDPointer in
-            AudioObjectGetPropertyData(
-                audioObjectSystemObjectID,
-                &address,
-                0,
-                nil,
-                &dataSize,
-                deviceIDPointer
-            )
-        }
-
-        guard status == noErr else {
-            return nil
-        }
-
-        return deviceID
-    }
-}
 
 @MainActor
-final class AudioDeviceService: ObservableObject, AudioDeviceServiceProtocol {
-    @Published var availableDevices: [AudioInputDevice] = []
-    @Published var selectedDevice: AudioInputDevice? {
+@Observable
+final class AudioDeviceService: AudioDeviceServiceProtocol {
+    var availableDevices: [AudioInputDevice] = []
+    var selectedDevice: AudioInputDevice? {
         didSet {
             guard !isApplyingSelection else {
                 return
@@ -174,29 +19,21 @@ final class AudioDeviceService: ObservableObject, AudioDeviceServiceProtocol {
         }
     }
 
-    var availableDevicesPublisher: AnyPublisher<[AudioInputDevice], Never> {
-        $availableDevices.eraseToAnyPublisher()
-    }
-
-    var selectedDevicePublisher: AnyPublisher<AudioInputDevice?, Never> {
-        $selectedDevice.eraseToAnyPublisher()
-    }
-
-    private let hardware: AudioDeviceHardwareProviding
-    private let userDefaults: UserDefaults
-    private let notificationCenter: NotificationCenter
-    private let hardwareListenerQueue: DispatchQueue
-    private lazy var hardwarePropertyListener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+    @ObservationIgnored private let hardware: AudioDeviceHardwareProviding
+    @ObservationIgnored private let userDefaults: UserDefaults
+    @ObservationIgnored nonisolated(unsafe) private let notificationCenter: NotificationCenter
+    @ObservationIgnored private let hardwareListenerQueue: DispatchQueue
+    @ObservationIgnored private lazy var hardwarePropertyListener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
         Task { @MainActor [weak self] in
             self?.refreshDevices()
         }
     }
-    private let selectedMicUIDKey = "selectedMicUID"
-    private let deviceUsageScoresKey = "deviceUsageScores"
-    private var configurationObserver: NSObjectProtocol?
-    private var isApplyingSelection = false
-    private var deviceUsageScores: [String: Int]
-    private var lastDisconnectedSelectedUID: String?
+    @ObservationIgnored private let selectedMicUIDKey = "selectedMicUID"
+    @ObservationIgnored private let deviceUsageScoresKey = "deviceUsageScores"
+    @ObservationIgnored nonisolated(unsafe) private var configurationObserver: NSObjectProtocol?
+    @ObservationIgnored private var isApplyingSelection = false
+    @ObservationIgnored private var deviceUsageScores: [String: Int]
+    @ObservationIgnored private var lastDisconnectedSelectedUID: String?
 
     init(
         hardware: AudioDeviceHardwareProviding = CoreAudioDeviceHardware(),
