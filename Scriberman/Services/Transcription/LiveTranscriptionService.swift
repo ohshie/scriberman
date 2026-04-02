@@ -8,6 +8,50 @@ enum LiveTranscriptionError: Error {
     case initializationFailed
 }
 
+enum LiveVADEventKind {
+    case speechStart
+    case speechEnd
+}
+
+struct LiveVADProcessingResult {
+    let state: VadStreamState
+    let isTriggered: Bool
+    let eventKind: LiveVADEventKind?
+}
+
+protocol LiveVADStreamingProcessing: Sendable {
+    func processStreamingChunk(
+        _ chunk: [Float],
+        state: VadStreamState,
+        config: VadSegmentationConfig
+    ) async throws -> LiveVADProcessingResult
+}
+
+private struct VadManagerStreamProcessor: LiveVADStreamingProcessing {
+    let manager: VadManager
+
+    func processStreamingChunk(
+        _ chunk: [Float],
+        state: VadStreamState,
+        config: VadSegmentationConfig
+    ) async throws -> LiveVADProcessingResult {
+        let result = try await manager.processStreamingChunk(chunk, state: state, config: config)
+        let mappedEvent: LiveVADEventKind?
+        if result.event?.kind == .speechStart {
+            mappedEvent = .speechStart
+        } else if result.event?.kind == .speechEnd {
+            mappedEvent = .speechEnd
+        } else {
+            mappedEvent = nil
+        }
+        return LiveVADProcessingResult(
+            state: result.state,
+            isTriggered: result.state.triggered,
+            eventKind: mappedEvent
+        )
+    }
+}
+
 actor LiveTranscriptionService {
     private let logger = Logger(subsystem: "Scriberman", category: "LiveTranscriptionService")
     private let fileManager = FileManager.default
@@ -17,6 +61,7 @@ actor LiveTranscriptionService {
     private var asrManager: AsrManager?
     private var diarizer: DiarizerManager?
     private var vadManager: VadManager?
+    private var vadStreamProcessor: (any LiveVADStreamingProcessing)?
 
     // Dependencies
     private let speakerEmbeddingStore: SpeakerEmbeddingStore?
@@ -37,6 +82,9 @@ actor LiveTranscriptionService {
     private var speechStartOffsets: [AudioSource: Float] = [:]
     private var vadInputRemainders: [AudioSource: [Float]] = [:]
     private var totalSamplesProcessed: [AudioSource: Int] = [:]
+#if DEBUG
+    private var processChunkHookForTesting: (@Sendable ([Float], AudioSource, Float) async -> Void)?
+#endif
 
     // Authoritative record of all final segments accumulated this session
     private var collectedFinalSegments: [TranscriptSegment] = []
@@ -69,14 +117,61 @@ actor LiveTranscriptionService {
         }
 
         logger.info("Pre-warming live transcription models...")
+        await prepare(
+            workspace: workspace,
+            initializeAsr: { workspace in
+                let asrConfig = ASRConfig()
+                let asr = AsrManager(config: asrConfig)
+                let asrDirectory = try ModelPathResolver().modelDirectory(for: .asrParakeetV3, in: workspace)
+                let asrModels = try await AsrModels.load(from: asrDirectory)
+                try await asr.initialize(models: asrModels)
+                return asr
+            },
+            initializeDiarizer: { workspace in
+                let diarizerConfig = DiarizerConfig(
+                    clusteringThreshold: 0.5,
+                    minSpeechDuration: 0.5,
+                    minSilenceGap: 0.2
+                )
+                let mgr = DiarizerManager(config: diarizerConfig)
+                let diarizerRepo = try ModelPathResolver().modelDirectory(for: .offlineDiarization, in: workspace)
+                let segmentationURL = diarizerRepo.appendingPathComponent("pyannote_segmentation.mlmodelc", isDirectory: true)
+                let embeddingURL = diarizerRepo.appendingPathComponent("wespeaker_v2.mlmodelc", isDirectory: true)
+                let fileManager = FileManager.default
+                guard fileManager.fileExists(atPath: segmentationURL.path),
+                      fileManager.fileExists(atPath: embeddingURL.path)
+                else {
+                    throw LiveTranscriptionError.initializationFailed
+                }
 
+                let models = try await DiarizerModels.load(
+                    localSegmentationModel: segmentationURL,
+                    localEmbeddingModel: embeddingURL
+                )
+                mgr.initialize(models: models)
+                return mgr
+            },
+            initializeVad: { workspace in
+                let vadDirectory = try ModelPathResolver().modelDirectory(for: .vadSilero, in: workspace)
+                let vadModelURL = vadDirectory.appendingPathComponent(ModelNames.VAD.sileroVadFile, isDirectory: true)
+                let mlConfig = MLModelConfiguration()
+                mlConfig.computeUnits = .cpuAndNeuralEngine
+                let mlModel = try await MLModel.load(contentsOf: vadModelURL, configuration: mlConfig)
+                let manager = VadManager(config: VadConfig(defaultThreshold: 0.75), vadModel: mlModel)
+                return (manager, VadManagerStreamProcessor(manager: manager))
+            }
+        )
+    }
+
+    private func prepare(
+        workspace: Workspace,
+        initializeAsr: @Sendable (Workspace) async throws -> AsrManager,
+        initializeDiarizer: @Sendable (Workspace) async throws -> DiarizerManager,
+        initializeVad: @Sendable (Workspace) async throws -> (VadManager, any LiveVADStreamingProcessing)
+    ) async {
         // 1. Initialize ASR
         do {
-            let asrConfig = ASRConfig()
-            let asr = AsrManager(config: asrConfig)
-            let asrDirectory = try modelPathResolver.modelDirectory(for: .asrParakeetV3, in: workspace)
-            let asrModels = try await AsrModels.load(from: asrDirectory)
-            try await asr.initialize(models: asrModels)
+            let asr = try await initializeAsr(workspace)
             self.asrManager = asr
             logger.info("AsrManager initialized")
         } catch {
@@ -85,43 +180,13 @@ actor LiveTranscriptionService {
             asrManager = nil
             diarizer = nil
             vadManager = nil
+            vadStreamProcessor = nil
             return
         }
 
-        // 2. Initialize DiarizerManager with retry (task 1.2, 1.3, 1.5)
-        let diarizerConfig = DiarizerConfig(
-            clusteringThreshold: 0.5,
-            minSpeechDuration: 0.5,
-            minSilenceGap: 0.2
-        )
-        let mgr = DiarizerManager(config: diarizerConfig)
-
-        let diarizerRepo: URL
+        // 2. Initialize DiarizerManager
         do {
-            diarizerRepo = try modelPathResolver.modelDirectory(for: .offlineDiarization, in: workspace)
-        } catch {
-            logger.error("Diarizer initialization failed during prepare(): missing workspace diarizer repo — \(error).")
-            asrManager = nil
-            diarizer = nil
-            vadManager = nil
-            return
-        }
-        let segmentationURL = diarizerRepo.appendingPathComponent("pyannote_segmentation.mlmodelc", isDirectory: true)
-        let embeddingURL = diarizerRepo.appendingPathComponent("wespeaker_v2.mlmodelc", isDirectory: true)
-        guard fileManager.fileExists(atPath: segmentationURL.path), fileManager.fileExists(atPath: embeddingURL.path) else {
-            logger.error("Diarizer initialization failed during prepare(): missing workspace diarizer files.")
-            asrManager = nil
-            diarizer = nil
-            vadManager = nil
-            return
-        }
-
-        do {
-            let models = try await DiarizerModels.load(
-                localSegmentationModel: segmentationURL,
-                localEmbeddingModel: embeddingURL
-            )
-            mgr.initialize(models: models)
+            let mgr = try await initializeDiarizer(workspace)
             self.diarizer = mgr
             logger.info("DiarizerManager initialized from workspace models")
         } catch {
@@ -129,22 +194,22 @@ actor LiveTranscriptionService {
             asrManager = nil
             diarizer = nil
             vadManager = nil
+            vadStreamProcessor = nil
             return
         }
 
+        // 3. Initialize VAD
         do {
-            let vadDirectory = try modelPathResolver.modelDirectory(for: .vadSilero, in: workspace)
-            let vadModelURL = vadDirectory.appendingPathComponent(ModelNames.VAD.sileroVadFile, isDirectory: true)
-            let mlConfig = MLModelConfiguration()
-            mlConfig.computeUnits = .cpuAndNeuralEngine
-            let mlModel = try await MLModel.load(contentsOf: vadModelURL, configuration: mlConfig)
-            self.vadManager = VadManager(config: VadConfig(defaultThreshold: 0.75), vadModel: mlModel)
+            let (manager, processor) = try await initializeVad(workspace)
+            self.vadManager = manager
+            self.vadStreamProcessor = processor
             logger.info("VadManager initialized from workspace models")
         } catch {
             logger.error("VAD initialization failed during prepare(): \(error). Live transcription unavailable.")
             asrManager = nil
             diarizer = nil
             vadManager = nil
+            vadStreamProcessor = nil
             return
         }
 
@@ -171,7 +236,7 @@ actor LiveTranscriptionService {
             await prepare(workspace: workspace)
         }
 
-        guard isInitialized, asrManager != nil, diarizer != nil, vadManager != nil else {
+        guard isInitialized, asrManager != nil, diarizer != nil, vadStreamProcessor != nil else {
             throw LiveTranscriptionError.initializationFailed
         }
 
@@ -242,6 +307,7 @@ actor LiveTranscriptionService {
         asrManager = nil
         diarizer = nil
         vadManager = nil
+        vadStreamProcessor = nil
         isInitialized = false
 
         return segments
@@ -272,7 +338,7 @@ actor LiveTranscriptionService {
             }
 
             guard processableCount > 0 else { return }
-            guard let vadManager else { return }
+            guard let vadStreamProcessor else { return }
 
             let processableSamples = Array(combinedSamples.prefix(processableCount))
             var currentChunkStartSamples = (totalSamplesProcessed[source] ?? 0) - processableCount
@@ -280,17 +346,21 @@ actor LiveTranscriptionService {
             for startIndex in stride(from: 0, to: processableCount, by: chunkSize) {
                 let chunk = Array(processableSamples[startIndex..<(startIndex + chunkSize)])
                 let streamState = vadStreamStates[source] ?? .initial()
-                let result = try await vadManager.processStreamingChunk(chunk, state: streamState, config: .default)
+                let result = try await vadStreamProcessor.processStreamingChunk(
+                    chunk,
+                    state: streamState,
+                    config: VadSegmentationConfig.default
+                )
                 vadStreamStates[source] = result.state
 
-                if result.event?.kind == .speechStart {
+                if result.eventKind == LiveVADEventKind.speechStart {
                     speechStartOffsets[source] = Float(currentChunkStartSamples) / Self.SAMPLE_RATE
                     if speechAccumulationBuffers[source] == nil {
                         speechAccumulationBuffers[source] = []
                     }
                 }
 
-                if vadStreamStates[source]?.triggered == true {
+                if result.isTriggered {
                     var speechBuffer = speechAccumulationBuffers[source] ?? []
                     speechBuffer.append(contentsOf: chunk)
                     speechAccumulationBuffers[source] = speechBuffer
@@ -302,7 +372,7 @@ actor LiveTranscriptionService {
                     }
                 }
 
-                if result.event?.kind == .speechEnd {
+                if result.eventKind == LiveVADEventKind.speechEnd {
                     if let buffer = speechAccumulationBuffers[source], !buffer.isEmpty {
                         await flushSpeechBuffer(for: source)
                     }
@@ -332,6 +402,12 @@ actor LiveTranscriptionService {
     }
 
     private func processChunk(samples: [Float], source: AudioSource, currentOffset: Float) async {
+#if DEBUG
+        if let processChunkHookForTesting {
+            await processChunkHookForTesting(samples, source, currentOffset)
+            return
+        }
+#endif
         guard let asrManager = asrManager else { return }
 
         let chunkDuration = Float(samples.count) / Self.SAMPLE_RATE
@@ -447,3 +523,29 @@ actor LiveTranscriptionService {
         return speakerMatcher.findBestMatch(for: embedding, in: profiles)
     }
 }
+
+#if DEBUG
+extension LiveTranscriptionService {
+    func prepareForTesting(
+        workspace: Workspace,
+        initializeAsr: @Sendable (Workspace) async throws -> AsrManager,
+        initializeDiarizer: @Sendable (Workspace) async throws -> DiarizerManager,
+        initializeVad: @Sendable (Workspace) async throws -> (VadManager, any LiveVADStreamingProcessing)
+    ) async {
+        await prepare(
+            workspace: workspace,
+            initializeAsr: initializeAsr,
+            initializeDiarizer: initializeDiarizer,
+            initializeVad: initializeVad
+        )
+    }
+
+    func setVADProcessorForTesting(_ processor: any LiveVADStreamingProcessing) {
+        self.vadStreamProcessor = processor
+    }
+
+    func setProcessChunkHookForTesting(_ hook: @escaping @Sendable ([Float], AudioSource, Float) async -> Void) {
+        self.processChunkHookForTesting = hook
+    }
+}
+#endif

@@ -66,24 +66,41 @@ actor ModelInstallService: ModelInstallServicing {
     }
 
     func warmUpModels(workspace: Workspace) async {
-        do {
-            let asrDirectory = try modelPathResolver.modelDirectory(for: .asrParakeetV3, in: workspace)
-            _ = try await AsrModels.load(from: asrDirectory)
-
-            let diarizerDirectory = try modelPathResolver.modelDirectory(for: .offlineDiarization, in: workspace)
-            let segmentationURL = diarizerDirectory.appendingPathComponent("pyannote_segmentation.mlmodelc", isDirectory: true)
-            let embeddingURL = diarizerDirectory.appendingPathComponent("wespeaker_v2.mlmodelc", isDirectory: true)
-            _ = try await DiarizerModels.load(
-                localSegmentationModel: segmentationURL,
-                localEmbeddingModel: embeddingURL
-            )
-
-            do {
-                let vadDirectory = try modelPathResolver.modelDirectory(for: .vadSilero, in: workspace)
+        await warmUpModelsInternal(
+            warmUpASR: {
+                let asrDirectory = try self.modelPathResolver.modelDirectory(for: .asrParakeetV3, in: workspace)
+                _ = try await AsrModels.load(from: asrDirectory)
+            },
+            warmUpDiarizer: {
+                let diarizerDirectory = try self.modelPathResolver.modelDirectory(for: .offlineDiarization, in: workspace)
+                let segmentationURL = diarizerDirectory.appendingPathComponent("pyannote_segmentation.mlmodelc", isDirectory: true)
+                let embeddingURL = diarizerDirectory.appendingPathComponent("wespeaker_v2.mlmodelc", isDirectory: true)
+                _ = try await DiarizerModels.load(
+                    localSegmentationModel: segmentationURL,
+                    localEmbeddingModel: embeddingURL
+                )
+            },
+            warmUpVAD: {
+                let vadDirectory = try self.modelPathResolver.modelDirectory(for: .vadSilero, in: workspace)
                 let vadModelURL = vadDirectory.appendingPathComponent(ModelNames.VAD.sileroVadFile, isDirectory: true)
                 let mlConfig = MLModelConfiguration()
                 mlConfig.computeUnits = .cpuAndNeuralEngine
                 _ = try await MLModel.load(contentsOf: vadModelURL, configuration: mlConfig)
+            }
+        )
+    }
+
+    private func warmUpModelsInternal(
+        warmUpASR: () async throws -> Void,
+        warmUpDiarizer: () async throws -> Void,
+        warmUpVAD: () async throws -> Void
+    ) async {
+        do {
+            try await warmUpASR()
+            try await warmUpDiarizer()
+
+            do {
+                try await warmUpVAD()
             } catch {
                 NSLog("[ModelInstallService] VAD CoreML warm-up failed (non-fatal): %@", String(describing: error))
             }
@@ -227,6 +244,18 @@ actor ModelInstallService: ModelInstallServicing {
 extension ModelInstallService {
     func validateInstalledRepoForTesting(for group: ModelGroup, at repoURL: URL) throws -> Bool {
         try validateInstalledRepo(for: group, at: repoURL)
+    }
+
+    func warmUpModelsForTesting(
+        warmUpASR: () async throws -> Void,
+        warmUpDiarizer: () async throws -> Void,
+        warmUpVAD: () async throws -> Void
+    ) async {
+        await warmUpModelsInternal(
+            warmUpASR: warmUpASR,
+            warmUpDiarizer: warmUpDiarizer,
+            warmUpVAD: warmUpVAD
+        )
     }
 }
 #endif
