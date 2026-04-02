@@ -27,6 +27,8 @@ actor LiveTranscriptionService {
 
     // Audio processing constants (task 2.1: 5.0 → 10.0)
     private static let SAMPLE_RATE: Float = 16000
+    private static let VAD_CHUNK_SIZE = 4096
+    private static let MAX_SPEECH_SAMPLES = 480_000
 
     // Chunk accumulation state
     private var audioConverters: [AudioSource: AudioConverter] = [:]
@@ -34,6 +36,7 @@ actor LiveTranscriptionService {
     private var speechAccumulationBuffers: [AudioSource: [Float]] = [:]
     private var speechStartOffsets: [AudioSource: Float] = [:]
     private var vadInputRemainders: [AudioSource: [Float]] = [:]
+    private var totalSamplesProcessed: [AudioSource: Int] = [:]
 
     // Authoritative record of all final segments accumulated this session
     private var collectedFinalSegments: [TranscriptSegment] = []
@@ -159,6 +162,7 @@ actor LiveTranscriptionService {
         speechAccumulationBuffers.removeAll()
         speechStartOffsets.removeAll()
         vadInputRemainders.removeAll()
+        totalSamplesProcessed.removeAll()
         collectedFinalSegments.removeAll()
         sessionSpeakers.removeAll()
 
@@ -215,6 +219,7 @@ actor LiveTranscriptionService {
         speechAccumulationBuffers.removeAll()
         speechStartOffsets.removeAll()
         vadInputRemainders.removeAll()
+        totalSamplesProcessed.removeAll()
         asrManager = nil
         diarizer = nil
         vadManager = nil
@@ -232,11 +237,79 @@ actor LiveTranscriptionService {
             }
             let resampled = try audioConverters[source]!.resample(samples, from: sampleRate)
             guard !resampled.isEmpty else { return }
+            totalSamplesProcessed[source] = (totalSamplesProcessed[source] ?? 0) + resampled.count
 
-            await processChunk(samples: resampled, source: source, currentOffset: 0)
+            var combinedSamples = vadInputRemainders[source] ?? []
+            combinedSamples.append(contentsOf: resampled)
+
+            let chunkSize = Self.VAD_CHUNK_SIZE
+            let processableCount = (combinedSamples.count / chunkSize) * chunkSize
+            let remainderCount = combinedSamples.count - processableCount
+
+            if remainderCount > 0 {
+                vadInputRemainders[source] = Array(combinedSamples.suffix(remainderCount))
+            } else {
+                vadInputRemainders[source] = []
+            }
+
+            guard processableCount > 0 else { return }
+            guard let vadManager else { return }
+
+            let processableSamples = Array(combinedSamples.prefix(processableCount))
+            var currentChunkStartSamples = (totalSamplesProcessed[source] ?? 0) - processableCount
+
+            for startIndex in stride(from: 0, to: processableCount, by: chunkSize) {
+                let chunk = Array(processableSamples[startIndex..<(startIndex + chunkSize)])
+                let streamState = vadStreamStates[source] ?? .initial()
+                let result = try await vadManager.processStreamingChunk(chunk, state: streamState, config: .default)
+                vadStreamStates[source] = result.state
+
+                if result.event?.kind == .speechStart {
+                    speechStartOffsets[source] = Float(currentChunkStartSamples) / Self.SAMPLE_RATE
+                    if speechAccumulationBuffers[source] == nil {
+                        speechAccumulationBuffers[source] = []
+                    }
+                }
+
+                if vadStreamStates[source]?.triggered == true {
+                    var speechBuffer = speechAccumulationBuffers[source] ?? []
+                    speechBuffer.append(contentsOf: chunk)
+                    speechAccumulationBuffers[source] = speechBuffer
+
+                    if speechBuffer.count >= Self.MAX_SPEECH_SAMPLES {
+                        await flushSpeechBuffer(for: source)
+                        speechAccumulationBuffers[source] = []
+                        speechStartOffsets[source] = nil
+                    }
+                }
+
+                if result.event?.kind == .speechEnd {
+                    if let buffer = speechAccumulationBuffers[source], !buffer.isEmpty {
+                        await flushSpeechBuffer(for: source)
+                    }
+                    speechAccumulationBuffers[source] = []
+                    speechStartOffsets[source] = nil
+                }
+
+                currentChunkStartSamples += chunkSize
+            }
         } catch {
             logger.error("Error processing live audio (\(source.rawValue)): \(error.localizedDescription)")
         }
+    }
+
+    private func currentSessionOffset(for source: AudioSource) -> Float {
+        Float(totalSamplesProcessed[source] ?? 0) / Self.SAMPLE_RATE
+    }
+
+    private func flushSpeechBuffer(for source: AudioSource) async {
+        guard let samples = speechAccumulationBuffers[source], !samples.isEmpty else {
+            return
+        }
+
+        let startOffset = speechStartOffsets[source]
+            ?? max(0, currentSessionOffset(for: source) - Float(samples.count) / Self.SAMPLE_RATE)
+        await processChunk(samples: samples, source: source, currentOffset: startOffset)
     }
 
     private func processChunk(samples: [Float], source: AudioSource, currentOffset: Float) async {
