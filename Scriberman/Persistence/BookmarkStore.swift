@@ -1,18 +1,19 @@
 import Foundation
 
+private let workspaceBookmarkKey = "workspace.bookmark"
+
 protocol BookmarkStore {
     func loadWorkspaceBookmark() -> Data?
     func saveWorkspaceBookmark(_ data: Data)
 }
 
+@MainActor
 final class UserDefaultsBookmarkStore: BookmarkStore {
-    private let key = "workspace.bookmark"
-
-    func loadWorkspaceBookmark() -> Data? {
-        UserDefaults.standard.data(forKey: key)
+    nonisolated func loadWorkspaceBookmark() -> Data? {
+        UserDefaults.standard.data(forKey: workspaceBookmarkKey)
     }
 
-    func saveWorkspaceBookmark(_ data: Data) {
-        UserDefaults.standard.set(data, forKey: key)
+    nonisolated func saveWorkspaceBookmark(_ data: Data) {
+        UserDefaults.standard.set(data, forKey: workspaceBookmarkKey)
     }
 }

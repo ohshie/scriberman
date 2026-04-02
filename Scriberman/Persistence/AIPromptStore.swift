@@ -1,5 +1,6 @@
 import Foundation
 
+@MainActor
 final class AIPromptStore {
     private enum Keys {
         static let prompts = "aiPrompts.prompts"

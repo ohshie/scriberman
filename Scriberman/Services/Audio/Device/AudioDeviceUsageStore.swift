@@ -1,5 +1,6 @@
 import Foundation
 
+@MainActor
 final class AudioDeviceUsageStore {
     private let userDefaults: UserDefaults
     private let key: String
