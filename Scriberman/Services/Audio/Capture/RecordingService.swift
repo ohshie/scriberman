@@ -55,6 +55,7 @@ actor RecordingService: RecordingServiceProtocol {
     private var appAudioCaptureSession: AppAudioCaptureSession?
     private var pendingError: RecordingError?
     private let liveAudioStreamTuple: (stream: AsyncStream<([Float], AudioSource, Double)>, continuation: AsyncStream<([Float], AudioSource, Double)>.Continuation)
+    // nonisolated(unsafe): written once in init on the actor; read only in deinit; lifetime matches the actor
     nonisolated(unsafe) private var engineConfigurationObserver: NSObjectProtocol?
 
     private var isRecordingValue = false

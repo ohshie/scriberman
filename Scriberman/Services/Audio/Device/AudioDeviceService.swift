@@ -21,7 +21,7 @@ final class AudioDeviceService: AudioDeviceServiceProtocol {
 
     @ObservationIgnored private let hardware: AudioDeviceHardwareProviding
     @ObservationIgnored private let userDefaults: UserDefaults
-    @ObservationIgnored nonisolated(unsafe) private let notificationCenter: NotificationCenter
+    @ObservationIgnored private let notificationCenter: NotificationCenter
     @ObservationIgnored private let hardwareListenerQueue: DispatchQueue
     @ObservationIgnored private lazy var hardwarePropertyListener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
         Task { @MainActor [weak self] in
@@ -29,6 +29,7 @@ final class AudioDeviceService: AudioDeviceServiceProtocol {
         }
     }
     @ObservationIgnored private let selectedMicUIDKey = "selectedMicUID"
+    // nonisolated(unsafe): written once in init, removed in deinit; never mutated concurrently
     @ObservationIgnored nonisolated(unsafe) private var configurationObserver: NSObjectProtocol?
     @ObservationIgnored private var isApplyingSelection = false
     @ObservationIgnored private let usageStore: AudioDeviceUsageStore
