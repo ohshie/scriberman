@@ -239,6 +239,7 @@ final class PermissionServiceTests: XCTestCase {
     }
 }
 
+@MainActor
 private final class MockMicrophonePermissionProvider: MicrophonePermissionProviding {
     var status: AVAuthorizationStatus = .notDetermined
     var statusAfterRequest: AVAuthorizationStatus?
@@ -256,6 +257,7 @@ private final class MockMicrophonePermissionProvider: MicrophonePermissionProvid
     }
 }
 
+@MainActor
 private final class MockScreenRecordingPermissionProvider: ScreenRecordingPermissionProviding {
     var preflightResult = false
     var requestResult = false
@@ -269,6 +271,7 @@ private final class MockScreenRecordingPermissionProvider: ScreenRecordingPermis
     }
 }
 
+@MainActor
 private final class MockScreenRecordingFunctionalPermissionProvider: ScreenRecordingFunctionalPermissionProviding {
     var snapshotResult = ScreenRecordingShareableContentSnapshot(
         windowCount: 1,

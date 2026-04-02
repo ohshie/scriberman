@@ -3,7 +3,7 @@ import CoreAudio
 import Foundation
 import SwiftData
 
-protocol RecordingServiceProtocol {
+protocol RecordingServiceProtocol: Sendable {
     func liveAudioStream() async -> AsyncStream<([Float], AudioSource, Double)>
     func isRecording() async -> Bool
     func audioLevel() async -> Float
@@ -13,7 +13,7 @@ protocol RecordingServiceProtocol {
         capturedAppName: String?,
         appProcessID: pid_t?,
         title: String?
-    ) async throws
+    ) async throws(RecordingError)
     func stopRecording() async -> UUID?
     func consumePendingError() async -> RecordingError?
 }

@@ -1,26 +1,15 @@
 import Foundation
 @testable import Scriberman
 
-final class MockWorkspaceService: WorkspaceServiceProtocol {
+final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked Sendable {
     var currentWorkspaceResult: Workspace?
-    var requireWritableResult: Result<Workspace, Error> = .failure(MockWorkspaceServiceError.notConfigured)
+    var requireWritableResult: Result<Workspace, WorkspaceError> = .failure(.notConfigured)
 
     func currentWorkspace() async -> Workspace? {
         currentWorkspaceResult
     }
 
-    func requireWritableWorkspace() async throws -> Workspace {
+    func requireWritableWorkspace() async throws(WorkspaceError) -> Workspace {
         try requireWritableResult.get()
-    }
-}
-
-enum MockWorkspaceServiceError: LocalizedError {
-    case notConfigured
-
-    var errorDescription: String? {
-        switch self {
-        case .notConfigured:
-            return "No workspace configured"
-        }
     }
 }

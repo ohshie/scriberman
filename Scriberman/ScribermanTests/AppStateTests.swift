@@ -242,7 +242,7 @@ private final class InMemoryKeychainStore: KeychainStore {
     }
 }
 
-private final class TestBookmarkStore: BookmarkStore {
+private final class TestBookmarkStore: BookmarkStore, @unchecked Sendable {
     private var bookmarkData: Data?
 
     func loadWorkspaceBookmark() -> Data? {

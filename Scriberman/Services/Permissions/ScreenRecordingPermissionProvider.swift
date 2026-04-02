@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 import ScreenCaptureKit
 
+@MainActor
 protocol ScreenRecordingPermissionProviding {
     func preflightAccess() -> Bool
     func requestAccess() -> Bool
@@ -26,6 +27,7 @@ struct ScreenRecordingShareableContentSnapshot {
     }
 }
 
+@MainActor
 protocol ScreenRecordingFunctionalPermissionProviding {
     func shareableContentSnapshot() async throws -> ScreenRecordingShareableContentSnapshot
 }

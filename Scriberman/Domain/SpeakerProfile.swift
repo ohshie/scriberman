@@ -15,3 +15,17 @@ final class SpeakerProfile {
         self.lastSeen = lastSeen
     }
 }
+
+struct SpeakerProfileSnapshot: Sendable, Identifiable {
+    let id: UUID
+    let name: String
+    let embedding: [Float]
+    let lastSeen: Date
+
+    init(profile: SpeakerProfile) {
+        self.id = profile.id
+        self.name = profile.name
+        self.embedding = profile.embedding
+        self.lastSeen = profile.lastSeen
+    }
+}

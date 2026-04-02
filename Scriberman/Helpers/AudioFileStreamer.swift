@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 
 /// A thread-safe helper for writing audio buffers to a file and tracking peak levels.
 /// @unchecked Sendable: mutable state is synchronized via stateLock and the internal serial queue.

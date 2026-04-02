@@ -44,7 +44,7 @@ final class SpeakerMatcherTests: XCTestCase {
         let matcher = SpeakerMatcher()
         let query = Array(repeating: Float(0), count: 192)
 
-        XCTAssertNil(matcher.findBestMatch(for: query, in: []))
+        XCTAssertNil(matcher.findBestMatch(for: query, in: [SpeakerProfile]()))
     }
 
     func testFindBestMatchBreaksTiesByOldestLastSeen() {

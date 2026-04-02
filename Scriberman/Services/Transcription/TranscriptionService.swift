@@ -3,6 +3,11 @@ import Foundation
 import OSLog
 import SwiftData
 
+private func defaultSegmentSpeech(_ samples: [Float]) async throws -> [VadSegment] {
+    let vadManager = try await VadManager(config: VadConfig(defaultThreshold: 0.75))
+    return try await vadManager.segmentSpeech(samples, config: VadSegmentationConfig.default)
+}
+
 enum TranscriptionError: LocalizedError {
     case missingAudioFile
     case missingWorkspaceModels([String])
@@ -45,10 +50,7 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         resampleAudioFile: @escaping ResampleAudioFile = { url in
             try AudioConverter().resampleAudioFile(url)
         },
-        segmentSpeech: @escaping SegmentSpeech = { samples in
-            let vadManager = try await VadManager(config: VadConfig(defaultThreshold: 0.75))
-            return try await vadManager.segmentSpeech(samples, config: VadSegmentationConfig.default)
-        },
+        segmentSpeech: @escaping SegmentSpeech = defaultSegmentSpeech,
         extractSamples: @escaping ExtractSamples = { url, isStereo in
             try M4AChannelExtractor().extract(url: url, isStereo: isStereo)
         },
@@ -180,7 +182,8 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         source: AudioSource,
         workspace: Workspace
     ) async throws -> ([TranscriptSegment], [String: [Float]]) {
-        try await makeTranscriptionPassRunner().run(
+        let passRunner = makeTranscriptionPassRunner()
+        return try await passRunner.run(
             samples: samples,
             source: source,
             workspace: workspace
@@ -204,15 +207,17 @@ actor TranscriptionService: TranscriptionServiceProtocol {
     }
 
     internal func matchSpeakers(diarizationResult: DiarizationResult) async throws -> [String: String] {
-        try await makeTranscriptionPassRunner().matchSpeakers(diarizationResult: diarizationResult)
+        let passRunner = makeTranscriptionPassRunner()
+        return try await passRunner.matchSpeakers(diarizationResult: diarizationResult)
     }
 
     func makeTranscriptionPassRunner() -> TranscriptionPassRunner {
-        TranscriptionPassRunner(
+        let segmentSpeech = self.segmentSpeech
+        return TranscriptionPassRunner(
             speakerEmbeddingStore: speakerEmbeddingStore,
             minimumChunkSamples: minimumChunkSamples,
             segmentSpeech: { samples in
-                let vadSegments = try await self.segmentSpeech(samples)
+                let vadSegments = try await segmentSpeech(samples)
                 return vadSegments.map { segment in
                     TranscriptionPassRunner.SpeechSegment(
                         startTime: segment.startTime,

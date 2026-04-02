@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 
+@MainActor
 protocol MicrophonePermissionProviding {
     func authorizationStatus() -> AVAuthorizationStatus
     func requestAccess() async -> Bool
