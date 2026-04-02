@@ -8,6 +8,7 @@ struct TranscriptDetailView: View {
     let onOpenStudy: (() -> Void)?
 
     @State private var showingDeleteConfirmation = false
+    @State private var showingTransformationDetail = false
     @State private var viewModel: TranscriptDetailViewModel
 
     init(
@@ -71,6 +72,14 @@ struct TranscriptDetailView: View {
             viewModel.loadPrompts()
             viewModel.refreshSelectedTransformation()
         }
+        .sheet(isPresented: $showingTransformationDetail) {
+            if let latestTransformation = latestTransformation {
+                AITransformationDetailView(
+                    transformations: viewModel.availableTransformations,
+                    initialTransformationID: latestTransformation.id
+                )
+            }
+        }
     }
 
     private var header: some View {
@@ -100,13 +109,7 @@ struct TranscriptDetailView: View {
 
     private var aiTransformationSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("AI Transformations")
-                    .font(.title3.weight(.semibold))
-                Spacer()
-            }
-
-            HStack(alignment: .bottom, spacing: 12) {
+            HStack(spacing: 12) {
                 Picker("Prompt", selection: $viewModel.selectedPromptID) {
                     ForEach(viewModel.prompts) { prompt in
                         Text(prompt.name).tag(Optional(prompt.id))
@@ -121,6 +124,8 @@ struct TranscriptDetailView: View {
                     }
                 }
                 .disabled(viewModel.canRunTransformation == false)
+
+                Spacer(minLength: 0)
             }
 
             if viewModel.prompts.isEmpty {
@@ -135,15 +140,6 @@ struct TranscriptDetailView: View {
                     .foregroundStyle(.orange)
             }
 
-            if viewModel.availableTransformations.isEmpty == false {
-                Picker("History", selection: $viewModel.selectedTransformationID) {
-                    ForEach(viewModel.availableTransformations) { transformation in
-                        Text(transformation.historyLabel).tag(Optional(transformation.id))
-                    }
-                }
-                .disabled(viewModel.isRunningTransformation)
-            }
-
             if let transformationErrorMessage = viewModel.transformationErrorMessage {
                 Text(transformationErrorMessage)
                     .font(.footnote)
@@ -153,12 +149,17 @@ struct TranscriptDetailView: View {
             if viewModel.isRunningTransformation {
                 SkeletonView()
                     .frame(height: 180)
-            } else if let selectedTransformation = viewModel.selectedTransformation {
-                SectionCard(title: selectedTransformation.promptName, text: selectedTransformation.resultText)
-            } else {
-                SectionCard(title: "Result", text: "Run a transformation to see AI output here.")
+            } else if let latestTransformation {
+                AITransformationPreviewCard(transformation: latestTransformation) {
+                    guard viewModel.availableTransformations.isEmpty == false else { return }
+                    showingTransformationDetail = true
+                }
             }
         }
+    }
+
+    private var latestTransformation: AITransformation? {
+        viewModel.availableTransformations.last
     }
 
     private var metadataGrid: some View {
@@ -204,18 +205,5 @@ struct TranscriptDetailView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(viewModel.finalTranscriptText, forType: .string)
-    }
-}
-
-private extension AITransformation {
-    var historyLabel: String {
-        "\(promptName) - \(formattedTime)"
-    }
-
-    private var formattedTime: String {
-        let formatter = DateFormatter()
-        formatter.locale = .current
-        formatter.timeStyle = .short
-        return formatter.string(from: createdAt)
     }
 }
