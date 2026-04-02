@@ -83,6 +83,7 @@
 		7987328E2F7DBC2800570A03 /* SettingsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987328D2F7DBC2800570A03 /* SettingsViewModelTests.swift */; };
 		79BE35232F7E52ED00DB542F /* ThirdPartySendable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35222F7E52ED00DB542F /* ThirdPartySendable.swift */; };
 		79BE35252F7E6EF700DB542F /* TranscriptDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35242F7E6EF700DB542F /* TranscriptDetailViewModel.swift */; };
+		79BE35272F7E71F200DB542F /* PromptManagementViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35262F7E71F200DB542F /* PromptManagementViewModel.swift */; };
 		79DCE41A2F77BC3D0024DC26 /* TranscriptionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */; };
 		79DCE41D2F77CC1E0024DC26 /* PermissionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */; };
 		79DCE41F2F77CDA90024DC26 /* PermissionsOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41E2F77CDA90024DC26 /* PermissionsOnboardingView.swift */; };
@@ -229,6 +230,7 @@
 		7987328D2F7DBC2800570A03 /* SettingsViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModelTests.swift; sourceTree = "<group>"; };
 		79BE35222F7E52ED00DB542F /* ThirdPartySendable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThirdPartySendable.swift; sourceTree = "<group>"; };
 		79BE35242F7E6EF700DB542F /* TranscriptDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptDetailViewModel.swift; sourceTree = "<group>"; };
+		79BE35262F7E71F200DB542F /* PromptManagementViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptManagementViewModel.swift; sourceTree = "<group>"; };
 		79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionServiceTests.swift; sourceTree = "<group>"; };
 		79DCE41B2F77CC0B0024DC26 /* Scriberman.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = Scriberman.xctestplan; sourceTree = "<group>"; };
 		79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionService.swift; sourceTree = "<group>"; };
@@ -404,6 +406,7 @@
 				A8F3DE0F4D65F9DD94E5DEFC /* SettingsViewModel.swift */,
 				82B5AC231318E9580ADB309B /* AppState.swift */,
 				79BE35242F7E6EF700DB542F /* TranscriptDetailViewModel.swift */,
+				79BE35262F7E71F200DB542F /* PromptManagementViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -807,6 +810,7 @@
 				2A2B3C4D5E6F708192A3B4CA /* RecordingService.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CB /* TranscriptionService.swift in Sources */,
 				79DCE41D2F77CC1E0024DC26 /* PermissionService.swift in Sources */,
+				79BE35272F7E71F200DB542F /* PromptManagementViewModel.swift in Sources */,
 				79E005DE2F767ABC00D3EAD9 /* AppAudioService.swift in Sources */,
 				F0A1B2C3D4E5F60718293B41 /* AppAudioCaptureSession.swift in Sources */,
 				F0A1B2C3D4E5F60718293B42 /* AppAudioStreamOutputHandler.swift in Sources */,
