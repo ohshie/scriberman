@@ -144,6 +144,24 @@ final class JobsViewModel {
         return isNewSessionIdle
     }
 
+    func sessionItems(
+        recordingSessions: [RecordingSession],
+        importedSessions: [ImportedSession],
+        preserving selectedItem: SessionListItem?
+    ) -> [SessionListItem] {
+        var recordingItems = recordingSessions.map(SessionListItem.recording)
+        let importedItems = importedSessions.map(SessionListItem.imported)
+
+        // Keep selected recordings visible until SwiftData query refresh catches up.
+        if let selectedItem,
+           case .recording = selectedItem,
+           !recordingItems.contains(where: { $0.id == selectedItem.id }) {
+            recordingItems.append(selectedItem)
+        }
+
+        return (recordingItems + importedItems).sorted { $0.createdAt > $1.createdAt }
+    }
+
     func sessionDateGroup(
         for date: Date,
         referenceDate: Date = .now,

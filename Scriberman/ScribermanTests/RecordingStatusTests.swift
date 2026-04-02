@@ -149,7 +149,8 @@ final class RecordingStatusTests: XCTestCase {
         XCTAssertNotNil(session.retranscriptData)
     }
 
-    func testTranscriptDetailStatePrefersRetranscript() {
+    @MainActor
+    func testTranscriptDetailViewModelPrefersRetranscript() {
         let session = RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
             duration: 10,
@@ -170,26 +171,27 @@ final class RecordingStatusTests: XCTestCase {
             speakers: [TranscriptSpeaker(id: "app:S1", label: "Speaker", colorHex: "#222222")]
         )
 
-        let state = TranscriptDetailViewState(session: session)
-        XCTAssertEqual(state.displayedTranscript?.fullText, "retry")
-        XCTAssertEqual(state.finalTranscriptText, "retry")
-        XCTAssertEqual(state.originalTranscriptText, "original")
-        XCTAssertTrue(state.isReprocessed)
+        let viewModel = TranscriptDetailViewModel(session: session, aiProviderService: makeAIProviderService())
+        XCTAssertEqual(viewModel.displayedTranscript?.fullText, "retry")
+        XCTAssertEqual(viewModel.finalTranscriptText, "retry")
+        XCTAssertEqual(viewModel.originalTranscriptText, "original")
+        XCTAssertTrue(viewModel.isReprocessed)
     }
 
-    func testTranscriptDetailStateApplicationNameAndReprocessedFlag() {
-        let recording = TranscriptDetailViewState(session: RecordingSession(
+    @MainActor
+    func testTranscriptDetailViewModelApplicationNameAndReprocessedFlag() {
+        let recording = TranscriptDetailViewModel(session: RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
             duration: 10,
             micAudioURL: "/tmp/mic.wav",
             title: "Session",
             capturedAppName: "Zoom",
             status: .done
-        ))
+        ), aiProviderService: makeAIProviderService())
         XCTAssertEqual(recording.applicationName, "Zoom")
         XCTAssertFalse(recording.isReprocessed)
 
-        let imported = TranscriptDetailViewState(session: ImportedSession(
+        let imported = TranscriptDetailViewModel(session: ImportedSession(
             createdAt: Date(timeIntervalSince1970: 0),
             duration: 4,
             mixdownURL: "/tmp/mix.m4a",
@@ -197,8 +199,18 @@ final class RecordingStatusTests: XCTestCase {
             originalFileName: "sample.wav",
             originalFormat: "wav",
             status: .done
-        ))
+        ), aiProviderService: makeAIProviderService())
         XCTAssertNil(imported.applicationName)
+    }
+
+    @MainActor
+    private func makeAIProviderService() -> AIProviderService {
+        let defaults = UserDefaults(suiteName: "RecordingStatusTests.\(UUID().uuidString)") ?? .standard
+        let keychainStore = MockKeychainStore()
+        return AIProviderService(
+            keychainStore: keychainStore,
+            store: AIProviderStore(defaults: defaults)
+        )
     }
 }
 
@@ -272,7 +284,7 @@ final class RecordingSessionTests: XCTestCase {
         let source = try transcriptDetailSource()
 
         XCTAssertTrue(source.contains("TranscriptPreviewView("))
-        XCTAssertTrue(source.contains("onTap: viewState.displayedTranscript == nil ? nil : onOpenStudy"))
+        XCTAssertTrue(source.contains("onTap: viewModel.displayedTranscript == nil ? nil : onOpenStudy"))
         XCTAssertFalse(source.contains("Label(\"Study Transcript\", systemImage: \"book.pages\")"))
         XCTAssertFalse(source.contains(".sheet(isPresented: $showingStudyTranscript)"))
     }
