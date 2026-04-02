@@ -3,7 +3,8 @@ import CoreMedia
 import Foundation
 import ScreenCaptureKit
 
-final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput {
+// @unchecked Sendable: all mutable state protected by NSLock and internal DispatchQueue
+final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendable {
     private let lock = NSLock()
     private var fileURL: URL?
     private let streamer = AudioFileStreamer()

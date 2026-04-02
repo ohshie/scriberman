@@ -3,7 +3,8 @@ import Foundation
 import OSLog
 import ScreenCaptureKit
 
-final class AppAudioCaptureSession: NSObject, SCStreamDelegate {
+// @unchecked Sendable: delegate callbacks synchronize via sampleQueue (DispatchQueue) and self.stream is only mutated on the calling async context
+final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendable {
     private let fileURL: URL
     private let processID: pid_t
     private let outputHandler: AppAudioStreamOutputHandler
