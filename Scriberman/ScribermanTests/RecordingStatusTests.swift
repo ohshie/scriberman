@@ -272,9 +272,8 @@ final class RecordingSessionTests: XCTestCase {
     func testTranscriptDetailViewIncludesAITransformationUIElements() throws {
         let source = try transcriptDetailSource()
 
-        XCTAssertTrue(source.contains("Text(\"AI Transformations\")"))
         XCTAssertTrue(source.contains("Picker(\"Prompt\""))
-        XCTAssertTrue(source.contains("Picker(\"History\""))
+        XCTAssertTrue(source.contains("AITransformationPreviewCard("))
         XCTAssertTrue(source.contains("SkeletonView()"))
         XCTAssertTrue(source.contains("Add prompts in Settings to enable transformations."))
         XCTAssertTrue(source.contains("40,000"))
