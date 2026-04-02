@@ -1,5 +1,6 @@
 import FluidAudio
 import Foundation
+import CoreML
 
 enum ModelInstallError: LocalizedError {
     case workspaceNotWritable
@@ -76,6 +77,16 @@ actor ModelInstallService: ModelInstallServicing {
                 localSegmentationModel: segmentationURL,
                 localEmbeddingModel: embeddingURL
             )
+
+            do {
+                let vadDirectory = try modelPathResolver.modelDirectory(for: .vadSilero, in: workspace)
+                let vadModelURL = vadDirectory.appendingPathComponent(ModelNames.VAD.sileroVadFile, isDirectory: true)
+                let mlConfig = MLModelConfiguration()
+                mlConfig.computeUnits = .cpuAndNeuralEngine
+                _ = try await MLModel.load(contentsOf: vadModelURL, configuration: mlConfig)
+            } catch {
+                NSLog("[ModelInstallService] VAD CoreML warm-up failed (non-fatal): %@", String(describing: error))
+            }
         } catch {
             NSLog("[ModelInstallService] CoreML warm-up failed (non-fatal): %@", String(describing: error))
         }
