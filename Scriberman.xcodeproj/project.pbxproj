@@ -123,6 +123,7 @@
 		A33A33A33A33A33A33A33A33 /* AIProviderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B33B33B33B33B33B33B33B33 /* AIProviderStore.swift */; };
 		A44A44A44A44A44A44A44A44 /* AIProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B44B44B44B44B44B44B44B44 /* AIProviderService.swift */; };
 		A55A55A55A55A55A55A55A55 /* OpenAI in Frameworks */ = {isa = PBXBuildFile; productRef = D11D11D11D11D11D11D11D11 /* OpenAI */; };
+		E3E3E3E3E3E3E3E3E3E3E3E3 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = E2E2E2E2E2E2E2E2E2E2E2E2 /* MarkdownUI */; };
 		A66A66A66A66A66A66A66A66 /* MockKeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B66B66B66B66B66B66B66B66 /* MockKeychainStore.swift */; };
 		A77A77A77A77A77A77A77A77 /* AIProviderServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B77B77B77B77B77B77B77B77 /* AIProviderServiceTests.swift */; };
 		A88A88A88A88A88A88A88A88 /* ConnectionStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B88B88B88B88B88B88B88B88 /* ConnectionStatusTests.swift */; };
@@ -334,6 +335,7 @@
 				72E17286721922EFD739F74A /* Cocoa.framework in Frameworks */,
 				A55A55A55A55A55A55A55A55 /* OpenAI in Frameworks */,
 				C3EE37FB3F5E384076FF1B4E /* FluidAudio in Frameworks */,
+				E3E3E3E3E3E3E3E3E3E3E3E3 /* MarkdownUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -722,6 +724,7 @@
 			packageProductDependencies = (
 				DDA5336F2945D8E09B308BC2 /* FluidAudio */,
 				D11D11D11D11D11D11D11D11 /* OpenAI */,
+				E2E2E2E2E2E2E2E2E2E2E2E2 /* MarkdownUI */,
 			);
 			productName = Scriberman;
 			productReference = 5542239A238BB9A1883C5B5A /* Scriberman.app */;
@@ -771,6 +774,7 @@
 			packageReferences = (
 				C9C9D7C4E41BA2318ED6E595 /* XCRemoteSwiftPackageReference "FluidAudio" */,
 				C11C11C11C11C11C11C11C11 /* XCRemoteSwiftPackageReference "OpenAI" */,
+				E1E1E1E1E1E1E1E1E1E1E1E1 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 			);
 			productRefGroup = 43993D81DB3C75CD2DC1BB1F /* Products */;
 			projectDirPath = "";
@@ -1250,6 +1254,14 @@
 				minimumVersion = 0.7.9;
 			};
 		};
+		E1E1E1E1E1E1E1E1E1E1E1E1 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.4.1;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1262,6 +1274,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C9C9D7C4E41BA2318ED6E595 /* XCRemoteSwiftPackageReference "FluidAudio" */;
 			productName = FluidAudio;
+		};
+		E2E2E2E2E2E2E2E2E2E2E2E2 /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E1E1E1E1E1E1E1E1E1E1E1E1 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
+			productName = MarkdownUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -1,3 +1,4 @@
+import MarkdownUI
 import XCTest
 @testable import Scriberman
 
@@ -46,6 +47,10 @@ final class MarkdownRendererTests: XCTestCase {
 
     func testDefaultFileNameFallbackForEmptyTitle() {
         XCTAssertEqual(renderer.defaultFileName(for: ""), "Transcript.md")
+    }
+
+    func testMarkdownUIImportCompiles() {
+        _ = Markdown("**MarkdownUI**")
     }
 
     private func makeSession(title: String = "Session") -> RecordingSession {
