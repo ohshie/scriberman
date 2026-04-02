@@ -19,6 +19,7 @@ struct AppShellView: View {
     @State private var detailMode: DetailMode = .standard
     @State private var selectedTransformationID: UUID?
     @State private var studyActionErrorMessage: String?
+    @State private var audioPlayerViewModel = AudioPlayerViewModel()
 
     var body: some View {
         @Bindable var appState = appState
@@ -41,6 +42,13 @@ struct AppShellView: View {
         } detail: {
             if let selectedSession {
                 detailView(for: selectedSession)
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        AudioPlayerBar(
+                            viewModel: audioPlayerViewModel,
+                            sessionHasAudio: audioURL(for: selectedSession) != nil || selectedSessionHasMixdownNil(selectedSession),
+                            mixdownURL: mixdownURLString(for: selectedSession)
+                        )
+                    }
                     .navigationSplitViewColumnWidth(min: 560, ideal: 860)
             } else {
                 ContentUnavailableView(
@@ -135,6 +143,14 @@ struct AppShellView: View {
             guard oldValue?.id != newValue?.id else {
                 return
             }
+
+            audioPlayerViewModel.stop()
+            if let url = audioURL(for: newValue) {
+                audioPlayerViewModel.load(url: url)
+            } else {
+                audioPlayerViewModel.clear()
+            }
+
             detailMode = .standard
             selectedTransformationID = nil
         }
@@ -239,6 +255,49 @@ struct AppShellView: View {
     }
 
     @Environment(\.modelContext) private var modelContext
+
+    private func audioURL(for item: JobsViewModel.SessionListItem?) -> URL? {
+        guard let item else {
+            return nil
+        }
+
+        switch item {
+        case .pending:
+            return nil
+        case .recording(let session):
+            guard let mixdownURL = session.mixdownURL, mixdownURL.isEmpty == false else {
+                return nil
+            }
+            return URL(fileURLWithPath: mixdownURL)
+        case .imported(let session):
+            guard let mixdownURL = session.mixdownURL, mixdownURL.isEmpty == false else {
+                return nil
+            }
+            return URL(fileURLWithPath: mixdownURL)
+        }
+    }
+
+    private func mixdownURLString(for item: JobsViewModel.SessionListItem?) -> String? {
+        switch item {
+        case .recording(let session):
+            return session.mixdownURL
+        case .imported(let session):
+            return session.mixdownURL
+        case .pending, .none:
+            return nil
+        }
+    }
+
+    private func selectedSessionHasMixdownNil(_ item: JobsViewModel.SessionListItem?) -> Bool {
+        switch item {
+        case .recording(let session):
+            return session.mixdownURL == nil
+        case .imported(let session):
+            return session.mixdownURL == nil
+        case .pending, .none:
+            return false
+        }
+    }
 
     private func presentImportPanel() {
         let panel = NSOpenPanel()
