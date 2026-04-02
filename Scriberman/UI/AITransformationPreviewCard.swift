@@ -15,6 +15,7 @@ struct AITransformationPreviewCard: View {
             Markdown(transformation.resultText)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
+                .frame(height: 180, alignment: .top)
                 .mask(alignment: .bottom) {
                     LinearGradient(
                         stops: [
@@ -26,7 +27,7 @@ struct AITransformationPreviewCard: View {
                         endPoint: .bottom
                     )
                 }
-                .frame(maxHeight: 180, alignment: .top)
+                .clipped()
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)

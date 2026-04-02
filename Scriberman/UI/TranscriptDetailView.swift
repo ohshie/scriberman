@@ -6,9 +6,9 @@ struct TranscriptDetailView: View {
     let onReprocess: (() -> Void)?
     let onDelete: () -> Void
     let onOpenStudy: (() -> Void)?
+    let onOpenTransformation: ((UUID) -> Void)?
 
     @State private var showingDeleteConfirmation = false
-    @State private var showingTransformationDetail = false
     @State private var viewModel: TranscriptDetailViewModel
 
     init(
@@ -16,12 +16,14 @@ struct TranscriptDetailView: View {
         aiProviderService: AIProviderService,
         onReprocess: (() -> Void)?,
         onDelete: @escaping () -> Void,
-        onOpenStudy: (() -> Void)?
+        onOpenStudy: (() -> Void)?,
+        onOpenTransformation: ((UUID) -> Void)?
     ) {
         self.session = session
         self.onReprocess = onReprocess
         self.onDelete = onDelete
         self.onOpenStudy = onOpenStudy
+        self.onOpenTransformation = onOpenTransformation
         _viewModel = State(initialValue: TranscriptDetailViewModel(session: session, aiProviderService: aiProviderService))
     }
 
@@ -71,14 +73,6 @@ struct TranscriptDetailView: View {
         .task {
             viewModel.loadPrompts()
             viewModel.refreshSelectedTransformation()
-        }
-        .sheet(isPresented: $showingTransformationDetail) {
-            if let latestTransformation = latestTransformation {
-                AITransformationDetailView(
-                    transformations: viewModel.availableTransformations,
-                    initialTransformationID: latestTransformation.id
-                )
-            }
         }
     }
 
@@ -152,7 +146,7 @@ struct TranscriptDetailView: View {
             } else if let latestTransformation {
                 AITransformationPreviewCard(transformation: latestTransformation) {
                     guard viewModel.availableTransformations.isEmpty == false else { return }
-                    showingTransformationDetail = true
+                    onOpenTransformation?(latestTransformation.id)
                 }
             }
         }
