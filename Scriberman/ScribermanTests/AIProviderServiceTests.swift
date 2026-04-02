@@ -212,22 +212,30 @@ final class SettingsViewSourceTests: XCTestCase {
     }
 
     func testPromptsTabSupportsCRUDAndValidationHooks() throws {
-        let source = try settingsSource()
+        let settingsSource = try settingsSource()
+        let promptViewModelSource = try promptManagementViewModelSource()
 
-        XCTAssertTrue(source.contains("Button(\"Add Prompt\")"))
-        XCTAssertTrue(source.contains("Button(\"Edit\")"))
-        XCTAssertTrue(source.contains("Button(\"Delete\", role: .destructive)"))
-        XCTAssertTrue(source.contains("\"Prompt name is required.\""))
-        XCTAssertTrue(source.contains("\"Prompt content is required.\""))
-        XCTAssertTrue(source.contains("\"Prompt name must be unique.\""))
-        XCTAssertTrue(source.contains("promptStore.addPrompt"))
-        XCTAssertTrue(source.contains("promptStore.updatePrompt"))
-        XCTAssertTrue(source.contains("promptStore.deletePrompt"))
+        XCTAssertTrue(settingsSource.contains("Button(\"Add Prompt\")"))
+        XCTAssertTrue(settingsSource.contains("Button(\"Edit\")"))
+        XCTAssertTrue(settingsSource.contains("Button(\"Delete\", role: .destructive)"))
+        XCTAssertTrue(settingsSource.contains("promptVM.savePrompt()"))
+        XCTAssertTrue(settingsSource.contains("promptVM.deletePrompt(prompt)"))
+        XCTAssertTrue(settingsSource.contains("promptVM.presentEditor(for: nil)"))
+
+        XCTAssertTrue(promptViewModelSource.contains("\"Prompt name is required.\""))
+        XCTAssertTrue(promptViewModelSource.contains("\"Prompt content is required.\""))
+        XCTAssertTrue(promptViewModelSource.contains("\"Prompt name must be unique.\""))
     }
 
     private func settingsSource() throws -> String {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let fileURL = testsDirectory.appendingPathComponent("../UI/SettingsView.swift")
+        return try String(contentsOf: fileURL, encoding: .utf8)
+    }
+
+    private func promptManagementViewModelSource() throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let fileURL = testsDirectory.appendingPathComponent("../ViewModels/PromptManagementViewModel.swift")
         return try String(contentsOf: fileURL, encoding: .utf8)
     }
 }

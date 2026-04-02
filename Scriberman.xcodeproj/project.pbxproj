@@ -84,6 +84,8 @@
 		79BE35232F7E52ED00DB542F /* ThirdPartySendable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35222F7E52ED00DB542F /* ThirdPartySendable.swift */; };
 		79BE35252F7E6EF700DB542F /* TranscriptDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35242F7E6EF700DB542F /* TranscriptDetailViewModel.swift */; };
 		79BE35272F7E71F200DB542F /* PromptManagementViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35262F7E71F200DB542F /* PromptManagementViewModel.swift */; };
+		79BE35292F7E741E00DB542F /* TranscriptDetailViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35282F7E741E00DB542F /* TranscriptDetailViewModelTests.swift */; };
+		79BE352B2F7E742100DB542F /* PromptManagementViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE352A2F7E742100DB542F /* PromptManagementViewModelTests.swift */; };
 		79DCE41A2F77BC3D0024DC26 /* TranscriptionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */; };
 		79DCE41D2F77CC1E0024DC26 /* PermissionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */; };
 		79DCE41F2F77CDA90024DC26 /* PermissionsOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41E2F77CDA90024DC26 /* PermissionsOnboardingView.swift */; };
@@ -231,6 +233,8 @@
 		79BE35222F7E52ED00DB542F /* ThirdPartySendable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThirdPartySendable.swift; sourceTree = "<group>"; };
 		79BE35242F7E6EF700DB542F /* TranscriptDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptDetailViewModel.swift; sourceTree = "<group>"; };
 		79BE35262F7E71F200DB542F /* PromptManagementViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptManagementViewModel.swift; sourceTree = "<group>"; };
+		79BE35282F7E741E00DB542F /* TranscriptDetailViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptDetailViewModelTests.swift; sourceTree = "<group>"; };
+		79BE352A2F7E742100DB542F /* PromptManagementViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptManagementViewModelTests.swift; sourceTree = "<group>"; };
 		79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionServiceTests.swift; sourceTree = "<group>"; };
 		79DCE41B2F77CC0B0024DC26 /* Scriberman.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = Scriberman.xctestplan; sourceTree = "<group>"; };
 		79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionService.swift; sourceTree = "<group>"; };
@@ -372,6 +376,8 @@
 				798732892F7DA41C00570A03 /* SpeakerMatcherTests.swift */,
 				7987328B2F7DB47F00570A03 /* ModelInstallServiceTests.swift */,
 				7987328D2F7DBC2800570A03 /* SettingsViewModelTests.swift */,
+				79BE35282F7E741E00DB542F /* TranscriptDetailViewModelTests.swift */,
+				79BE352A2F7E742100DB542F /* PromptManagementViewModelTests.swift */,
 			);
 			path = ScribermanTests;
 			sourceTree = "<group>";
@@ -901,6 +907,7 @@
 				79DCE4252F77D0A10024DC26 /* MockPermissionService.swift in Sources */,
 				C4EC45D56DEE48C672BEE45A /* TimeFormatterTests.swift in Sources */,
 				79DCE41A2F77BC3D0024DC26 /* TranscriptionServiceTests.swift in Sources */,
+				79BE35292F7E741E00DB542F /* TranscriptDetailViewModelTests.swift in Sources */,
 				798732862F7DA2F900570A03 /* AudioResamplerTests.swift in Sources */,
 				7987327D2F7D998E00570A03 /* LiveTranscriptionBufferTests.swift in Sources */,
 				791009532F78184E00225294 /* AudioMixdownServiceTests.swift in Sources */,
@@ -918,6 +925,7 @@
 				79E005DC2F76777E00D3EAD9 /* MockAudioDeviceService.swift in Sources */,
 				A66A66A66A66A66A66A66A66 /* MockKeychainStore.swift in Sources */,
 				79E005E02F767AE100D3EAD9 /* AppAudioServiceTests.swift in Sources */,
+				79BE352B2F7E742100DB542F /* PromptManagementViewModelTests.swift in Sources */,
 				7987326D2F7D8D6F00570A03 /* AudioSampleReaderTests.swift in Sources */,
 				79E005E42F767E7900D3EAD9 /* AggregateDeviceBuilderTests.swift in Sources */,
 				B1C2D3E4F5061728394A5B6C /* StatusTagViewTests.swift in Sources */,
