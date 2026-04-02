@@ -7,6 +7,7 @@ struct AppShellView: View {
     private enum DetailMode {
         case standard
         case study
+        case transformation
     }
 
     @Environment(AppState.self) private var appState
@@ -16,6 +17,7 @@ struct AppShellView: View {
     @Query(sort: \ImportedSession.createdAt, order: .reverse) private var importedSessions: [ImportedSession]
     @State private var selectedSession: JobsViewModel.SessionListItem?
     @State private var detailMode: DetailMode = .standard
+    @State private var selectedTransformationID: UUID?
     @State private var studyActionErrorMessage: String?
 
     var body: some View {
@@ -56,6 +58,8 @@ struct AppShellView: View {
                 jobsToolbar
             case .study:
                 studyModeToolbar
+            case .transformation:
+                transformationModeToolbar
             }
         }
         .toolbar(removing: .title)
@@ -132,6 +136,7 @@ struct AppShellView: View {
                 return
             }
             detailMode = .standard
+            selectedTransformationID = nil
         }
     }
 
@@ -168,6 +173,12 @@ struct AppShellView: View {
                     transcript: transcript,
                     store: appState.backgroundServices.speakerEmbeddingStore
                 )
+            } else if detailMode == .transformation {
+                AITransformationDetailView(
+                    session: session,
+                    aiProviderService: aiProviderService,
+                    selectedTransformationID: $selectedTransformationID
+                )
             } else {
                 TranscriptDetailView(
                     session: session,
@@ -181,6 +192,10 @@ struct AppShellView: View {
                     },
                     onOpenStudy: {
                         detailMode = .study
+                    },
+                    onOpenTransformation: { transformationID in
+                        selectedTransformationID = transformationID
+                        detailMode = .transformation
                     }
                 )
                 .id(session.id)
@@ -192,6 +207,12 @@ struct AppShellView: View {
                     session: session,
                     transcript: transcript,
                     store: appState.backgroundServices.speakerEmbeddingStore
+                )
+            } else if detailMode == .transformation {
+                AITransformationDetailView(
+                    session: session,
+                    aiProviderService: aiProviderService,
+                    selectedTransformationID: $selectedTransformationID
                 )
             } else {
                 TranscriptDetailView(
@@ -206,6 +227,10 @@ struct AppShellView: View {
                     },
                     onOpenStudy: {
                         detailMode = .study
+                    },
+                    onOpenTransformation: { transformationID in
+                        selectedTransformationID = transformationID
+                        detailMode = .transformation
                     }
                 )
                 .id(session.id)
@@ -284,6 +309,29 @@ struct AppShellView: View {
         }
     }
 
+    @ToolbarContentBuilder
+    private var transformationModeToolbar: some ToolbarContent {
+        if let session = selectedTranscribableSession {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    detailMode = .standard
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .help("Back")
+            }
+
+            AITransformationDetailView.toolbarActions(
+                onCopy: {
+                    copyTransformation(for: session)
+                },
+                onExport: {
+                    exportTransformation(for: session)
+                }
+            )
+        }
+    }
+
     private var selectedTranscribableSession: (any TranscribableSession)? {
         guard let selectedSession else {
             return nil
@@ -321,5 +369,61 @@ struct AppShellView: View {
                 studyActionErrorMessage = error.localizedDescription
             }
         }
+    }
+
+    private func availableTransformations(for session: any TranscribableSession) -> [AITransformation] {
+        session.aiTransformations.sorted(by: { $0.createdAt < $1.createdAt })
+    }
+
+    private func selectedTransformation(for session: any TranscribableSession) -> AITransformation? {
+        let transformations = availableTransformations(for: session)
+
+        if let selectedTransformationID,
+           let selected = transformations.first(where: { $0.id == selectedTransformationID }) {
+            return selected
+        }
+
+        return transformations.last
+    }
+
+    private func copyTransformation(for session: any TranscribableSession) {
+        guard let transformation = selectedTransformation(for: session) else {
+            return
+        }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(transformation.resultText, forType: .string)
+    }
+
+    private func exportTransformation(for session: any TranscribableSession) {
+        guard let transformation = selectedTransformation(for: session) else {
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.title = "Export Transformation"
+        panel.prompt = "Export"
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        panel.nameFieldStringValue = defaultTransformationFileName(sessionTitle: session.title, promptName: transformation.promptName)
+
+        guard panel.runModal() == .OK, let destinationURL = panel.url else {
+            return
+        }
+
+        do {
+            try transformation.resultText.write(to: destinationURL, atomically: true, encoding: .utf8)
+        } catch {
+            studyActionErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func defaultTransformationFileName(sessionTitle: String, promptName: String) -> String {
+        let sanitizedSession = sessionTitle.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespacesAndNewlines)
+        let sanitizedPrompt = promptName.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseSession = sanitizedSession.isEmpty ? "Session" : sanitizedSession
+        let basePrompt = sanitizedPrompt.isEmpty ? "Transformation" : sanitizedPrompt
+        return "\(baseSession) - \(basePrompt).md"
     }
 }

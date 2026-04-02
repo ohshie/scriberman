@@ -89,6 +89,8 @@
 		79BE352D2F7E7E7500DB542F /* ConnectionStatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE352C2F7E7E7500DB542F /* ConnectionStatusBadge.swift */; };
 		79BE352F2F7E7E7C00DB542F /* SectionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE352E2F7E7E7C00DB542F /* SectionCard.swift */; };
 		79BE35312F7E7E8100DB542F /* MetadataCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35302F7E7E8100DB542F /* MetadataCell.swift */; };
+		79BE35332F7E8F5E00DB542F /* AITransformationPreviewCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35322F7E8F5E00DB542F /* AITransformationPreviewCard.swift */; };
+		79BE35352F7E8FF600DB542F /* AITransformationDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35342F7E8FF600DB542F /* AITransformationDetailView.swift */; };
 		79DCE41A2F77BC3D0024DC26 /* TranscriptionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */; };
 		79DCE41D2F77CC1E0024DC26 /* PermissionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */; };
 		79DCE41F2F77CDA90024DC26 /* PermissionsOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41E2F77CDA90024DC26 /* PermissionsOnboardingView.swift */; };
@@ -142,6 +144,7 @@
 		D0AD07DBAD50A6EF4CD90C2B /* MockWorkspaceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4A24E4069AF734D90C9236E /* MockWorkspaceService.swift */; };
 		D1A2B3C4D5E6F708192A3B4E /* StatusTagView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A2B3C4D5E6F708192A3B4F /* StatusTagView.swift */; };
 		E1A2B3C4D5E6F708192A3B4C /* TranscriptGrouperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A2B3C4D5E6F708192A3B4D /* TranscriptGrouperTests.swift */; };
+		E3E3E3E3E3E3E3E3E3E3E3E3 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = E2E2E2E2E2E2E2E2E2E2E2E2 /* MarkdownUI */; };
 		EF15FDA2B169C6BE3CB9FB4A /* Workspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DFBA039128F2B74BE4BB578 /* Workspace.swift */; };
 		F0A1B2C3D4E5F60718293B41 /* AppAudioCaptureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F60718293A41 /* AppAudioCaptureSession.swift */; };
 		F0A1B2C3D4E5F60718293B42 /* AppAudioStreamOutputHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F60718293A42 /* AppAudioStreamOutputHandler.swift */; };
@@ -241,6 +244,8 @@
 		79BE352C2F7E7E7500DB542F /* ConnectionStatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStatusBadge.swift; sourceTree = "<group>"; };
 		79BE352E2F7E7E7C00DB542F /* SectionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionCard.swift; sourceTree = "<group>"; };
 		79BE35302F7E7E8100DB542F /* MetadataCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataCell.swift; sourceTree = "<group>"; };
+		79BE35322F7E8F5E00DB542F /* AITransformationPreviewCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AITransformationPreviewCard.swift; sourceTree = "<group>"; };
+		79BE35342F7E8FF600DB542F /* AITransformationDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AITransformationDetailView.swift; sourceTree = "<group>"; };
 		79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionServiceTests.swift; sourceTree = "<group>"; };
 		79DCE41B2F77CC0B0024DC26 /* Scriberman.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = Scriberman.xctestplan; sourceTree = "<group>"; };
 		79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionService.swift; sourceTree = "<group>"; };
@@ -334,6 +339,7 @@
 				72E17286721922EFD739F74A /* Cocoa.framework in Frameworks */,
 				A55A55A55A55A55A55A55A55 /* OpenAI in Frameworks */,
 				C3EE37FB3F5E384076FF1B4E /* FluidAudio in Frameworks */,
+				E3E3E3E3E3E3E3E3E3E3E3E3 /* MarkdownUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -456,6 +462,8 @@
 				79BE352C2F7E7E7500DB542F /* ConnectionStatusBadge.swift */,
 				79BE352E2F7E7E7C00DB542F /* SectionCard.swift */,
 				79BE35302F7E7E8100DB542F /* MetadataCell.swift */,
+				79BE35322F7E8F5E00DB542F /* AITransformationPreviewCard.swift */,
+				79BE35342F7E8FF600DB542F /* AITransformationDetailView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -722,6 +730,7 @@
 			packageProductDependencies = (
 				DDA5336F2945D8E09B308BC2 /* FluidAudio */,
 				D11D11D11D11D11D11D11D11 /* OpenAI */,
+				E2E2E2E2E2E2E2E2E2E2E2E2 /* MarkdownUI */,
 			);
 			productName = Scriberman;
 			productReference = 5542239A238BB9A1883C5B5A /* Scriberman.app */;
@@ -771,6 +780,7 @@
 			packageReferences = (
 				C9C9D7C4E41BA2318ED6E595 /* XCRemoteSwiftPackageReference "FluidAudio" */,
 				C11C11C11C11C11C11C11C11 /* XCRemoteSwiftPackageReference "OpenAI" */,
+				E1E1E1E1E1E1E1E1E1E1E1E1 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 			);
 			productRefGroup = 43993D81DB3C75CD2DC1BB1F /* Products */;
 			projectDirPath = "";
@@ -839,6 +849,7 @@
 				F0A1B2C3D4E5F60718293B49 /* ScreenRecordingPermissionProvider.swift in Sources */,
 				F0A1B2C3D4E5F60718293B4A /* PermissionServiceProtocol.swift in Sources */,
 				797571722F79C752006AEFB6 /* SpeakerEmbeddingStore.swift in Sources */,
+				79BE35352F7E8FF600DB542F /* AITransformationDetailView.swift in Sources */,
 				79E005DA2F76774E00D3EAD9 /* AudioDeviceServiceProtocol.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4D1 /* TranscriptExportService.swift in Sources */,
 				798732712F7D8EB600570A03 /* AudioChannelReader.swift in Sources */,
@@ -895,6 +906,7 @@
 				F1A2B3C4D5E6F708192A3B4C /* TranscriptGrouper.swift in Sources */,
 				06B30512C65DF04AFA9A0026 /* MarkdownRenderer.swift in Sources */,
 				993FF0F23A6CE7ED3F1B8F49 /* WorkspaceServiceProtocol.swift in Sources */,
+				79BE35332F7E8F5E00DB542F /* AITransformationPreviewCard.swift in Sources */,
 				C16E1FE0441F3C95A965E4C0 /* RecordingServiceProtocol.swift in Sources */,
 				791009612F7859DF00225294 /* AudioImportService.swift in Sources */,
 				7975716E2F7983AC006AEFB6 /* TranscriptStudyView.swift in Sources */,
@@ -1250,6 +1262,14 @@
 				minimumVersion = 0.7.9;
 			};
 		};
+		E1E1E1E1E1E1E1E1E1E1E1E1 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.4.1;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1262,6 +1282,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C9C9D7C4E41BA2318ED6E595 /* XCRemoteSwiftPackageReference "FluidAudio" */;
 			productName = FluidAudio;
+		};
+		E2E2E2E2E2E2E2E2E2E2E2E2 /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E1E1E1E1E1E1E1E1E1E1E1E1 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
+			productName = MarkdownUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
