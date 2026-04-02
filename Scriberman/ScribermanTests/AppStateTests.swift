@@ -102,7 +102,7 @@ final class AppStateTests: XCTestCase {
         let permissionService = MockPermissionService()
         let services = makeServiceContainer(permissionService: permissionService)
         let appState = AppState(services: services)
-        let recording = RecordingSession(
+        _ = RecordingSession(
             createdAt: .now,
             duration: 5,
             micAudioURL: "/tmp/recording.wav",

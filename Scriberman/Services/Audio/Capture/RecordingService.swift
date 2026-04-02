@@ -55,6 +55,7 @@ actor RecordingService: RecordingServiceProtocol {
     private var appAudioCaptureSession: AppAudioCaptureSession?
     private var pendingError: RecordingError?
     private let liveAudioStreamTuple: (stream: AsyncStream<([Float], AudioSource, Double)>, continuation: AsyncStream<([Float], AudioSource, Double)>.Continuation)
+    // nonisolated(unsafe): written once in init on the actor; read only in deinit; lifetime matches the actor
     nonisolated(unsafe) private var engineConfigurationObserver: NSObjectProtocol?
 
     private var isRecordingValue = false
@@ -202,9 +203,8 @@ actor RecordingService: RecordingServiceProtocol {
                         }
 
                         self?.micStreamer.write(buffer: buffer)
-                        if let samples = self?.extractSamples(from: buffer) {
-                            self?.liveAudioStreamTuple.continuation.yield((samples, .mic, buffer.format.sampleRate))
-                        }
+                        let samples = AudioDownmixer.toMono(buffer: buffer)
+                        self?.liveAudioStreamTuple.continuation.yield((samples, .mic, buffer.format.sampleRate))
                     }
 
                     audioEngine.prepare()
@@ -450,10 +450,6 @@ actor RecordingService: RecordingServiceProtocol {
         self.audioRecorder = recorder
     }
 
-    private func extractSamples(from buffer: AVAudioPCMBuffer) -> [Float] {
-        AudioDownmixer.toMono(buffer: buffer)
-    }
-
     private func isValidTapFormat(_ format: AVAudioFormat) -> Bool {
         format.sampleRate.isFinite && format.sampleRate > 0 && format.channelCount > 0
     }
@@ -533,11 +529,8 @@ actor RecordingService: RecordingServiceProtocol {
 
         do {
             let context = ModelContext(modelContainer)
-            var descriptor = FetchDescriptor<RecordingSession>(
-                predicate: #Predicate { $0.id == sessionID }
-            )
-            descriptor.fetchLimit = 1
-            guard let persistedSession = try context.fetch(descriptor).first else {
+            let descriptor = FetchDescriptor<RecordingSession>()
+            guard let persistedSession = try context.fetch(descriptor).first(where: { $0.id == sessionID }) else {
                 logger.error("Mixdown succeeded but session \(sessionID, privacy: .public) was not found for persistence update.")
                 return
             }

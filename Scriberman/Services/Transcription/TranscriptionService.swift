@@ -86,11 +86,9 @@ actor TranscriptionService: TranscriptionServiceProtocol {
 
     func transcribe(sessionID: UUID, modelContainer: ModelContainer, workspace: Workspace) async throws -> Transcript {
         let context = ModelContext(modelContainer)
-        let predicate = #Predicate<RecordingSession> { $0.id == sessionID }
-        var descriptor = FetchDescriptor<RecordingSession>(predicate: predicate)
-        descriptor.fetchLimit = 1
-        
-        guard let session = try? context.fetch(descriptor).first else {
+        let descriptor = FetchDescriptor<RecordingSession>()
+
+        guard let session = try? context.fetch(descriptor).first(where: { $0.id == sessionID }) else {
             throw TranscriptionError.failedToTranscribe("Session not found for ID \(sessionID)")
         }
 
@@ -129,7 +127,7 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         let (micSegments, micEmbeddings) = try await micResult
         let (appSegments, appEmbeddings) = try await appResult
         
-        let mergedSegments = try await mergeByTimestamp(micSegments + appSegments)
+        let mergedSegments = mergeByTimestamp(micSegments + appSegments)
         let mergedEmbeddings = micEmbeddings.merging(appEmbeddings) { (current, _) in current }
 
         logger.info("Completed transcription for session \(session.id, privacy: .public) with \(mergedSegments.count, privacy: .public) segments")

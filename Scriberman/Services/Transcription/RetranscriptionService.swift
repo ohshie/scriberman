@@ -40,14 +40,14 @@ actor RetranscriptionService {
     func retranscribe(sessionID: UUID, modelContainer: ModelContainer, workspace: Workspace) async {
         let context = ModelContext(modelContainer)
         
-        let recordingPredicate = #Predicate<RecordingSession> { $0.id == sessionID }
-        let importedPredicate = #Predicate<ImportedSession> { $0.id == sessionID }
-        
         var session: (any TranscribableSession)?
-        
-        if let recording = try? context.fetch(FetchDescriptor<RecordingSession>(predicate: recordingPredicate)).first {
+
+        let recordingDescriptor = FetchDescriptor<RecordingSession>()
+        let importedDescriptor = FetchDescriptor<ImportedSession>()
+
+        if let recording = try? context.fetch(recordingDescriptor).first(where: { $0.id == sessionID }) {
             session = recording
-        } else if let imported = try? context.fetch(FetchDescriptor<ImportedSession>(predicate: importedPredicate)).first {
+        } else if let imported = try? context.fetch(importedDescriptor).first(where: { $0.id == sessionID }) {
             session = imported
         }
         

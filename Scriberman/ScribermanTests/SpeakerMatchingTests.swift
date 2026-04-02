@@ -33,7 +33,7 @@ struct SpeakerMatchingTests {
 
     @Test("Match speakers with close embedding within threshold")
     func matchSpeakersCloseMatch() async throws {
-        var aliceEmbedding: [Float] = Array(repeating: 0.1, count: 192)
+        let aliceEmbedding: [Float] = Array(repeating: 0.1, count: 192)
         try await store.enrollSpeaker(name: "Alice", embedding: aliceEmbedding)
 
         var closeEmbedding = aliceEmbedding

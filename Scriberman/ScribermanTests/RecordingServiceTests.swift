@@ -4,6 +4,12 @@ import XCTest
 @testable import Scriberman
 
 final class RecordingServiceTests: XCTestCase {
+    private func fetchRecordingSession(id: UUID, from context: ModelContext) throws -> RecordingSession {
+        var descriptor = FetchDescriptor<RecordingSession>()
+        descriptor.fetchLimit = 1_000
+        return try XCTUnwrap(context.fetch(descriptor).first(where: { $0.id == id }))
+    }
+
     func testStartRecordingUsesTmpFolderMicPath() {
         let workspace = makeWorkspace()
         let urls = RecordingService.recordingFileURLs(in: workspace)
@@ -118,9 +124,7 @@ final class RecordingServiceTests: XCTestCase {
         )
 
         let sessionID = session.id
-        var descriptor = FetchDescriptor<RecordingSession>(predicate: #Predicate { $0.id == sessionID })
-        descriptor.fetchLimit = 1
-        let persisted = try XCTUnwrap(context.fetch(descriptor).first)
+        let persisted = try fetchRecordingSession(id: sessionID, from: context)
         XCTAssertNil(persisted.mixdownURL)
         XCTAssertEqual(persisted.status, .recorded)
     }
@@ -191,9 +195,8 @@ final class RecordingServiceTests: XCTestCase {
         let sessionID = await service.stopRecording()
         XCTAssertNotNil(sessionID)
         let ctx = ModelContext(container)
-        let predicate = #Predicate<RecordingSession> { $0.id == sessionID! }
-        let fetched = try ctx.fetch(FetchDescriptor<RecordingSession>(predicate: predicate)).first
-        XCTAssertEqual(fetched?.title, customTitle)
+        let fetched = try fetchRecordingSession(id: try XCTUnwrap(sessionID), from: ctx)
+        XCTAssertEqual(fetched.title, customTitle)
     }
 
     func testStopRecordingFallbacksToDefaultTitleWhenNoPendingTitle() async throws {
@@ -223,9 +226,8 @@ final class RecordingServiceTests: XCTestCase {
         let sessionID = await service.stopRecording()
         XCTAssertNotNil(sessionID)
         let ctx = ModelContext(container)
-        let predicate = #Predicate<RecordingSession> { $0.id == sessionID! }
-        let fetched = try ctx.fetch(FetchDescriptor<RecordingSession>(predicate: predicate)).first
-        XCTAssertTrue(fetched?.title.hasPrefix("Recording ") ?? false)
+        let fetched = try fetchRecordingSession(id: try XCTUnwrap(sessionID), from: ctx)
+        XCTAssertTrue(fetched.title.hasPrefix("Recording "))
     }
 
     private func makeWorkspace() -> Workspace {

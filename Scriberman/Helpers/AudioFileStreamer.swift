@@ -1,7 +1,8 @@
 import AVFoundation
 
 /// A thread-safe helper for writing audio buffers to a file and tracking peak levels.
-final class AudioFileStreamer: Sendable {
+/// @unchecked Sendable: mutable state is synchronized via stateLock and the internal serial queue.
+final class AudioFileStreamer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.scriberman.audio-file-streamer", qos: .userInitiated)
     private let stateLock = NSLock()
     

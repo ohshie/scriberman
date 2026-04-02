@@ -166,7 +166,7 @@ struct NewSessionPanelView: View {
                         .padding(.vertical, 8)
                     }
                     .frame(height: 120)
-                    .onChange(of: viewModel.liveSegments.count) { _ in
+                    .onChange(of: viewModel.liveSegments.count) {
                         if let last = viewModel.liveSegments.last {
                             proxy.scrollTo(last.startTime, anchor: .bottom)
                         }
