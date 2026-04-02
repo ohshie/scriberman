@@ -73,7 +73,7 @@ final class JobsViewModelTests: XCTestCase {
         XCTAssertNil(session.errorMessage)
     }
 
-    func testTranscribeSkipsNonRecordedSessions() throws {
+    func testTranscribeSkipsNonRecordedSessions() async throws {
         let session = makeSession(status: .done)
         context.insert(session)
         try context.save()
@@ -81,11 +81,7 @@ final class JobsViewModelTests: XCTestCase {
         viewModel.transcribe(session: session, context: context)
 
         // Give asynchronous work chance to start if it was incorrectly queued.
-        let expectation = expectation(description: "wait")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: 1)
+        try await Task.sleep(for: .milliseconds(100))
 
         XCTAssertEqual(session.status, .done)
         XCTAssertNil(session.errorMessage)
