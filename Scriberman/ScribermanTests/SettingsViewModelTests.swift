@@ -50,7 +50,6 @@ final class SettingsViewModelTests: XCTestCase {
             if case .downloading = phase { return true }
             return false
         })
-        XCTAssertTrue(observed.contains(.installing))
         XCTAssertTrue(observed.contains(.warmingUp))
         XCTAssertEqual(viewModel.bundlePhase, .allReady)
 
@@ -85,6 +84,9 @@ final class SettingsViewModelTests: XCTestCase {
         default:
             XCTFail("Expected .error phase, got \(viewModel.bundlePhase)")
         }
+
+        XCTAssertEqual(viewModel.modelStates[.vadSilero], .error)
+        XCTAssertEqual(viewModel.currentModelStatusText, "Installed")
     }
 
     func testRefreshSetsBundlePhaseForReadyAndMissingStates() async throws {
@@ -193,8 +195,6 @@ private actor MockModelInstallService: ModelInstallServicing {
             throw MockError.installFailed(group)
         }
 
-        progress?(.installing)
-        await Task.yield()
         progress?(.ready)
         states[group] = .ready
 

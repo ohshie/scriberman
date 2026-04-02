@@ -5,7 +5,6 @@ enum BundleInstallPhase: Equatable {
     case idle
     case allReady
     case downloading(label: String, progress: Double)
-    case installing
     case warmingUp
     case error(String)
 }
@@ -84,7 +83,7 @@ final class SettingsViewModel {
             return "Installed"
         case .missing:
             return "Not selected"
-        case .downloading, .installing:
+        case .downloading:
             return "Installing"
         case .error:
             return "Error"
@@ -105,10 +104,12 @@ final class SettingsViewModel {
             (.offlineDiarization, "Downloading Diarizer…", (0.8 / 3.0) * 2.0)
         ]
         let segmentWidth = 0.8 / 3.0
+        var activeGroup: ModelGroup?
 
         do {
             for item in groupsInOrder {
                 let group = item.group
+                activeGroup = group
                 bundlePhase = .downloading(label: item.label, progress: item.start)
                 modelStates[group] = .downloading
 
@@ -131,9 +132,7 @@ final class SettingsViewModel {
                 modelStates[group] = .ready
                 modelStatusMessages[group] = nil
             }
-
-            bundlePhase = .installing
-            await Task.yield()
+            activeGroup = nil
 
             if let workspace = await workspaceService.currentWorkspace() {
                 bundlePhase = .warmingUp
@@ -142,13 +141,17 @@ final class SettingsViewModel {
 
             bundlePhase = .allReady
         } catch {
+            if let activeGroup {
+                modelStates[activeGroup] = .error
+                modelStatusMessages[activeGroup] = error.localizedDescription
+            }
             bundlePhase = .error(error.localizedDescription)
         }
     }
 
     private static func isInProgress(_ phase: BundleInstallPhase) -> Bool {
         switch phase {
-        case .downloading, .installing, .warmingUp:
+        case .downloading, .warmingUp:
             return true
         default:
             return false
