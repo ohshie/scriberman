@@ -12,7 +12,7 @@ struct SettingsView: View {
     }
 
     var viewModel: SettingsViewModel
-    @EnvironmentObject private var appState: AppState
+    @Environment(AppState.self) private var appState
     @Environment(AIProviderService.self) private var aiProviderService
     @State private var selectedTab: SettingsTab = .general
     @State private var isModelsExpanded = false

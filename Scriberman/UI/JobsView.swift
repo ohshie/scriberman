@@ -6,7 +6,7 @@ struct JobsView: View {
     let items: [JobsViewModel.SessionListItem]
     @Binding var selection: JobsViewModel.SessionListItem?
 
-    @EnvironmentObject private var appState: AppState
+    @Environment(AppState.self) private var appState
     @Environment(\.modelContext) private var modelContext
     @State private var showClearAllConfirmation = false
 

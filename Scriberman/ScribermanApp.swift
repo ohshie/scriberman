@@ -4,27 +4,23 @@ import SwiftData
 
 @main
 struct ScribermanApp: App {
-    @StateObject private var appState: AppState
-    private let modelContainer: ModelContainer
-
-    init() {
+    private static let appModelContainer: ModelContainer = {
         do {
-            let modelContainer = try ModelContainer(for: RecordingSession.self, ImportedSession.self, SpeakerProfile.self)
-            self.modelContainer = modelContainer
-            _appState = StateObject(
-                wrappedValue: AppState(
-                    services: ServiceContainer.live(modelContainer: modelContainer)
-                )
-            )
+            return try ModelContainer(for: RecordingSession.self, ImportedSession.self, SpeakerProfile.self)
         } catch {
             fatalError("Failed to initialize app model container: \(error.localizedDescription)")
         }
-    }
+    }()
+
+    @State private var appState = AppState(
+        services: ServiceContainer.live(modelContainer: ScribermanApp.appModelContainer)
+    )
+    private let modelContainer = ScribermanApp.appModelContainer
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(appState)
+                .environment(appState)
                 .environment(appState.aiProviderService)
                 .task {
                     await appState.bootstrapWorkspace()
@@ -37,7 +33,7 @@ struct ScribermanApp: App {
 
         Settings {
             SettingsView(viewModel: appState.settingsViewModel)
-                .environmentObject(appState)
+                .environment(appState)
                 .environment(appState.aiProviderService)
         }
     }
