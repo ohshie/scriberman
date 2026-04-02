@@ -3,95 +3,164 @@ import MarkdownUI
 import SwiftUI
 
 struct AITransformationDetailView: View {
-    @State private var transformations: [AITransformation]
-    @State private var selectedID: UUID
-    @State private var isEditing = false
-    @State private var editText = ""
+    let session: any TranscribableSession
 
-    init(transformations: [AITransformation], initialTransformationID: UUID) {
-        _transformations = State(initialValue: transformations)
-        _selectedID = State(initialValue: initialTransformationID)
-    }
+    @Binding var selectedTransformationID: UUID?
 
-    private var selectedTransformation: AITransformation? {
-        transformations.first(where: { $0.id == selectedID })
+    @State private var viewModel: TranscriptDetailViewModel
+    @State private var showRawMarkdown = false
+
+    init(
+        session: any TranscribableSession,
+        aiProviderService: AIProviderService,
+        selectedTransformationID: Binding<UUID?>
+    ) {
+        self.session = session
+        self._selectedTransformationID = selectedTransformationID
+        _viewModel = State(initialValue: TranscriptDetailViewModel(session: session, aiProviderService: aiProviderService))
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if transformations.count > 1 {
-                Picker("History", selection: $selectedID) {
-                    ForEach(transformations) { transformation in
-                        Text(transformation.historyLabel).tag(transformation.id)
-                    }
-                }
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                controlsBar
 
-            if isEditing {
-                TextEditor(text: $editText)
-                    .font(.body)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if viewModel.prompts.isEmpty {
+                    Text("Add prompts in Settings to enable transformations.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                if viewModel.shouldWarnAboutTranscriptLength {
+                    Text("Transcript is longer than 40,000 characters. The model may fail due to context limits.")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
+
+                if transformations.count > 1 {
+                    Picker("History", selection: $selectedTransformationID) {
+                        ForEach(transformations) { transformation in
+                            Text(transformation.historyLabel).tag(Optional(transformation.id))
+                        }
+                    }
+                    .disabled(viewModel.isRunningTransformation)
+                }
+
+                if let transformationErrorMessage = viewModel.transformationErrorMessage {
+                    Text(transformationErrorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+
+                transformationContent
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
+        }
+        .safeAreaInset(edge: .top) {
+            Toggle(isOn: $showRawMarkdown) {
+                Text("Raw Markdown")
+                    .font(.subheadline.weight(.medium))
+            }
+            .toggleStyle(.switch)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .background(.bar)
+        }
+        .task {
+            viewModel.loadPrompts()
+            syncSelectionWithAvailableTransformations()
+        }
+        .onChange(of: selectedTransformationID) { _, newID in
+            viewModel.selectedTransformationID = newID
+        }
+        .onChange(of: viewModel.selectedTransformationID) { _, newID in
+            selectedTransformationID = newID
+        }
+        .onChange(of: transformations.map(\.id)) { _, _ in
+            syncSelectionWithAvailableTransformations()
+        }
+    }
+
+    @ViewBuilder
+    private var transformationContent: some View {
+        if viewModel.isRunningTransformation {
+            SkeletonView()
+                .frame(height: 180)
+        } else if let selectedTransformation {
+            if showRawMarkdown {
+                Text(selectedTransformation.resultText)
+                    .font(.body.monospaced())
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             } else {
-                ScrollView {
-                    Markdown(selectedTransformation?.resultText ?? "")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .padding(20)
-        .frame(minWidth: 640, minHeight: 420)
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    copyCurrentTransformation()
-                } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
-                }
-
-                if isEditing {
-                    Button("Cancel") {
-                        isEditing = false
-                    }
-
-                    Button("Done") {
-                        saveEdit()
-                    }
-                } else {
-                    Button("Edit") {
-                        beginEditing()
-                    }
-                    .disabled(selectedTransformation == nil)
-                }
-            }
-        }
-        .onChange(of: selectedID) { _, _ in
-            if isEditing {
-                editText = selectedTransformation?.resultText ?? ""
+                Markdown(selectedTransformation.resultText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
             }
         }
     }
 
-    private func beginEditing() {
-        editText = selectedTransformation?.resultText ?? ""
-        isEditing = true
+    private var controlsBar: some View {
+        HStack(spacing: 12) {
+            Picker("Prompt", selection: $viewModel.selectedPromptID) {
+                ForEach(viewModel.prompts) { prompt in
+                    Text(prompt.name).tag(Optional(prompt.id))
+                }
+            }
+            .disabled(viewModel.prompts.isEmpty || viewModel.isRunningTransformation)
+            .frame(maxWidth: 320)
+
+            Button(viewModel.runButtonTitle) {
+                Task {
+                    await viewModel.runTransformation()
+                    syncSelectionWithAvailableTransformations()
+                }
+            }
+            .disabled(viewModel.canRunTransformation == false)
+
+            Spacer(minLength: 0)
+        }
     }
 
-    private func saveEdit() {
-        guard let index = transformations.firstIndex(where: { $0.id == selectedID }) else {
-            isEditing = false
-            return
+    private var transformations: [AITransformation] {
+        viewModel.availableTransformations
+    }
+
+    private var selectedTransformation: AITransformation? {
+        if let selectedTransformationID,
+           let selected = transformations.first(where: { $0.id == selectedTransformationID }) {
+            return selected
         }
 
-        transformations[index].resultText = editText
-        isEditing = false
+        return transformations.last
     }
 
-    private func copyCurrentTransformation() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(selectedTransformation?.resultText ?? "", forType: .string)
+    private func syncSelectionWithAvailableTransformations() {
+        viewModel.refreshSelectedTransformation()
+        selectedTransformationID = viewModel.selectedTransformationID
+    }
+
+    @ToolbarContentBuilder
+    static func toolbarActions(
+        onCopy: @escaping () -> Void,
+        onExport: @escaping () -> Void
+    ) -> some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button {
+                onCopy()
+            } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+            }
+
+            Button {
+                onExport()
+            } label: {
+                Label("Export", systemImage: "square.and.arrow.up")
+            }
+        }
     }
 }
 
