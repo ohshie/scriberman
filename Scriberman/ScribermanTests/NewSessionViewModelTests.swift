@@ -99,6 +99,18 @@ final class NewSessionViewModelTests: XCTestCase {
         XCTAssertEqual(audioDeviceService.incrementUsageCalls, ["uid-7"])
     }
 
+    func testStartRecordingIncrementsUsageForSelectedApp() async {
+        permissionService.micStatus = .granted
+        permissionService.screenRecordingStatus = .granted
+        let app = CapturedApp(bundleID: "com.apple.Music", name: "Music", pid: 123, icon: nil)
+        appAudioService.runningApps = [app]
+        viewModel.selectApp(app)
+
+        await viewModel.startRecording(title: "Session", context: context)
+
+        XCTAssertEqual(appAudioService.incrementUsageCalls, ["com.apple.Music"])
+    }
+
     func testStartRecordingPassesTitleToService() async {
         permissionService.micStatus = .granted
         let customTitle = "Meeting with Team"
@@ -161,6 +173,40 @@ final class NewSessionViewModelTests: XCTestCase {
 
         XCTAssertEqual(permissionService.requestScreenRecordingCalls, 1)
         XCTAssertFalse(viewModel.recordAppAudio)
+    }
+
+    func testSelectAppSetsSelectedAppAndEnablesAppAudioWhenPermissionGranted() {
+        permissionService.screenRecordingStatus = .granted
+        let app = CapturedApp(bundleID: "com.apple.Music", name: "Music", pid: 123, icon: nil)
+        appAudioService.runningApps = [app]
+
+        viewModel.selectApp(app)
+
+        XCTAssertEqual(viewModel.selectedApp?.bundleID, "com.apple.Music")
+        XCTAssertTrue(viewModel.recordAppAudio)
+    }
+
+    func testSelectAppNilDisablesAppAudioAndClearsSelection() {
+        permissionService.screenRecordingStatus = .granted
+        let app = CapturedApp(bundleID: "com.apple.Music", name: "Music", pid: 123, icon: nil)
+        appAudioService.runningApps = [app]
+        viewModel.selectApp(app)
+
+        viewModel.selectApp(nil)
+
+        XCTAssertFalse(viewModel.recordAppAudio)
+        XCTAssertNil(viewModel.selectedApp)
+    }
+
+    func testSelectAppRequestsPermissionWhenNotGranted() {
+        permissionService.screenRecordingStatus = .denied
+        let app = CapturedApp(bundleID: "com.apple.Music", name: "Music", pid: 123, icon: nil)
+
+        viewModel.selectApp(app)
+
+        XCTAssertEqual(permissionService.requestScreenRecordingCalls, 1)
+        XCTAssertFalse(viewModel.recordAppAudio)
+        XCTAssertNil(viewModel.selectedApp)
     }
 
     func testMicrophonePermissionPromptStateTracksMicStatus() {
@@ -304,6 +350,11 @@ private final class MockNewSessionAppAudioService: AppAudioServiceProtocol {
     var runningApps: [CapturedApp] = []
     var selectedApp: CapturedApp?
     var refreshCalls = 0
+    var incrementUsageCalls: [String] = []
+
+    func incrementUsage(for bundleID: String) {
+        incrementUsageCalls.append(bundleID)
+    }
 
     func refreshRunningApps() {
         refreshCalls += 1

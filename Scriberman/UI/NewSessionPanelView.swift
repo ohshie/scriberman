@@ -197,30 +197,14 @@ struct NewSessionPanelView: View {
     }
 
     private func controlsSection(isInteractive: Bool) -> some View {
-        @Bindable var bindableViewModel = viewModel
-
         return VStack(spacing: 0) {
             microphoneMenu
                 .disabled(!isInteractive)
 
             Divider()
 
-            HStack(spacing: 12) {
-                Label("Record app audio", systemImage: "waveform")
-                Spacer(minLength: 0)
-                Toggle("", isOn: $bindableViewModel.recordAppAudio)
-                    .labelsHidden()
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
-            .disabled(!isInteractive || !viewModel.appAudioToggleEnabled)
-
-            if viewModel.showAppPicker {
-                Divider()
-                appPicker
-                    .disabled(!isInteractive)
-            }
+            appAudioMenu
+                .disabled(!isInteractive)
         }
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -256,35 +240,72 @@ struct NewSessionPanelView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(TapGesture().onEnded {
+            viewModel.refreshAudioDevicesOnPanelExpanded()
+        })
     }
 
-    private var appPicker: some View {
+    private var appAudioMenu: some View {
         Menu {
+            Button("Off") {
+                viewModel.selectApp(nil)
+            }
+
+            Divider()
+
             ForEach(viewModel.runningApps) { app in
                 Button {
-                    viewModel.selectedApp = app
+                    viewModel.selectApp(app)
                 } label: {
-                    if viewModel.selectedApp?.bundleID == app.bundleID {
-                        Label(app.name, systemImage: "checkmark")
+                    if let appIcon = app.icon {
+                        Label {
+                            Text(app.name)
+                        } icon: {
+                            Image(nsImage: appIcon)
+                        }
                     } else {
-                        Text(app.name)
+                        Label {
+                            Text(app.name)
+                        } icon: {
+                            Image(systemName: "app")
+                        }
                     }
                 }
             }
         } label: {
             HStack(spacing: 12) {
-                Label(viewModel.selectedApp?.name ?? "Choose app", systemImage: "app")
+                if let selectedApp = viewModel.selectedApp {
+                    HStack(spacing: 8) {
+                        if let icon = selectedApp.icon {
+                            Image(nsImage: icon)
+                                .resizable()
+                                .interpolation(.high)
+                                .frame(width: 16, height: 16)
+                                .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                        } else {
+                            Image(systemName: "app")
+                                .frame(width: 16, height: 16)
+                        }
+
+                        Text(selectedApp.name)
+                    }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Label("Select app to record", systemImage: "waveform")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .padding(.leading, 20)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(TapGesture().onEnded {
+            viewModel.refreshApps()
+        })
     }
 
     private var sessionNameEditorCard: some View {
