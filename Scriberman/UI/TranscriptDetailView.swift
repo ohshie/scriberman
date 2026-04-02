@@ -154,9 +154,9 @@ struct TranscriptDetailView: View {
                 SkeletonView()
                     .frame(height: 180)
             } else if let selectedTransformation = viewModel.selectedTransformation {
-                sectionCard(title: selectedTransformation.promptName, text: selectedTransformation.resultText)
+                SectionCard(title: selectedTransformation.promptName, text: selectedTransformation.resultText)
             } else {
-                sectionCard(title: "Result", text: "Run a transformation to see AI output here.")
+                SectionCard(title: "Result", text: "Run a transformation to see AI output here.")
             }
         }
     }
@@ -166,17 +166,17 @@ struct TranscriptDetailView: View {
             GridItem(.flexible(), alignment: .leading),
             GridItem(.flexible(), alignment: .leading)
         ], alignment: .leading, spacing: 16) {
-            metadataCell(
+            MetadataCell(
                 title: "Application",
                 value: viewModel.applicationName ?? "—",
                 systemImage: viewModel.applicationName == nil ? "mic.fill" : "app.fill"
             )
-            metadataCell(
+            MetadataCell(
                 title: "Window",
                 value: "—",
                 systemImage: "macwindow"
             )
-            metadataCell(
+            MetadataCell(
                 title: "Duration",
                 value: TimeFormatter.format(seconds: Float(session.duration)),
                 systemImage: "clock"
@@ -204,42 +204,6 @@ struct TranscriptDetailView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(viewModel.finalTranscriptText, forType: .string)
-    }
-
-    @ViewBuilder
-    private func metadataCell(title: String, value: String, systemImage: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .foregroundStyle(.tint)
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-
-            Text(value)
-                .font(.body)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    @ViewBuilder
-    private func sectionCard(title: String, text: String) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(title)
-                .font(.title3.weight(.semibold))
-
-            Text(text.isEmpty ? "No transcript available." : text)
-                .font(.body)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 }
 

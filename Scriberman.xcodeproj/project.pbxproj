@@ -86,6 +86,9 @@
 		79BE35272F7E71F200DB542F /* PromptManagementViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35262F7E71F200DB542F /* PromptManagementViewModel.swift */; };
 		79BE35292F7E741E00DB542F /* TranscriptDetailViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35282F7E741E00DB542F /* TranscriptDetailViewModelTests.swift */; };
 		79BE352B2F7E742100DB542F /* PromptManagementViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE352A2F7E742100DB542F /* PromptManagementViewModelTests.swift */; };
+		79BE352D2F7E7E7500DB542F /* ConnectionStatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE352C2F7E7E7500DB542F /* ConnectionStatusBadge.swift */; };
+		79BE352F2F7E7E7C00DB542F /* SectionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE352E2F7E7E7C00DB542F /* SectionCard.swift */; };
+		79BE35312F7E7E8100DB542F /* MetadataCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35302F7E7E8100DB542F /* MetadataCell.swift */; };
 		79DCE41A2F77BC3D0024DC26 /* TranscriptionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */; };
 		79DCE41D2F77CC1E0024DC26 /* PermissionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */; };
 		79DCE41F2F77CDA90024DC26 /* PermissionsOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41E2F77CDA90024DC26 /* PermissionsOnboardingView.swift */; };
@@ -235,6 +238,9 @@
 		79BE35262F7E71F200DB542F /* PromptManagementViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptManagementViewModel.swift; sourceTree = "<group>"; };
 		79BE35282F7E741E00DB542F /* TranscriptDetailViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptDetailViewModelTests.swift; sourceTree = "<group>"; };
 		79BE352A2F7E742100DB542F /* PromptManagementViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptManagementViewModelTests.swift; sourceTree = "<group>"; };
+		79BE352C2F7E7E7500DB542F /* ConnectionStatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStatusBadge.swift; sourceTree = "<group>"; };
+		79BE352E2F7E7E7C00DB542F /* SectionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionCard.swift; sourceTree = "<group>"; };
+		79BE35302F7E7E8100DB542F /* MetadataCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataCell.swift; sourceTree = "<group>"; };
 		79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionServiceTests.swift; sourceTree = "<group>"; };
 		79DCE41B2F77CC0B0024DC26 /* Scriberman.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = Scriberman.xctestplan; sourceTree = "<group>"; };
 		79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionService.swift; sourceTree = "<group>"; };
@@ -447,6 +453,9 @@
 				7975716B2F7983A7006AEFB6 /* TranscriptPreviewView.swift */,
 				7975716D2F7983AC006AEFB6 /* TranscriptStudyView.swift */,
 				797571792F79CB17006AEFB6 /* SpeakerManagementView.swift */,
+				79BE352C2F7E7E7500DB542F /* ConnectionStatusBadge.swift */,
+				79BE352E2F7E7E7C00DB542F /* SectionCard.swift */,
+				79BE35302F7E7E8100DB542F /* MetadataCell.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -854,6 +863,7 @@
 				79BE35252F7E6EF700DB542F /* TranscriptDetailViewModel.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CC /* WaveformView.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CD /* RecordingSessionRow.swift in Sources */,
+				79BE352F2F7E7E7C00DB542F /* SectionCard.swift in Sources */,
 				D1A2B3C4D5E6F708192A3B4E /* StatusTagView.swift in Sources */,
 				791009552F78328500225294 /* M4AChannelExtractor.swift in Sources */,
 				79E005E22F767E5300D3EAD9 /* AggregateDeviceBuilder.swift in Sources */,
@@ -866,6 +876,7 @@
 				3428B3A8DAFDF0891C460E3C /* ModelGroup.swift in Sources */,
 				7987325C2F7B157200570A03 /* LiveTranscriptionService.swift in Sources */,
 				798732882F7DA3ED00570A03 /* SpeakerMatcher.swift in Sources */,
+				79BE35312F7E7E8100DB542F /* MetadataCell.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4D0 /* TimeFormatter.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4C5 /* RecordingSession.swift in Sources */,
 				A1B2C3D4E5F60718293A4B5C /* PendingSession.swift in Sources */,
@@ -875,6 +886,7 @@
 				2A2B3C4D5E6F708192A3B4C9 /* TranscriptSpeaker.swift in Sources */,
 				517B8995017388C7FC8E3644 /* ModelsSettingsView.swift in Sources */,
 				0A81963A9F600E19F5F698ED /* ModelsSettingsScreen.swift in Sources */,
+				79BE352D2F7E7E7500DB542F /* ConnectionStatusBadge.swift in Sources */,
 				C8BE5BFB9362549C53823350 /* TokenStitcher.swift in Sources */,
 				797571782F79C922006AEFB6 /* MemoryBoundAudioBuffer.swift in Sources */,
 				791009652F785B5900225294 /* ImportedSessionRow.swift in Sources */,
