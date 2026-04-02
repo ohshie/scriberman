@@ -1,6 +1,6 @@
 import Foundation
 
-final class MemoryBoundAudioBuffer {
+final class MemoryBoundAudioBuffer: Sendable {
     private enum Storage {
         case array([Float])
         case mapped(Data)
