@@ -12,8 +12,8 @@ actor SpeakerEmbeddingStore {
     }
 
     func fetchAll() throws -> [SpeakerProfile] {
-        let descriptor = FetchDescriptor<SpeakerProfile>(sortBy: [SortDescriptor(\.lastSeen, order: .reverse)])
-        return try context.fetch(descriptor)
+        let descriptor = FetchDescriptor<SpeakerProfile>()
+        return try context.fetch(descriptor).sorted(by: { $0.lastSeen > $1.lastSeen })
     }
 
     func save(_ profile: SpeakerProfile) throws {
@@ -22,8 +22,8 @@ actor SpeakerEmbeddingStore {
     }
 
     func updateProfile(id: UUID) throws {
-        let descriptor = FetchDescriptor<SpeakerProfile>(predicate: #Predicate<SpeakerProfile> { $0.id == id })
-        if let profile = try context.fetch(descriptor).first {
+        let descriptor = FetchDescriptor<SpeakerProfile>()
+        if let profile = try context.fetch(descriptor).first(where: { $0.id == id }) {
             profile.lastSeen = .now
             try context.save()
         }
@@ -38,8 +38,8 @@ actor SpeakerEmbeddingStore {
     }
 
     func findProfile(byID id: UUID) throws -> SpeakerProfile? {
-        let descriptor = FetchDescriptor<SpeakerProfile>(predicate: #Predicate<SpeakerProfile> { $0.id == id })
-        return try context.fetch(descriptor).first
+        let descriptor = FetchDescriptor<SpeakerProfile>()
+        return try context.fetch(descriptor).first(where: { $0.id == id })
     }
 
     /// Finds the stored `SpeakerProfile` whose embedding has the highest cosine similarity

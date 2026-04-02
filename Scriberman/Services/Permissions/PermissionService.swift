@@ -32,8 +32,8 @@ final class PermissionService: PermissionServiceProtocol {
     private let userDefaults: UserDefaults
     private let notificationCenter: NotificationCenter
     private let logger = Logger(subsystem: "Scriberman", category: "PermissionService")
-    // nonisolated(unsafe): written once in init, removed in deinit; never mutated concurrently
-    nonisolated(unsafe) private var appAudioCaptureAccessDeniedObserver: NSObjectProtocol?
+    // Written once in init and removed in deinit; not mutated elsewhere.
+    private var appAudioCaptureAccessDeniedObserver: NSObjectProtocol?
 
     init(
         microphonePermissions: MicrophonePermissionProviding = AVCaptureMicrophonePermissionProvider(),
@@ -61,7 +61,7 @@ final class PermissionService: PermissionServiceProtocol {
         checkAll()
     }
 
-    deinit {
+    @MainActor deinit {
         if let appAudioCaptureAccessDeniedObserver {
             notificationCenter.removeObserver(appAudioCaptureAccessDeniedObserver)
         }

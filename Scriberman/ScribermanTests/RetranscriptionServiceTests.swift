@@ -6,8 +6,39 @@ import Foundation
 @Suite("RetranscriptionService Tests")
 @MainActor
 struct RetranscriptionServiceTests {
+    private final class LockedValue<T>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: T
+
+        init(_ value: T) {
+            self.value = value
+        }
+
+        func set(_ newValue: T) {
+            lock.lock()
+            value = newValue
+            lock.unlock()
+        }
+
+        func get() -> T {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
+    }
+
     private let container: ModelContainer
     private let context: ModelContext
+
+    private func fetchRecordingSession(id: UUID, in modelContainer: ModelContainer) throws -> RecordingSession? {
+        let verifyContext = ModelContext(modelContainer)
+        return try verifyContext.fetch(FetchDescriptor<RecordingSession>()).first(where: { $0.id == id })
+    }
+
+    private func fetchImportedSession(id: UUID, in modelContainer: ModelContainer) throws -> ImportedSession? {
+        let verifyContext = ModelContext(modelContainer)
+        return try verifyContext.fetch(FetchDescriptor<ImportedSession>()).first(where: { $0.id == id })
+    }
 
     init() throws {
         self.container = try ModelContainer(
@@ -82,8 +113,7 @@ struct RetranscriptionServiceTests {
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()))
         await service.retranscribe(sessionID: sessionID, modelContainer: container, workspace: workspace)
 
-        let verifyContext = ModelContext(container)
-        let fetched = try verifyContext.fetch(FetchDescriptor<RecordingSession>(predicate: #Predicate { $0.id == sessionID })).first
+        let fetched = try fetchRecordingSession(id: sessionID, in: container)
         #expect(fetched?.status == .done)
         #expect(fetched?.retranscript?.segments.map(\.text) == ["app line", "mic line"])
         #expect(fetched?.transcript?.fullText == "original")
@@ -129,8 +159,7 @@ struct RetranscriptionServiceTests {
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()))
         await service.retranscribe(sessionID: sessionID, modelContainer: container, workspace: workspace)
 
-        let verifyContext = ModelContext(container)
-        let fetched = try verifyContext.fetch(FetchDescriptor<RecordingSession>(predicate: #Predicate { $0.id == sessionID })).first
+        let fetched = try fetchRecordingSession(id: sessionID, in: container)
         #expect(fetched?.status == .done)
         #expect(fetched?.retranscript?.segments.count == 1)
         #expect(fetched?.retranscript?.segments.first?.audioSource == .mic)
@@ -156,8 +185,7 @@ struct RetranscriptionServiceTests {
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()))
         await service.retranscribe(sessionID: sessionID, modelContainer: container, workspace: workspace)
 
-        let verifyContext = ModelContext(container)
-        let fetched = try verifyContext.fetch(FetchDescriptor<RecordingSession>(predicate: #Predicate { $0.id == sessionID })).first
+        let fetched = try fetchRecordingSession(id: sessionID, in: container)
         #expect(fetched?.status == .error("No mixdown available for retranscription"))
         #expect(fetched?.retranscript == nil)
     }
@@ -201,8 +229,7 @@ struct RetranscriptionServiceTests {
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()))
         await service.retranscribe(sessionID: sessionID, modelContainer: container, workspace: workspace)
 
-        let verifyContext = ModelContext(container)
-        let fetched = try verifyContext.fetch(FetchDescriptor<RecordingSession>(predicate: #Predicate { $0.id == sessionID })).first
+        let fetched = try fetchRecordingSession(id: sessionID, in: container)
         if case .error(let message) = fetched?.status {
             #expect(message == "Forced extraction failure")
         } else {
@@ -214,11 +241,11 @@ struct RetranscriptionServiceTests {
     @Test("Imported session retranscription uses mono extraction")
     func retranscribeImportedSession() async throws {
         let transcriptionService = TranscriptionService()
-        var capturedIsStereo: Bool?
+        let capturedIsStereo = LockedValue<Bool?>(nil)
         let service = RetranscriptionService(
             transcriptionService: transcriptionService,
             extractSamples: { _, isStereo in
-                capturedIsStereo = isStereo
+                capturedIsStereo.set(isStereo)
                 return (mic: [0.1, 0.2], app: nil)
             },
             prepareModelsHandler: { _ in },
@@ -252,9 +279,8 @@ struct RetranscriptionServiceTests {
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()))
         await service.retranscribe(sessionID: sessionID, modelContainer: container, workspace: workspace)
 
-        #expect(capturedIsStereo == false)
-        let verifyContext = ModelContext(container)
-        let fetched = try verifyContext.fetch(FetchDescriptor<ImportedSession>(predicate: #Predicate { $0.id == sessionID })).first
+        #expect(capturedIsStereo.get() == false)
+        let fetched = try fetchImportedSession(id: sessionID, in: container)
         #expect(fetched?.status == .done)
         #expect(fetched?.retranscript?.segments.first?.text == "imported")
     }

@@ -324,10 +324,8 @@ final class NewSessionViewModel {
         
         var fetchedSession: RecordingSession?
         if let sessionID = sessionID {
-            let predicate = #Predicate<RecordingSession> { $0.id == sessionID }
-            var descriptor = FetchDescriptor<RecordingSession>(predicate: predicate)
-            descriptor.fetchLimit = 1
-            fetchedSession = try? context.fetch(descriptor).first
+            let descriptor = FetchDescriptor<RecordingSession>()
+            fetchedSession = try? context.fetch(descriptor).first(where: { $0.id == sessionID })
         }
         
         guard let session = fetchedSession else {
@@ -436,7 +434,7 @@ final class NewSessionViewModel {
 
         // Pipeline: results -> UI
         Task {
-            for await segment in liveTranscriptionService.transcriptStream {
+            for await segment in await liveTranscriptionService.transcriptStream {
                 await MainActor.run {
                     updateLiveSegments(with: segment)
                 }

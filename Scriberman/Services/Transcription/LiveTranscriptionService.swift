@@ -38,9 +38,9 @@ actor LiveTranscriptionService {
     // Value: (embedding, wasMatched, matchedProfileID)
     var sessionSpeakers: [String: (embedding: [Float], wasMatched: Bool, matchedProfileID: UUID?)] = [:]
 
-    nonisolated(unsafe) private let resultsTuple: (stream: AsyncStream<TranscriptSegment>, continuation: AsyncStream<TranscriptSegment>.Continuation)
+    private let resultsTuple: (stream: AsyncStream<TranscriptSegment>, continuation: AsyncStream<TranscriptSegment>.Continuation)
 
-    nonisolated var transcriptStream: AsyncStream<TranscriptSegment> {
+    var transcriptStream: AsyncStream<TranscriptSegment> {
         resultsTuple.stream
     }
 

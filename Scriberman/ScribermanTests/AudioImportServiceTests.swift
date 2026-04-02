@@ -5,9 +5,43 @@ import XCTest
 
 @MainActor
 final class AudioImportServiceTests: XCTestCase {
+    private final class LockedValue<T>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: T
+
+        init(_ value: T) {
+            self.value = value
+        }
+
+        func set(_ newValue: T) {
+            lock.lock()
+            value = newValue
+            lock.unlock()
+        }
+
+        func get() -> T {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
+    }
+
     private var container: ModelContainer!
     private var context: ModelContext!
     private var workspaceRootURL: URL!
+
+    private static func updateImportedSession(
+        id sessionID: UUID,
+        in modelContainer: ModelContainer,
+        update: (ImportedSession) -> Void
+    ) {
+        let ctx = ModelContext(modelContainer)
+        guard let session = try? ctx.fetch(FetchDescriptor<ImportedSession>()).first(where: { $0.id == sessionID }) else {
+            return
+        }
+        update(session)
+        try? ctx.save()
+    }
 
     override func setUpWithError() throws {
         try super.setUpWithError()
@@ -35,8 +69,8 @@ final class AudioImportServiceTests: XCTestCase {
         let workspace = Workspace(rootURL: workspaceRootURL)
         let inputURL = workspaceRootURL.appendingPathComponent("meeting.mp3")
 
-        var capturedWrittenSamples: [Float] = []
-        var capturedOutputURL: URL?
+        let capturedWrittenSamples = LockedValue<[Float]>([])
+        let capturedOutputURL = LockedValue<URL?>(nil)
         let service = AudioImportService(
             retranscriptionService: RetranscriptionService(transcriptionService: TranscriptionService()),
             probeAudio: { _ in
@@ -51,17 +85,14 @@ final class AudioImportServiceTests: XCTestCase {
                 [[0.1, -0.2, 0.4]]
             },
             writeMonoAAC: { samples, outputURL in
-                capturedWrittenSamples = samples
-                capturedOutputURL = outputURL
+                capturedWrittenSamples.set(samples)
+                capturedOutputURL.set(outputURL)
                 try FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
                 FileManager.default.createFile(atPath: outputURL.path, contents: Data("aac".utf8))
             },
             retranscribe: { sessionID, modelContainer, _ in
-                let ctx = ModelContext(modelContainer)
-                let pred = #Predicate<ImportedSession> { $0.id == sessionID }
-                if let session = try? ctx.fetch(FetchDescriptor<ImportedSession>(predicate: pred)).first {
+                Self.updateImportedSession(id: sessionID, in: modelContainer) { session in
                     session.status = .done
-                    try? ctx.save()
                 }
             }
         )
@@ -73,8 +104,8 @@ final class AudioImportServiceTests: XCTestCase {
         XCTAssertEqual(imported.originalFileName, "meeting.mp3")
         XCTAssertEqual(imported.originalFormat, "mp3")
         XCTAssertEqual(imported.duration, 42, accuracy: 0.001)
-        XCTAssertEqual(capturedWrittenSamples, [0.1, -0.2, 0.4])
-        XCTAssertEqual(imported.mixdownURL, capturedOutputURL?.path)
+        XCTAssertEqual(capturedWrittenSamples.get(), [0.1, -0.2, 0.4])
+        XCTAssertEqual(imported.mixdownURL, capturedOutputURL.get()?.path)
         XCTAssertEqual(imported.status, .done)
         XCTAssertTrue(imported.mixdownURL?.contains("/imports/meeting at ") == true)
     }
@@ -83,7 +114,7 @@ final class AudioImportServiceTests: XCTestCase {
         let workspace = Workspace(rootURL: workspaceRootURL)
         let inputURL = workspaceRootURL.appendingPathComponent("stereo.wav")
 
-        var capturedWrittenSamples: [Float] = []
+        let capturedWrittenSamples = LockedValue<[Float]>([])
         let service = AudioImportService(
             retranscriptionService: RetranscriptionService(transcriptionService: TranscriptionService()),
             probeAudio: { _ in
@@ -101,7 +132,7 @@ final class AudioImportServiceTests: XCTestCase {
                 ]
             },
             writeMonoAAC: { samples, outputURL in
-                capturedWrittenSamples = samples
+                capturedWrittenSamples.set(samples)
                 try FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
                 FileManager.default.createFile(atPath: outputURL.path, contents: Data("aac".utf8))
             },
@@ -111,10 +142,11 @@ final class AudioImportServiceTests: XCTestCase {
 
         await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
 
-        XCTAssertEqual(capturedWrittenSamples.count, 3)
-        XCTAssertEqual(capturedWrittenSamples[0], 0.3, accuracy: 0.0001)
-        XCTAssertEqual(capturedWrittenSamples[1], 0.0, accuracy: 0.0001)
-        XCTAssertEqual(capturedWrittenSamples[2], 0.0, accuracy: 0.0001)
+        let written = capturedWrittenSamples.get()
+        XCTAssertEqual(written.count, 3)
+        XCTAssertEqual(written[0], 0.3, accuracy: 0.0001)
+        XCTAssertEqual(written[1], 0.0, accuracy: 0.0001)
+        XCTAssertEqual(written[2], 0.0, accuracy: 0.0001)
     }
 
     func testImportAudioCorruptFileSetsErrorStatus() async throws {
@@ -187,7 +219,7 @@ final class AudioImportServiceTests: XCTestCase {
         let workspace = Workspace(rootURL: workspaceRootURL)
         let inputURL = workspaceRootURL.appendingPathComponent("sandboxed.mp3")
 
-        var fallbackCalled = false
+        let fallbackCalled = LockedValue(false)
         let service = AudioImportService(
             retranscriptionService: RetranscriptionService(transcriptionService: TranscriptionService()),
             probeAudio: { _ in
@@ -202,7 +234,7 @@ final class AudioImportServiceTests: XCTestCase {
                 throw NSError(domain: NSCocoaErrorDomain, code: 0)
             },
             mixToMonoM4A: { _, outputURL in
-                fallbackCalled = true
+                fallbackCalled.set(true)
                 try FileManager.default.createDirectory(
                     at: outputURL.deletingLastPathComponent(),
                     withIntermediateDirectories: true
@@ -210,11 +242,8 @@ final class AudioImportServiceTests: XCTestCase {
                 FileManager.default.createFile(atPath: outputURL.path, contents: Data("aac".utf8))
             },
             retranscribe: { sessionID, modelContainer, _ in
-                let ctx = ModelContext(modelContainer)
-                let pred = #Predicate<ImportedSession> { $0.id == sessionID }
-                if let session = try? ctx.fetch(FetchDescriptor<ImportedSession>(predicate: pred)).first {
+                Self.updateImportedSession(id: sessionID, in: modelContainer) { session in
                     session.status = .done
-                    try? ctx.save()
                 }
             }
         )
@@ -222,7 +251,7 @@ final class AudioImportServiceTests: XCTestCase {
         await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
 
         let imported = try XCTUnwrap(fetchImportedSession())
-        XCTAssertTrue(fallbackCalled)
+        XCTAssertTrue(fallbackCalled.get())
         XCTAssertEqual(imported.status, .done)
         XCTAssertNotNil(imported.mixdownURL)
         XCTAssertTrue(imported.mixdownURL?.hasSuffix("recording.m4a") == true)
