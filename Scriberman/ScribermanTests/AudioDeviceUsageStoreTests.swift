@@ -3,7 +3,6 @@ import Foundation
 import XCTest
 @testable import Scriberman
 
-@MainActor
 final class AudioDeviceUsageStoreTests: XCTestCase {
     private var userDefaults: UserDefaults!
     private var suiteName: String!
@@ -24,6 +23,7 @@ final class AudioDeviceUsageStoreTests: XCTestCase {
         super.tearDown()
     }
 
+    @MainActor
     func testSortOrdersByUsageThenNameThenUID() {
         userDefaults.set(["uid-1": 2, "uid-3": 1], forKey: "deviceUsageScores")
 
@@ -40,6 +40,7 @@ final class AudioDeviceUsageStoreTests: XCTestCase {
         XCTAssertEqual(sorted.map(\.uid), ["uid-1", "uid-3", "uid-2", "uid-4"])
     }
 
+    @MainActor
     func testIncrementPersistsScores() {
         let store = AudioDeviceUsageStore(userDefaults: userDefaults)
 
@@ -50,6 +51,7 @@ final class AudioDeviceUsageStoreTests: XCTestCase {
         XCTAssertEqual(persistedScores?["uid-7"], 2)
     }
 
+    @MainActor
     func testInitLoadsPersistedScoresForSorting() {
         userDefaults.set(["uid-2": 5], forKey: "deviceUsageScores")
 

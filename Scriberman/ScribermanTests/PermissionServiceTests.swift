@@ -4,13 +4,13 @@ import XCTest
 
 @MainActor
 final class PermissionServiceTests: XCTestCase {
-    private var userDefaults: UserDefaults!
-    private var userDefaultsSuiteName: String!
-    private var notificationCenter: NotificationCenter!
-    private var microphonePermissions: MockMicrophonePermissionProvider!
-    private var screenRecordingPermissions: MockScreenRecordingPermissionProvider!
-    private var functionalPermissions: MockScreenRecordingFunctionalPermissionProvider!
-    private var service: PermissionService!
+    nonisolated(unsafe) private var userDefaults: UserDefaults!
+    nonisolated(unsafe) private var userDefaultsSuiteName: String!
+    nonisolated(unsafe) private var notificationCenter: NotificationCenter!
+    nonisolated(unsafe) private var microphonePermissions: MockMicrophonePermissionProvider!
+    nonisolated(unsafe) private var screenRecordingPermissions: MockScreenRecordingPermissionProvider!
+    nonisolated(unsafe) private var functionalPermissions: MockScreenRecordingFunctionalPermissionProvider!
+    nonisolated(unsafe) private var service: PermissionService!
 
     override func setUp() {
         super.setUp()
@@ -239,6 +239,7 @@ final class PermissionServiceTests: XCTestCase {
     }
 }
 
+@MainActor
 private final class MockMicrophonePermissionProvider: MicrophonePermissionProviding {
     var status: AVAuthorizationStatus = .notDetermined
     var statusAfterRequest: AVAuthorizationStatus?
@@ -256,6 +257,7 @@ private final class MockMicrophonePermissionProvider: MicrophonePermissionProvid
     }
 }
 
+@MainActor
 private final class MockScreenRecordingPermissionProvider: ScreenRecordingPermissionProviding {
     var preflightResult = false
     var requestResult = false
@@ -269,6 +271,7 @@ private final class MockScreenRecordingPermissionProvider: ScreenRecordingPermis
     }
 }
 
+@MainActor
 private final class MockScreenRecordingFunctionalPermissionProvider: ScreenRecordingFunctionalPermissionProviding {
     var snapshotResult = ScreenRecordingShareableContentSnapshot(
         windowCount: 1,

@@ -138,12 +138,16 @@ actor RecordingService: RecordingServiceProtocol {
         capturedAppName: String? = nil,
         appProcessID: pid_t? = nil,
         title: String? = nil
-    ) async throws {
+    ) async throws(RecordingError) {
         guard !isRecordingValue else {
             throw RecordingError.alreadyRecording
         }
 
-        _ = try await workspaceService.requireWritableWorkspace()
+        do {
+            _ = try await workspaceService.requireWritableWorkspace()
+        } catch {
+            throw RecordingError.invalidWorkspaceAccess
+        }
         try await ensureMicrophonePermission()
 
         if !workspace.rootURL.startAccessingSecurityScopedResource() {
@@ -356,7 +360,7 @@ actor RecordingService: RecordingServiceProtocol {
         return pendingError
     }
 
-    private func ensureMicrophonePermission() async throws {
+    private func ensureMicrophonePermission() async throws(RecordingError) {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
             return

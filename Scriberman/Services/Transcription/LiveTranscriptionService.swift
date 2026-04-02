@@ -161,7 +161,7 @@ actor LiveTranscriptionService {
         // tasks 3.5, 3.6: Speaker enrollment at session end
         if let store = speakerEmbeddingStore, !sessionSpeakers.isEmpty {
             do {
-                let allProfiles = try await store.fetchAll()
+                let allProfiles = try await store.fetchAllSnapshots()
                 let existingCount = allProfiles.count
                 var newSpeakerIndex = 0
 
@@ -321,20 +321,20 @@ actor LiveTranscriptionService {
         return longestSegment
     }
 
-    private func findBestSpeakerMatch(for embedding: [Float]) async -> SpeakerProfile? {
+    private func findBestSpeakerMatch(for embedding: [Float]) async -> SpeakerProfileSnapshot? {
         guard !embedding.isEmpty, let store = speakerEmbeddingStore else {
             return nil
         }
 
         // Keep using the store-level fast path when available.
-        if let match = await store.findBestMatch(
+        if let match = await store.findBestMatchSnapshot(
             embedding: embedding,
             threshold: 1.0 - speakerMatcher.threshold
         ) {
             return match
         }
 
-        guard let profiles = try? await store.fetchAll() else {
+        guard let profiles = try? await store.fetchAllSnapshots() else {
             return nil
         }
         return speakerMatcher.findBestMatch(for: embedding, in: profiles)

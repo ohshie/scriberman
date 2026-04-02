@@ -80,7 +80,7 @@ struct SpeakerMatchingTests {
 
         _ = try await service.matchSpeakers(diarizationResult: diarizationResult)
 
-        let updated = try await store.fetchAll().first { $0.name == "Alice" }
+        let updated = try await store.fetchAllSnapshots().first { $0.name == "Alice" }
         let verifiedUpdated = try #require(updated)
         #expect(verifiedUpdated.lastSeen > oldDate)
     }

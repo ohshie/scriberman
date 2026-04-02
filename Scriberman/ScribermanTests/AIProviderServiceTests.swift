@@ -147,8 +147,8 @@ final class AIProviderServiceTests: XCTestCase {
 
 @MainActor
 final class AIPromptStoreTests: XCTestCase {
-    private var defaults: UserDefaults!
-    private var suiteName: String!
+    nonisolated(unsafe) private var defaults: UserDefaults!
+    nonisolated(unsafe) private var suiteName: String!
 
     override func setUp() {
         super.setUp()

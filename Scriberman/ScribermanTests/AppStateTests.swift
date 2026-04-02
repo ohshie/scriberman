@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class AppStateTests: XCTestCase {
-    private var modelContainer: ModelContainer!
+    nonisolated(unsafe) private var modelContainer: ModelContainer!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
@@ -242,7 +242,7 @@ private final class InMemoryKeychainStore: KeychainStore {
     }
 }
 
-private final class TestBookmarkStore: BookmarkStore {
+private final class TestBookmarkStore: BookmarkStore, @unchecked Sendable {
     private var bookmarkData: Data?
 
     func loadWorkspaceBookmark() -> Data? {

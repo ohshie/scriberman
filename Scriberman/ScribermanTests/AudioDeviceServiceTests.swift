@@ -5,11 +5,11 @@ import XCTest
 
 @MainActor
 final class AudioDeviceServiceTests: XCTestCase {
-    private var hardware: MockAudioDeviceHardware!
-    private var userDefaults: UserDefaults!
-    private var notificationCenter: NotificationCenter!
-    private var service: AudioDeviceService!
-    private var userDefaultsSuiteName: String!
+    nonisolated(unsafe) private var hardware: MockAudioDeviceHardware!
+    nonisolated(unsafe) private var userDefaults: UserDefaults!
+    nonisolated(unsafe) private var notificationCenter: NotificationCenter!
+    nonisolated(unsafe) private var service: AudioDeviceService!
+    nonisolated(unsafe) private var userDefaultsSuiteName: String!
 
     override func setUp() {
         super.setUp()

@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 
 enum AudioResamplerError: LocalizedError {
@@ -22,6 +22,10 @@ enum AudioResamplerError: LocalizedError {
 }
 
 struct AudioResampler {
+    private final class ConversionState: @unchecked Sendable {
+        var deliveredInput = false
+    }
+
     let targetSampleRate: Double
     private let conversionChunkSize: AVAudioFrameCount = 4_096
 
@@ -72,7 +76,7 @@ struct AudioResampler {
             inputChannelData[0].update(from: baseAddress, count: samples.count)
         }
 
-        var deliveredInput = false
+        let conversionState = ConversionState()
         var outputSamples: [Float] = []
 
         while true {
@@ -85,11 +89,11 @@ struct AudioResampler {
 
             var conversionError: NSError?
             let status = converter.convert(to: outputBuffer, error: &conversionError) { _, outputStatus in
-                if deliveredInput {
+                if conversionState.deliveredInput {
                     outputStatus.pointee = .endOfStream
                     return nil
                 }
-                deliveredInput = true
+                conversionState.deliveredInput = true
                 outputStatus.pointee = .haveData
                 return inputBuffer
             }

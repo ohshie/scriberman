@@ -53,8 +53,9 @@ final class PermissionService: PermissionServiceProtocol {
             object: nil,
             queue: .main
         ) { [weak self] notification in
+            let errorDescription = notification.userInfo?["errorDescription"] as? String ?? "unknown"
             Task { @MainActor [weak self] in
-                self?.handleAppAudioCaptureAccessDenied(notification)
+                self?.handleAppAudioCaptureAccessDenied(errorDescription: errorDescription)
             }
         }
 
@@ -164,10 +165,9 @@ final class PermissionService: PermissionServiceProtocol {
         }
     }
 
-    private func handleAppAudioCaptureAccessDenied(_ notification: Notification) {
+    private func handleAppAudioCaptureAccessDenied(errorDescription: String) {
         userDefaults.set(true, forKey: DefaultsKey.screenRecordingPromptHasBeenShown)
         screenRecordingStatus = .denied
-        let errorDescription = notification.userInfo?["errorDescription"] as? String ?? "unknown"
         logger.error(
             "[\(self.timestamp(), privacy: .public)] source=streamDelegate screenStatus=\(self.description(for: self.screenRecordingStatus), privacy: .public) error=\(errorDescription, privacy: .public)"
         )
