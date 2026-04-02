@@ -103,35 +103,37 @@ struct TranscriptDetailView: View {
 
     private var aiTransformationSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                Picker("Prompt", selection: $viewModel.selectedPromptID) {
-                    ForEach(viewModel.prompts) { prompt in
-                        Text(prompt.name).tag(Optional(prompt.id))
+            if latestTransformation == nil {
+                HStack(spacing: 12) {
+                    Picker("Prompt", selection: $viewModel.selectedPromptID) {
+                        ForEach(viewModel.prompts) { prompt in
+                            Text(prompt.name).tag(Optional(prompt.id))
+                        }
                     }
-                }
-                .disabled(viewModel.prompts.isEmpty || viewModel.isRunningTransformation)
-                .frame(maxWidth: 320)
+                    .disabled(viewModel.prompts.isEmpty || viewModel.isRunningTransformation)
+                    .frame(maxWidth: 320)
 
-                Button(viewModel.runButtonTitle) {
-                    Task {
-                        await viewModel.runTransformation()
+                    Button(viewModel.runButtonTitle) {
+                        Task {
+                            await viewModel.runTransformation()
+                        }
                     }
+                    .disabled(viewModel.canRunTransformation == false)
+
+                    Spacer(minLength: 0)
                 }
-                .disabled(viewModel.canRunTransformation == false)
 
-                Spacer(minLength: 0)
-            }
+                if viewModel.prompts.isEmpty {
+                    Text("Add prompts in Settings to enable transformations.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
 
-            if viewModel.prompts.isEmpty {
-                Text("Add prompts in Settings to enable transformations.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            if viewModel.shouldWarnAboutTranscriptLength {
-                Text("Transcript is longer than 40,000 characters. The model may fail due to context limits.")
-                    .font(.footnote)
-                    .foregroundStyle(.orange)
+                if viewModel.shouldWarnAboutTranscriptLength {
+                    Text("Transcript is longer than 40,000 characters. The model may fail due to context limits.")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
             }
 
             if let transformationErrorMessage = viewModel.transformationErrorMessage {
