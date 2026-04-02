@@ -119,6 +119,18 @@ final class NewSessionViewModelTests: XCTestCase {
         }
     }
 
+    func testIsIdleIsTrueWhenStateIsIdle() {
+        viewModel.state = .idle
+
+        XCTAssertTrue(viewModel.isIdle)
+    }
+
+    func testIsIdleIsFalseWhenRecording() {
+        viewModel.state = .recording(duration: 1, level: 0.5)
+
+        XCTAssertFalse(viewModel.isIdle)
+    }
+
     func testCanRecordRequiresGrantedMicrophonePermission() {
         permissionService.micStatus = .notDetermined
         XCTAssertFalse(viewModel.canRecord)
