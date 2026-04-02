@@ -29,7 +29,6 @@ actor LiveTranscriptionService {
     private static let SAMPLE_RATE: Float = 16000
 
     // Chunk accumulation state
-    private let liveBuffer = LiveTranscriptionBuffer()
     private var audioConverters: [AudioSource: AudioConverter] = [:]
     private var vadStreamStates: [AudioSource: VadStreamState] = [:]
     private var speechAccumulationBuffers: [AudioSource: [Float]] = [:]
@@ -155,7 +154,6 @@ actor LiveTranscriptionService {
     func start(workspace: Workspace) async throws {
         logger.info("Starting live transcription service (Offline Chunking Mode)")
 
-        await liveBuffer.reset()
         audioConverters.removeAll()
         vadStreamStates.removeAll()
         speechAccumulationBuffers.removeAll()
@@ -178,15 +176,6 @@ actor LiveTranscriptionService {
 
     func stop() async -> [TranscriptSegment] {
         logger.info("Stopping live transcription service")
-
-        // Process any remaining audio in the buffers
-        let remainingBuffers = await liveBuffer.remainingBuffers()
-        for (source, buffer) in remainingBuffers {
-            if !buffer.isEmpty {
-                let currentOffset = await liveBuffer.currentOffset(for: source)
-                await processChunk(samples: buffer, source: source, currentOffset: currentOffset)
-            }
-        }
 
         // tasks 3.5, 3.6: Speaker enrollment at session end
         if let store = speakerEmbeddingStore, !sessionSpeakers.isEmpty {
@@ -221,7 +210,6 @@ actor LiveTranscriptionService {
         // Cleanup — reset isInitialized so next session creates a fresh DiarizerManager
         collectedFinalSegments.removeAll()
         sessionSpeakers.removeAll()
-        await liveBuffer.reset()
         audioConverters.removeAll()
         vadStreamStates.removeAll()
         speechAccumulationBuffers.removeAll()
@@ -245,10 +233,7 @@ actor LiveTranscriptionService {
             let resampled = try audioConverters[source]!.resample(samples, from: sampleRate)
             guard !resampled.isEmpty else { return }
 
-            if let chunkToProcess = await liveBuffer.append(samples: resampled, source: source) {
-                let currentOffset = await liveBuffer.takePendingChunkOffset(for: source) ?? 0
-                await processChunk(samples: chunkToProcess, source: source, currentOffset: currentOffset)
-            }
+            await processChunk(samples: resampled, source: source, currentOffset: 0)
         } catch {
             logger.error("Error processing live audio (\(source.rawValue)): \(error.localizedDescription)")
         }
@@ -263,11 +248,6 @@ actor LiveTranscriptionService {
             let maxAmplitude = samples.map { abs($0) }.max() ?? 0.0
 
             logger.info("🎤 Transcribing \(source.rawValue) chunk (\(samples.count) samples = \(String(format: "%.1f", chunkDuration))s, max amplitude: \(String(format: "%.6f", maxAmplitude)))...")
-
-            if maxAmplitude < 0.001 {
-                logger.info("⚠️ AUDIO IS SILENT - Skipping transcription")
-                return
-            }
 
             // task 2.2: pass correct ASR source based on audio origin
             // (.microphone for mic, .system for app — inferred as FluidAudio.AudioSource from call-site)
