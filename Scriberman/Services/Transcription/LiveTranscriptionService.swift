@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreML
 import FluidAudio
 import Foundation
 import OSLog
@@ -15,6 +16,7 @@ actor LiveTranscriptionService {
     // Core managers
     private var asrManager: AsrManager?
     private var diarizer: DiarizerManager?
+    private var vadManager: VadManager?
 
     // Dependencies
     private let speakerEmbeddingStore: SpeakerEmbeddingStore?
@@ -29,6 +31,10 @@ actor LiveTranscriptionService {
     // Chunk accumulation state
     private let liveBuffer = LiveTranscriptionBuffer()
     private var audioConverters: [AudioSource: AudioConverter] = [:]
+    private var vadStreamStates: [AudioSource: VadStreamState] = [:]
+    private var speechAccumulationBuffers: [AudioSource: [Float]] = [:]
+    private var speechStartOffsets: [AudioSource: Float] = [:]
+    private var vadInputRemainders: [AudioSource: [Float]] = [:]
 
     // Authoritative record of all final segments accumulated this session
     private var collectedFinalSegments: [TranscriptSegment] = []
@@ -76,6 +82,7 @@ actor LiveTranscriptionService {
             // Leave isInitialized = false so start() can surface the error
             asrManager = nil
             diarizer = nil
+            vadManager = nil
             return
         }
 
@@ -94,6 +101,7 @@ actor LiveTranscriptionService {
             logger.error("Diarizer initialization failed during prepare(): missing workspace diarizer repo — \(error).")
             asrManager = nil
             diarizer = nil
+            vadManager = nil
             return
         }
         let segmentationURL = diarizerRepo.appendingPathComponent("pyannote_segmentation.mlmodelc", isDirectory: true)
@@ -102,6 +110,7 @@ actor LiveTranscriptionService {
             logger.error("Diarizer initialization failed during prepare(): missing workspace diarizer files.")
             asrManager = nil
             diarizer = nil
+            vadManager = nil
             return
         }
 
@@ -117,6 +126,23 @@ actor LiveTranscriptionService {
             logger.error("Diarizer initialization failed during prepare(): \(error). Live transcription unavailable.")
             asrManager = nil
             diarizer = nil
+            vadManager = nil
+            return
+        }
+
+        do {
+            let vadDirectory = try modelPathResolver.modelDirectory(for: .vadSilero, in: workspace)
+            let vadModelURL = vadDirectory.appendingPathComponent(ModelNames.VAD.sileroVadFile, isDirectory: true)
+            let mlConfig = MLModelConfiguration()
+            mlConfig.computeUnits = .cpuAndNeuralEngine
+            let mlModel = try await MLModel.load(contentsOf: vadModelURL, configuration: mlConfig)
+            self.vadManager = VadManager(config: VadConfig(defaultThreshold: 0.75), vadModel: mlModel)
+            logger.info("VadManager initialized from workspace models")
+        } catch {
+            logger.error("VAD initialization failed during prepare(): \(error). Live transcription unavailable.")
+            asrManager = nil
+            diarizer = nil
+            vadManager = nil
             return
         }
 
@@ -131,6 +157,10 @@ actor LiveTranscriptionService {
 
         await liveBuffer.reset()
         audioConverters.removeAll()
+        vadStreamStates.removeAll()
+        speechAccumulationBuffers.removeAll()
+        speechStartOffsets.removeAll()
+        vadInputRemainders.removeAll()
         collectedFinalSegments.removeAll()
         sessionSpeakers.removeAll()
 
@@ -139,7 +169,7 @@ actor LiveTranscriptionService {
             await prepare(workspace: workspace)
         }
 
-        guard isInitialized, asrManager != nil, diarizer != nil else {
+        guard isInitialized, asrManager != nil, diarizer != nil, vadManager != nil else {
             throw LiveTranscriptionError.initializationFailed
         }
 
@@ -193,8 +223,13 @@ actor LiveTranscriptionService {
         sessionSpeakers.removeAll()
         await liveBuffer.reset()
         audioConverters.removeAll()
+        vadStreamStates.removeAll()
+        speechAccumulationBuffers.removeAll()
+        speechStartOffsets.removeAll()
+        vadInputRemainders.removeAll()
         asrManager = nil
         diarizer = nil
+        vadManager = nil
         isInitialized = false
 
         return segments
