@@ -18,13 +18,7 @@ struct SettingsView: View {
     @State private var isModelsExpanded = false
     @State private var apiKeyDraft = ""
     @State private var lastCommittedAPIKeyDraft = ""
-    @State private var promptStore = AIPromptStore()
-    @State private var prompts: [AIPrompt] = []
-    @State private var isPromptEditorPresented = false
-    @State private var editingPromptID: UUID?
-    @State private var promptNameDraft = ""
-    @State private var promptContentDraft = ""
-    @State private var promptValidationMessage: String?
+    @State private var promptVM = PromptManagementViewModel()
     @FocusState private var focusedField: Field?
 
     var body: some View {
@@ -137,11 +131,11 @@ struct SettingsView: View {
 
                 Form {
                     Section("Saved Prompts") {
-                        if prompts.isEmpty {
+                        if promptVM.prompts.isEmpty {
                             Text("No prompts yet. Add a prompt to enable AI transformations.")
                                 .foregroundStyle(.secondary)
                         } else {
-                            ForEach(prompts) { prompt in
+                            ForEach(promptVM.prompts) { prompt in
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text(prompt.name)
                                         .font(.headline)
@@ -152,11 +146,11 @@ struct SettingsView: View {
 
                                     HStack {
                                         Button("Edit") {
-                                            presentPromptEditor(for: prompt)
+                                            promptVM.presentEditor(for: prompt)
                                         }
 
                                         Button("Delete", role: .destructive) {
-                                            deletePrompt(prompt)
+                                            promptVM.deletePrompt(prompt)
                                         }
                                     }
                                 }
@@ -165,11 +159,14 @@ struct SettingsView: View {
                         }
 
                         Button("Add Prompt") {
-                            presentPromptEditor(for: nil)
+                            promptVM.presentEditor(for: nil)
                         }
                     }
                 }
                 .formStyle(.grouped)
+                .task {
+                    promptVM.loadPrompts()
+                }
                 .tabItem {
                     Label("Prompts", systemImage: "text.bubble")
                 }
@@ -225,9 +222,11 @@ struct SettingsView: View {
             await viewModel.refresh()
             _ = await appState.verifyWorkspaceForWrite()
             await viewModel.refresh()
-            loadPrompts()
         }
-        .sheet(isPresented: $isPromptEditorPresented) {
+        .sheet(isPresented: Binding(
+            get: { promptVM.isEditorPresented },
+            set: { promptVM.isEditorPresented = $0 }
+        )) {
             promptEditorSheet
         }
     }
@@ -254,64 +253,8 @@ struct SettingsView: View {
         lastCommittedAPIKeyDraft = normalized
     }
 
-    private func loadPrompts() {
-        prompts = promptStore.loadPrompts().sorted {
-            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-        }
-    }
-
-    private func presentPromptEditor(for prompt: AIPrompt?) {
-        editingPromptID = prompt?.id
-        promptNameDraft = prompt?.name ?? ""
-        promptContentDraft = prompt?.content ?? ""
-        promptValidationMessage = nil
-        isPromptEditorPresented = true
-    }
-
-    private func savePromptFromEditor() {
-        let normalizedName = promptNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedContent = promptContentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard normalizedName.isEmpty == false else {
-            promptValidationMessage = "Prompt name is required."
-            return
-        }
-
-        guard normalizedContent.isEmpty == false else {
-            promptValidationMessage = "Prompt content is required."
-            return
-        }
-
-        let lowercasedName = normalizedName.lowercased()
-        let hasDuplicateName = prompts.contains { prompt in
-            guard prompt.id != editingPromptID else {
-                return false
-            }
-            return prompt.name.lowercased() == lowercasedName
-        }
-
-        guard hasDuplicateName == false else {
-            promptValidationMessage = "Prompt name must be unique."
-            return
-        }
-
-        if let editingPromptID {
-            promptStore.updatePrompt(id: editingPromptID, name: normalizedName, content: normalizedContent)
-        } else {
-            promptStore.addPrompt(name: normalizedName, content: normalizedContent)
-        }
-
-        isPromptEditorPresented = false
-        loadPrompts()
-    }
-
-    private func deletePrompt(_ prompt: AIPrompt) {
-        promptStore.deletePrompt(id: prompt.id)
-        loadPrompts()
-    }
-
     private var promptEditorTitle: String {
-        editingPromptID == nil ? "Add Prompt" : "Edit Prompt"
+        promptVM.editingPromptID == nil ? "Add Prompt" : "Edit Prompt"
     }
 
     @ViewBuilder
@@ -319,12 +262,18 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section("Prompt Details") {
-                    TextField("Name", text: $promptNameDraft)
-                    TextEditor(text: $promptContentDraft)
+                    TextField("Name", text: Binding(
+                        get: { promptVM.promptNameDraft },
+                        set: { promptVM.promptNameDraft = $0 }
+                    ))
+                    TextEditor(text: Binding(
+                        get: { promptVM.promptContentDraft },
+                        set: { promptVM.promptContentDraft = $0 }
+                    ))
                         .frame(minHeight: 160)
                 }
 
-                if let promptValidationMessage {
+                if let promptValidationMessage = promptVM.promptValidationMessage {
                     Section {
                         Text(promptValidationMessage)
                             .foregroundStyle(.red)
@@ -336,13 +285,13 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
-                        isPromptEditorPresented = false
+                        promptVM.dismissEditor()
                     }
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        savePromptFromEditor()
+                        promptVM.savePrompt()
                     }
                 }
             }
