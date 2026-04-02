@@ -175,6 +175,21 @@ final class NewSessionViewModel {
         appAudioService.refreshRunningApps()
     }
 
+    func selectApp(_ app: CapturedApp?) {
+        guard let app else {
+            recordAppAudio = false
+            return
+        }
+
+        guard screenRecordingPermissionGranted else {
+            requestScreenRecordingPermission()
+            return
+        }
+
+        selectedApp = app
+        recordAppAudio = true
+    }
+
     func refreshAudioDevicesOnAppear() {
         audioDeviceService.refreshDevices()
         Task {
@@ -295,6 +310,10 @@ final class NewSessionViewModel {
 
             if let selectedDevice {
                 audioDeviceService.incrementUsage(for: selectedDevice.uid)
+            }
+
+            if let selectedApp {
+                appAudioService.incrementUsage(for: selectedApp.bundleID)
             }
 
             if let fallbackMessage {
