@@ -25,9 +25,21 @@ enum ModelInstallError: LocalizedError {
     }
 }
 
-actor ModelInstallService {
+protocol ModelInstallServicing: Actor {
+    func canInstallModels() async -> Bool
+    func state(for group: ModelGroup) async -> ModelGroupReadinessState
+    func installModelGroup(
+        _ group: ModelGroup,
+        progress: (@Sendable (ModelGroupReadinessState) -> Void)?,
+        downloadProgress: (@Sendable (Double) -> Void)?
+    ) async throws -> URL
+    func warmUpModels(workspace: Workspace) async
+}
+
+actor ModelInstallService: ModelInstallServicing {
     private let workspaceService: WorkspaceService
     private let fileManager = FileManager.default
+    private let modelPathResolver = ModelPathResolver()
 
     init(workspaceService: WorkspaceService) {
         self.workspaceService = workspaceService
@@ -56,6 +68,23 @@ actor ModelInstallService {
             return try validateInstalledRepo(for: group, at: repoURL) ? .ready : .missing
         } catch {
             return .error
+        }
+    }
+
+    func warmUpModels(workspace: Workspace) async {
+        do {
+            let asrDirectory = try modelPathResolver.modelDirectory(for: .asrParakeetV3, in: workspace)
+            _ = try await AsrModels.load(from: asrDirectory)
+
+            let diarizerDirectory = try modelPathResolver.modelDirectory(for: .offlineDiarization, in: workspace)
+            let segmentationURL = diarizerDirectory.appendingPathComponent("pyannote_segmentation.mlmodelc", isDirectory: true)
+            let embeddingURL = diarizerDirectory.appendingPathComponent("wespeaker_v2.mlmodelc", isDirectory: true)
+            _ = try await DiarizerModels.load(
+                localSegmentationModel: segmentationURL,
+                localEmbeddingModel: embeddingURL
+            )
+        } catch {
+            NSLog("[ModelInstallService] CoreML warm-up failed (non-fatal): %@", String(describing: error))
         }
     }
 
