@@ -4,13 +4,13 @@ import XCTest
 
 @MainActor
 final class JobsViewModelTests: XCTestCase {
-    private var workspaceService: MockWorkspaceService!
-    private var transcriptionService: MockTranscriptionService!
-    private var retranscriptionService: RetranscriptionService!
-    private var audioImportService: AudioImportService!
-    private var viewModel: JobsViewModel!
-    private var container: ModelContainer!
-    private var context: ModelContext!
+    nonisolated(unsafe) private var workspaceService: MockWorkspaceService!
+    nonisolated(unsafe) private var transcriptionService: MockTranscriptionService!
+    nonisolated(unsafe) private var retranscriptionService: RetranscriptionService!
+    nonisolated(unsafe) private var audioImportService: AudioImportService!
+    nonisolated(unsafe) private var viewModel: JobsViewModel!
+    nonisolated(unsafe) private var container: ModelContainer!
+    nonisolated(unsafe) private var context: ModelContext!
 
     override func setUpWithError() throws {
         try super.setUpWithError()

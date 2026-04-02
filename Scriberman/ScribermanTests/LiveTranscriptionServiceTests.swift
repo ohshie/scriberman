@@ -1,17 +1,19 @@
 import Foundation
 import SwiftData
-import XCTest
+import Testing
 @testable import Scriberman
 
 @MainActor
-final class LiveTranscriptionServiceTests: XCTestCase {
+@Suite
+struct LiveTranscriptionServiceTests {
     private func makeStore() throws -> SpeakerEmbeddingStore {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: SpeakerProfile.self, configurations: config)
         return SpeakerEmbeddingStore(modelContainer: container)
     }
 
-    func testStopEnrollsNewSpeaker() async throws {
+    @Test
+    func stopEnrollsNewSpeaker() async throws {
         let store = try makeStore()
         let service = LiveTranscriptionService(speakerEmbeddingStore: store)
 
@@ -25,11 +27,12 @@ final class LiveTranscriptionServiceTests: XCTestCase {
         _ = await service.stop()
 
         let profiles = try await store.fetchAllSnapshots()
-        XCTAssertEqual(profiles.count, 1)
-        XCTAssertEqual(profiles.first?.name, "Speaker 1")
+        #expect(profiles.count == 1)
+        #expect(profiles.first?.name == "Speaker 1")
     }
 
-    func testStopEnrollsMultipleNewSpeakers() async throws {
+    @Test
+    func stopEnrollsMultipleNewSpeakers() async throws {
         let store = try makeStore()
         let service = LiveTranscriptionService(speakerEmbeddingStore: store)
 
@@ -49,18 +52,19 @@ final class LiveTranscriptionServiceTests: XCTestCase {
         _ = await service.stop()
 
         let profiles = try await store.fetchAllSnapshots()
-        XCTAssertEqual(profiles.count, 2)
-        XCTAssertEqual(Set(profiles.map(\.name)), ["Speaker 1", "Speaker 2"])
+        #expect(profiles.count == 2)
+        #expect(Set(profiles.map(\.name)) == ["Speaker 1", "Speaker 2"])
     }
 
-    func testStopUpdatesLastSeenForMatchedSpeaker() async throws {
+    @Test
+    func stopUpdatesLastSeenForMatchedSpeaker() async throws {
         let store = try makeStore()
         let oldDate = Date(timeIntervalSinceNow: -3600)
         let aliceEmbedding = Array(repeating: Float(0.1), count: 256)
 
         try await store.enrollSpeaker(name: "Alice", embedding: aliceEmbedding)
         let alice = try await store.fetchAllSnapshots().first { $0.name == "Alice" }
-        let aliceID = try XCTUnwrap(alice?.id)
+        let aliceID = try #require(alice?.id)
 
         let service = LiveTranscriptionService(speakerEmbeddingStore: store)
 
@@ -74,15 +78,16 @@ final class LiveTranscriptionServiceTests: XCTestCase {
         _ = await service.stop()
 
         let profiles = try await store.fetchAllSnapshots()
-        XCTAssertEqual(profiles.count, 1)
-        XCTAssertEqual(profiles.first?.name, "Alice")
+        #expect(profiles.count == 1)
+        #expect(profiles.first?.name == "Alice")
 
         let updatedProfile = try await store.findProfileSnapshot(byID: aliceID)
-        let updated = try XCTUnwrap(updatedProfile)
-        XCTAssertGreaterThan(updated.lastSeen, oldDate)
+        let updated = try #require(updatedProfile)
+        #expect(updated.lastSeen > oldDate)
     }
 
-    func testStopSkipsEnrollmentForEmptyEmbedding() async throws {
+    @Test
+    func stopSkipsEnrollmentForEmptyEmbedding() async throws {
         let store = try makeStore()
         let service = LiveTranscriptionService(speakerEmbeddingStore: store)
 
@@ -96,10 +101,11 @@ final class LiveTranscriptionServiceTests: XCTestCase {
         _ = await service.stop()
 
         let profiles = try await store.fetchAllSnapshots()
-        XCTAssertTrue(profiles.isEmpty)
+        #expect(profiles.isEmpty)
     }
 
-    func testStopWithoutStoreDoesNotCrash() async {
+    @Test
+    func stopWithoutStoreDoesNotCrash() async {
         let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
 
         await service.injectSessionSpeaker(
@@ -112,13 +118,14 @@ final class LiveTranscriptionServiceTests: XCTestCase {
         _ = await service.stop()
     }
 
-    func testMicAudioSourceMapsToMicrophoneASRSource() {
+    @Test
+    func micAudioSourceMapsToMicrophoneASRSource() {
         let domainMic = AudioSource.mic
         let domainApp = AudioSource.app
 
-        XCTAssertNotEqual(domainMic, domainApp)
-        XCTAssertEqual(domainMic.rawValue, "mic")
-        XCTAssertEqual(domainApp.rawValue, "app")
+        #expect(domainMic != domainApp)
+        #expect(domainMic.rawValue == "mic")
+        #expect(domainApp.rawValue == "app")
     }
 }
 

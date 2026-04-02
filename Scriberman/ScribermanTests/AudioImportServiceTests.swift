@@ -3,7 +3,6 @@ import SwiftData
 import XCTest
 @testable import Scriberman
 
-@MainActor
 final class AudioImportServiceTests: XCTestCase {
     private final class LockedValue<T>: @unchecked Sendable {
         private let lock = NSLock()

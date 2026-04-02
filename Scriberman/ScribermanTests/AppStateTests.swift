@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class AppStateTests: XCTestCase {
-    private var modelContainer: ModelContainer!
+    nonisolated(unsafe) private var modelContainer: ModelContainer!
 
     override func setUpWithError() throws {
         try super.setUpWithError()

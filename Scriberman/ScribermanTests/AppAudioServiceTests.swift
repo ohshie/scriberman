@@ -2,7 +2,6 @@ import AppKit
 import XCTest
 @testable import Scriberman
 
-@MainActor
 final class AppAudioServiceTests: XCTestCase {
     private var provider: MockRunningApplicationProvider!
     private var userDefaults: UserDefaults!
@@ -28,6 +27,7 @@ final class AppAudioServiceTests: XCTestCase {
         super.tearDown()
     }
 
+    @MainActor
     func testRefreshRunningAppsFiltersRegularAndExcludesOwnBundleID() {
         provider.ownBundleIdentifier = "com.test.scriberman"
         provider.apps = [
@@ -45,6 +45,7 @@ final class AppAudioServiceTests: XCTestCase {
         XCTAssertEqual(service.runningApps.map(\.bundleID), ["com.test.zoom"])
     }
 
+    @MainActor
     func testSelectedAppPersistsBundleID() {
         provider.apps = [
             RunningApplicationSnapshot(bundleID: "com.test.zoom", name: "Zoom", pid: 2, icon: nil, activationPolicy: .regular)
@@ -59,6 +60,7 @@ final class AppAudioServiceTests: XCTestCase {
         XCTAssertEqual(userDefaults.string(forKey: "selectedAppBundleID"), "com.test.zoom")
     }
 
+    @MainActor
     func testRestoreSelectionFromSavedBundleID() {
         provider.apps = [
             RunningApplicationSnapshot(bundleID: "com.test.zoom", name: "Zoom", pid: 2, icon: nil, activationPolicy: .regular),
@@ -74,6 +76,7 @@ final class AppAudioServiceTests: XCTestCase {
         XCTAssertEqual(service.selectedApp?.bundleID, "com.test.browser")
     }
 
+    @MainActor
     func testMissingSavedSelectionIsClearedAndSelectionIsNil() {
         provider.apps = [
             RunningApplicationSnapshot(bundleID: "com.test.zoom", name: "Zoom", pid: 2, icon: nil, activationPolicy: .regular)
@@ -89,6 +92,7 @@ final class AppAudioServiceTests: XCTestCase {
         XCTAssertNil(userDefaults.string(forKey: "selectedAppBundleID"))
     }
 
+    @MainActor
     func testRefreshRevalidatesSelectionWhenAppDisappears() {
         provider.apps = [
             RunningApplicationSnapshot(bundleID: "com.test.zoom", name: "Zoom", pid: 2, icon: nil, activationPolicy: .regular),

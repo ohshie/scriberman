@@ -4,13 +4,13 @@ import XCTest
 
 @MainActor
 final class PermissionServiceTests: XCTestCase {
-    private var userDefaults: UserDefaults!
-    private var userDefaultsSuiteName: String!
-    private var notificationCenter: NotificationCenter!
-    private var microphonePermissions: MockMicrophonePermissionProvider!
-    private var screenRecordingPermissions: MockScreenRecordingPermissionProvider!
-    private var functionalPermissions: MockScreenRecordingFunctionalPermissionProvider!
-    private var service: PermissionService!
+    nonisolated(unsafe) private var userDefaults: UserDefaults!
+    nonisolated(unsafe) private var userDefaultsSuiteName: String!
+    nonisolated(unsafe) private var notificationCenter: NotificationCenter!
+    nonisolated(unsafe) private var microphonePermissions: MockMicrophonePermissionProvider!
+    nonisolated(unsafe) private var screenRecordingPermissions: MockScreenRecordingPermissionProvider!
+    nonisolated(unsafe) private var functionalPermissions: MockScreenRecordingFunctionalPermissionProvider!
+    nonisolated(unsafe) private var service: PermissionService!
 
     override func setUp() {
         super.setUp()

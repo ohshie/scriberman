@@ -5,16 +5,16 @@ import XCTest
 
 @MainActor
 final class NewSessionViewModelTests: XCTestCase {
-    private var workspaceService: MockWorkspaceService!
-    private var recordingService: MockRecordingService!
-    private var audioDeviceService: MockAudioDeviceService!
-    private var appAudioService: MockNewSessionAppAudioService!
-    private var permissionService: MockPermissionService!
-    private var userDefaultsSuiteName: String!
-    private var userDefaults: UserDefaults!
-    private var viewModel: NewSessionViewModel!
-    private var context: ModelContext!
-    private var workspace: Workspace!
+    nonisolated(unsafe) private var workspaceService: MockWorkspaceService!
+    nonisolated(unsafe) private var recordingService: MockRecordingService!
+    nonisolated(unsafe) private var audioDeviceService: MockAudioDeviceService!
+    nonisolated(unsafe) private var appAudioService: MockNewSessionAppAudioService!
+    nonisolated(unsafe) private var permissionService: MockPermissionService!
+    nonisolated(unsafe) private var userDefaultsSuiteName: String!
+    nonisolated(unsafe) private var userDefaults: UserDefaults!
+    nonisolated(unsafe) private var viewModel: NewSessionViewModel!
+    nonisolated(unsafe) private var context: ModelContext!
+    nonisolated(unsafe) private var workspace: Workspace!
 
     override func setUpWithError() throws {
         try super.setUpWithError()

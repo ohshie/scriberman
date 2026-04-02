@@ -5,7 +5,7 @@ import XCTest
 
 @MainActor
 final class SettingsViewModelTests: XCTestCase {
-    private var tempRoots: [URL] = []
+    nonisolated(unsafe) private var tempRoots: [URL] = []
 
     override func tearDown() {
         let fileManager = FileManager.default
