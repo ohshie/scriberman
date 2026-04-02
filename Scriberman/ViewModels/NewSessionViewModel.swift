@@ -23,6 +23,13 @@ final class NewSessionViewModel {
     private var recordingStartedAt: Date?
 
     var state: State = .idle
+    var isIdle: Bool {
+        if case .idle = state {
+            return true
+        }
+
+        return false
+    }
     var liveSegments: [TranscriptSegment] = []
     var errorMessage: String?
     var availableDevices: [AudioInputDevice] {

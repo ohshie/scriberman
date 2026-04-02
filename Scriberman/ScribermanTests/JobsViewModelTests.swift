@@ -212,6 +212,63 @@ final class JobsViewModelTests: XCTestCase {
         XCTAssertFalse(shouldDiscardWhenPendingSelected)
     }
 
+    func testSessionItemsReturnsEmptyForEmptyInputs() {
+        let items = viewModel.sessionItems(
+            recordingSessions: [],
+            importedSessions: [],
+            preserving: nil
+        )
+
+        XCTAssertTrue(items.isEmpty)
+    }
+
+    func testSessionItemsMergesRecordingAndImportedSessionsSortedDescending() {
+        let oldestRecording = makeSession(createdAt: makeDate(year: 2026, month: 3, day: 20, hour: 8), status: .done)
+        let newestImported = makeImportedSession(createdAt: makeDate(year: 2026, month: 3, day: 22, hour: 9))
+        let middleRecording = makeSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 10), status: .done)
+
+        let items = viewModel.sessionItems(
+            recordingSessions: [oldestRecording, middleRecording],
+            importedSessions: [newestImported],
+            preserving: nil
+        )
+
+        XCTAssertEqual(items.count, 3)
+        XCTAssertEqual(items.map(\.id), [
+            JobsViewModel.SessionListItem.imported(newestImported).id,
+            JobsViewModel.SessionListItem.recording(middleRecording).id,
+            JobsViewModel.SessionListItem.recording(oldestRecording).id
+        ])
+    }
+
+    func testSessionItemsPreservesSelectedRecordingWhenMissingFromRefreshedQuery() {
+        let selectedRecording = makeSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 12), status: .done)
+        let refreshedRecording = makeSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 10), status: .done)
+
+        let items = viewModel.sessionItems(
+            recordingSessions: [refreshedRecording],
+            importedSessions: [],
+            preserving: .recording(selectedRecording)
+        )
+
+        XCTAssertEqual(items.count, 2)
+        XCTAssertTrue(items.contains(where: { $0.id == JobsViewModel.SessionListItem.recording(selectedRecording).id }))
+    }
+
+    func testSessionItemsDoesNotPreserveNonRecordingSelections() {
+        let selectedImported = makeImportedSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 12))
+        let refreshedRecording = makeSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 10), status: .done)
+
+        let items = viewModel.sessionItems(
+            recordingSessions: [refreshedRecording],
+            importedSessions: [],
+            preserving: .imported(selectedImported)
+        )
+
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items.first?.id, JobsViewModel.SessionListItem.recording(refreshedRecording).id)
+    }
+
     func testExportTranscriptWritesMarkdownWhenDestinationSelected() async throws {
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
@@ -292,6 +349,21 @@ final class JobsViewModelTests: XCTestCase {
             micAudioURL: "/tmp/audio.wav",
             mixdownURL: nil,
             title: "Session",
+            status: status
+        )
+    }
+
+    private func makeImportedSession(
+        createdAt: Date = Date(timeIntervalSince1970: 0),
+        status: RecordingStatus = .done
+    ) -> ImportedSession {
+        ImportedSession(
+            createdAt: createdAt,
+            duration: 8,
+            mixdownURL: "/tmp/imported.m4a",
+            title: "Imported Session",
+            originalFileName: "imported.m4a",
+            originalFormat: "m4a",
             status: status
         )
     }
