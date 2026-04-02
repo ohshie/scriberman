@@ -46,6 +46,33 @@ final class AppAudioServiceTests: XCTestCase {
     }
 
     @MainActor
+    func testRefreshRunningAppsSortsByUsageThenNameThenBundleID() {
+        provider.apps = [
+            RunningApplicationSnapshot(bundleID: "com.test.spotify", name: "Spotify", pid: 1, icon: nil, activationPolicy: .regular),
+            RunningApplicationSnapshot(bundleID: "com.test.chrome", name: "Chrome", pid: 2, icon: nil, activationPolicy: .regular),
+            RunningApplicationSnapshot(bundleID: "com.test.alpha", name: "Alpha", pid: 3, icon: nil, activationPolicy: .regular),
+            RunningApplicationSnapshot(bundleID: "com.test.beta", name: "Alpha", pid: 4, icon: nil, activationPolicy: .regular)
+        ]
+        userDefaults.set(
+            [
+                "com.test.spotify": 10,
+                "com.test.chrome": 3
+            ],
+            forKey: "appAudioUsageScores"
+        )
+
+        service = AppAudioService(
+            runningApplicationProvider: provider,
+            userDefaults: userDefaults
+        )
+
+        XCTAssertEqual(
+            service.runningApps.map(\.bundleID),
+            ["com.test.spotify", "com.test.chrome", "com.test.alpha", "com.test.beta"]
+        )
+    }
+
+    @MainActor
     func testSelectedAppPersistsBundleID() {
         provider.apps = [
             RunningApplicationSnapshot(bundleID: "com.test.zoom", name: "Zoom", pid: 2, icon: nil, activationPolicy: .regular)
@@ -113,6 +140,26 @@ final class AppAudioServiceTests: XCTestCase {
 
         XCTAssertNil(service.selectedApp)
         XCTAssertNil(userDefaults.string(forKey: "selectedAppBundleID"))
+    }
+
+    @MainActor
+    func testIncrementUsagePersistsAndResortsRunningApps() {
+        provider.apps = [
+            RunningApplicationSnapshot(bundleID: "com.test.zoom", name: "Zoom", pid: 1, icon: nil, activationPolicy: .regular),
+            RunningApplicationSnapshot(bundleID: "com.test.browser", name: "Browser", pid: 2, icon: nil, activationPolicy: .regular)
+        ]
+        service = AppAudioService(
+            runningApplicationProvider: provider,
+            userDefaults: userDefaults
+        )
+
+        XCTAssertEqual(service.runningApps.map(\.bundleID), ["com.test.browser", "com.test.zoom"])
+
+        service.incrementUsage(for: "com.test.zoom")
+
+        XCTAssertEqual(service.runningApps.map(\.bundleID), ["com.test.zoom", "com.test.browser"])
+        let persistedScores = userDefaults.dictionary(forKey: "appAudioUsageScores") as? [String: Int]
+        XCTAssertEqual(persistedScores?["com.test.zoom"], 1)
     }
 }
 

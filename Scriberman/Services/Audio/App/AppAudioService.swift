@@ -17,6 +17,7 @@ final class AppAudioService: AppAudioServiceProtocol {
 
     private let runningApplicationProvider: RunningApplicationProviding
     private let userDefaults: UserDefaults
+    private let usageStore: AppAudioUsageStore
     private let selectedAppBundleIDKey = "selectedAppBundleID"
     private var isApplyingSelection = false
 
@@ -26,8 +27,14 @@ final class AppAudioService: AppAudioServiceProtocol {
     ) {
         self.runningApplicationProvider = runningApplicationProvider
         self.userDefaults = userDefaults
+        self.usageStore = AppAudioUsageStore(userDefaults: userDefaults)
 
         refreshRunningApps()
+    }
+
+    func incrementUsage(for bundleID: String) {
+        usageStore.increment(bundleID: bundleID)
+        runningApps = usageStore.sort(runningApps)
     }
 
     func refreshRunningApps() {
@@ -43,9 +50,7 @@ final class AppAudioService: AppAudioServiceProtocol {
                     icon: app.icon
                 )
             }
-            .sorted {
-                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-            }
+        runningApps = usageStore.sort(runningApps)
 
         revalidateSelectedApp()
     }
