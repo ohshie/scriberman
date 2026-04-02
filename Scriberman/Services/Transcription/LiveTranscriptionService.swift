@@ -1,10 +1,55 @@
 import AVFoundation
+import CoreML
 import FluidAudio
 import Foundation
 import OSLog
 
 enum LiveTranscriptionError: Error {
     case initializationFailed
+}
+
+enum LiveVADEventKind {
+    case speechStart
+    case speechEnd
+}
+
+struct LiveVADProcessingResult {
+    let state: VadStreamState
+    let isTriggered: Bool
+    let eventKind: LiveVADEventKind?
+}
+
+protocol LiveVADStreamingProcessing: Sendable {
+    func processStreamingChunk(
+        _ chunk: [Float],
+        state: VadStreamState,
+        config: VadSegmentationConfig
+    ) async throws -> LiveVADProcessingResult
+}
+
+private struct VadManagerStreamProcessor: LiveVADStreamingProcessing {
+    let manager: VadManager
+
+    func processStreamingChunk(
+        _ chunk: [Float],
+        state: VadStreamState,
+        config: VadSegmentationConfig
+    ) async throws -> LiveVADProcessingResult {
+        let result = try await manager.processStreamingChunk(chunk, state: state, config: config)
+        let mappedEvent: LiveVADEventKind?
+        if result.event?.kind == .speechStart {
+            mappedEvent = .speechStart
+        } else if result.event?.kind == .speechEnd {
+            mappedEvent = .speechEnd
+        } else {
+            mappedEvent = nil
+        }
+        return LiveVADProcessingResult(
+            state: result.state,
+            isTriggered: result.state.triggered,
+            eventKind: mappedEvent
+        )
+    }
 }
 
 actor LiveTranscriptionService {
@@ -15,6 +60,8 @@ actor LiveTranscriptionService {
     // Core managers
     private var asrManager: AsrManager?
     private var diarizer: DiarizerManager?
+    private var vadManager: VadManager?
+    private var vadStreamProcessor: (any LiveVADStreamingProcessing)?
 
     // Dependencies
     private let speakerEmbeddingStore: SpeakerEmbeddingStore?
@@ -25,10 +72,19 @@ actor LiveTranscriptionService {
 
     // Audio processing constants (task 2.1: 5.0 → 10.0)
     private static let SAMPLE_RATE: Float = 16000
+    private static let VAD_CHUNK_SIZE = 4096
+    private static let MAX_SPEECH_SAMPLES = 480_000
 
     // Chunk accumulation state
-    private let liveBuffer = LiveTranscriptionBuffer()
     private var audioConverters: [AudioSource: AudioConverter] = [:]
+    private var vadStreamStates: [AudioSource: VadStreamState] = [:]
+    private var speechAccumulationBuffers: [AudioSource: [Float]] = [:]
+    private var speechStartOffsets: [AudioSource: Float] = [:]
+    private var vadInputRemainders: [AudioSource: [Float]] = [:]
+    private var totalSamplesProcessed: [AudioSource: Int] = [:]
+#if DEBUG
+    private var processChunkHookForTesting: (@Sendable ([Float], AudioSource, Float) async -> Void)?
+#endif
 
     // Authoritative record of all final segments accumulated this session
     private var collectedFinalSegments: [TranscriptSegment] = []
@@ -61,14 +117,61 @@ actor LiveTranscriptionService {
         }
 
         logger.info("Pre-warming live transcription models...")
+        await prepare(
+            workspace: workspace,
+            initializeAsr: { workspace in
+                let asrConfig = ASRConfig()
+                let asr = AsrManager(config: asrConfig)
+                let asrDirectory = try ModelPathResolver().modelDirectory(for: .asrParakeetV3, in: workspace)
+                let asrModels = try await AsrModels.load(from: asrDirectory)
+                try await asr.initialize(models: asrModels)
+                return asr
+            },
+            initializeDiarizer: { workspace in
+                let diarizerConfig = DiarizerConfig(
+                    clusteringThreshold: 0.5,
+                    minSpeechDuration: 0.5,
+                    minSilenceGap: 0.2
+                )
+                let mgr = DiarizerManager(config: diarizerConfig)
+                let diarizerRepo = try ModelPathResolver().modelDirectory(for: .offlineDiarization, in: workspace)
+                let segmentationURL = diarizerRepo.appendingPathComponent("pyannote_segmentation.mlmodelc", isDirectory: true)
+                let embeddingURL = diarizerRepo.appendingPathComponent("wespeaker_v2.mlmodelc", isDirectory: true)
+                let fileManager = FileManager.default
+                guard fileManager.fileExists(atPath: segmentationURL.path),
+                      fileManager.fileExists(atPath: embeddingURL.path)
+                else {
+                    throw LiveTranscriptionError.initializationFailed
+                }
 
+                let models = try await DiarizerModels.load(
+                    localSegmentationModel: segmentationURL,
+                    localEmbeddingModel: embeddingURL
+                )
+                mgr.initialize(models: models)
+                return mgr
+            },
+            initializeVad: { workspace in
+                let vadDirectory = try ModelPathResolver().modelDirectory(for: .vadSilero, in: workspace)
+                let vadModelURL = vadDirectory.appendingPathComponent(ModelNames.VAD.sileroVadFile, isDirectory: true)
+                let mlConfig = MLModelConfiguration()
+                mlConfig.computeUnits = .cpuAndNeuralEngine
+                let mlModel = try await MLModel.load(contentsOf: vadModelURL, configuration: mlConfig)
+                let manager = VadManager(config: VadConfig(defaultThreshold: 0.75), vadModel: mlModel)
+                return (manager, VadManagerStreamProcessor(manager: manager))
+            }
+        )
+    }
+
+    private func prepare(
+        workspace: Workspace,
+        initializeAsr: @Sendable (Workspace) async throws -> AsrManager,
+        initializeDiarizer: @Sendable (Workspace) async throws -> DiarizerManager,
+        initializeVad: @Sendable (Workspace) async throws -> (VadManager, any LiveVADStreamingProcessing)
+    ) async {
         // 1. Initialize ASR
         do {
-            let asrConfig = ASRConfig()
-            let asr = AsrManager(config: asrConfig)
-            let asrDirectory = try modelPathResolver.modelDirectory(for: .asrParakeetV3, in: workspace)
-            let asrModels = try await AsrModels.load(from: asrDirectory)
-            try await asr.initialize(models: asrModels)
+            let asr = try await initializeAsr(workspace)
             self.asrManager = asr
             logger.info("AsrManager initialized")
         } catch {
@@ -76,47 +179,37 @@ actor LiveTranscriptionService {
             // Leave isInitialized = false so start() can surface the error
             asrManager = nil
             diarizer = nil
+            vadManager = nil
+            vadStreamProcessor = nil
             return
         }
 
-        // 2. Initialize DiarizerManager with retry (task 1.2, 1.3, 1.5)
-        let diarizerConfig = DiarizerConfig(
-            clusteringThreshold: 0.5,
-            minSpeechDuration: 0.5,
-            minSilenceGap: 0.2
-        )
-        let mgr = DiarizerManager(config: diarizerConfig)
-
-        let diarizerRepo: URL
+        // 2. Initialize DiarizerManager
         do {
-            diarizerRepo = try modelPathResolver.modelDirectory(for: .offlineDiarization, in: workspace)
-        } catch {
-            logger.error("Diarizer initialization failed during prepare(): missing workspace diarizer repo — \(error).")
-            asrManager = nil
-            diarizer = nil
-            return
-        }
-        let segmentationURL = diarizerRepo.appendingPathComponent("pyannote_segmentation.mlmodelc", isDirectory: true)
-        let embeddingURL = diarizerRepo.appendingPathComponent("wespeaker_v2.mlmodelc", isDirectory: true)
-        guard fileManager.fileExists(atPath: segmentationURL.path), fileManager.fileExists(atPath: embeddingURL.path) else {
-            logger.error("Diarizer initialization failed during prepare(): missing workspace diarizer files.")
-            asrManager = nil
-            diarizer = nil
-            return
-        }
-
-        do {
-            let models = try await DiarizerModels.load(
-                localSegmentationModel: segmentationURL,
-                localEmbeddingModel: embeddingURL
-            )
-            mgr.initialize(models: models)
+            let mgr = try await initializeDiarizer(workspace)
             self.diarizer = mgr
             logger.info("DiarizerManager initialized from workspace models")
         } catch {
             logger.error("Diarizer initialization failed during prepare(): \(error). Live transcription unavailable.")
             asrManager = nil
             diarizer = nil
+            vadManager = nil
+            vadStreamProcessor = nil
+            return
+        }
+
+        // 3. Initialize VAD
+        do {
+            let (manager, processor) = try await initializeVad(workspace)
+            self.vadManager = manager
+            self.vadStreamProcessor = processor
+            logger.info("VadManager initialized from workspace models")
+        } catch {
+            logger.error("VAD initialization failed during prepare(): \(error). Live transcription unavailable.")
+            asrManager = nil
+            diarizer = nil
+            vadManager = nil
+            vadStreamProcessor = nil
             return
         }
 
@@ -129,8 +222,12 @@ actor LiveTranscriptionService {
     func start(workspace: Workspace) async throws {
         logger.info("Starting live transcription service (Offline Chunking Mode)")
 
-        await liveBuffer.reset()
         audioConverters.removeAll()
+        vadStreamStates.removeAll()
+        speechAccumulationBuffers.removeAll()
+        speechStartOffsets.removeAll()
+        vadInputRemainders.removeAll()
+        totalSamplesProcessed.removeAll()
         collectedFinalSegments.removeAll()
         sessionSpeakers.removeAll()
 
@@ -139,7 +236,7 @@ actor LiveTranscriptionService {
             await prepare(workspace: workspace)
         }
 
-        guard isInitialized, asrManager != nil, diarizer != nil else {
+        guard isInitialized, asrManager != nil, diarizer != nil, vadStreamProcessor != nil else {
             throw LiveTranscriptionError.initializationFailed
         }
 
@@ -149,13 +246,23 @@ actor LiveTranscriptionService {
     func stop() async -> [TranscriptSegment] {
         logger.info("Stopping live transcription service")
 
-        // Process any remaining audio in the buffers
-        let remainingBuffers = await liveBuffer.remainingBuffers()
-        for (source, buffer) in remainingBuffers {
-            if !buffer.isEmpty {
-                let currentOffset = await liveBuffer.currentOffset(for: source)
-                await processChunk(samples: buffer, source: source, currentOffset: currentOffset)
+        // Flush pending speech buffers before speaker enrollment.
+        for source in speechAccumulationBuffers.keys {
+            guard let pendingSamples = speechAccumulationBuffers[source], !pendingSamples.isEmpty else {
+                continue
             }
+
+            let fallbackStartOffset = max(
+                0,
+                currentSessionOffset(for: source) - Float(pendingSamples.count) / Self.SAMPLE_RATE
+            )
+            if speechStartOffsets[source] == nil {
+                speechStartOffsets[source] = fallbackStartOffset
+            }
+
+            await flushSpeechBuffer(for: source)
+            speechAccumulationBuffers[source] = []
+            speechStartOffsets[source] = nil
         }
 
         // tasks 3.5, 3.6: Speaker enrollment at session end
@@ -191,10 +298,16 @@ actor LiveTranscriptionService {
         // Cleanup — reset isInitialized so next session creates a fresh DiarizerManager
         collectedFinalSegments.removeAll()
         sessionSpeakers.removeAll()
-        await liveBuffer.reset()
         audioConverters.removeAll()
+        vadStreamStates.removeAll()
+        speechAccumulationBuffers.removeAll()
+        speechStartOffsets.removeAll()
+        vadInputRemainders.removeAll()
+        totalSamplesProcessed.removeAll()
         asrManager = nil
         diarizer = nil
+        vadManager = nil
+        vadStreamProcessor = nil
         isInitialized = false
 
         return segments
@@ -209,17 +322,92 @@ actor LiveTranscriptionService {
             }
             let resampled = try audioConverters[source]!.resample(samples, from: sampleRate)
             guard !resampled.isEmpty else { return }
+            totalSamplesProcessed[source] = (totalSamplesProcessed[source] ?? 0) + resampled.count
 
-            if let chunkToProcess = await liveBuffer.append(samples: resampled, source: source) {
-                let currentOffset = await liveBuffer.takePendingChunkOffset(for: source) ?? 0
-                await processChunk(samples: chunkToProcess, source: source, currentOffset: currentOffset)
+            var combinedSamples = vadInputRemainders[source] ?? []
+            combinedSamples.append(contentsOf: resampled)
+
+            let chunkSize = Self.VAD_CHUNK_SIZE
+            let processableCount = (combinedSamples.count / chunkSize) * chunkSize
+            let remainderCount = combinedSamples.count - processableCount
+
+            if remainderCount > 0 {
+                vadInputRemainders[source] = Array(combinedSamples.suffix(remainderCount))
+            } else {
+                vadInputRemainders[source] = []
+            }
+
+            guard processableCount > 0 else { return }
+            guard let vadStreamProcessor else { return }
+
+            let processableSamples = Array(combinedSamples.prefix(processableCount))
+            var currentChunkStartSamples = (totalSamplesProcessed[source] ?? 0) - processableCount
+
+            for startIndex in stride(from: 0, to: processableCount, by: chunkSize) {
+                let chunk = Array(processableSamples[startIndex..<(startIndex + chunkSize)])
+                let streamState = vadStreamStates[source] ?? .initial()
+                let result = try await vadStreamProcessor.processStreamingChunk(
+                    chunk,
+                    state: streamState,
+                    config: VadSegmentationConfig.default
+                )
+                vadStreamStates[source] = result.state
+
+                if result.eventKind == LiveVADEventKind.speechStart {
+                    speechStartOffsets[source] = Float(currentChunkStartSamples) / Self.SAMPLE_RATE
+                    if speechAccumulationBuffers[source] == nil {
+                        speechAccumulationBuffers[source] = []
+                    }
+                }
+
+                if result.isTriggered {
+                    var speechBuffer = speechAccumulationBuffers[source] ?? []
+                    speechBuffer.append(contentsOf: chunk)
+                    speechAccumulationBuffers[source] = speechBuffer
+
+                    if speechBuffer.count >= Self.MAX_SPEECH_SAMPLES {
+                        await flushSpeechBuffer(for: source)
+                        speechAccumulationBuffers[source] = []
+                        speechStartOffsets[source] = nil
+                    }
+                }
+
+                if result.eventKind == LiveVADEventKind.speechEnd {
+                    if let buffer = speechAccumulationBuffers[source], !buffer.isEmpty {
+                        await flushSpeechBuffer(for: source)
+                    }
+                    speechAccumulationBuffers[source] = []
+                    speechStartOffsets[source] = nil
+                }
+
+                currentChunkStartSamples += chunkSize
             }
         } catch {
             logger.error("Error processing live audio (\(source.rawValue)): \(error.localizedDescription)")
         }
     }
 
+    private func currentSessionOffset(for source: AudioSource) -> Float {
+        Float(totalSamplesProcessed[source] ?? 0) / Self.SAMPLE_RATE
+    }
+
+    private func flushSpeechBuffer(for source: AudioSource) async {
+        guard let samples = speechAccumulationBuffers[source], !samples.isEmpty else {
+            return
+        }
+
+        let startOffset = speechStartOffsets[source]
+            ?? max(0, currentSessionOffset(for: source) - Float(samples.count) / Self.SAMPLE_RATE)
+        await processChunk(samples: samples, source: source, currentOffset: startOffset)
+    }
+
     private func processChunk(samples: [Float], source: AudioSource, currentOffset: Float) async {
+#if DEBUG
+        if let processChunkHookForTesting {
+            await processChunkHookForTesting(samples, source, currentOffset)
+            return
+        }
+#endif
         guard let asrManager = asrManager else { return }
 
         let chunkDuration = Float(samples.count) / Self.SAMPLE_RATE
@@ -228,11 +416,6 @@ actor LiveTranscriptionService {
             let maxAmplitude = samples.map { abs($0) }.max() ?? 0.0
 
             logger.info("🎤 Transcribing \(source.rawValue) chunk (\(samples.count) samples = \(String(format: "%.1f", chunkDuration))s, max amplitude: \(String(format: "%.6f", maxAmplitude)))...")
-
-            if maxAmplitude < 0.001 {
-                logger.info("⚠️ AUDIO IS SILENT - Skipping transcription")
-                return
-            }
 
             // task 2.2: pass correct ASR source based on audio origin
             // (.microphone for mic, .system for app — inferred as FluidAudio.AudioSource from call-site)
@@ -340,3 +523,29 @@ actor LiveTranscriptionService {
         return speakerMatcher.findBestMatch(for: embedding, in: profiles)
     }
 }
+
+#if DEBUG
+extension LiveTranscriptionService {
+    func prepareForTesting(
+        workspace: Workspace,
+        initializeAsr: @Sendable (Workspace) async throws -> AsrManager,
+        initializeDiarizer: @Sendable (Workspace) async throws -> DiarizerManager,
+        initializeVad: @Sendable (Workspace) async throws -> (VadManager, any LiveVADStreamingProcessing)
+    ) async {
+        await prepare(
+            workspace: workspace,
+            initializeAsr: initializeAsr,
+            initializeDiarizer: initializeDiarizer,
+            initializeVad: initializeVad
+        )
+    }
+
+    func setVADProcessorForTesting(_ processor: any LiveVADStreamingProcessing) {
+        self.vadStreamProcessor = processor
+    }
+
+    func setProcessChunkHookForTesting(_ hook: @escaping @Sendable ([Float], AudioSource, Float) async -> Void) {
+        self.processChunkHookForTesting = hook
+    }
+}
+#endif
