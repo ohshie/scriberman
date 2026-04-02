@@ -27,12 +27,6 @@ struct ModelsSettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
-            case .installing:
-                ProgressView()
-                Text("Installing…")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
             case .warmingUp:
                 ProgressView()
                 Text("Compiling models for first use…")
