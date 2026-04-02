@@ -4,9 +4,11 @@ import SwiftUI
 struct JobsView: View {
     var viewModel: JobsViewModel
     let items: [JobsViewModel.SessionListItem]
+    let pendingSession: PendingSession?
+    let isNewSessionIdle: Bool
     @Binding var selection: JobsViewModel.SessionListItem?
+    let onDiscardPendingSession: () -> Void
 
-    @Environment(AppState.self) private var appState
     @Environment(\.modelContext) private var modelContext
     @State private var showClearAllConfirmation = false
 
@@ -16,7 +18,7 @@ struct JobsView: View {
 
     var body: some View {
         Group {
-            if items.isEmpty && appState.pendingSession == nil {
+            if items.isEmpty && pendingSession == nil {
                 emptyState(
                     title: "No Sessions Yet",
                     systemImage: "list.bullet.rectangle",
@@ -44,20 +46,20 @@ struct JobsView: View {
         }
         .onChange(of: selection) { _, newSelection in
             guard viewModel.shouldDiscardPendingSessionOnSelectionChange(
-                pendingSession: appState.pendingSession,
+                pendingSession: pendingSession,
                 newSelection: newSelection,
                 isNewSessionIdle: isNewSessionIdle
             ) else {
                 return
             }
 
-            appState.discardPendingSession()
+            onDiscardPendingSession()
         }
     }
 
     private var listContent: some View {
         List(selection: $selection) {
-            if let pendingSession = appState.pendingSession {
+            if let pendingSession {
                 row(for: .pending(pendingSession))
                     .tag(JobsViewModel.SessionListItem.pending(pendingSession))
             }
@@ -157,13 +159,5 @@ struct JobsView: View {
             }
         }
         selection = nil
-    }
-
-    private var isNewSessionIdle: Bool {
-        if case .idle = appState.newSessionViewModel.state {
-            return true
-        }
-
-        return false
     }
 }
