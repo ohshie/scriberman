@@ -81,6 +81,7 @@
 		7987328A2F7DA41C00570A03 /* SpeakerMatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798732892F7DA41C00570A03 /* SpeakerMatcherTests.swift */; };
 		7987328C2F7DB47F00570A03 /* ModelInstallServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987328B2F7DB47F00570A03 /* ModelInstallServiceTests.swift */; };
 		7987328E2F7DBC2800570A03 /* SettingsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987328D2F7DBC2800570A03 /* SettingsViewModelTests.swift */; };
+		79BE35232F7E52ED00DB542F /* ThirdPartySendable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35222F7E52ED00DB542F /* ThirdPartySendable.swift */; };
 		79DCE41A2F77BC3D0024DC26 /* TranscriptionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */; };
 		79DCE41D2F77CC1E0024DC26 /* PermissionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */; };
 		79DCE41F2F77CDA90024DC26 /* PermissionsOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41E2F77CDA90024DC26 /* PermissionsOnboardingView.swift */; };
@@ -225,6 +226,7 @@
 		798732892F7DA41C00570A03 /* SpeakerMatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMatcherTests.swift; sourceTree = "<group>"; };
 		7987328B2F7DB47F00570A03 /* ModelInstallServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelInstallServiceTests.swift; sourceTree = "<group>"; };
 		7987328D2F7DBC2800570A03 /* SettingsViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModelTests.swift; sourceTree = "<group>"; };
+		79BE35222F7E52ED00DB542F /* ThirdPartySendable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThirdPartySendable.swift; sourceTree = "<group>"; };
 		79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionServiceTests.swift; sourceTree = "<group>"; };
 		79DCE41B2F77CC0B0024DC26 /* Scriberman.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = Scriberman.xctestplan; sourceTree = "<group>"; };
 		79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionService.swift; sourceTree = "<group>"; };
@@ -588,6 +590,7 @@
 				F1A2B3C4D5E6F708192A3B4D /* TranscriptGrouper.swift */,
 				797571772F79C922006AEFB6 /* MemoryBoundAudioBuffer.swift */,
 				797571812F7A78AC006AEFB6 /* AudioFileStreamer.swift */,
+				79BE35222F7E52ED00DB542F /* ThirdPartySendable.swift */,
 			);
 			path = Helpers;
 			sourceTree = "<group>";
@@ -844,6 +847,7 @@
 				C9B001B001B001B001B001B2 /* SkeletonView.swift in Sources */,
 				7975716A2F7983A2006AEFB6 /* TranscriptBlockView.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CF /* TranscriptSegmentRow.swift in Sources */,
+				79BE35232F7E52ED00DB542F /* ThirdPartySendable.swift in Sources */,
 				BE05D8275352276E509B5A6A /* WorkspacePicker.swift in Sources */,
 				3428B3A8DAFDF0891C460E3C /* ModelGroup.swift in Sources */,
 				7987325C2F7B157200570A03 /* LiveTranscriptionService.swift in Sources */,
@@ -1011,11 +1015,11 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.scriberman.app.tests;
 				SDKROOT = macosx;
-					SUPPORTED_PLATFORMS = macosx;
-					SWIFT_STRICT_CONCURRENCY = complete;
-					SWIFT_VERSION = 6.0;
-					TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Scriberman.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Scriberman";
-					TEST_TARGET_NAME = Scriberman;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Scriberman.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Scriberman";
+				TEST_TARGET_NAME = Scriberman;
 			};
 			name = Release;
 		};
@@ -1041,11 +1045,11 @@
 				PRODUCT_MODULE_NAME = Scriberman;
 				PRODUCT_NAME = Scriberman;
 				SDKROOT = macosx;
-					SUPPORTED_PLATFORMS = macosx;
-					SWIFT_EMIT_LOC_STRINGS = YES;
-					SWIFT_STRICT_CONCURRENCY = complete;
-					SWIFT_VERSION = 6.0;
-				};
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
 			name = Debug;
 		};
 		D968D3A5543C0DA4848C8E5E /* Debug */ = {
@@ -1065,12 +1069,12 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.scriberman.app.tests;
 				SDKROOT = macosx;
-					SUPPORTED_PLATFORMS = macosx;
-					SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
-					SWIFT_STRICT_CONCURRENCY = complete;
-					SWIFT_VERSION = 6.0;
-					TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Scriberman.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Scriberman";
-					TEST_TARGET_NAME = Scriberman;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Scriberman.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Scriberman";
+				TEST_TARGET_NAME = Scriberman;
 			};
 			name = Debug;
 		};
@@ -1162,11 +1166,11 @@
 				PRODUCT_NAME = Scriberman;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
-					SUPPORTED_PLATFORMS = macosx;
-					SWIFT_EMIT_LOC_STRINGS = YES;
-					SWIFT_STRICT_CONCURRENCY = complete;
-					SWIFT_VERSION = 6.0;
-				};
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
