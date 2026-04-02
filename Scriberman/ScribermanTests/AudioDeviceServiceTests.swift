@@ -151,7 +151,7 @@ final class AudioDeviceServiceTests: XCTestCase {
         XCTAssertNil(userDefaults.string(forKey: "selectedMicUID"))
     }
 
-    func testConfigurationChangeRefreshesDevicesAndRevalidatesSelection() {
+    func testConfigurationChangeRefreshesDevicesAndRevalidatesSelection() async throws {
         hardware.devices = [
             MockAudioDevice(id: 1, uid: "uid-1", name: "First Mic", hasInput: true)
         ]
@@ -171,11 +171,7 @@ final class AudioDeviceServiceTests: XCTestCase {
         hardware.defaultInputID = 2
 
         notificationCenter.post(name: .AVAudioEngineConfigurationChange, object: nil)
-        let refreshExpectation = expectation(description: "Audio devices refreshed after configuration change")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            refreshExpectation.fulfill()
-        }
-        wait(for: [refreshExpectation], timeout: 1.0)
+        try await Task.sleep(for: .milliseconds(100))
 
         XCTAssertEqual(service.availableDevices.map(\.uid), ["uid-2"])
         XCTAssertEqual(service.selectedDevice?.uid, "uid-2")

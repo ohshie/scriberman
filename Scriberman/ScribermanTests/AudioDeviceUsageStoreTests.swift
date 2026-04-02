@@ -3,6 +3,7 @@ import Foundation
 import XCTest
 @testable import Scriberman
 
+@MainActor
 final class AudioDeviceUsageStoreTests: XCTestCase {
     private var userDefaults: UserDefaults!
     private var suiteName: String!

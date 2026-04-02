@@ -145,6 +145,7 @@ final class AIProviderServiceTests: XCTestCase {
     }
 }
 
+@MainActor
 final class AIPromptStoreTests: XCTestCase {
     private var defaults: UserDefaults!
     private var suiteName: String!
