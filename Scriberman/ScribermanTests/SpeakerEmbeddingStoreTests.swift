@@ -20,7 +20,7 @@ struct SpeakerEmbeddingStoreTests {
         let embedding: [Float] = Array(repeating: 0.1, count: 256)
         try await store.enrollSpeaker(name: "Alice", embedding: embedding)
         
-        let all = try await store.fetchAll()
+        let all = try await store.fetchAllSnapshots()
         #expect(all.count == 1)
         #expect(all.first?.name == "Alice")
         #expect(all.first?.embedding == embedding)
@@ -34,7 +34,7 @@ struct SpeakerEmbeddingStoreTests {
         let embedding2: [Float] = Array(repeating: 0.2, count: 256)
         try await store.enrollSpeaker(name: "Alice", embedding: embedding2)
         
-        let all = try await store.fetchAll()
+        let all = try await store.fetchAllSnapshots()
         #expect(all.count == 1)
         #expect(all.first?.name == "Alice")
         #expect(all.first?.embedding == embedding2)
@@ -45,10 +45,11 @@ struct SpeakerEmbeddingStoreTests {
         let embedding: [Float] = Array(repeating: 0.1, count: 256)
         try await store.enrollSpeaker(name: "Alice", embedding: embedding)
         
-        let all = try await store.fetchAll()
-        try await store.delete(all.first!)
+        let all = try await store.fetchAllSnapshots()
+        let firstId = try #require(all.first?.id)
+        try await store.deleteProfile(id: firstId)
         
-        let allAfter = try await store.fetchAll()
+        let allAfter = try await store.fetchAllSnapshots()
         #expect(allAfter.isEmpty)
     }
 
@@ -57,10 +58,10 @@ struct SpeakerEmbeddingStoreTests {
         let embedding: [Float] = Array(repeating: 0.1, count: 256)
         try await store.enrollSpeaker(name: "Alice", embedding: embedding)
 
-        let all = try await store.fetchAll()
+        let all = try await store.fetchAllSnapshots()
         let id = try #require(all.first?.id)
 
-        let found = try await store.findProfile(byID: id)
+        let found = try await store.findProfileSnapshot(byID: id)
         #expect(found != nil)
         #expect(found?.name == "Alice")
     }
@@ -75,7 +76,7 @@ struct SpeakerEmbeddingStoreTests {
         try await store.enrollSpeaker(name: "Alice", embedding: embedding)
 
         // Query is the same vector — cosine similarity == 1.0
-        let match = await store.findBestMatch(embedding: embedding, threshold: 0.72)
+        let match = await store.findBestMatchSnapshot(embedding: embedding, threshold: 0.72)
         #expect(match?.name == "Alice")
     }
 
@@ -89,7 +90,7 @@ struct SpeakerEmbeddingStoreTests {
         var query: [Float] = Array(repeating: 0.0, count: 256)
         query[1] = 1.0
 
-        let match = await store.findBestMatch(embedding: query, threshold: 0.72)
+        let match = await store.findBestMatchSnapshot(embedding: query, threshold: 0.72)
         #expect(match == nil)
     }
 
@@ -98,7 +99,7 @@ struct SpeakerEmbeddingStoreTests {
         var embedding: [Float] = Array(repeating: 0.0, count: 256)
         embedding[0] = 1.0
 
-        let match = await store.findBestMatch(embedding: embedding)
+        let match = await store.findBestMatchSnapshot(embedding: embedding)
         #expect(match == nil)
     }
 
@@ -108,7 +109,7 @@ struct SpeakerEmbeddingStoreTests {
         stored[0] = 1.0
         try await store.enrollSpeaker(name: "Alice", embedding: stored)
 
-        let match = await store.findBestMatch(embedding: [])
+        let match = await store.findBestMatchSnapshot(embedding: [])
         #expect(match == nil)
     }
 
@@ -119,7 +120,7 @@ struct SpeakerEmbeddingStoreTests {
         try await store.enrollSpeaker(name: "Alice", embedding: stored)
 
         let zeroEmbedding: [Float] = Array(repeating: 0.0, count: 256)
-        let match = await store.findBestMatch(embedding: zeroEmbedding)
+        let match = await store.findBestMatchSnapshot(embedding: zeroEmbedding)
         #expect(match == nil)
     }
 
@@ -140,7 +141,7 @@ struct SpeakerEmbeddingStoreTests {
         query[0] = 0.99
         query[1] = 0.01
 
-        let match = await store.findBestMatch(embedding: query, threshold: 0.72)
+        let match = await store.findBestMatchSnapshot(embedding: query, threshold: 0.72)
         #expect(match?.name == "Alice")
     }
 }

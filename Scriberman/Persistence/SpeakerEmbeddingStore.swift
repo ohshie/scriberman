@@ -16,6 +16,10 @@ actor SpeakerEmbeddingStore {
         return try context.fetch(descriptor).sorted(by: { $0.lastSeen > $1.lastSeen })
     }
 
+    func fetchAllSnapshots() throws -> [SpeakerProfileSnapshot] {
+        try fetchAll().map(SpeakerProfileSnapshot.init(profile:))
+    }
+
     func save(_ profile: SpeakerProfile) throws {
         context.insert(profile)
         try context.save()
@@ -43,6 +47,15 @@ actor SpeakerEmbeddingStore {
         }
     }
 
+    func deleteProfile(id: UUID) throws {
+        let descriptor = FetchDescriptor<SpeakerProfile>()
+        let profiles = try context.fetch(descriptor)
+        if let profile = profiles.first(where: { $0.id == id }) {
+            context.delete(profile)
+            try context.save()
+        }
+    }
+
     func findProfile(byID id: UUID) throws -> SpeakerProfile? {
         let descriptor = FetchDescriptor<SpeakerProfile>()
         let profiles = try context.fetch(descriptor)
@@ -50,6 +63,13 @@ actor SpeakerEmbeddingStore {
             return profile
         }
         return nil
+    }
+
+    func findProfileSnapshot(byID id: UUID) throws -> SpeakerProfileSnapshot? {
+        guard let profile = try findProfile(byID: id) else {
+            return nil
+        }
+        return SpeakerProfileSnapshot(profile: profile)
     }
 
     /// Finds the stored `SpeakerProfile` whose embedding has the highest cosine similarity
@@ -102,6 +122,13 @@ actor SpeakerEmbeddingStore {
 
         guard bestSimilarity >= threshold else { return nil }
         return bestProfile
+    }
+
+    func findBestMatchSnapshot(embedding: [Float], threshold: Float = 0.72) -> SpeakerProfileSnapshot? {
+        guard let match = findBestMatch(embedding: embedding, threshold: threshold) else {
+            return nil
+        }
+        return SpeakerProfileSnapshot(profile: match)
     }
 
     // MARK: - Private helpers

@@ -1,6 +1,7 @@
 import XCTest
 @testable import Scriberman
 
+@MainActor
 final class StatusTagViewTests: XCTestCase {
     func testDoneMapsToGreenTint() {
         let style = StatusTagView.style(for: .done)

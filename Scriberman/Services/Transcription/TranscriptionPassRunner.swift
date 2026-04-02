@@ -1,7 +1,7 @@
 import FluidAudio
 import Foundation
 
-struct TranscriptionPassRunner {
+struct TranscriptionPassRunner: @unchecked Sendable {
     struct SpeechSegment {
         let startTime: Double
         let endTime: Double
@@ -33,17 +33,19 @@ struct TranscriptionPassRunner {
     private let makePassEngines: MakePassEngines
     private let alignTranscript: AlignTranscript
 
+    private static func defaultSegmentSpeech(samples: [Float]) async throws -> [SpeechSegment] {
+        let vadManager = try await VadManager(config: VadConfig(defaultThreshold: 0.75))
+        let segments = try await vadManager.segmentSpeech(samples, config: VadSegmentationConfig.default)
+        return segments.map { segment in
+            SpeechSegment(startTime: segment.startTime, endTime: segment.endTime)
+        }
+    }
+
     init(
         speakerEmbeddingStore: SpeakerEmbeddingStore? = nil,
         minimumChunkSamples: Int = 16_000,
         speakerMatcher: SpeakerMatcher = SpeakerMatcher(),
-        segmentSpeech: @escaping SegmentSpeech = { samples in
-            let vadManager = try await VadManager(config: VadConfig(defaultThreshold: 0.75))
-            let segments = try await vadManager.segmentSpeech(samples, config: VadSegmentationConfig.default)
-            return segments.map { segment in
-                SpeechSegment(startTime: segment.startTime, endTime: segment.endTime)
-            }
-        },
+        segmentSpeech: @escaping SegmentSpeech = Self.defaultSegmentSpeech,
         makePassEngines: MakePassEngines? = nil,
         alignTranscript: AlignTranscript? = nil
     ) {
@@ -191,7 +193,7 @@ struct TranscriptionPassRunner {
             return [:]
         }
 
-        let profiles = (try? await store.fetchAll()) ?? []
+        let profiles = (try? await store.fetchAllSnapshots()) ?? []
 
         for (clusterId, embedding) in db {
             if let match = speakerMatcher.findBestMatch(for: embedding, in: profiles) {

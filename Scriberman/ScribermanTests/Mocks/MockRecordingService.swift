@@ -2,11 +2,11 @@ import CoreAudio
 import Foundation
 @testable import Scriberman
 
-final class MockRecordingService: RecordingServiceProtocol {
+final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable {
     var isRecordingOverride = false
     var audioLevelOverride: Float = 0
-    var startShouldThrow: Error?
-    var startThrowSequence: [Error] = []
+    var startShouldThrow: RecordingError?
+    var startThrowSequence: [RecordingError] = []
     var stopReturns: UUID?
     var startCalls: [(workspace: Workspace, micDeviceID: AudioDeviceID?, capturedAppName: String?, appProcessID: pid_t?, title: String?)] = []
     var pendingError: RecordingError?
@@ -31,7 +31,7 @@ final class MockRecordingService: RecordingServiceProtocol {
         capturedAppName: String?,
         appProcessID: pid_t?,
         title: String?
-    ) async throws {
+    ) async throws(RecordingError) {
         startCalls.append((
             workspace: workspace,
             micDeviceID: micDeviceID,

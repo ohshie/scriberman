@@ -34,7 +34,7 @@ actor WorkspaceService: WorkspaceServiceProtocol {
         self.bookmarkStore = bookmarkStore
     }
 
-    func restoreWorkspaceIfPossible() throws -> Workspace {
+    func restoreWorkspaceIfPossible() throws(WorkspaceError) -> Workspace {
         guard let bookmarkData = bookmarkStore.loadWorkspaceBookmark() else {
             throw WorkspaceError.notConfigured
         }
@@ -62,7 +62,7 @@ actor WorkspaceService: WorkspaceServiceProtocol {
         return workspace
     }
 
-    func setWorkspace(url: URL) throws -> Workspace {
+    func setWorkspace(url: URL) throws(WorkspaceError) -> Workspace {
         let workspace = try activateWorkspace(url: url)
         try saveBookmark(for: workspace.rootURL)
         return workspace
@@ -76,7 +76,7 @@ actor WorkspaceService: WorkspaceServiceProtocol {
         return Workspace(rootURL: activeWorkspaceURL)
     }
 
-    func requireWritableWorkspace() async throws -> Workspace {
+    func requireWritableWorkspace() async throws(WorkspaceError) -> Workspace {
         guard let workspace = await currentWorkspace() else {
             throw WorkspaceError.notConfigured
         }
@@ -89,7 +89,7 @@ actor WorkspaceService: WorkspaceServiceProtocol {
         return workspace
     }
 
-    private func activateWorkspace(url: URL) throws -> Workspace {
+    private func activateWorkspace(url: URL) throws(WorkspaceError) -> Workspace {
         releaseActiveWorkspaceIfNeeded()
 
         guard url.startAccessingSecurityScopedResource() else {
@@ -111,7 +111,7 @@ actor WorkspaceService: WorkspaceServiceProtocol {
         return workspace
     }
 
-    private func initializeWorkspaceFolders(_ workspace: Workspace) throws {
+    private func initializeWorkspaceFolders(_ workspace: Workspace) throws(WorkspaceError) {
         do {
             try fileManager.createDirectory(at: workspace.modelsURL, withIntermediateDirectories: true)
             try fileManager.createDirectory(at: workspace.jobsURL, withIntermediateDirectories: true)
@@ -120,7 +120,7 @@ actor WorkspaceService: WorkspaceServiceProtocol {
         }
     }
 
-    private func saveBookmark(for url: URL) throws {
+    private func saveBookmark(for url: URL) throws(WorkspaceError) {
         let bookmarkData: Data
 
         do {

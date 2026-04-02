@@ -2,7 +2,7 @@ import Foundation
 
 private let workspaceBookmarkKey = "workspace.bookmark"
 
-protocol BookmarkStore {
+protocol BookmarkStore: Sendable {
     func loadWorkspaceBookmark() -> Data?
     func saveWorkspaceBookmark(_ data: Data)
 }

@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SpeakerManagementView: View {
     let store: SpeakerEmbeddingStore
-    @State private var profiles: [SpeakerProfile] = []
+    @State private var profiles: [SpeakerProfileSnapshot] = []
     @State private var isLoading = true
 
     var body: some View {
@@ -34,7 +34,7 @@ struct SpeakerManagementView: View {
 
     private func loadProfiles() async {
         do {
-            profiles = try await store.fetchAll()
+            profiles = try await store.fetchAllSnapshots()
         } catch {
             print("Failed to load speaker profiles: \(error)")
         }
@@ -45,7 +45,7 @@ struct SpeakerManagementView: View {
         let toDelete = offsets.map { profiles[$0] }
         Task {
             for profile in toDelete {
-                try? await store.delete(profile)
+                try? await store.deleteProfile(id: profile.id)
             }
             await loadProfiles()
         }
