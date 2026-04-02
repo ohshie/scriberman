@@ -21,11 +21,11 @@ enum ModelGroup: String, CaseIterable, Identifiable {
     var repoFolderName: String {
         switch self {
         case .asrParakeetV3:
-            return "parakeet-tdt-0.6b-v3-coreml"
+            return "parakeet-tdt-0.6b-v3"
         case .vadSilero:
-            return "silero-vad-coreml"
+            return "silero-vad"
         case .offlineDiarization:
-            return "speaker-diarization-coreml"
+            return "speaker-diarization"
         }
     }
 }
@@ -33,7 +33,6 @@ enum ModelGroup: String, CaseIterable, Identifiable {
 enum ModelGroupReadinessState: String {
     case missing
     case downloading
-    case installing
     case ready
     case error
 }
