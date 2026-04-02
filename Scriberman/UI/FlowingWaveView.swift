@@ -5,11 +5,16 @@ struct FlowingWaveView: View {
     let showAppWave: Bool
     let isRecording: Bool
 
+    @State private var smoothedLevel: CGFloat = 0
+
     private let idleAmplitude: CGFloat = 6
     private let maxAmplitude: CGFloat = 44
+    private let minRecordingAmplitude: CGFloat = 2
     private let appAmbientAmplitude: CGFloat = 9
     private let waveSpeed: Double = 2.25
     private let appWavePhaseOffset: Double = .pi / 3
+    private let attackDuration: Double = 0.08
+    private let releaseDuration: Double = 0.2
 
     var body: some View {
         TimelineView(.animation) { timelineContext in
@@ -21,7 +26,7 @@ struct FlowingWaveView: View {
                 let elapsed = timelineContext.date.timeIntervalSinceReferenceDate
                 let phase = elapsed * waveSpeed
                 let primaryAmplitude = isRecording
-                    ? CGFloat(max(0, min(level, 1))) * maxAmplitude
+                    ? minRecordingAmplitude + (smoothedLevel * (maxAmplitude - minRecordingAmplitude))
                     : idleAmplitude
 
                 let primaryPath = wavePath(
@@ -32,7 +37,13 @@ struct FlowingWaveView: View {
                 graphicsContext.stroke(
                     primaryPath,
                     with: .color(.blue.opacity(0.8)),
-                    lineWidth: 2
+                    style: StrokeStyle(
+                        lineWidth: 2.8,
+                        lineCap: .round,
+                        lineJoin: .round,
+                        dash: [0.1, 7.2],
+                        dashPhase: CGFloat(-phase * 22)
+                    )
                 )
 
                 if showAppWave {
@@ -44,11 +55,43 @@ struct FlowingWaveView: View {
                     graphicsContext.stroke(
                         appPath,
                         with: .color(.red.opacity(0.8)),
-                        lineWidth: 2
+                        style: StrokeStyle(
+                            lineWidth: 2.8,
+                            lineCap: .round,
+                            lineJoin: .round,
+                            dash: [0.1, 7.2],
+                            dashPhase: CGFloat((phase + appWavePhaseOffset) * 20)
+                        )
                     )
                 }
             }
         }
+        .onAppear {
+            smoothedLevel = clampedLevel
+        }
+        .onChange(of: level) { _, newLevel in
+            let target = CGFloat(max(0, min(newLevel, 1)))
+            guard isRecording else {
+                smoothedLevel = target
+                return
+            }
+
+            let duration = target >= smoothedLevel ? attackDuration : releaseDuration
+            withAnimation(.easeInOut(duration: duration)) {
+                smoothedLevel = target
+            }
+        }
+        .onChange(of: isRecording) { _, recording in
+            if !recording {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    smoothedLevel = clampedLevel
+                }
+            }
+        }
+    }
+
+    private var clampedLevel: CGFloat {
+        CGFloat(max(0, min(level, 1)))
     }
 
     private func wavePath(in size: CGSize, amplitude: CGFloat, phase: Double) -> Path {

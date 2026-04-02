@@ -9,6 +9,7 @@ struct NewSessionPanelView: View {
     var onImportFile: () -> Void = {}
 
     @Environment(\.modelContext) private var modelContext
+    @State private var isNameCardHovering = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -287,15 +288,35 @@ struct NewSessionPanelView: View {
     }
 
     private var sessionNameEditorCard: some View {
-        TextField("Untitled Session", text: $pendingSession.title)
-            .textFieldStyle(.plain)
-            .font(.title2.weight(.semibold))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(
+        HStack(spacing: 10) {
+            TextField("Untitled Session", text: $pendingSession.title)
+                .textFieldStyle(.plain)
+                .font(.title2.weight(.semibold))
+
+            if isNameCardHovering {
+                Label("Edit", systemImage: "pencil")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tint)
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onHover { hovering in
+            isNameCardHovering = hovering
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay {
+            if isNameCardHovering {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            )
+                    .stroke(.tint.opacity(0.35), lineWidth: 1.5)
+            }
+        }
+        .animation(.easeInOut(duration: 0.15), value: isNameCardHovering)
     }
 
     private var sessionNameReadOnlyCard: some View {
