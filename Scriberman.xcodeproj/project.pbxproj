@@ -82,6 +82,7 @@
 		7987328C2F7DB47F00570A03 /* ModelInstallServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987328B2F7DB47F00570A03 /* ModelInstallServiceTests.swift */; };
 		7987328E2F7DBC2800570A03 /* SettingsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987328D2F7DBC2800570A03 /* SettingsViewModelTests.swift */; };
 		79BE35232F7E52ED00DB542F /* ThirdPartySendable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35222F7E52ED00DB542F /* ThirdPartySendable.swift */; };
+		79BE35252F7E6EF700DB542F /* TranscriptDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35242F7E6EF700DB542F /* TranscriptDetailViewModel.swift */; };
 		79DCE41A2F77BC3D0024DC26 /* TranscriptionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */; };
 		79DCE41D2F77CC1E0024DC26 /* PermissionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */; };
 		79DCE41F2F77CDA90024DC26 /* PermissionsOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41E2F77CDA90024DC26 /* PermissionsOnboardingView.swift */; };
@@ -227,6 +228,7 @@
 		7987328B2F7DB47F00570A03 /* ModelInstallServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelInstallServiceTests.swift; sourceTree = "<group>"; };
 		7987328D2F7DBC2800570A03 /* SettingsViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModelTests.swift; sourceTree = "<group>"; };
 		79BE35222F7E52ED00DB542F /* ThirdPartySendable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThirdPartySendable.swift; sourceTree = "<group>"; };
+		79BE35242F7E6EF700DB542F /* TranscriptDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptDetailViewModel.swift; sourceTree = "<group>"; };
 		79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionServiceTests.swift; sourceTree = "<group>"; };
 		79DCE41B2F77CC0B0024DC26 /* Scriberman.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = Scriberman.xctestplan; sourceTree = "<group>"; };
 		79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionService.swift; sourceTree = "<group>"; };
@@ -401,6 +403,7 @@
 				C4F2C579DEA6DCCA2A080BC3 /* JobsViewModel.swift */,
 				A8F3DE0F4D65F9DD94E5DEFC /* SettingsViewModel.swift */,
 				82B5AC231318E9580ADB309B /* AppState.swift */,
+				79BE35242F7E6EF700DB542F /* TranscriptDetailViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -838,6 +841,7 @@
 				7987326F2F7D8EB100570A03 /* AudioFileProber.swift in Sources */,
 				C2B2C3D4E5F60718293A4B5C /* NewSessionPanelView.swift in Sources */,
 				A0313B452C3199D5A6118FB9 /* AppShellView.swift in Sources */,
+				79BE35252F7E6EF700DB542F /* TranscriptDetailViewModel.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CC /* WaveformView.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4CD /* RecordingSessionRow.swift in Sources */,
 				D1A2B3C4D5E6F708192A3B4E /* StatusTagView.swift in Sources */,

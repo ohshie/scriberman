@@ -10,6 +10,7 @@ struct AppShellView: View {
     }
 
     @Environment(AppState.self) private var appState
+    @Environment(AIProviderService.self) private var aiProviderService
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \RecordingSession.createdAt, order: .reverse) private var recordingSessions: [RecordingSession]
     @Query(sort: \ImportedSession.createdAt, order: .reverse) private var importedSessions: [ImportedSession]
@@ -177,6 +178,7 @@ struct AppShellView: View {
             } else {
                 TranscriptDetailView(
                     session: session,
+                    aiProviderService: aiProviderService,
                     onReprocess: {
                         appState.jobsViewModel.reprocess(session: session, context: modelContext)
                     },
@@ -188,6 +190,7 @@ struct AppShellView: View {
                         detailMode = .study
                     }
                 )
+                .id(session.id)
             }
 
         case .imported(let session):
@@ -200,6 +203,7 @@ struct AppShellView: View {
             } else {
                 TranscriptDetailView(
                     session: session,
+                    aiProviderService: aiProviderService,
                     onReprocess: {
                         appState.jobsViewModel.reprocess(session: session, context: modelContext)
                     },
@@ -211,6 +215,7 @@ struct AppShellView: View {
                         detailMode = .study
                     }
                 )
+                .id(session.id)
             }
         }
     }
