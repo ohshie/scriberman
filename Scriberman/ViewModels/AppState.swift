@@ -1,7 +1,9 @@
 import Foundation
+import Observation
 
+@Observable
 @MainActor
-final class AppState: ObservableObject {
+final class AppState {
     let mainServices: MainServiceContainer
     let backgroundServices: BackgroundServiceContainer
     let permissionService: PermissionServiceProtocol
@@ -11,11 +13,11 @@ final class AppState: ObservableObject {
     private let restoreWorkspaceHandler: () async throws -> Workspace
     private let setWorkspaceHandler: (URL) async throws -> Workspace
 
-    @Published var pendingSession: PendingSession?
-    @Published private(set) var workspace: Workspace?
-    @Published private(set) var workspaceErrorMessage: String?
-    @Published var workspaceSelectionRequired = false
-    @Published var showPermissionsOnboarding = false
+    var pendingSession: PendingSession?
+    private(set) var workspace: Workspace?
+    private(set) var workspaceErrorMessage: String?
+    var workspaceSelectionRequired = false
+    var showPermissionsOnboarding = false
 
     var aiProviderService: AIProviderService {
         mainServices.aiProviderService

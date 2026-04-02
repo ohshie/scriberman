@@ -7,7 +7,7 @@ struct TranscriptDetailView: View {
     let onDelete: () -> Void
     let onOpenStudy: (() -> Void)?
 
-    @EnvironmentObject private var appState: AppState
+    @Environment(AppState.self) private var appState
     @Environment(AIProviderService.self) private var aiProviderService
     @State private var showingDeleteConfirmation = false
     @State private var promptStore = AIPromptStore()
@@ -379,7 +379,7 @@ private struct AnalyzableView: View {
             transcript: transcript,
             store: appState.backgroundServices.speakerEmbeddingStore
         )
-        .environmentObject(appState)
+        .environment(appState)
         .environment(aiProviderService)
     }
 }

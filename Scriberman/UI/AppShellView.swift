@@ -9,7 +9,7 @@ struct AppShellView: View {
         case study
     }
 
-    @EnvironmentObject private var appState: AppState
+    @Environment(AppState.self) private var appState
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \RecordingSession.createdAt, order: .reverse) private var recordingSessions: [RecordingSession]
     @Query(sort: \ImportedSession.createdAt, order: .reverse) private var importedSessions: [ImportedSession]
@@ -32,6 +32,8 @@ struct AppShellView: View {
     }
 
     var body: some View {
+        @Bindable var appState = appState
+
         NavigationSplitView {
             JobsView(
                 viewModel: appState.jobsViewModel,
@@ -120,7 +122,7 @@ struct AppShellView: View {
             )
         ) {
             PermissionsOnboardingView(permissionService: appState.permissionService)
-                .environmentObject(appState)
+                .environment(appState)
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else {
