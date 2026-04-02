@@ -530,7 +530,13 @@ actor RecordingService: RecordingServiceProtocol {
         do {
             let context = ModelContext(modelContainer)
             let descriptor = FetchDescriptor<RecordingSession>()
-            guard let persistedSession = try context.fetch(descriptor).first(where: { $0.id == sessionID }) else {
+            let sessions = try context.fetch(descriptor)
+            var persistedSession: RecordingSession?
+            for session in sessions where session.id == sessionID {
+                persistedSession = session
+                break
+            }
+            guard let persistedSession else {
                 logger.error("Mixdown succeeded but session \(sessionID, privacy: .public) was not found for persistence update.")
                 return
             }

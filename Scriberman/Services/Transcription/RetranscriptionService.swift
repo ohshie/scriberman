@@ -45,10 +45,17 @@ actor RetranscriptionService {
         let recordingDescriptor = FetchDescriptor<RecordingSession>()
         let importedDescriptor = FetchDescriptor<ImportedSession>()
 
-        if let recording = try? context.fetch(recordingDescriptor).first(where: { $0.id == sessionID }) {
-            session = recording
-        } else if let imported = try? context.fetch(importedDescriptor).first(where: { $0.id == sessionID }) {
-            session = imported
+        if let recordings = try? context.fetch(recordingDescriptor) {
+            for recording in recordings where recording.id == sessionID {
+                session = recording
+                break
+            }
+        }
+        if session == nil, let importedSessions = try? context.fetch(importedDescriptor) {
+            for imported in importedSessions where imported.id == sessionID {
+                session = imported
+                break
+            }
         }
         
         guard let session = session else {

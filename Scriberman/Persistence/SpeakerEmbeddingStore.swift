@@ -23,7 +23,13 @@ actor SpeakerEmbeddingStore {
 
     func updateProfile(id: UUID) throws {
         let descriptor = FetchDescriptor<SpeakerProfile>()
-        if let profile = try context.fetch(descriptor).first(where: { $0.id == id }) {
+        let profiles = try context.fetch(descriptor)
+        var profileToUpdate: SpeakerProfile?
+        for profile in profiles where profile.id == id {
+            profileToUpdate = profile
+            break
+        }
+        if let profile = profileToUpdate {
             profile.lastSeen = .now
             try context.save()
         }
@@ -39,7 +45,11 @@ actor SpeakerEmbeddingStore {
 
     func findProfile(byID id: UUID) throws -> SpeakerProfile? {
         let descriptor = FetchDescriptor<SpeakerProfile>()
-        return try context.fetch(descriptor).first(where: { $0.id == id })
+        let profiles = try context.fetch(descriptor)
+        for profile in profiles where profile.id == id {
+            return profile
+        }
+        return nil
     }
 
     /// Finds the stored `SpeakerProfile` whose embedding has the highest cosine similarity
