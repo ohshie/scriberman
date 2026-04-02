@@ -21,7 +21,7 @@ final class AudioChannelReaderTests: XCTestCase {
         try super.tearDownWithError()
     }
 
-    func testReadReturnsSamplesPerChannel() throws {
+    func testReadReturnsSamplesPerChannel() async throws {
         let url = tempDirectoryURL.appendingPathComponent("stereo-input.wav")
         let left = [Float(0.8), 0.6, 0.4, 0.2]
         let right = [Float(-0.1), -0.2, -0.3, -0.4]
@@ -30,7 +30,9 @@ final class AudioChannelReaderTests: XCTestCase {
         let reader = AudioChannelReader()
         let channels: [[Float]]
         do {
-            channels = try reader.read(url: url)
+            channels = try await Task.detached(priority: .userInitiated) {
+                try reader.read(url: url)
+            }.value
         } catch {
             if shouldSkipForSandboxAudioIO(error) {
                 throw XCTSkip("Skipping channel reader test: AVAudioFile read unavailable in sandbox (\(error.localizedDescription))")

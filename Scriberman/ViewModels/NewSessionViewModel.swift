@@ -325,7 +325,12 @@ final class NewSessionViewModel {
         var fetchedSession: RecordingSession?
         if let sessionID = sessionID {
             let descriptor = FetchDescriptor<RecordingSession>()
-            fetchedSession = try? context.fetch(descriptor).first(where: { $0.id == sessionID })
+            if let sessions = try? context.fetch(descriptor) {
+                for session in sessions where session.id == sessionID {
+                    fetchedSession = session
+                    break
+                }
+            }
         }
         
         guard let session = fetchedSession else {
