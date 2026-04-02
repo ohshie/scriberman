@@ -30,8 +30,9 @@ final class PermissionService: PermissionServiceProtocol {
     private let screenRecordingPermissions: ScreenRecordingPermissionProviding
     private let screenRecordingFunctionalPermissions: ScreenRecordingFunctionalPermissionProviding
     private let userDefaults: UserDefaults
-    nonisolated(unsafe) private let notificationCenter: NotificationCenter
+    private let notificationCenter: NotificationCenter
     private let logger = Logger(subsystem: "Scriberman", category: "PermissionService")
+    // nonisolated(unsafe): written once in init, removed in deinit; never mutated concurrently
     nonisolated(unsafe) private var appAudioCaptureAccessDeniedObserver: NSObjectProtocol?
 
     init(
