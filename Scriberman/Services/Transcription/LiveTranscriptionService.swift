@@ -181,6 +181,25 @@ actor LiveTranscriptionService {
     func stop() async -> [TranscriptSegment] {
         logger.info("Stopping live transcription service")
 
+        // Flush pending speech buffers before speaker enrollment.
+        for source in speechAccumulationBuffers.keys {
+            guard let pendingSamples = speechAccumulationBuffers[source], !pendingSamples.isEmpty else {
+                continue
+            }
+
+            let fallbackStartOffset = max(
+                0,
+                currentSessionOffset(for: source) - Float(pendingSamples.count) / Self.SAMPLE_RATE
+            )
+            if speechStartOffsets[source] == nil {
+                speechStartOffsets[source] = fallbackStartOffset
+            }
+
+            await flushSpeechBuffer(for: source)
+            speechAccumulationBuffers[source] = []
+            speechStartOffsets[source] = nil
+        }
+
         // tasks 3.5, 3.6: Speaker enrollment at session end
         if let store = speakerEmbeddingStore, !sessionSpeakers.isEmpty {
             do {
