@@ -90,11 +90,10 @@ struct NewSessionPanelView: View {
 
     private var idleState: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("New Session")
-                .font(.title2.weight(.semibold))
+            sessionNameEditorCard
 
-            TextField("Session name", text: $pendingSession.title)
-                .textFieldStyle(.roundedBorder)
+            FlowingWaveView(level: 0, showAppWave: false, isRecording: false)
+                .frame(height: 110)
 
             controlsSection(isInteractive: true)
 
@@ -113,16 +112,19 @@ struct NewSessionPanelView: View {
                 }
             }
 
-            Button {
-                Task {
-                    await viewModel.startRecording(title: pendingSession.title, context: modelContext)
+            HStack {
+                Spacer()
+                Button {
+                    Task {
+                        await viewModel.startRecording(title: pendingSession.title, context: modelContext)
+                    }
+                } label: {
+                    Label("Record", systemImage: "record.circle")
                 }
-            } label: {
-                Label("Record", systemImage: "record.circle")
-                    .frame(maxWidth: .infinity)
+                .buttonStyle(.glassProminent)
+                .disabled(!viewModel.canRecord)
+                Spacer()
             }
-            .buttonStyle(.glassProminent)
-            .disabled(!viewModel.canRecord)
 
             Button("or Import File") {
                 onImportFile()
@@ -133,10 +135,9 @@ struct NewSessionPanelView: View {
 
     private func recordingState(duration: TimeInterval, level: Float) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Recording")
-                .font(.title2.weight(.semibold))
+            sessionNameReadOnlyCard
 
-            WaveformView(level: .constant(level))
+            FlowingWaveView(level: level, showAppWave: viewModel.recordAppAudio, isRecording: true)
                 .frame(height: 110)
 
             Text(durationText(duration))
@@ -174,18 +175,21 @@ struct NewSessionPanelView: View {
                 }
             }
 
-            Button {
-                Task {
-                    if let session = await viewModel.stopRecording(context: modelContext) {
-                        onRecordingFinished(session)
+            HStack {
+                Spacer()
+                Button {
+                    Task {
+                        if let session = await viewModel.stopRecording(context: modelContext) {
+                            onRecordingFinished(session)
+                        }
                     }
+                } label: {
+                    Label("Stop", systemImage: "stop.circle.fill")
                 }
-            } label: {
-                Label("Stop", systemImage: "stop.circle.fill")
-                    .frame(maxWidth: .infinity)
+                .buttonStyle(.glassProminent)
+                .tint(.red)
+                Spacer()
             }
-            .buttonStyle(.glassProminent)
-            .tint(.red)
 
             controlsSection(isInteractive: false)
         }
@@ -194,20 +198,35 @@ struct NewSessionPanelView: View {
     private func controlsSection(isInteractive: Bool) -> some View {
         @Bindable var bindableViewModel = viewModel
 
-        return VStack(alignment: .leading, spacing: 12) {
+        return VStack(spacing: 0) {
             microphoneMenu
                 .disabled(!isInteractive)
 
-            Toggle(isOn: $bindableViewModel.recordAppAudio) {
+            Divider()
+
+            HStack(spacing: 12) {
                 Label("Record app audio", systemImage: "waveform")
+                Spacer(minLength: 0)
+                Toggle("", isOn: $bindableViewModel.recordAppAudio)
+                    .labelsHidden()
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
             .disabled(!isInteractive || !viewModel.appAudioToggleEnabled)
 
             if viewModel.showAppPicker {
+                Divider()
                 appPicker
                     .disabled(!isInteractive)
             }
         }
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .disabled(!isInteractive)
+        .opacity(isInteractive ? 1 : 0.65)
     }
 
     private var microphoneMenu: some View {
@@ -224,9 +243,18 @@ struct NewSessionPanelView: View {
                 }
             }
         } label: {
-            Label(viewModel.selectedDevice?.name ?? "Microphone", systemImage: "mic")
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 12) {
+                Label(viewModel.selectedDevice?.name ?? "Microphone", systemImage: "mic")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 
     private var appPicker: some View {
@@ -243,9 +271,43 @@ struct NewSessionPanelView: View {
                 }
             }
         } label: {
-            Label(viewModel.selectedApp?.name ?? "Choose app", systemImage: "app")
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 12) {
+                Label(viewModel.selectedApp?.name ?? "Choose app", systemImage: "app")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .padding(.leading, 20)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+    }
+
+    private var sessionNameEditorCard: some View {
+        TextField("Untitled Session", text: $pendingSession.title)
+            .textFieldStyle(.plain)
+            .font(.title2.weight(.semibold))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
+    }
+
+    private var sessionNameReadOnlyCard: some View {
+        Text(pendingSession.title.isEmpty ? "Untitled Session" : pendingSession.title)
+            .font(.title2.weight(.semibold))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
     }
 
     private func durationText(_ duration: TimeInterval) -> String {
