@@ -87,8 +87,14 @@ actor TranscriptionService: TranscriptionServiceProtocol {
     func transcribe(sessionID: UUID, modelContainer: ModelContainer, workspace: Workspace) async throws -> Transcript {
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<RecordingSession>()
+        let sessions = try context.fetch(descriptor)
+        var session: RecordingSession?
+        for candidate in sessions where candidate.id == sessionID {
+            session = candidate
+            break
+        }
 
-        guard let session = try? context.fetch(descriptor).first(where: { $0.id == sessionID }) else {
+        guard let session else {
             throw TranscriptionError.failedToTranscribe("Session not found for ID \(sessionID)")
         }
 

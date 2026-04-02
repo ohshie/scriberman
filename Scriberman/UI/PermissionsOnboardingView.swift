@@ -7,7 +7,7 @@ struct PermissionsOnboardingView: View {
         case screenRecording
     }
 
-    @EnvironmentObject private var appState: AppState
+    @Environment(AppState.self) private var appState
     @State private var currentStep: OnboardingStep = .mic
     @State private var micVerified = false
     @State private var screenRecordingVerified = false
