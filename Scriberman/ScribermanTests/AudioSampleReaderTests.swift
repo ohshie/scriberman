@@ -1,8 +1,8 @@
 import Foundation
-import XCTest
+import Testing
 @testable import Scriberman
 
-final class AudioSampleReaderTests: XCTestCase {
+final class AudioSampleReaderTests {
     private final class LockedInt: @unchecked Sendable {
         private let lock = NSLock()
         private var value = 0
@@ -22,6 +22,7 @@ final class AudioSampleReaderTests: XCTestCase {
         }
     }
 
+    @Test
     func testReadFallsBackToExtAudioFilePath() async throws {
         let url = URL(fileURLWithPath: "/tmp/mock-audio.wav")
         let avCalls = LockedInt()
@@ -41,11 +42,12 @@ final class AudioSampleReaderTests: XCTestCase {
 
         let samples = try await reader.read(from: url, label: "mic")
 
-        XCTAssertEqual(samples, [0.1, -0.1, 0.2])
-        XCTAssertEqual(avCalls.get(), 1)
-        XCTAssertEqual(extCalls.get(), 1)
+        #expect(samples == [0.1, -0.1, 0.2])
+        #expect(avCalls.get() == 1)
+        #expect(extCalls.get() == 1)
     }
 
+    @Test
     func testReadRetriesUntilSuccess() async throws {
         let url = URL(fileURLWithPath: "/tmp/mock-audio-retry.wav")
         let fallbackAttempts = LockedInt()
@@ -66,10 +68,11 @@ final class AudioSampleReaderTests: XCTestCase {
 
         let samples = try await reader.read(from: url, label: "app")
 
-        XCTAssertEqual(samples, [0.5])
-        XCTAssertEqual(fallbackAttempts.get(), 3)
+        #expect(samples == [0.5])
+        #expect(fallbackAttempts.get() == 3)
     }
 
+    @Test
     func testReadThrowsAfterMaxRetries() async {
         let url = URL(fileURLWithPath: "/tmp/mock-audio-fail.wav")
 
@@ -85,10 +88,11 @@ final class AudioSampleReaderTests: XCTestCase {
 
         do {
             _ = try await reader.read(from: url, label: "mic")
-            XCTFail("Expected read to fail after retries")
+            Issue.record("Expected read to fail after retries")
+            return
         } catch {
             let description = error.localizedDescription
-            XCTAssertTrue(description.contains("forced failure"), "Unexpected error description: \(description)")
+            #expect(description.contains("forced failure"), "Unexpected error description: \(description)")
         }
     }
 

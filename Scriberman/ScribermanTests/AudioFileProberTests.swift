@@ -1,26 +1,22 @@
 import AVFoundation
 import Foundation
-import XCTest
+import Testing
 @testable import Scriberman
 
-final class AudioFileProberTests: XCTestCase {
-    private var tempDirectoryURL: URL!
+final class AudioFileProberTests {
+    private let tempDirectoryURL: URL
 
-    override func setUpWithError() throws {
-        try super.setUpWithError()
+    init() throws {
         tempDirectoryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempDirectoryURL, withIntermediateDirectories: true)
     }
 
-    override func tearDownWithError() throws {
-        if let tempDirectoryURL {
-            try? FileManager.default.removeItem(at: tempDirectoryURL)
-        }
-        tempDirectoryURL = nil
-        try super.tearDownWithError()
+    deinit {
+        try? FileManager.default.removeItem(at: tempDirectoryURL)
     }
 
+    @Test
     func testProbeReturnsFileMetadataAndDuration() async throws {
         let url = tempDirectoryURL.appendingPathComponent("team-sync.wav")
         try writeMonoWAV(samples: Array(repeating: Float(0.25), count: 24_000), to: url)
@@ -28,10 +24,10 @@ final class AudioFileProberTests: XCTestCase {
         let prober = AudioFileProber()
         let result = try await prober.probe(url: url)
 
-        XCTAssertEqual(result.title, "team-sync")
-        XCTAssertEqual(result.originalFileName, "team-sync.wav")
-        XCTAssertEqual(result.originalFormat, "wav")
-        XCTAssertGreaterThan(result.duration, 0.45)
+        #expect(result.title == "team-sync")
+        #expect(result.originalFileName == "team-sync.wav")
+        #expect(result.originalFormat == "wav")
+        #expect(result.duration > 0.45)
     }
 
     private func writeMonoWAV(samples: [Float], to url: URL) throws {

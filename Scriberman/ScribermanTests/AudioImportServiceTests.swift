@@ -1,9 +1,9 @@
 import Foundation
 import SwiftData
-import XCTest
+import Testing
 @testable import Scriberman
 
-final class AudioImportServiceTests: XCTestCase {
+final class AudioImportServiceTests {
     private final class LockedValue<T>: @unchecked Sendable {
         private let lock = NSLock()
         private var value: T
@@ -25,9 +25,9 @@ final class AudioImportServiceTests: XCTestCase {
         }
     }
 
-    private var container: ModelContainer!
-    private var context: ModelContext!
-    private var workspaceRootURL: URL!
+    private let container: ModelContainer
+    private let context: ModelContext
+    private let workspaceRootURL: URL
 
     private static func updateImportedSession(
         id sessionID: UUID,
@@ -42,8 +42,7 @@ final class AudioImportServiceTests: XCTestCase {
         try? ctx.save()
     }
 
-    override func setUpWithError() throws {
-        try super.setUpWithError()
+    init() throws {
         container = try ModelContainer(
             for: RecordingSession.self, ImportedSession.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
@@ -54,16 +53,11 @@ final class AudioImportServiceTests: XCTestCase {
         try FileManager.default.createDirectory(at: workspaceRootURL, withIntermediateDirectories: true)
     }
 
-    override func tearDownWithError() throws {
-        if let workspaceRootURL {
-            try? FileManager.default.removeItem(at: workspaceRootURL)
-        }
-        workspaceRootURL = nil
-        context = nil
-        container = nil
-        try super.tearDownWithError()
+    deinit {
+        try? FileManager.default.removeItem(at: workspaceRootURL)
     }
 
+    @Test
     func testImportAudioSuccessfulMonoImport() async throws {
         let workspace = Workspace(rootURL: workspaceRootURL)
         let inputURL = workspaceRootURL.appendingPathComponent("meeting.mp3")
@@ -98,17 +92,18 @@ final class AudioImportServiceTests: XCTestCase {
 
         await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
 
-        let imported = try XCTUnwrap(fetchImportedSession())
-        XCTAssertEqual(imported.title, "meeting")
-        XCTAssertEqual(imported.originalFileName, "meeting.mp3")
-        XCTAssertEqual(imported.originalFormat, "mp3")
-        XCTAssertEqual(imported.duration, 42, accuracy: 0.001)
-        XCTAssertEqual(capturedWrittenSamples.get(), [0.1, -0.2, 0.4])
-        XCTAssertEqual(imported.mixdownURL, capturedOutputURL.get()?.path)
-        XCTAssertEqual(imported.status, .done)
-        XCTAssertTrue(imported.mixdownURL?.contains("/imports/meeting at ") == true)
+        let imported = try #require(fetchImportedSession())
+        #expect(imported.title == "meeting")
+        #expect(imported.originalFileName == "meeting.mp3")
+        #expect(imported.originalFormat == "mp3")
+        #expect(abs(imported.duration - 42) < 0.001)
+        #expect(capturedWrittenSamples.get() == [0.1, -0.2, 0.4])
+        #expect(imported.mixdownURL == capturedOutputURL.get()?.path)
+        #expect(imported.status == .done)
+        #expect(imported.mixdownURL?.contains("/imports/meeting at ") == true)
     }
 
+    @Test
     func testImportAudioStereoDownmixAveragesChannels() async throws {
         let workspace = Workspace(rootURL: workspaceRootURL)
         let inputURL = workspaceRootURL.appendingPathComponent("stereo.wav")
@@ -142,12 +137,13 @@ final class AudioImportServiceTests: XCTestCase {
         await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
 
         let written = capturedWrittenSamples.get()
-        XCTAssertEqual(written.count, 3)
-        XCTAssertEqual(written[0], 0.3, accuracy: 0.0001)
-        XCTAssertEqual(written[1], 0.0, accuracy: 0.0001)
-        XCTAssertEqual(written[2], 0.0, accuracy: 0.0001)
+        #expect(written.count == 3)
+        #expect(abs(written[0] - 0.3) < 0.0001)
+        #expect(abs(written[1] - 0.0) < 0.0001)
+        #expect(abs(written[2] - 0.0) < 0.0001)
     }
 
+    @Test
     func testImportAudioCorruptFileSetsErrorStatus() async throws {
         enum CorruptError: LocalizedError {
             case corrupt
@@ -173,14 +169,15 @@ final class AudioImportServiceTests: XCTestCase {
 
         await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
 
-        let imported = try XCTUnwrap(fetchImportedSession())
+        let imported = try #require(fetchImportedSession())
         if case .error(let message) = imported.status {
-            XCTAssertEqual(message, "Corrupt audio file")
+            #expect(message == "Corrupt audio file")
         } else {
-            XCTFail("Expected error status for corrupt file")
+            Issue.record("Expected error status for corrupt file")
         }
     }
 
+    @Test
     func testImportAudioMissingFileSetsErrorStatus() async throws {
         enum MissingError: LocalizedError {
             case missing
@@ -206,14 +203,15 @@ final class AudioImportServiceTests: XCTestCase {
 
         await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
 
-        let imported = try XCTUnwrap(fetchImportedSession())
+        let imported = try #require(fetchImportedSession())
         if case .error(let message) = imported.status {
-            XCTAssertEqual(message, "Audio file not found")
+            #expect(message == "Audio file not found")
         } else {
-            XCTFail("Expected error status for missing file")
+            Issue.record("Expected error status for missing file")
         }
     }
 
+    @Test
     func testImportAudioFallsBackToMixdownServiceForSandboxDecodeError() async throws {
         let workspace = Workspace(rootURL: workspaceRootURL)
         let inputURL = workspaceRootURL.appendingPathComponent("sandboxed.mp3")
@@ -249,11 +247,11 @@ final class AudioImportServiceTests: XCTestCase {
 
         await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
 
-        let imported = try XCTUnwrap(fetchImportedSession())
-        XCTAssertTrue(fallbackCalled.get())
-        XCTAssertEqual(imported.status, .done)
-        XCTAssertNotNil(imported.mixdownURL)
-        XCTAssertTrue(imported.mixdownURL?.hasSuffix("recording.m4a") == true)
+        let imported = try #require(fetchImportedSession())
+        #expect(fallbackCalled.get())
+        #expect(imported.status == .done)
+        #expect(imported.mixdownURL != nil)
+        #expect(imported.mixdownURL?.hasSuffix("recording.m4a") == true)
     }
 
     private func fetchImportedSession() -> ImportedSession? {

@@ -1,26 +1,22 @@
 import AVFoundation
 import Foundation
-import XCTest
+import Testing
 @testable import Scriberman
 
-final class AudioChannelReaderTests: XCTestCase {
-    private var tempDirectoryURL: URL!
+final class AudioChannelReaderTests {
+    private let tempDirectoryURL: URL
 
-    override func setUpWithError() throws {
-        try super.setUpWithError()
+    init() throws {
         tempDirectoryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempDirectoryURL, withIntermediateDirectories: true)
     }
 
-    override func tearDownWithError() throws {
-        if let tempDirectoryURL {
-            try? FileManager.default.removeItem(at: tempDirectoryURL)
-        }
-        tempDirectoryURL = nil
-        try super.tearDownWithError()
+    deinit {
+        try? FileManager.default.removeItem(at: tempDirectoryURL)
     }
 
+    @Test
     func testReadReturnsSamplesPerChannel() async throws {
         let url = tempDirectoryURL.appendingPathComponent("stereo-input.wav")
         let left = [Float(0.8), 0.6, 0.4, 0.2]
@@ -35,16 +31,16 @@ final class AudioChannelReaderTests: XCTestCase {
             }.value
         } catch {
             if shouldSkipForSandboxAudioIO(error) {
-                throw XCTSkip("Skipping channel reader test: AVAudioFile read unavailable in sandbox (\(error.localizedDescription))")
+                return
             }
             throw error
         }
 
-        XCTAssertEqual(channels.count, 2)
-        XCTAssertEqual(channels[0].count, 4)
-        XCTAssertEqual(channels[1].count, 4)
-        XCTAssertEqual(channels[0][0], 0.8, accuracy: 0.001)
-        XCTAssertEqual(channels[1][0], -0.1, accuracy: 0.001)
+        #expect(channels.count == 2)
+        #expect(channels[0].count == 4)
+        #expect(channels[1].count == 4)
+        #expect(abs(channels[0][0] - 0.8) < 0.001)
+        #expect(abs(channels[1][0] - -0.1) < 0.001)
     }
 
     private func writeStereoWAV(left: [Float], right: [Float], to url: URL) throws {

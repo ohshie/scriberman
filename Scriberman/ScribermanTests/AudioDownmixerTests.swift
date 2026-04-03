@@ -1,8 +1,9 @@
 import AVFoundation
-import XCTest
+import Testing
 @testable import Scriberman
 
-final class AudioDownmixerTests: XCTestCase {
+final class AudioDownmixerTests {
+    @Test
     func testToMonoStereoAveragesChannels() {
         let channelSamples: [[Float]] = [
             [0.4, 0.2, -0.4],
@@ -11,24 +12,27 @@ final class AudioDownmixerTests: XCTestCase {
 
         let mono = AudioDownmixer.toMono(channelSamples: channelSamples)
 
-        XCTAssertEqual(mono.count, 3)
-        XCTAssertEqual(mono[0], 0.3, accuracy: 0.0001)
-        XCTAssertEqual(mono[1], 0.0, accuracy: 0.0001)
-        XCTAssertEqual(mono[2], 0.0, accuracy: 0.0001)
+        #expect(mono.count == 3)
+        #expect(abs(mono[0] - 0.3) < 0.0001)
+        #expect(abs(mono[1] - 0.0) < 0.0001)
+        #expect(abs(mono[2] - 0.0) < 0.0001)
     }
 
+    @Test
     func testToMonoSingleChannelPassthrough() {
         let samples: [Float] = [0.25, -0.5, 0.75]
 
         let mono = AudioDownmixer.toMono(channelSamples: [samples])
 
-        XCTAssertEqual(mono, samples)
+        #expect(mono == samples)
     }
 
+    @Test
     func testToMonoEmptyInputReturnsEmpty() {
-        XCTAssertEqual(AudioDownmixer.toMono(channelSamples: []), [])
+        #expect(AudioDownmixer.toMono(channelSamples: []) == [])
     }
 
+    @Test
     func testToMonoSkipsMismatchedChannelLength() {
         let channelSamples: [[Float]] = [
             [1.0, 2.0, 3.0],
@@ -37,14 +41,15 @@ final class AudioDownmixerTests: XCTestCase {
 
         let mono = AudioDownmixer.toMono(channelSamples: channelSamples)
 
-        XCTAssertEqual(mono.count, 3)
-        XCTAssertEqual(mono[0], 0.5, accuracy: 0.0001)
-        XCTAssertEqual(mono[1], 1.0, accuracy: 0.0001)
-        XCTAssertEqual(mono[2], 1.5, accuracy: 0.0001)
+        #expect(mono.count == 3)
+        #expect(abs(mono[0] - 0.5) < 0.0001)
+        #expect(abs(mono[1] - 1.0) < 0.0001)
+        #expect(abs(mono[2] - 1.5) < 0.0001)
     }
 
+    @Test
     func testToMonoBufferStereoAveragesChannels() throws {
-        let format = try XCTUnwrap(
+        let format = try #require(
             AVAudioFormat(
                 commonFormat: .pcmFormatFloat32,
                 sampleRate: 48_000,
@@ -52,9 +57,9 @@ final class AudioDownmixerTests: XCTestCase {
                 interleaved: false
             )
         )
-        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 3))
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 3))
         buffer.frameLength = 3
-        let channelData = try XCTUnwrap(buffer.floatChannelData)
+        let channelData = try #require(buffer.floatChannelData)
         channelData[0][0] = 0.4
         channelData[0][1] = 0.2
         channelData[0][2] = -0.4
@@ -64,9 +69,9 @@ final class AudioDownmixerTests: XCTestCase {
 
         let mono = AudioDownmixer.toMono(buffer: buffer)
 
-        XCTAssertEqual(mono.count, 3)
-        XCTAssertEqual(mono[0], 0.3, accuracy: 0.0001)
-        XCTAssertEqual(mono[1], 0.0, accuracy: 0.0001)
-        XCTAssertEqual(mono[2], 0.0, accuracy: 0.0001)
+        #expect(mono.count == 3)
+        #expect(abs(mono[0] - 0.3) < 0.0001)
+        #expect(abs(mono[1] - 0.0) < 0.0001)
+        #expect(abs(mono[2] - 0.0) < 0.0001)
     }
 }

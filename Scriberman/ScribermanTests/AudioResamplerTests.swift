@@ -1,44 +1,48 @@
 import Foundation
-import XCTest
+import Testing
 @testable import Scriberman
 
-final class AudioResamplerTests: XCTestCase {
+final class AudioResamplerTests {
+    @Test
     func testResampleSameRateReturnsInputUnchanged() throws {
         let samples = makeSineSamples(sampleRate: 48_000, frequency: 440, durationSeconds: 1.0)
         let resampler = AudioResampler(targetSampleRate: 48_000)
 
         let output = try resampler.resample(samples, from: 48_000)
 
-        XCTAssertEqual(output.count, samples.count)
+        #expect(output.count == samples.count)
         for index in 0..<samples.count {
-            XCTAssertEqual(output[index], samples[index], accuracy: 0.000001)
+            #expect(abs(output[index] - samples[index]) < 0.000001)
         }
     }
 
+    @Test
     func testResampleDownsample48kTo16k() throws {
         let samples = makeSineSamples(sampleRate: 48_000, frequency: 440, durationSeconds: 1.0)
         let resampler = AudioResampler(targetSampleRate: 16_000)
 
         let output = try resampler.resample(samples, from: 48_000)
 
-        XCTAssertEqual(output.count, 16_000)
+        #expect(output.count == 16_000)
     }
 
+    @Test
     func testResampleUpsample16kTo48k() throws {
         let samples = makeSineSamples(sampleRate: 16_000, frequency: 440, durationSeconds: 1.0)
         let resampler = AudioResampler(targetSampleRate: 48_000)
 
         let output = try resampler.resample(samples, from: 16_000)
 
-        XCTAssertEqual(output.count, 48_000)
+        #expect(output.count == 48_000)
     }
 
+    @Test
     func testResampleEmptyInputReturnsEmpty() throws {
         let resampler = AudioResampler(targetSampleRate: 16_000)
 
         let output = try resampler.resample([], from: 48_000)
 
-        XCTAssertTrue(output.isEmpty)
+        #expect(output.isEmpty)
     }
 
     private func makeSineSamples(sampleRate: Double, frequency: Double, durationSeconds: Double) -> [Float] {

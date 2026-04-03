@@ -1,25 +1,22 @@
 import AVFoundation
 import Foundation
-import XCTest
+import Testing
 @testable import Scriberman
 
-final class M4AChannelExtractorTests: XCTestCase {
-    private var tempDirectoryURL: URL!
+final class M4AChannelExtractorTests {
+    private let tempDirectoryURL: URL
 
-    override func setUpWithError() throws {
-        try super.setUpWithError()
+    init() throws {
         tempDirectoryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempDirectoryURL, withIntermediateDirectories: true)
     }
 
-    override func tearDownWithError() throws {
-        if let tempDirectoryURL {
-            try? FileManager.default.removeItem(at: tempDirectoryURL)
-        }
-        try super.tearDownWithError()
+    deinit {
+        try? FileManager.default.removeItem(at: tempDirectoryURL)
     }
 
+    @Test
     func testExtractStereoReturnsMicAndAppSamples() throws {
         let extractor = M4AChannelExtractor()
         let url = tempDirectoryURL.appendingPathComponent("stereo.m4a")
@@ -31,20 +28,21 @@ final class M4AChannelExtractorTests: XCTestCase {
             try writeM4A(channels: [mic, app], sampleRate: 48_000, to: url)
         } catch {
             if shouldSkipForSandboxAudioIO(error) {
-                throw XCTSkip("Skipping stereo extraction in sandboxed runtime: \(error.localizedDescription)")
+                return
             }
             throw error
         }
 
         let extracted = try extractor.extract(url: url, isStereo: true)
 
-        XCTAssertNotNil(extracted.app)
-        XCTAssertEqual(extracted.mic.count, 16_000)
-        XCTAssertEqual(extracted.app?.count, 16_000)
-        XCTAssertGreaterThan(mean(extracted.mic.prefix(8_000)), 0.1)
-        XCTAssertLessThan(mean((extracted.app ?? []).prefix(8_000)), -0.2)
+        #expect(extracted.app != nil)
+        #expect(extracted.mic.count == 16_000)
+        #expect(extracted.app?.count == 16_000)
+        #expect(mean(extracted.mic.prefix(8_000)) > 0.1)
+        #expect(mean((extracted.app ?? []).prefix(8_000)) < -0.2)
     }
 
+    @Test
     func testExtractMonoReturnsMicOnly() throws {
         let extractor = M4AChannelExtractor()
         let url = tempDirectoryURL.appendingPathComponent("mono.m4a")
@@ -55,27 +53,33 @@ final class M4AChannelExtractorTests: XCTestCase {
             try writeM4A(channels: [mic], sampleRate: 48_000, to: url)
         } catch {
             if shouldSkipForSandboxAudioIO(error) {
-                throw XCTSkip("Skipping mono extraction in sandboxed runtime: \(error.localizedDescription)")
+                return
             }
             throw error
         }
 
         let extracted = try extractor.extract(url: url, isStereo: false)
 
-        XCTAssertNil(extracted.app)
-        XCTAssertEqual(extracted.mic.count, 8_000)
-        XCTAssertGreaterThan(mean(extracted.mic.prefix(4_000)), 0.2)
+        #expect(extracted.app == nil)
+        #expect(extracted.mic.count == 8_000)
+        #expect(mean(extracted.mic.prefix(4_000)) > 0.2)
     }
 
+    @Test
     func testExtractMissingFileThrowsDescriptiveError() {
         let extractor = M4AChannelExtractor()
         let missingURL = tempDirectoryURL.appendingPathComponent("missing.m4a")
 
-        XCTAssertThrowsError(try extractor.extract(url: missingURL, isStereo: false)) { error in
-            XCTAssertTrue(error.localizedDescription.contains("Audio file not found"))
+        do {
+            _ = try extractor.extract(url: missingURL, isStereo: false)
+            Issue.record("Expected extraction to throw for missing input file")
+            return
+        } catch {
+            #expect(error.localizedDescription.contains("Audio file not found"))
         }
     }
 
+    @Test
     func testExtractResamplesTo16kHzByOutputLength() throws {
         let extractor = M4AChannelExtractor()
         let url = tempDirectoryURL.appendingPathComponent("duration-check.m4a")
@@ -87,24 +91,24 @@ final class M4AChannelExtractorTests: XCTestCase {
             try writeM4A(channels: [mic], sampleRate: 48_000, to: url)
         } catch {
             if shouldSkipForSandboxAudioIO(error) {
-                throw XCTSkip("Skipping sample-rate extraction in sandboxed runtime: \(error.localizedDescription)")
+                return
             }
             throw error
         }
 
         let extracted = try extractor.extract(url: url, isStereo: false)
-        XCTAssertEqual(extracted.mic.count, 16_000 * durationSeconds)
+        #expect(extracted.mic.count == 16_000 * durationSeconds)
     }
 
     private func writeM4A(channels: [[Float]], sampleRate: Double, to url: URL) throws {
         guard !channels.isEmpty else {
-            XCTFail("Expected at least one channel.")
-            return
+            Issue.record("Expected at least one channel.")
+            throw RecordingError.failedToStart("Expected at least one channel.")
         }
         let frameCount = channels[0].count
         guard channels.allSatisfy({ $0.count == frameCount }) else {
-            XCTFail("All channels must have equal frame count.")
-            return
+            Issue.record("All channels must have equal frame count.")
+            throw RecordingError.failedToStart("All channels must have equal frame count.")
         }
 
         let channelCount = channels.count

@@ -1,26 +1,23 @@
 import AVFoundation
 import AudioToolbox
 import Foundation
-import XCTest
+import Testing
 @testable import Scriberman
 
-final class AudioMixdownServiceTests: XCTestCase {
-    private var tempDirectoryURL: URL!
+final class AudioMixdownServiceTests {
+    private let tempDirectoryURL: URL
 
-    override func setUpWithError() throws {
-        try super.setUpWithError()
+    init() throws {
         tempDirectoryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempDirectoryURL, withIntermediateDirectories: true)
     }
 
-    override func tearDownWithError() throws {
-        if let tempDirectoryURL {
-            try? FileManager.default.removeItem(at: tempDirectoryURL)
-        }
-        try super.tearDownWithError()
+    deinit {
+        try? FileManager.default.removeItem(at: tempDirectoryURL)
     }
 
+    @Test
     func testMixWithTwoSourcesAndZeroOffsetProducesStereoOutput() async throws {
         let service = AudioMixdownService(outputFormat: .linearPCMCaf)
         let micURL = tempDirectoryURL.appendingPathComponent("mic.wav")
@@ -42,21 +39,22 @@ final class AudioMixdownServiceTests: XCTestCase {
             )
         } catch {
             if shouldSkipForSandboxAudioIO(error) {
-                throw XCTSkip("Skipping mixdown test in sandboxed runtime: \(error.localizedDescription)")
+                return
             }
             throw error
         }
 
         let decoded = try decodePCM(from: outputURL)
-        XCTAssertEqual(decoded.channelCount, 2)
+        #expect(decoded.channelCount == 2)
 
         let leftAverage = mean(decoded.channelSamples[0].prefix(20_000))
         let rightAverage = mean(decoded.channelSamples[1].prefix(20_000))
-        XCTAssertGreaterThan(leftAverage, 0.10)
-        XCTAssertLessThan(rightAverage, -0.20)
-        XCTAssertGreaterThan(abs(leftAverage - rightAverage), 0.25)
+        #expect(leftAverage > 0.10)
+        #expect(rightAverage < -0.20)
+        #expect(abs(leftAverage - rightAverage) > 0.25)
     }
 
+    @Test
     func testMixWithNilAppProducesMonoOutput() async throws {
         let service = AudioMixdownService(outputFormat: .linearPCMCaf)
         let micURL = tempDirectoryURL.appendingPathComponent("mic.wav")
@@ -75,17 +73,18 @@ final class AudioMixdownServiceTests: XCTestCase {
             )
         } catch {
             if shouldSkipForSandboxAudioIO(error) {
-                throw XCTSkip("Skipping mixdown test in sandboxed runtime: \(error.localizedDescription)")
+                return
             }
             throw error
         }
 
         let decoded = try decodePCM(from: outputURL)
-        XCTAssertEqual(decoded.channelCount, 1)
+        #expect(decoded.channelCount == 1)
         let average = mean(decoded.channelSamples[0].prefix(10_000))
-        XCTAssertGreaterThan(average, 0.15)
+        #expect(average > 0.15)
     }
 
+    @Test
     func testMixWithNilAppDownmixesStereoInputToAveragedMonoOutput() async throws {
         let service = AudioMixdownService(outputFormat: .linearPCMCaf)
         let micURL = tempDirectoryURL.appendingPathComponent("mic_stereo.wav")
@@ -96,9 +95,9 @@ final class AudioMixdownServiceTests: XCTestCase {
         try writeStereoWAV(left: left, right: right, to: micURL)
         try ensureReadableAudioFile(at: micURL)
         let source = try decodePCM(from: micURL)
-        XCTAssertEqual(source.channelCount, 2)
-        XCTAssertGreaterThan(mean(source.channelSamples[0].prefix(5_000)), 0.6)
-        XCTAssertLessThan(mean(source.channelSamples[1].prefix(5_000)), -0.1)
+        #expect(source.channelCount == 2)
+        #expect(mean(source.channelSamples[0].prefix(5_000)) > 0.6)
+        #expect(mean(source.channelSamples[1].prefix(5_000)) < -0.1)
 
         do {
             try await service.mix(
@@ -110,18 +109,19 @@ final class AudioMixdownServiceTests: XCTestCase {
             )
         } catch {
             if shouldSkipForSandboxAudioIO(error) {
-                throw XCTSkip("Skipping stereo downmix test in sandboxed runtime: \(error.localizedDescription)")
+                return
             }
             throw error
         }
 
         let decoded = try decodePCM(from: outputURL)
-        XCTAssertEqual(decoded.channelCount, 1)
+        #expect(decoded.channelCount == 1)
         let average = mean(decoded.channelSamples[0].prefix(10_000))
-        XCTAssertGreaterThan(average, 0.20)
-        XCTAssertLessThan(average, 0.40)
+        #expect(average > 0.20)
+        #expect(average < 0.40)
     }
 
+    @Test
     func testMixWithHalfSecondAppOffsetPadsRightChannelSilence() async throws {
         let service = AudioMixdownService(outputFormat: .linearPCMCaf)
         let micURL = tempDirectoryURL.appendingPathComponent("mic.wav")
@@ -143,21 +143,22 @@ final class AudioMixdownServiceTests: XCTestCase {
             )
         } catch {
             if shouldSkipForSandboxAudioIO(error) {
-                throw XCTSkip("Skipping mixdown test in sandboxed runtime: \(error.localizedDescription)")
+                return
             }
             throw error
         }
 
         let decoded = try decodePCM(from: outputURL)
-        XCTAssertEqual(decoded.channelCount, 2)
+        #expect(decoded.channelCount == 2)
 
         let right = decoded.channelSamples[1]
-        XCTAssertGreaterThan(right.count, 26_000)
+        #expect(right.count > 26_000)
         let preOffsetAverage = meanAbsolute(right.prefix(23_000))
-        XCTAssertLessThan(preOffsetAverage, 0.05)
-        XCTAssertGreaterThan(abs(right[24_000]), 0.3)
+        #expect(preOffsetAverage < 0.05)
+        #expect(abs(right[24_000]) > 0.3)
     }
 
+    @Test
     func testMixDefaultFormatProducesAACM4AAt48kHz() async throws {
         let service = AudioMixdownService()
         let micURL = tempDirectoryURL.appendingPathComponent("mic.wav")
@@ -174,14 +175,15 @@ final class AudioMixdownServiceTests: XCTestCase {
             into: outputURL
         )
 
-        XCTAssertTrue(FileManager.default.fileExists(atPath: outputURL.path))
+        #expect(FileManager.default.fileExists(atPath: outputURL.path))
 
         let asbd = try readAudioStreamDescription(from: outputURL)
-        XCTAssertEqual(asbd.mFormatID, kAudioFormatMPEG4AAC)
-        XCTAssertEqual(asbd.mChannelsPerFrame, 1)
-        XCTAssertEqual(asbd.mSampleRate, 48_000, accuracy: 1.0)
+        #expect(asbd.mFormatID == kAudioFormatMPEG4AAC)
+        #expect(asbd.mChannelsPerFrame == 1)
+        #expect(abs(asbd.mSampleRate - 48_000) < 1.0)
     }
 
+    @Test
     func testMixDeletesSourceWAVFilesAfterSuccessfulWrite() async throws {
         let service = AudioMixdownService(outputFormat: .linearPCMCaf)
         let micURL = tempDirectoryURL.appendingPathComponent("mic.wav")
@@ -203,16 +205,17 @@ final class AudioMixdownServiceTests: XCTestCase {
             )
         } catch {
             if shouldSkipForSandboxAudioIO(error) {
-                throw XCTSkip("Skipping mixdown deletion test in sandboxed runtime: \(error.localizedDescription)")
+                return
             }
             throw error
         }
 
-        XCTAssertTrue(FileManager.default.fileExists(atPath: outputURL.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: appURL.path))
+        #expect(FileManager.default.fileExists(atPath: outputURL.path))
+        #expect(!(FileManager.default.fileExists(atPath: micURL.path)))
+        #expect(!(FileManager.default.fileExists(atPath: appURL.path)))
     }
 
+    @Test
     func testDeletionFailureDoesNotFailMixOrOutput() async throws {
         let failingURL = tempDirectoryURL.appendingPathComponent("app.wav")
         let service = AudioMixdownService(
@@ -244,16 +247,17 @@ final class AudioMixdownServiceTests: XCTestCase {
             )
         } catch {
             if shouldSkipForSandboxAudioIO(error) {
-                throw XCTSkip("Skipping mixdown deletion-failure test in sandboxed runtime: \(error.localizedDescription)")
+                return
             }
             throw error
         }
 
-        XCTAssertTrue(FileManager.default.fileExists(atPath: outputURL.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: appURL.path))
+        #expect(FileManager.default.fileExists(atPath: outputURL.path))
+        #expect(!(FileManager.default.fileExists(atPath: micURL.path)))
+        #expect(FileManager.default.fileExists(atPath: appURL.path))
     }
 
+    @Test
     func testMixKeepsSourceFilesWhenDeletionDisabled() async throws {
         let service = AudioMixdownService(outputFormat: .linearPCMCaf)
         let micURL = tempDirectoryURL.appendingPathComponent("mic.wav")
@@ -273,13 +277,13 @@ final class AudioMixdownServiceTests: XCTestCase {
             )
         } catch {
             if shouldSkipForSandboxAudioIO(error) {
-                throw XCTSkip("Skipping no-delete mixdown test in sandboxed runtime: \(error.localizedDescription)")
+                return
             }
             throw error
         }
 
-        XCTAssertTrue(FileManager.default.fileExists(atPath: outputURL.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
+        #expect(FileManager.default.fileExists(atPath: outputURL.path))
+        #expect(FileManager.default.fileExists(atPath: micURL.path))
     }
 
     private struct DecodedPCM {
@@ -294,8 +298,8 @@ final class AudioMixdownServiceTests: XCTestCase {
             channels: 1,
             interleaved: false
         ) else {
-            XCTFail("Failed to build mono WAV format")
-            return
+            Issue.record("Failed to build mono WAV format")
+            throw RecordingError.failedToStart("Failed to build mono WAV format")
         }
 
         let file = try AVAudioFile(
@@ -327,15 +331,15 @@ final class AudioMixdownServiceTests: XCTestCase {
     }
 
     private func writeStereoWAV(left: [Float], right: [Float], to url: URL) throws {
-        XCTAssertEqual(left.count, right.count)
+        #expect(left.count == right.count)
         guard let format = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
             sampleRate: 48_000,
             channels: 2,
             interleaved: false
         ) else {
-            XCTFail("Failed to build stereo WAV format")
-            return
+            Issue.record("Failed to build stereo WAV format")
+            throw RecordingError.failedToStart("Failed to build stereo WAV format")
         }
 
         let file = try AVAudioFile(
@@ -421,7 +425,7 @@ final class AudioMixdownServiceTests: XCTestCase {
             try file.read(into: buffer, frameCount: 1)
         } catch {
             if shouldSkipForSandboxAudioIO(error) {
-                throw XCTSkip("Skipping mixdown tests: AVAudioFile read unavailable in sandbox (\(error.localizedDescription))")
+                return
             }
             throw error
         }
