@@ -101,6 +101,7 @@
 		79C2018A2F7FAE79002A1163 /* MenuBarSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79C201892F7FAE79002A1163 /* MenuBarSettings.swift */; };
 		79C2018C2F7FAE7D002A1163 /* MenuBarSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79C2018B2F7FAE7D002A1163 /* MenuBarSettingsTests.swift */; };
 		79C2018F2F7FB050002A1163 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79C2018E2F7FB050002A1163 /* AppDelegate.swift */; };
+		79C201912F7FB1DA002A1163 /* MenuBarExtraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79C201902F7FB1DA002A1163 /* MenuBarExtraView.swift */; };
 		79DCE41A2F77BC3D0024DC26 /* TranscriptionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */; };
 		79DCE41D2F77CC1E0024DC26 /* PermissionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */; };
 		79DCE4212F77D02C0024DC26 /* PermissionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4202F77D02C0024DC26 /* PermissionServiceTests.swift */; };
@@ -266,6 +267,7 @@
 		79C201892F7FAE79002A1163 /* MenuBarSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarSettings.swift; sourceTree = "<group>"; };
 		79C2018B2F7FAE7D002A1163 /* MenuBarSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarSettingsTests.swift; sourceTree = "<group>"; };
 		79C2018E2F7FB050002A1163 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		79C201902F7FB1DA002A1163 /* MenuBarExtraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarExtraView.swift; sourceTree = "<group>"; };
 		79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionServiceTests.swift; sourceTree = "<group>"; };
 		79DCE41B2F77CC0B0024DC26 /* Scriberman.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = Scriberman.xctestplan; sourceTree = "<group>"; };
 		79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionService.swift; sourceTree = "<group>"; };
@@ -489,6 +491,7 @@
 				79BE35342F7E8FF600DB542F /* AITransformationDetailView.swift */,
 				79BE35382F7EA83000DB542F /* AudioPlayerBar.swift */,
 				79C2017E2F7F8BB1002A1163 /* Onboarding */,
+				79C201902F7FB1DA002A1163 /* MenuBarExtraView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -934,6 +937,7 @@
 				798732882F7DA3ED00570A03 /* SpeakerMatcher.swift in Sources */,
 				79BE35312F7E7E8100DB542F /* MetadataCell.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4D0 /* TimeFormatter.swift in Sources */,
+				79C201912F7FB1DA002A1163 /* MenuBarExtraView.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4C5 /* RecordingSession.swift in Sources */,
 				A1B2C3D4E5F60718293A4B5C /* PendingSession.swift in Sources */,
 				2A2B3C4D5E6F708192A3B4C6 /* RecordingStatus.swift in Sources */,
