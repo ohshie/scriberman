@@ -173,6 +173,24 @@ final class AppStateTests {
     }
 
     @Test
+    func testAppSourceDeclaresMenuBarExtraScene() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let appFileURL = testsDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("ScribermanApp.swift")
+        let appSource = try String(contentsOf: appFileURL, encoding: .utf8)
+
+        #expect(
+            appSource.contains("MenuBarExtra("),
+            "Expected ScribermanApp.swift to declare a MenuBarExtra scene."
+        )
+        #expect(
+            appSource.contains("MenuBarExtraView(appState: appState)"),
+            "Expected ScribermanApp.swift to use MenuBarExtraView."
+        )
+    }
+
+    @Test
     func testSelectPendingSessionCreatesSinglePendingSession() {
         let permissionService = MockPermissionService()
         let services = makeServiceContainer(permissionService: permissionService)
