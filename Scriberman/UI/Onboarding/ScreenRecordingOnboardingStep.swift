@@ -6,6 +6,8 @@ struct ScreenRecordingOnboardingStep: View {
     var onAdvance: () -> Void
 
     @State private var isVerifying = false
+    @State private var hasAttemptedAutomaticRequest = false
+    @State private var verificationMessage: String?
 
     var body: some View {
         VStack(spacing: 18) {
@@ -18,7 +20,7 @@ struct ScreenRecordingOnboardingStep: View {
             Text("Screen Recording Access")
                 .font(.title2.weight(.semibold))
 
-            Text("Scriberman needs Screen Recording permission to capture audio from other apps. After granting access in System Settings, restart Scriberman for the change to take effect.")
+            Text("Scriberman needs Screen Recording permission to capture audio from other apps.")
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 460)
@@ -29,15 +31,9 @@ struct ScreenRecordingOnboardingStep: View {
                 }
                 .buttonStyle(.bordered)
 
-                Button("Restart Scriberman") {
-                    NSWorkspace.shared.open(Bundle.main.bundleURL)
-                    NSApp.terminate(nil)
-                }
-                .buttonStyle(.bordered)
-
                 Button {
                     Task {
-                        await verifyAndAdvanceIfGranted()
+                        await verifyAndAdvanceIfGranted(showFeedback: true)
                     }
                 } label: {
                     if isVerifying {
@@ -50,13 +46,21 @@ struct ScreenRecordingOnboardingStep: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(isVerifying)
+
+                if let verificationMessage {
+                    Text(verificationMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 420)
+                }
             }
 
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
-            await verifyAndAdvanceIfGranted()
+            await autoRequestAndAdvanceIfNeeded()
         }
     }
 
@@ -67,8 +71,11 @@ struct ScreenRecordingOnboardingStep: View {
         NSWorkspace.shared.open(url)
     }
 
-    private func verifyAndAdvanceIfGranted() async {
+    private func verifyAndAdvanceIfGranted(showFeedback: Bool) async {
         if appState.permissionService.screenRecordingStatus == .granted {
+            if showFeedback {
+                verificationMessage = "Screen Recording access is granted. Please restart Scriberman to continue."
+            }
             onAdvance()
             return
         }
@@ -77,12 +84,35 @@ struct ScreenRecordingOnboardingStep: View {
             return
         }
 
+        if showFeedback {
+            verificationMessage = "Checking Screen Recording access..."
+        }
+
         isVerifying = true
         let granted = await appState.permissionService.verifyScreenRecording()
         isVerifying = false
 
         if granted {
+            if showFeedback {
+                verificationMessage = "Screen Recording access is granted. Please restart Scriberman to continue."
+            }
             onAdvance()
+        } else if showFeedback {
+            verificationMessage = "Access is still blocked. Enable Screen Recording in System Settings, then restart Scriberman and press Verify again."
         }
+    }
+
+    private func autoRequestAndAdvanceIfNeeded() async {
+        guard !hasAttemptedAutomaticRequest else {
+            return
+        }
+
+        hasAttemptedAutomaticRequest = true
+
+        if appState.permissionService.screenRecordingStatus == .notDetermined {
+            _ = appState.permissionService.requestScreenRecording()
+        }
+
+        await verifyAndAdvanceIfGranted(showFeedback: false)
     }
 }

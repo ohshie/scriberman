@@ -6,6 +6,7 @@ struct MicrophoneOnboardingStep: View {
     var onAdvance: () -> Void
 
     @State private var isRequesting = false
+    @State private var hasAttemptedAutomaticRequest = false
 
     var body: some View {
         VStack(spacing: 18) {
@@ -50,9 +51,7 @@ struct MicrophoneOnboardingStep: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
-            if appState.permissionService.micStatus == .granted {
-                onAdvance()
-            }
+            await autoRequestAndAdvanceIfNeeded()
         }
     }
 
@@ -68,6 +67,23 @@ struct MicrophoneOnboardingStep: View {
 
         if granted {
             onAdvance()
+        }
+    }
+
+    private func autoRequestAndAdvanceIfNeeded() async {
+        guard !hasAttemptedAutomaticRequest else {
+            return
+        }
+
+        hasAttemptedAutomaticRequest = true
+
+        if appState.permissionService.micStatus == .granted {
+            onAdvance()
+            return
+        }
+
+        if appState.permissionService.micStatus == .notDetermined {
+            await requestAndVerifyMicrophone()
         }
     }
 
