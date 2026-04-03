@@ -14,12 +14,6 @@ final class MockPermissionService: PermissionServiceProtocol {
     var verifyMicCalls = 0
     var verifyScreenRecordingResult = false
     var verifyScreenRecordingCalls = 0
-    var onboardingMarked = false
-    var needsOnboardingValue = false
-
-    var needsOnboarding: Bool {
-        needsOnboardingValue
-    }
 
     func checkAll() {
         checkAllCalls += 1
@@ -46,10 +40,5 @@ final class MockPermissionService: PermissionServiceProtocol {
         verifyScreenRecordingCalls += 1
         screenRecordingStatus = verifyScreenRecordingResult ? .granted : .denied
         return verifyScreenRecordingResult
-    }
-
-    func markOnboardingShown() {
-        onboardingMarked = true
-        needsOnboardingValue = false
     }
 }
