@@ -2,10 +2,12 @@ import AppKit
 import SwiftUI
 import FluidAudio
 import SwiftData
+import OSLog
 
 @main
 struct ScribermanApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    private static let logger = Logger(subsystem: "Scriberman", category: "MenuBarFlow")
 
     private static let appModelContainer: ModelContainer = {
         do {
@@ -44,16 +46,21 @@ struct ScribermanApp: App {
         MenuBarExtra(
             isInserted: Binding(
                 get: { appState.menuBarSettings.isInTrayMode },
-                set: { appState.menuBarSettings.isInTrayMode = $0 }
+                set: {
+                    ScribermanApp.logger.info("MenuBarExtra isInserted binding set to \($0)")
+                    appState.menuBarSettings.isInTrayMode = $0
+                }
             )
         ) {
             MenuBarExtraView(appState: appState)
                 .onChange(of: appState.menuBarSettings.isInTrayMode) { _, isInserted in
+                    ScribermanApp.logger.info("MenuBarExtra onChange isInTrayMode=\(isInserted)")
                     guard isInserted == false else {
                         return
                     }
 
-                    _ = NSApp.setActivationPolicy(.regular)
+                    let changed = NSApp.setActivationPolicy(.regular)
+                    ScribermanApp.logger.info("MenuBarExtra removal restore regular changed=\(changed)")
                     appState.menuBarSettings.isInTrayMode = false
                 }
         } label: {
