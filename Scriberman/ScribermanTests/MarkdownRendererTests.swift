@@ -2,6 +2,7 @@ import MarkdownUI
 import XCTest
 @testable import Scriberman
 
+@MainActor
 final class MarkdownRendererTests: XCTestCase {
     private let renderer = MarkdownRenderer()
 

@@ -90,7 +90,7 @@ final class AudioImportServiceTests: XCTestCase {
                 FileManager.default.createFile(atPath: outputURL.path, contents: Data("aac".utf8))
             },
             retranscribe: { sessionID, modelContainer, _ in
-                await Self.updateImportedSession(id: sessionID, in: modelContainer) { session in
+                Self.updateImportedSession(id: sessionID, in: modelContainer) { session in
                     session.status = .done
                 }
             }
@@ -241,7 +241,7 @@ final class AudioImportServiceTests: XCTestCase {
                 FileManager.default.createFile(atPath: outputURL.path, contents: Data("aac".utf8))
             },
             retranscribe: { sessionID, modelContainer, _ in
-                await Self.updateImportedSession(id: sessionID, in: modelContainer) { session in
+                Self.updateImportedSession(id: sessionID, in: modelContainer) { session in
                     session.status = .done
                 }
             }
