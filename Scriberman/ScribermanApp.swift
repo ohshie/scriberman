@@ -4,6 +4,8 @@ import SwiftData
 
 @main
 struct ScribermanApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     private static let appModelContainer: ModelContainer = {
         do {
             return try ModelContainer(for: RecordingSession.self, ImportedSession.self, SpeakerProfile.self)
@@ -23,6 +25,7 @@ struct ScribermanApp: App {
                 .environment(appState)
                 .environment(appState.aiProviderService)
                 .task {
+                    appDelegate.appState = appState
                     await appState.bootstrapWorkspace()
                 }
         }
