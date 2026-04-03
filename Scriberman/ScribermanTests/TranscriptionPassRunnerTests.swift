@@ -1,11 +1,12 @@
 import FluidAudio
 import Foundation
 import SwiftData
-import XCTest
+import Testing
 @testable import Scriberman
 
-final class TranscriptionPassRunnerTests: XCTestCase {
-    func testRunReturnsEmptyWhenVADProducesNoSpeech() async throws {
+struct TranscriptionPassRunnerTests {
+    @Test
+    func runReturnsEmptyWhenVADProducesNoSpeech() async throws {
         var engineCreated = false
         let runner = TranscriptionPassRunner(
             segmentSpeech: { _ in [] },
@@ -25,12 +26,13 @@ final class TranscriptionPassRunnerTests: XCTestCase {
         let workspace = try makeWorkspace()
         let (segments, embeddings) = try await runner.run(samples: [0, 0, 0], source: .mic, workspace: workspace)
 
-        XCTAssertTrue(segments.isEmpty)
-        XCTAssertTrue(embeddings.isEmpty)
-        XCTAssertFalse(engineCreated)
+        #expect(segments.isEmpty)
+        #expect(embeddings.isEmpty)
+        #expect(!engineCreated)
     }
 
-    func testRunPrefixesAppSpeakerIDsInSegmentsAndEmbeddings() async throws {
+    @Test
+    func runPrefixesAppSpeakerIDsInSegmentsAndEmbeddings() async throws {
         let diarizedSegments = [
             TimedSpeakerSegment(
                 speakerId: "cluster_1",
@@ -78,12 +80,13 @@ final class TranscriptionPassRunnerTests: XCTestCase {
         let workspace = try makeWorkspace()
         let (segments, embeddings) = try await runner.run(samples: Array(repeating: 0.1, count: 16_000), source: .app, workspace: workspace)
 
-        XCTAssertEqual(segments.count, 1)
-        XCTAssertEqual(segments[0].speakerId, "app:cluster_1")
-        XCTAssertNotNil(embeddings["app:cluster_1"])
+        #expect(segments.count == 1)
+        #expect(segments[0].speakerId == "app:cluster_1")
+        #expect(embeddings["app:cluster_1"] != nil)
     }
 
-    func testRunAppliesSpeakerMappingFromStore() async throws {
+    @Test
+    func runAppliesSpeakerMappingFromStore() async throws {
         let modelContainer = try ModelContainer(
             for: SpeakerProfile.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
@@ -139,9 +142,9 @@ final class TranscriptionPassRunnerTests: XCTestCase {
         let workspace = try makeWorkspace()
         let (segments, embeddings) = try await runner.run(samples: Array(repeating: 0.1, count: 16_000), source: .mic, workspace: workspace)
 
-        XCTAssertEqual(segments.count, 1)
-        XCTAssertEqual(segments[0].speakerId, "Alice")
-        XCTAssertNotNil(embeddings["Alice"])
+        #expect(segments.count == 1)
+        #expect(segments[0].speakerId == "Alice")
+        #expect(embeddings["Alice"] != nil)
     }
 
     private func makeWorkspace() throws -> Workspace {

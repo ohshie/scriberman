@@ -1,9 +1,11 @@
 import SwiftData
-import XCTest
+import Foundation
+import Testing
 @testable import Scriberman
 
-final class TranscriptionServiceTests: XCTestCase {
-    func testMergeByTimestampInterleavedInput() async {
+struct TranscriptionServiceTests {
+    @Test
+    func mergeByTimestampInterleavedInput() async {
         let service = TranscriptionService()
         let segments = [
             TranscriptSegment(speakerId: "S1", text: "later mic", startTime: 2.0, endTime: 2.3, audioSource: .mic),
@@ -12,10 +14,11 @@ final class TranscriptionServiceTests: XCTestCase {
         ]
 
         let merged = await service.mergeByTimestamp(segments)
-        XCTAssertEqual(merged.map(\.text), ["earlier app", "middle mic", "later mic"])
+        #expect(merged.map(\.text) == ["earlier app", "middle mic", "later mic"])
     }
 
-    func testMergeByTimestampMicOnlyInput() async {
+    @Test
+    func mergeByTimestampMicOnlyInput() async {
         let service = TranscriptionService()
         let micSegments = [
             TranscriptSegment(speakerId: "S2", text: "second", startTime: 2.0, endTime: 2.2, audioSource: .mic),
@@ -23,11 +26,12 @@ final class TranscriptionServiceTests: XCTestCase {
         ]
 
         let merged = await service.mergeByTimestamp(micSegments)
-        XCTAssertEqual(merged.map(\.text), ["first", "second"])
-        XCTAssertTrue(merged.allSatisfy { $0.audioSource == .mic })
+        #expect(merged.map(\.text) == ["first", "second"])
+        #expect(merged.allSatisfy { $0.audioSource == .mic })
     }
 
-    func testMergeByTimestampWithEmptyAppInputReturnsMicSegmentsOnly() async {
+    @Test
+    func mergeByTimestampWithEmptyAppInputReturnsMicSegmentsOnly() async {
         let service = TranscriptionService()
         let micSegments = [
             TranscriptSegment(speakerId: "S1", text: "only mic", startTime: 0.5, endTime: 0.9, audioSource: .mic)
@@ -35,12 +39,13 @@ final class TranscriptionServiceTests: XCTestCase {
         let allSegments = micSegments + [TranscriptSegment]()
 
         let merged = await service.mergeByTimestamp(allSegments)
-        XCTAssertEqual(merged.count, 1)
-        XCTAssertEqual(merged[0].text, "only mic")
-        XCTAssertEqual(merged[0].audioSource, .mic)
+        #expect(merged.count == 1)
+        #expect(merged[0].text == "only mic")
+        #expect(merged[0].audioSource == .mic)
     }
 
-    func testTranscribePassSilentAudioReturnsEmptySegments() async throws {
+    @Test
+    func transcribePassSilentAudioReturnsEmptySegments() async throws {
         let service = TranscriptionService(
             resampleAudioFile: { _ in [0, 0, 0, 0] },
             segmentSpeech: { _ in [] }
@@ -57,11 +62,12 @@ final class TranscriptionServiceTests: XCTestCase {
         let workspace = Workspace(rootURL: tempRoot)
 
         let (segments, embeddings) = try await service.transcribePassForTesting(url: audioURL, source: .app, workspace: workspace)
-        XCTAssertEqual(segments, [])
-        XCTAssertTrue(embeddings.isEmpty)
+        #expect(segments == [])
+        #expect(embeddings.isEmpty)
     }
 
-    func testTranscribePassFromSamplesSilentAudioReturnsEmptySegments() async throws {
+    @Test
+    func transcribePassFromSamplesSilentAudioReturnsEmptySegments() async throws {
         let service = TranscriptionService(
             resampleAudioFile: { _ in [1, 2, 3, 4] },
             segmentSpeech: { _ in [] }
@@ -74,11 +80,12 @@ final class TranscriptionServiceTests: XCTestCase {
             workspace: workspace
         )
 
-        XCTAssertEqual(segments, [])
-        XCTAssertTrue(embeddings.isEmpty)
+        #expect(segments == [])
+        #expect(embeddings.isEmpty)
     }
 
-    func testTranscribeThrowsMissingAudioWhenMixdownURLIsNil() async throws {
+    @Test
+    func transcribeThrowsMissingAudioWhenMixdownURLIsNil() async throws {
         let service = TranscriptionService()
         let workspace = Workspace(rootURL: FileManager.default.temporaryDirectory)
         let container = try ModelContainer(
@@ -100,20 +107,22 @@ final class TranscriptionServiceTests: XCTestCase {
 
         do {
             _ = try await service.transcribe(sessionID: session.id, modelContainer: container, workspace: workspace)
-            XCTFail("Expected missing audio file error.")
+            Issue.record("Expected missing audio file error.")
+            return
         } catch {
             guard case TranscriptionError.missingAudioFile = error else {
-                XCTFail("Expected missingAudioFile, got \(error)")
+                Issue.record("Expected missingAudioFile, got \(error)")
                 return
             }
         }
     }
 
-    func testTranscribeUsesM4AExtractionAndRunsMicAndAppPasses() async throws {
+    @Test
+    func transcribeUsesM4AExtractionAndRunsMicAndAppPasses() async throws {
         let recorder = SampleRecorder()
         let service = TranscriptionService(
             resampleAudioFile: { _ in
-                XCTFail("resampleAudioFile should not be used for M4A extraction path")
+                Issue.record("resampleAudioFile should not be used for M4A extraction path")
                 return []
             },
             segmentSpeech: { samples in
@@ -148,17 +157,18 @@ final class TranscriptionServiceTests: XCTestCase {
 
         let transcript = try await service.transcribe(sessionID: session.id, modelContainer: container, workspace: workspace)
 
-        XCTAssertTrue(transcript.segments.isEmpty)
-        XCTAssertTrue(transcript.fullText.isEmpty)
+        #expect(transcript.segments.isEmpty)
+        #expect(transcript.fullText.isEmpty)
         let captured = await recorder.captured
-        XCTAssertEqual(captured.count, 2)
-        XCTAssertTrue(captured.contains { $0 == [1.0, 2.0] })
-        XCTAssertTrue(captured.contains { $0 == [3.0, 4.0] })
+        #expect(captured.count == 2)
+        #expect(captured.contains { $0 == [1.0, 2.0] })
+        #expect(captured.contains { $0 == [3.0, 4.0] })
         let prepared = await recorder.prepared
-        XCTAssertTrue(prepared)
+        #expect(prepared)
     }
 
-    func testPrepareModelsSucceedsWhenThreeRequiredWorkspaceGroupsExist() async throws {
+    @Test
+    func prepareModelsSucceedsWhenThreeRequiredWorkspaceGroupsExist() async throws {
         let service = TranscriptionService()
         let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
@@ -174,7 +184,8 @@ final class TranscriptionServiceTests: XCTestCase {
         try await service.prepareModels(workspace: workspace)
     }
 
-    func testPrepareModelsThrowsMissingWorkspaceModelsWhenAnyRequiredGroupMissing() async throws {
+    @Test
+    func prepareModelsThrowsMissingWorkspaceModelsWhenAnyRequiredGroupMissing() async throws {
         let service = TranscriptionService()
         let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
@@ -189,13 +200,14 @@ final class TranscriptionServiceTests: XCTestCase {
 
         do {
             try await service.prepareModels(workspace: workspace)
-            XCTFail("Expected missingWorkspaceModels error.")
+            Issue.record("Expected missingWorkspaceModels error.")
+            return
         } catch let error as TranscriptionError {
             guard case .missingWorkspaceModels(let repos) = error else {
-                XCTFail("Expected missingWorkspaceModels, got \(error)")
+                Issue.record("Expected missingWorkspaceModels, got \(error)")
                 return
             }
-            XCTAssertTrue(repos.contains(ModelGroup.offlineDiarization.repoFolderName))
+            #expect(repos.contains(ModelGroup.offlineDiarization.repoFolderName))
         }
     }
 }

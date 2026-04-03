@@ -1,11 +1,13 @@
 import FluidAudio
-import XCTest
+import Foundation
+import Testing
 @testable import Scriberman
 
-final class TranscriptAlignerTests: XCTestCase {
+struct TranscriptAlignerTests {
     private let aligner = TranscriptAligner()
 
-    func testAlignWithTokensAndDiarizedSegmentsProducesMappedTranscript() {
+    @Test
+    func alignWithTokensAndDiarizedSegmentsProducesMappedTranscript() {
         let transcript = aligner.alignTranscript(
             fullText: "hello world",
             tokenTimings: [
@@ -19,22 +21,23 @@ final class TranscriptAlignerTests: XCTestCase {
             source: .mic
         )
 
-        XCTAssertEqual(transcript.segments.count, 2)
-        XCTAssertEqual(transcript.segments[0].speakerId, "S1")
-        XCTAssertEqual(transcript.segments[0].text, "hello")
-        XCTAssertEqual(transcript.segments[0].startTime, 0.0)
-        XCTAssertEqual(transcript.segments[0].endTime, 0.5)
+        #expect(transcript.segments.count == 2)
+        #expect(transcript.segments[0].speakerId == "S1")
+        #expect(transcript.segments[0].text == "hello")
+        #expect(transcript.segments[0].startTime == 0.0)
+        #expect(transcript.segments[0].endTime == 0.5)
 
-        XCTAssertEqual(transcript.segments[1].speakerId, "S2")
-        XCTAssertEqual(transcript.segments[1].text, "world")
-        XCTAssertEqual(transcript.segments[1].startTime, 0.5)
-        XCTAssertEqual(transcript.segments[1].endTime, 1.1)
+        #expect(transcript.segments[1].speakerId == "S2")
+        #expect(transcript.segments[1].text == "world")
+        #expect(transcript.segments[1].startTime == 0.5)
+        #expect(transcript.segments[1].endTime == 1.1)
 
-        XCTAssertEqual(transcript.fullText, "hello world")
-        XCTAssertEqual(transcript.speakers.map(\.colorHex), ["#4F46E5", "#16A34A"])
+        #expect(transcript.fullText == "hello world")
+        #expect(transcript.speakers.map { $0.colorHex } == ["#4F46E5", "#16A34A"])
     }
 
-    func testEmptyTokensAndEmptyDiarizedSegmentsUseSingleFallbackSegment() {
+    @Test
+    func emptyTokensAndEmptyDiarizedSegmentsUseSingleFallbackSegment() {
         let transcript = aligner.alignTranscript(
             fullText: "fallback text",
             tokenTimings: [],
@@ -42,12 +45,13 @@ final class TranscriptAlignerTests: XCTestCase {
             source: .mic
         )
 
-        XCTAssertEqual(transcript.segments.count, 1)
-        XCTAssertEqual(transcript.segments[0].speakerId, "S1")
-        XCTAssertEqual(transcript.segments[0].text, "fallback text")
+        #expect(transcript.segments.count == 1)
+        #expect(transcript.segments[0].speakerId == "S1")
+        #expect(transcript.segments[0].text == "fallback text")
     }
 
-    func testEmptyTokensWithDiarizedSegmentsUsesFirstSpeaker() {
+    @Test
+    func emptyTokensWithDiarizedSegmentsUsesFirstSpeaker() {
         let transcript = aligner.alignTranscript(
             fullText: "speaker fallback",
             tokenTimings: [],
@@ -58,13 +62,14 @@ final class TranscriptAlignerTests: XCTestCase {
             source: .mic
         )
 
-        XCTAssertEqual(transcript.segments.count, 1)
-        XCTAssertEqual(transcript.segments[0].speakerId, "S2")
-        XCTAssertEqual(transcript.segments[0].startTime, 10.0)
-        XCTAssertEqual(transcript.segments[0].endTime, 16.0)
+        #expect(transcript.segments.count == 1)
+        #expect(transcript.segments[0].speakerId == "S2")
+        #expect(transcript.segments[0].startTime == 10.0)
+        #expect(transcript.segments[0].endTime == 16.0)
     }
 
-    func testSegmentsWithNoOverlappingTokensAreDropped() {
+    @Test
+    func segmentsWithNoOverlappingTokensAreDropped() {
         let transcript = aligner.alignTranscript(
             fullText: "unused",
             tokenTimings: [token("▁hello", start: 0.0, end: 0.2)],
@@ -75,12 +80,13 @@ final class TranscriptAlignerTests: XCTestCase {
             source: .mic
         )
 
-        XCTAssertEqual(transcript.segments.count, 1)
-        XCTAssertEqual(transcript.segments[0].speakerId, "S1")
-        XCTAssertEqual(transcript.speakers.count, 1)
+        #expect(transcript.segments.count == 1)
+        #expect(transcript.segments[0].speakerId == "S1")
+        #expect(transcript.speakers.count == 1)
     }
 
-    func testAlignWithGlobalOffsetTimingsAcrossMultipleChunks() {
+    @Test
+    func alignWithGlobalOffsetTimingsAcrossMultipleChunks() {
         // Simulates two VAD chunks: chunk1 at 0-10s, chunk2 at 30-40s.
         // Token timings are already offset to global session time.
         let transcript = aligner.alignTranscript(
@@ -98,14 +104,15 @@ final class TranscriptAlignerTests: XCTestCase {
             source: .mic
         )
 
-        XCTAssertEqual(transcript.segments.count, 2)
-        XCTAssertEqual(transcript.segments[0].speakerId, "S1")
-        XCTAssertEqual(transcript.segments[0].text, "hello world")
-        XCTAssertEqual(transcript.segments[1].speakerId, "S2")
-        XCTAssertEqual(transcript.segments[1].text, "foo bar")
+        #expect(transcript.segments.count == 2)
+        #expect(transcript.segments[0].speakerId == "S1")
+        #expect(transcript.segments[0].text == "hello world")
+        #expect(transcript.segments[1].speakerId == "S2")
+        #expect(transcript.segments[1].text == "foo bar")
     }
 
-    func testAlignInterleavedSpeakersInSingleChunk() {
+    @Test
+    func alignInterleavedSpeakersInSingleChunk() {
         // Both Speaker A and B talk within the same 30s VAD chunk.
         // Diarizer identifies two distinct segments; aligner splits the ASR text.
         let transcript = aligner.alignTranscript(
@@ -123,17 +130,18 @@ final class TranscriptAlignerTests: XCTestCase {
             source: .mic
         )
 
-        XCTAssertEqual(transcript.segments.count, 2)
-        XCTAssertEqual(transcript.segments[0].speakerId, "S1")
-        XCTAssertEqual(transcript.segments[0].text, "hey there")
-        XCTAssertEqual(transcript.segments[1].speakerId, "S2")
-        XCTAssertEqual(transcript.segments[1].text, "yes indeed")
+        #expect(transcript.segments.count == 2)
+        #expect(transcript.segments[0].speakerId == "S1")
+        #expect(transcript.segments[0].text == "hey there")
+        #expect(transcript.segments[1].speakerId == "S2")
+        #expect(transcript.segments[1].text == "yes indeed")
     }
 
-    func testSpeakerColorPaletteMethod() {
-        XCTAssertEqual(aligner.speakerColorHex(at: 0), "#4F46E5")
-        XCTAssertEqual(aligner.speakerColorHex(at: 1), "#16A34A")
-        XCTAssertEqual(aligner.speakerColorHex(at: 6), "#4F46E5")
+    @Test
+    func speakerColorPaletteMethod() {
+        #expect(aligner.speakerColorHex(at: 0) == "#4F46E5")
+        #expect(aligner.speakerColorHex(at: 1) == "#16A34A")
+        #expect(aligner.speakerColorHex(at: 6) == "#4F46E5")
     }
 
     private func token(_ piece: String, start: TimeInterval, end: TimeInterval) -> TokenTiming {

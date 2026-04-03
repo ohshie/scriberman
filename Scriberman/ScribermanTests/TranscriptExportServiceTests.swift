@@ -1,10 +1,12 @@
-import XCTest
+import Foundation
+import Testing
 @testable import Scriberman
 
-final class TranscriptExportServiceTests: XCTestCase {
+struct TranscriptExportServiceTests {
     private let service = TranscriptExportService()
 
-    func testWritePersistsMarkdownToProvidedURL() throws {
+    @Test
+    func writePersistsMarkdownToProvidedURL() throws {
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("md")
@@ -13,6 +15,6 @@ final class TranscriptExportServiceTests: XCTestCase {
         try service.write("# Exported Transcript", to: outputURL)
 
         let written = try String(contentsOf: outputURL, encoding: .utf8)
-        XCTAssertEqual(written, "# Exported Transcript")
+        #expect(written == "# Exported Transcript")
     }
 }

@@ -1,8 +1,9 @@
-import XCTest
+import Testing
 @testable import Scriberman
 
-final class TranscriptGrouperTests: XCTestCase {
-    func testMakeBlocksMergesConsecutiveSegmentsWithSameSpeakerAndSource() {
+struct TranscriptGrouperTests {
+    @Test
+    func makeBlocksMergesConsecutiveSegmentsWithSameSpeakerAndSource() {
         let transcript = Transcript(
             fullText: "Hello world",
             segments: [
@@ -14,15 +15,16 @@ final class TranscriptGrouperTests: XCTestCase {
 
         let blocks = TranscriptGrouper.makeBlocks(from: transcript)
 
-        XCTAssertEqual(blocks.count, 1)
-        XCTAssertEqual(blocks[0].speaker.id, "S1")
-        XCTAssertEqual(blocks[0].audioSource, .mic)
-        XCTAssertEqual(blocks[0].startTime, 0.0)
-        XCTAssertEqual(blocks[0].endTime, 2.0)
-        XCTAssertEqual(blocks[0].text, "Hello world")
+        #expect(blocks.count == 1)
+        #expect(blocks[0].speaker.id == "S1")
+        #expect(blocks[0].audioSource == .mic)
+        #expect(blocks[0].startTime == 0.0)
+        #expect(blocks[0].endTime == 2.0)
+        #expect(blocks[0].text == "Hello world")
     }
 
-    func testMakeBlocksSplitsWhenAudioSourceDiffers() {
+    @Test
+    func makeBlocksSplitsWhenAudioSourceDiffers() {
         let transcript = Transcript(
             fullText: "A B",
             segments: [
@@ -34,12 +36,13 @@ final class TranscriptGrouperTests: XCTestCase {
 
         let blocks = TranscriptGrouper.makeBlocks(from: transcript)
 
-        XCTAssertEqual(blocks.count, 2)
-        XCTAssertEqual(blocks[0].audioSource, .mic)
-        XCTAssertEqual(blocks[1].audioSource, .app)
+        #expect(blocks.count == 2)
+        #expect(blocks[0].audioSource == .mic)
+        #expect(blocks[1].audioSource == .app)
     }
 
-    func testMakeBlocksUsesFallbackSpeakerWhenSpeakerIsMissing() {
+    @Test
+    func makeBlocksUsesFallbackSpeakerWhenSpeakerIsMissing() {
         let transcript = Transcript(
             fullText: "Unknown",
             segments: [
@@ -50,9 +53,9 @@ final class TranscriptGrouperTests: XCTestCase {
 
         let blocks = TranscriptGrouper.makeBlocks(from: transcript)
 
-        XCTAssertEqual(blocks.count, 1)
-        XCTAssertEqual(blocks[0].speaker.id, "missing")
-        XCTAssertEqual(blocks[0].speaker.label, "missing")
-        XCTAssertEqual(blocks[0].speaker.colorHex, "#6B7280")
+        #expect(blocks.count == 1)
+        #expect(blocks[0].speaker.id == "missing")
+        #expect(blocks[0].speaker.label == "missing")
+        #expect(blocks[0].speaker.colorHex == "#6B7280")
     }
 }
