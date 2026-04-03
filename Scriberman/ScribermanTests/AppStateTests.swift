@@ -235,6 +235,65 @@ final class AppStateTests {
     }
 
     @Test
+    func testAppDelegateSourceDeclaresHideAndRestoreActivationPolicy() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let delegateFileURL = testsDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("AppDelegate.swift")
+        let delegateSource = try String(contentsOf: delegateFileURL, encoding: .utf8)
+
+        #expect(delegateSource.contains("func hideToTray"))
+        #expect(delegateSource.contains("windowToHide?.orderOut(nil)"))
+        #expect(delegateSource.contains("NSApp.setActivationPolicy(.accessory)"))
+        #expect(delegateSource.contains("func showMainWindow()"))
+        #expect(delegateSource.contains("NSApp.setActivationPolicy(.regular)"))
+        #expect(delegateSource.contains("NSApp.activate(ignoringOtherApps: true)"))
+        #expect(delegateSource.contains("window.makeKeyAndOrderFront(nil)"))
+    }
+
+    @Test
+    func testAppDelegateSourceGuardsOnboardingBeforeFirstTimeTrayAlert() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let delegateFileURL = testsDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("AppDelegate.swift")
+        let delegateSource = try String(contentsOf: delegateFileURL, encoding: .utf8)
+
+        #expect(delegateSource.contains("if appState.requiredOnboardingStep != nil"))
+        #expect(delegateSource.contains("NSApp.terminate(nil)"))
+        #expect(delegateSource.contains("showFirstTimeTrayAlert(window: sender)"))
+        #expect(delegateSource.contains("hasShownFirstTimeTrayAlert"))
+    }
+
+    @Test
+    func testAppDelegateSourceRemembersCloseChoiceWhenRequested() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let delegateFileURL = testsDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("AppDelegate.swift")
+        let delegateSource = try String(contentsOf: delegateFileURL, encoding: .utf8)
+
+        #expect(delegateSource.contains("let rememberCheckbox = NSButton(checkboxWithTitle: \"Remember my choice\""))
+        #expect(delegateSource.contains("let shouldRemember = rememberCheckbox.state == .on"))
+        #expect(delegateSource.contains("appState.menuBarSettings.closeAction = keepInMenuBar ? .tray : .quit"))
+    }
+
+    @Test
+    func testAppSourceDeclaresMenuBarElapsedIconAndInsertionBinding() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let appFileURL = testsDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("ScribermanApp.swift")
+        let appSource = try String(contentsOf: appFileURL, encoding: .utf8)
+
+        #expect(appSource.contains("MenuBarExtra("))
+        #expect(appSource.contains("isInserted: Binding("))
+        #expect(appSource.contains("appState.menuBarSettings.isInTrayMode"))
+        #expect(appSource.contains("case let .recording(duration, _)"))
+        #expect(appSource.contains("Text(Self.menuBarDuration(duration))"))
+    }
+
+    @Test
     func testSelectPendingSessionCreatesSinglePendingSession() {
         let permissionService = MockPermissionService()
         let services = makeServiceContainer(permissionService: permissionService)
