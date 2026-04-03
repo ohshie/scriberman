@@ -244,7 +244,10 @@ final class AppStateTests {
 
         #expect(delegateSource.contains("func hideToTray"))
         #expect(delegateSource.contains("appState?.menuBarSettings.isInTrayMode = true"))
-        #expect(delegateSource.contains("windowToHide?.orderOut(nil)"))
+        #expect(delegateSource.contains("pendingTrayWindow = window ?? resolveMainWindow()"))
+        #expect(delegateSource.contains("func finalizeHideToTrayIfRequested()"))
+        #expect(delegateSource.contains("windowToHide.orderOut(nil)"))
+        #expect(delegateSource.contains("NSApp.setActivationPolicy(.accessory)"))
         #expect(delegateSource.contains("func showMainWindow()"))
         #expect(delegateSource.contains("NSApp.setActivationPolicy(.regular)"))
         #expect(delegateSource.contains("NSApp.activate(ignoringOtherApps: true)"))
@@ -291,7 +294,7 @@ final class AppStateTests {
         #expect(appSource.contains("appState.menuBarSettings.isInTrayMode"))
         #expect(appSource.contains("case let .recording(duration, _)"))
         #expect(appSource.contains("Text(Self.menuBarDuration(duration))"))
-        #expect(appSource.contains("NSApp.setActivationPolicy(.accessory)"))
+        #expect(appSource.contains("finalizeHideToTrayIfRequested()"))
         #expect(appSource.contains("NSApp.setActivationPolicy(.regular)"))
     }
 

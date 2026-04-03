@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     weak var appState: AppState?
 
     private weak var mainWindow: NSWindow?
+    private weak var pendingTrayWindow: NSWindow?
     private let logger = Logger(subsystem: "Scriberman", category: "MenuBarFlow")
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -52,8 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func hideToTray(window: NSWindow? = nil) {
         logger.info("hideToTray begin")
         appState?.menuBarSettings.isInTrayMode = true
-        let windowToHide = window ?? resolveMainWindow()
-        windowToHide?.orderOut(nil)
+        pendingTrayWindow = window ?? resolveMainWindow()
         logger.info("hideToTray requested menu bar insertion; waiting for scene insertion callback")
 
         // If the system/user customization immediately rejects insertion, recover
@@ -70,10 +70,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
 
             self.logger.error(
-                "hideToTray verification failed: menu bar extra rejected; restoring regular activation and main window"
+                "hideToTray verification failed: menu bar extra rejected; keeping main window visible"
             )
-            self.showMainWindow()
         }
+    }
+
+    func finalizeHideToTrayIfRequested() {
+        guard let windowToHide = pendingTrayWindow ?? resolveMainWindow() else {
+            logger.info("finalizeHideToTrayIfRequested no window resolved")
+            return
+        }
+
+        windowToHide.orderOut(nil)
+        let changed = NSApp.setActivationPolicy(.accessory)
+        logger.info(
+            "finalizeHideToTrayIfRequested activationPolicyChanged=\(changed) currentPolicy=\(String(describing: NSApp.activationPolicy), privacy: .public)"
+        )
+        pendingTrayWindow = nil
     }
 
     func showMainWindow() {

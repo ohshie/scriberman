@@ -56,8 +56,7 @@ struct ScribermanApp: App {
                 .onChange(of: appState.menuBarSettings.isInTrayMode) { _, isInserted in
                     ScribermanApp.logger.info("MenuBarExtra onChange isInTrayMode=\(isInserted)")
                     if isInserted {
-                        let changed = NSApp.setActivationPolicy(.accessory)
-                        ScribermanApp.logger.info("MenuBarExtra insertion apply accessory changed=\(changed)")
+                        (NSApp.delegate as? AppDelegate)?.finalizeHideToTrayIfRequested()
                         return
                     }
 
