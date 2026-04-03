@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func hideToTray(window: NSWindow? = nil) {
+        appState?.menuBarSettings.isInTrayMode = true
         let windowToHide = window ?? resolveMainWindow()
         windowToHide?.orderOut(nil)
         _ = NSApp.setActivationPolicy(.accessory)

@@ -243,6 +243,7 @@ final class AppStateTests {
         let delegateSource = try String(contentsOf: delegateFileURL, encoding: .utf8)
 
         #expect(delegateSource.contains("func hideToTray"))
+        #expect(delegateSource.contains("appState?.menuBarSettings.isInTrayMode = true"))
         #expect(delegateSource.contains("windowToHide?.orderOut(nil)"))
         #expect(delegateSource.contains("NSApp.setActivationPolicy(.accessory)"))
         #expect(delegateSource.contains("func showMainWindow()"))
