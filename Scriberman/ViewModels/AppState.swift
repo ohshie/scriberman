@@ -97,6 +97,7 @@ final class AppState {
             speakerEmbeddingStore: services.background.speakerEmbeddingStore
         )
         self.menuBarSettings = MenuBarSettings()
+        self.newSessionViewModel.menuBarSettings = self.menuBarSettings
     }
 
     func selectPendingSession() {
