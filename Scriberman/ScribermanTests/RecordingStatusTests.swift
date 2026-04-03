@@ -1,16 +1,23 @@
-import XCTest
+import Foundation
+import Testing
 @testable import Scriberman
 
-final class RecordingStatusTests: XCTestCase {
+struct RecordingStatusTests {
+    
+    
+    @Test
     func testNonErrorStatusesRoundTripPersistence() {
         let statuses: [RecordingStatus] = [.recorded, .converting, .transcribing, .retranscribing, .done]
 
         for status in statuses {
             let reconstructed = RecordingStatus(persistedValue: status.persistedValue, errorMessage: nil)
-            XCTAssertEqual(reconstructed, status)
+            #expect(reconstructed == status)
         }
     }
 
+    
+    
+    @Test
     func testErrorStatusRoundTripsWithMessage() {
         let status = RecordingStatus.error("something went wrong")
         let reconstructed = RecordingStatus(
@@ -18,16 +25,22 @@ final class RecordingStatusTests: XCTestCase {
             errorMessage: "something went wrong"
         )
 
-        XCTAssertEqual(reconstructed, .error("something went wrong"))
+        #expect(reconstructed == .error("something went wrong"))
     }
 
+    
+    
+    @Test
     func testUnknownPersistedValueFallsBackToRecorded() {
-        XCTAssertEqual(
-            RecordingStatus(persistedValue: "unknown", errorMessage: nil),
-            .recorded
+        #expect(
+            RecordingStatus(persistedValue: "unknown", errorMessage: nil)
+            == .recorded
         )
     }
 
+    
+    
+    @Test
     func testRecordingSessionStoresCapturedAppNameWhenProvided() {
         let session = RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
@@ -38,9 +51,12 @@ final class RecordingStatusTests: XCTestCase {
             status: .recorded
         )
 
-        XCTAssertEqual(session.capturedAppName, "Zoom")
+        #expect(session.capturedAppName == "Zoom")
     }
 
+    
+    
+    @Test
     func testRecordingSessionCapturedAppNameDefaultsToNil() {
         let session = RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
@@ -50,9 +66,12 @@ final class RecordingStatusTests: XCTestCase {
             status: .recorded
         )
 
-        XCTAssertNil(session.capturedAppName)
+        #expect(session.capturedAppName == nil)
     }
 
+    
+    
+    @Test
     func testRecordingSessionStoresAppAudioURLWhenProvided() {
         let session = RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
@@ -63,10 +82,13 @@ final class RecordingStatusTests: XCTestCase {
             status: .recorded
         )
 
-        XCTAssertEqual(session.micAudioURL, "/tmp/mic.wav")
-        XCTAssertEqual(session.appAudioURL, "/tmp/app.wav")
+        #expect(session.micAudioURL == "/tmp/mic.wav")
+        #expect(session.appAudioURL == "/tmp/app.wav")
     }
 
+    
+    
+    @Test
     func testRecordingSessionAppAudioURLDefaultsToNil() {
         let session = RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
@@ -76,10 +98,13 @@ final class RecordingStatusTests: XCTestCase {
             status: .recorded
         )
 
-        XCTAssertEqual(session.micAudioURL, "/tmp/mic.wav")
-        XCTAssertNil(session.appAudioURL)
+        #expect(session.micAudioURL == "/tmp/mic.wav")
+        #expect(session.appAudioURL == nil)
     }
 
+    
+    
+    @Test
     func testRecordingSessionStoresMixdownURLWhenProvided() {
         let session = RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
@@ -90,9 +115,12 @@ final class RecordingStatusTests: XCTestCase {
             status: .recorded
         )
 
-        XCTAssertEqual(session.mixdownURL, "/tmp/recording.m4a")
+        #expect(session.mixdownURL == "/tmp/recording.m4a")
     }
 
+    
+    
+    @Test
     func testRecordingSessionMixdownURLDefaultsToNil() {
         let session = RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
@@ -102,9 +130,12 @@ final class RecordingStatusTests: XCTestCase {
             status: .recorded
         )
 
-        XCTAssertNil(session.mixdownURL)
+        #expect(session.mixdownURL == nil)
     }
 
+    
+    
+    @Test
     func testRecordingSessionRetranscriptRoundTripsWithoutAffectingOriginalTranscript() {
         let original = Transcript(
             fullText: "original",
@@ -143,13 +174,16 @@ final class RecordingStatusTests: XCTestCase {
         session.transcript = original
         session.retranscript = retranscript
 
-        XCTAssertEqual(session.transcript?.fullText, "original")
-        XCTAssertEqual(session.retranscript?.fullText, "retry")
-        XCTAssertNotNil(session.transcriptData)
-        XCTAssertNotNil(session.retranscriptData)
+        #expect(session.transcript?.fullText == "original")
+        #expect(session.retranscript?.fullText == "retry")
+        #expect(session.transcriptData != nil)
+        #expect(session.retranscriptData != nil)
     }
 
     @MainActor
+    
+    
+    @Test
     func testTranscriptDetailViewModelPrefersRetranscript() {
         let session = RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
@@ -172,13 +206,16 @@ final class RecordingStatusTests: XCTestCase {
         )
 
         let viewModel = TranscriptDetailViewModel(session: session, aiProviderService: makeAIProviderService())
-        XCTAssertEqual(viewModel.displayedTranscript?.fullText, "retry")
-        XCTAssertEqual(viewModel.finalTranscriptText, "retry")
-        XCTAssertEqual(viewModel.originalTranscriptText, "original")
-        XCTAssertTrue(viewModel.isReprocessed)
+        #expect(viewModel.displayedTranscript?.fullText == "retry")
+        #expect(viewModel.finalTranscriptText == "retry")
+        #expect(viewModel.originalTranscriptText == "original")
+        #expect(viewModel.isReprocessed)
     }
 
     @MainActor
+    
+    
+    @Test
     func testTranscriptDetailViewModelApplicationNameAndReprocessedFlag() {
         let recording = TranscriptDetailViewModel(session: RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
@@ -188,8 +225,8 @@ final class RecordingStatusTests: XCTestCase {
             capturedAppName: "Zoom",
             status: .done
         ), aiProviderService: makeAIProviderService())
-        XCTAssertEqual(recording.applicationName, "Zoom")
-        XCTAssertFalse(recording.isReprocessed)
+        #expect(recording.applicationName == "Zoom")
+        #expect(!(recording.isReprocessed))
 
         let imported = TranscriptDetailViewModel(session: ImportedSession(
             createdAt: Date(timeIntervalSince1970: 0),
@@ -200,7 +237,7 @@ final class RecordingStatusTests: XCTestCase {
             originalFormat: "wav",
             status: .done
         ), aiProviderService: makeAIProviderService())
-        XCTAssertNil(imported.applicationName)
+        #expect(imported.applicationName == nil)
     }
 
     @MainActor
@@ -214,7 +251,10 @@ final class RecordingStatusTests: XCTestCase {
     }
 }
 
-final class RecordingSessionTests: XCTestCase {
+struct RecordingSessionTests {
+    
+    
+    @Test
     func testRecordingSessionAITransformationHistoryRoundTrips() {
         let session = RecordingSession(
             createdAt: Date(timeIntervalSince1970: 0),
@@ -240,10 +280,13 @@ final class RecordingSessionTests: XCTestCase {
 
         session.aiTransformations = transformations
 
-        XCTAssertEqual(session.aiTransformations, transformations)
-        XCTAssertNotNil(session.aiTransformationsData)
+        #expect(session.aiTransformations == transformations)
+        #expect(session.aiTransformationsData != nil)
     }
 
+    
+    
+    @Test
     func testImportedSessionAITransformationHistoryRoundTrips() {
         let session = ImportedSession(
             createdAt: Date(timeIntervalSince1970: 0),
@@ -265,41 +308,50 @@ final class RecordingSessionTests: XCTestCase {
 
         session.aiTransformations = transformations
 
-        XCTAssertEqual(session.aiTransformations, transformations)
-        XCTAssertNotNil(session.aiTransformationsData)
+        #expect(session.aiTransformations == transformations)
+        #expect(session.aiTransformationsData != nil)
     }
 
+    
+    
+    @Test
     func testTranscriptDetailViewIncludesAITransformationUIElements() throws {
         let source = try transcriptDetailSource()
 
-        XCTAssertTrue(source.contains("Picker(\"Prompt\""))
-        XCTAssertTrue(source.contains("AITransformationPreviewCard("))
-        XCTAssertTrue(source.contains("SkeletonView()"))
-        XCTAssertTrue(source.contains("Add prompts in Settings to enable transformations."))
-        XCTAssertTrue(source.contains("40,000"))
+        #expect(source.contains("Picker(\"Prompt\""))
+        #expect(source.contains("AITransformationPreviewCard("))
+        #expect(source.contains("SkeletonView()"))
+        #expect(source.contains("Add prompts in Settings to enable transformations."))
+        #expect(source.contains("40,000"))
     }
 
+    
+    
+    @Test
     func testTranscriptDetailViewIncludesPreviewAndStudyNavigation() throws {
         let source = try transcriptDetailSource()
 
-        XCTAssertTrue(source.contains("TranscriptPreviewView("))
-        XCTAssertTrue(source.contains("onTap: viewModel.displayedTranscript == nil ? nil : onOpenStudy"))
-        XCTAssertFalse(source.contains("Label(\"Study Transcript\", systemImage: \"book.pages\")"))
-        XCTAssertFalse(source.contains(".sheet(isPresented: $showingStudyTranscript)"))
+        #expect(source.contains("TranscriptPreviewView("))
+        #expect(source.contains("onTap: viewModel.displayedTranscript == nil ? nil : onOpenStudy"))
+        #expect(!(source.contains("Label(\"Study Transcript\", systemImage: \"book.pages\")")))
+        #expect(!(source.contains(".sheet(isPresented: $showingStudyTranscript)")))
     }
 
+    
+    
+    @Test
     func testTranscriptConversationViewsUseAdaptiveStylesForLightDarkMode() throws {
         let blockSource = try sourceForFile(named: "TranscriptBlockView.swift")
         let previewSource = try sourceForFile(named: "TranscriptPreviewView.swift")
         let studySource = try sourceForFile(named: "TranscriptStudyView.swift")
 
-        XCTAssertTrue(blockSource.contains(".background(.thinMaterial"))
-        XCTAssertTrue(blockSource.contains(".foregroundStyle(.primary)"))
-        XCTAssertFalse(blockSource.contains("Color.white"))
-        XCTAssertFalse(blockSource.contains("Color.black"))
+        #expect(blockSource.contains(".background(.thinMaterial"))
+        #expect(blockSource.contains(".foregroundStyle(.primary)"))
+        #expect(!(blockSource.contains("Color.white")))
+        #expect(!(blockSource.contains("Color.black")))
 
-        XCTAssertTrue(previewSource.contains(".background(.thinMaterial"))
-        XCTAssertTrue(studySource.contains(".background(.bar)"))
+        #expect(previewSource.contains(".background(.thinMaterial"))
+        #expect(studySource.contains(".background(.bar)"))
     }
 
     private func transcriptDetailSource() throws -> String {

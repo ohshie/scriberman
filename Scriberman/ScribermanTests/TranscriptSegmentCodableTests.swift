@@ -1,8 +1,9 @@
-import XCTest
+import Testing
 @testable import Scriberman
 
-final class TranscriptSegmentCodableTests: XCTestCase {
-    func testDecodeLegacySegmentWithoutAudioSourceDefaultsToMic() throws {
+struct TranscriptSegmentCodableTests {
+    @Test
+    func decodeLegacySegmentWithoutAudioSourceDefaultsToMic() throws {
         let json = """
         {
           "speakerId": "S1",
@@ -14,10 +15,11 @@ final class TranscriptSegmentCodableTests: XCTestCase {
 
         let segment = try JSONDecoder().decode(TranscriptSegment.self, from: Data(json.utf8))
 
-        XCTAssertEqual(segment.audioSource, .mic)
+        #expect(segment.audioSource == .mic)
     }
 
-    func testEncodeAndDecodePreservesAudioSource() throws {
+    @Test
+    func encodeAndDecodePreservesAudioSource() throws {
         let original = TranscriptSegment(
             speakerId: "S2",
             text: "app audio",
@@ -29,7 +31,7 @@ final class TranscriptSegmentCodableTests: XCTestCase {
         let encoded = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(TranscriptSegment.self, from: encoded)
 
-        XCTAssertEqual(decoded, original)
-        XCTAssertEqual(decoded.audioSource, .app)
+        #expect(decoded == original)
+        #expect(decoded.audioSource == .app)
     }
 }

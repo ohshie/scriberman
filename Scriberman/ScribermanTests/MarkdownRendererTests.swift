@@ -1,26 +1,30 @@
 import MarkdownUI
-import XCTest
+import Foundation
+import Testing
 @testable import Scriberman
 
 @MainActor
-final class MarkdownRendererTests: XCTestCase {
+struct MarkdownRendererTests {
     private let renderer = MarkdownRenderer()
 
-    func testRenderIncludesSessionTitleAsH1() {
+    @Test
+    func renderIncludesSessionTitleAsH1() {
         let markdown = renderer.renderMarkdown(session: makeSession(title: "Sprint Review"), transcript: makeTranscript())
-        XCTAssertTrue(markdown.hasPrefix("# Sprint Review\n"))
+        #expect(markdown.hasPrefix("# Sprint Review\n"))
     }
 
-    func testRenderIncludesSpeakerAndRangeFormatting() {
+    @Test
+    func renderIncludesSpeakerAndRangeFormatting() {
         let markdown = renderer.renderMarkdown(session: makeSession(), transcript: makeTranscript())
 
-        XCTAssertTrue(markdown.contains("**Speaker 1** [00:00 – 00:02]"))
-        XCTAssertTrue(markdown.contains("**Speaker 2** [00:03 – 00:05]"))
-        XCTAssertTrue(markdown.contains("hello"))
-        XCTAssertTrue(markdown.contains("there"))
+        #expect(markdown.contains("**Speaker 1** [00:00 – 00:02]"))
+        #expect(markdown.contains("**Speaker 2** [00:03 – 00:05]"))
+        #expect(markdown.contains("hello"))
+        #expect(markdown.contains("there"))
     }
 
-    func testRenderSortsSegmentsByStartTime() {
+    @Test
+    func renderSortsSegmentsByStartTime() {
         let transcript = Transcript(
             fullText: "first second",
             segments: [
@@ -37,20 +41,23 @@ final class MarkdownRendererTests: XCTestCase {
         let firstIndex = markdown.range(of: "first")
         let secondIndex = markdown.range(of: "second")
 
-        XCTAssertNotNil(firstIndex)
-        XCTAssertNotNil(secondIndex)
-        XCTAssertLessThan(firstIndex!.lowerBound, secondIndex!.lowerBound)
+        #expect(firstIndex != nil)
+        #expect(secondIndex != nil)
+        #expect(firstIndex!.lowerBound < secondIndex!.lowerBound)
     }
 
-    func testDefaultFileNameSanitizesSlash() {
-        XCTAssertEqual(renderer.defaultFileName(for: "Recording 03/27"), "Recording 03-27.md")
+    @Test
+    func defaultFileNameSanitizesSlash() {
+        #expect(renderer.defaultFileName(for: "Recording 03/27") == "Recording 03-27.md")
     }
 
-    func testDefaultFileNameFallbackForEmptyTitle() {
-        XCTAssertEqual(renderer.defaultFileName(for: ""), "Transcript.md")
+    @Test
+    func defaultFileNameFallbackForEmptyTitle() {
+        #expect(renderer.defaultFileName(for: "") == "Transcript.md")
     }
 
-    func testMarkdownUIImportCompiles() {
+    @Test
+    func markdownUIImportCompiles() {
         _ = Markdown("**MarkdownUI**")
     }
 

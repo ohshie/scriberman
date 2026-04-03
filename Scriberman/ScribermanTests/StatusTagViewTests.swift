@@ -1,47 +1,54 @@
-import XCTest
+import Testing
 @testable import Scriberman
 
 @MainActor
-final class StatusTagViewTests: XCTestCase {
-    func testDoneMapsToGreenTint() {
+struct StatusTagViewTests {
+    @Test
+    func doneMapsToGreenTint() {
         let style = StatusTagView.style(for: .done)
-        XCTAssertEqual(style.label, "Done")
-        XCTAssertEqual(style.tint, .green)
+        #expect(style.label == "Done")
+        #expect(style.tint == .green)
     }
 
-    func testPendingMapsToOrangeTint() {
-        XCTAssertEqual(StatusTagView.style(for: .recorded).tint, .orange)
-        XCTAssertEqual(StatusTagView.style(for: .converting).tint, .orange)
-        XCTAssertEqual(StatusTagView.style(for: .transcribing).tint, .orange)
-        XCTAssertEqual(StatusTagView.style(for: .retranscribing).tint, .orange)
+    @Test
+    func pendingMapsToOrangeTint() {
+        #expect(StatusTagView.style(for: .recorded).tint == .orange)
+        #expect(StatusTagView.style(for: .converting).tint == .orange)
+        #expect(StatusTagView.style(for: .transcribing).tint == .orange)
+        #expect(StatusTagView.style(for: .retranscribing).tint == .orange)
     }
 
-    func testFailedMapsToRedTint() {
+    @Test
+    func failedMapsToRedTint() {
         let style = StatusTagView.style(for: .error("boom"))
-        XCTAssertEqual(style.label, "Failed")
-        XCTAssertEqual(style.tint, .red)
+        #expect(style.label == "Failed")
+        #expect(style.tint == .red)
     }
 
-    func testNormalizedDownloadProgressScalesAndCapsAtOne() {
-        XCTAssertEqual(ModelInstallService.normalizedDownloadProgress(from: 0.0), 0.0, accuracy: 0.0001)
-        XCTAssertEqual(ModelInstallService.normalizedDownloadProgress(from: 0.25), 0.5, accuracy: 0.0001)
-        XCTAssertEqual(ModelInstallService.normalizedDownloadProgress(from: 0.5), 1.0, accuracy: 0.0001)
-        XCTAssertEqual(ModelInstallService.normalizedDownloadProgress(from: 0.9), 1.0, accuracy: 0.0001)
+    @Test
+    func normalizedDownloadProgressScalesAndCapsAtOne() {
+        #expect(abs(ModelInstallService.normalizedDownloadProgress(from: 0.0) - 0.0) < 0.0001)
+        #expect(abs(ModelInstallService.normalizedDownloadProgress(from: 0.25) - 0.5) < 0.0001)
+        #expect(abs(ModelInstallService.normalizedDownloadProgress(from: 0.5) - 1.0) < 0.0001)
+        #expect(abs(ModelInstallService.normalizedDownloadProgress(from: 0.9) - 1.0) < 0.0001)
     }
 
-    func testMakeDownloadProgressHandlerReturnsNilWhenCallbackIsNil() {
+    @Test
+    func makeDownloadProgressHandlerReturnsNilWhenCallbackIsNil() {
         let handler = ModelInstallService.makeDownloadProgressHandler(downloadProgress: nil)
-        XCTAssertNil(handler)
+        #expect(handler == nil)
     }
 
-    func testModelGroupsListContainsExactlyThreeRequiredRows() {
-        XCTAssertEqual(ModelGroup.allCases.count, 3)
-        XCTAssertEqual(ModelGroup.allCases, [.asrParakeetV3, .vadSilero, .offlineDiarization])
+    @Test
+    func modelGroupsListContainsExactlyThreeRequiredRows() {
+        #expect(ModelGroup.allCases.count == 3)
+        #expect(ModelGroup.allCases == [.asrParakeetV3, .vadSilero, .offlineDiarization])
     }
 
-    func testModelGroupTitlesMatchSettingsRows() {
-        XCTAssertEqual(ModelGroup.asrParakeetV3.title, "ASR (Parakeet v3)")
-        XCTAssertEqual(ModelGroup.vadSilero.title, "VAD (Silero CoreML)")
-        XCTAssertEqual(ModelGroup.offlineDiarization.title, "Diarization (Global Offline)")
+    @Test
+    func modelGroupTitlesMatchSettingsRows() {
+        #expect(ModelGroup.asrParakeetV3.title == "ASR (Parakeet v3)")
+        #expect(ModelGroup.vadSilero.title == "VAD (Silero CoreML)")
+        #expect(ModelGroup.offlineDiarization.title == "Diarization (Global Offline)")
     }
 }

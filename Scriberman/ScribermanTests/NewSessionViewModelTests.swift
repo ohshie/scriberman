@@ -16,8 +16,7 @@ final class NewSessionViewModelTests: XCTestCase {
     nonisolated(unsafe) private var context: ModelContext!
     nonisolated(unsafe) private var workspace: Workspace!
 
-    @MainActor
-    override func setUpWithError() throws {
+    nonisolated override func setUpWithError() throws {
         try super.setUpWithError()
         workspaceService = MockWorkspaceService()
         recordingService = MockRecordingService()
@@ -35,18 +34,19 @@ final class NewSessionViewModelTests: XCTestCase {
         )
         context = ModelContext(modelContainer)
 
-        viewModel = NewSessionViewModel(
-            workspaceService: workspaceService,
-            recordingService: recordingService,
-            audioDeviceService: audioDeviceService,
-            appAudioService: appAudioService,
-            permissionService: permissionService,
-            userDefaults: userDefaults
-        )
+        viewModel = MainActor.assumeIsolated {
+            NewSessionViewModel(
+                workspaceService: workspaceService,
+                recordingService: recordingService,
+                audioDeviceService: audioDeviceService,
+                appAudioService: appAudioService,
+                permissionService: permissionService,
+                userDefaults: userDefaults
+            )
+        }
     }
 
-    @MainActor
-    override func tearDown() {
+    nonisolated override func tearDown() {
         viewModel = nil
         context = nil
         workspace = nil

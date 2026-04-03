@@ -12,8 +12,7 @@ final class JobsViewModelTests: XCTestCase {
     nonisolated(unsafe) private var container: ModelContainer!
     nonisolated(unsafe) private var context: ModelContext!
 
-    @MainActor
-    override func setUpWithError() throws {
+    nonisolated override func setUpWithError() throws {
         try super.setUpWithError()
         workspaceService = MockWorkspaceService()
         transcriptionService = MockTranscriptionService()
@@ -44,16 +43,17 @@ final class JobsViewModelTests: XCTestCase {
         )
         context = ModelContext(container)
 
-        viewModel = JobsViewModel(
-            workspaceService: workspaceService,
-            transcriptionService: transcriptionService,
-            retranscriptionService: retranscriptionService,
-            audioImportService: audioImportService
-        )
+        viewModel = MainActor.assumeIsolated {
+            JobsViewModel(
+                workspaceService: workspaceService,
+                transcriptionService: transcriptionService,
+                retranscriptionService: retranscriptionService,
+                audioImportService: audioImportService
+            )
+        }
     }
 
-    @MainActor
-    override func tearDown() {
+    nonisolated override func tearDown() {
         viewModel = nil
         context = nil
         container = nil
