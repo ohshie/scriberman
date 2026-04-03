@@ -1,69 +1,65 @@
+import Foundation
 import CoreAudio
 import SwiftData
-import XCTest
+import Testing
 @testable import Scriberman
 
 @MainActor
-final class NewSessionViewModelTests: XCTestCase {
-    nonisolated(unsafe) private var workspaceService: MockWorkspaceService!
-    nonisolated(unsafe) private var recordingService: MockRecordingService!
-    nonisolated(unsafe) private var audioDeviceService: MockAudioDeviceService!
-    nonisolated(unsafe) private var appAudioService: MockNewSessionAppAudioService!
-    nonisolated(unsafe) private var permissionService: MockPermissionService!
-    nonisolated(unsafe) private var userDefaultsSuiteName: String!
-    nonisolated(unsafe) private var userDefaults: UserDefaults!
-    nonisolated(unsafe) private var viewModel: NewSessionViewModel!
-    nonisolated(unsafe) private var context: ModelContext!
-    nonisolated(unsafe) private var workspace: Workspace!
+struct NewSessionViewModelTests {
+    private typealias Fixture = (
+        workspaceService: MockWorkspaceService,
+        recordingService: MockRecordingService,
+        audioDeviceService: MockAudioDeviceService,
+        appAudioService: MockNewSessionAppAudioService,
+        permissionService: MockPermissionService,
+        viewModel: NewSessionViewModel,
+        context: ModelContext,
+        cleanup: () -> Void
+    )
 
-    nonisolated override func setUpWithError() throws {
-        try super.setUpWithError()
-        workspaceService = MockWorkspaceService()
-        recordingService = MockRecordingService()
-        audioDeviceService = MockAudioDeviceService()
-        appAudioService = MockNewSessionAppAudioService()
-        permissionService = MockPermissionService()
-        userDefaultsSuiteName = "NewSessionViewModelTests-\(UUID().uuidString)"
-        userDefaults = UserDefaults(suiteName: userDefaultsSuiteName)
-        workspace = Workspace(rootURL: URL(fileURLWithPath: "/tmp/workspace"))
+    private func makeFixture() -> Fixture {
+        let workspaceService = MockWorkspaceService()
+        let recordingService = MockRecordingService()
+        let audioDeviceService = MockAudioDeviceService()
+        let appAudioService = MockNewSessionAppAudioService()
+        let permissionService = MockPermissionService()
+        let userDefaultsSuiteName = "NewSessionViewModelTests-\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: userDefaultsSuiteName) ?? .standard
+        let workspace = Workspace(rootURL: URL(fileURLWithPath: "/tmp/workspace"))
         workspaceService.requireWritableResult = .success(workspace)
 
-        let modelContainer = try ModelContainer(
+        let modelContainer = try! ModelContainer(
             for: RecordingSession.self, ImportedSession.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
-        context = ModelContext(modelContainer)
+        let context = ModelContext(modelContainer)
 
-        viewModel = MainActor.assumeIsolated {
-            NewSessionViewModel(
-                workspaceService: workspaceService,
-                recordingService: recordingService,
-                audioDeviceService: audioDeviceService,
-                appAudioService: appAudioService,
-                permissionService: permissionService,
-                userDefaults: userDefaults
-            )
-        }
+        let viewModel = NewSessionViewModel(
+            workspaceService: workspaceService,
+            recordingService: recordingService,
+            audioDeviceService: audioDeviceService,
+            appAudioService: appAudioService,
+            permissionService: permissionService,
+            userDefaults: userDefaults
+        )
+
+        return (
+            workspaceService,
+            recordingService,
+            audioDeviceService,
+            appAudioService,
+            permissionService,
+            viewModel,
+            context,
+            { userDefaults.removePersistentDomain(forName: userDefaultsSuiteName) }
+        )
     }
 
-    nonisolated override func tearDown() {
-        viewModel = nil
-        context = nil
-        workspace = nil
-        if let userDefaultsSuiteName {
-            userDefaults?.removePersistentDomain(forName: userDefaultsSuiteName)
-        }
-        userDefaultsSuiteName = nil
-        userDefaults = nil
-        permissionService = nil
-        appAudioService = nil
-        audioDeviceService = nil
-        recordingService = nil
-        workspaceService = nil
-        super.tearDown()
-    }
-
+    @Test
     func testStateMachineTransitionsIdleToRecordingToStopped() async throws {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         recordingService.isRecordingOverride = false
         recordingService.audioLevelOverride = 0
         let stoppedSession = RecordingSession(
@@ -79,17 +75,23 @@ final class NewSessionViewModelTests: XCTestCase {
 
         await viewModel.startRecording(title: "Session", context: context)
         guard case .recording = viewModel.state else {
-            return XCTFail("Expected recording state after start")
+            Issue.record("Expected recording state after start")
+            return
         }
 
         let session = await viewModel.stopRecording(context: context)
         guard case .idle = viewModel.state else {
-            return XCTFail("Expected idle state after stop")
+            Issue.record("Expected idle state after stop")
+            return
         }
-        XCTAssertEqual(session?.id, stoppedSession.id)
+        #expect(session?.id == stoppedSession.id)
     }
 
+    @Test
     func testStartRecordingIncrementsUsageForSelectedDevice() async {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         permissionService.micStatus = .granted
         let selectedDevice = AudioInputDevice(id: 7, uid: "uid-7", name: "Desk Mic")
         audioDeviceService.availableDevices = [selectedDevice]
@@ -98,10 +100,14 @@ final class NewSessionViewModelTests: XCTestCase {
 
         await viewModel.startRecording(title: "Session", context: context)
 
-        XCTAssertEqual(audioDeviceService.incrementUsageCalls, ["uid-7"])
+        #expect(audioDeviceService.incrementUsageCalls == ["uid-7"])
     }
 
+    @Test
     func testStartRecordingIncrementsUsageForSelectedApp() async {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         permissionService.micStatus = .granted
         permissionService.screenRecordingStatus = .granted
         let app = CapturedApp(bundleID: "com.apple.Music", name: "Music", pid: 123, icon: nil)
@@ -110,85 +116,122 @@ final class NewSessionViewModelTests: XCTestCase {
 
         await viewModel.startRecording(title: "Session", context: context)
 
-        XCTAssertEqual(appAudioService.incrementUsageCalls, ["com.apple.Music"])
+        #expect(appAudioService.incrementUsageCalls == ["com.apple.Music"])
     }
 
+    @Test
     func testStartRecordingPassesTitleToService() async {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         permissionService.micStatus = .granted
         let customTitle = "Meeting with Team"
         
         await viewModel.startRecording(title: customTitle, context: context)
         
-        XCTAssertEqual(recordingService.startCalls.count, 1)
-        XCTAssertEqual(recordingService.startCalls.first?.title, customTitle)
+        #expect(recordingService.startCalls.count == 1)
+        #expect(recordingService.startCalls.first?.title == customTitle)
     }
 
+    @Test
     func testResetReturnsIdleFromRecordingState() {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         viewModel.state = .recording(duration: 10, level: 0)
 
         viewModel.reset()
 
         guard case .idle = viewModel.state else {
-            return XCTFail("Expected idle state after reset")
+            Issue.record("Expected idle state after reset")
+            return
         }
     }
 
+    @Test
     func testIsIdleIsTrueWhenStateIsIdle() {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         viewModel.state = .idle
 
-        XCTAssertTrue(viewModel.isIdle)
+        #expect(viewModel.isIdle)
     }
 
+    @Test
     func testIsIdleIsFalseWhenRecording() {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         viewModel.state = .recording(duration: 1, level: 0.5)
 
-        XCTAssertFalse(viewModel.isIdle)
+        #expect(!(viewModel.isIdle))
     }
 
+    @Test
     func testCanRecordRequiresGrantedMicrophonePermission() {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         permissionService.micStatus = .notDetermined
-        XCTAssertFalse(viewModel.canRecord)
+        #expect(!(viewModel.canRecord))
 
         permissionService.micStatus = .denied
-        XCTAssertFalse(viewModel.canRecord)
+        #expect(!(viewModel.canRecord))
 
         permissionService.micStatus = .granted
-        XCTAssertTrue(viewModel.canRecord)
+        #expect(viewModel.canRecord)
     }
 
+    @Test
     func testCanRecordRequiresSelectedAppWhenAppAudioEnabled() {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         permissionService.micStatus = .granted
         permissionService.screenRecordingStatus = .granted
         viewModel.recordAppAudio = true
         viewModel.selectedApp = nil
-        XCTAssertFalse(viewModel.canRecord)
+        #expect(!(viewModel.canRecord))
 
         let app = CapturedApp(bundleID: "com.apple.Music", name: "Music", pid: 123, icon: nil)
         viewModel.selectedApp = app
-        XCTAssertTrue(viewModel.canRecord)
+        #expect(viewModel.canRecord)
     }
 
+    @Test
     func testRecordAppAudioToggleRequestsScreenPermissionWhenNotGranted() {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         permissionService.screenRecordingStatus = .notDetermined
 
         viewModel.recordAppAudio = true
 
-        XCTAssertEqual(permissionService.requestScreenRecordingCalls, 1)
-        XCTAssertFalse(viewModel.recordAppAudio)
+        #expect(permissionService.requestScreenRecordingCalls == 1)
+        #expect(!(viewModel.recordAppAudio))
     }
 
+    @Test
     func testSelectAppSetsSelectedAppAndEnablesAppAudioWhenPermissionGranted() {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         permissionService.screenRecordingStatus = .granted
         let app = CapturedApp(bundleID: "com.apple.Music", name: "Music", pid: 123, icon: nil)
         appAudioService.runningApps = [app]
 
         viewModel.selectApp(app)
 
-        XCTAssertEqual(viewModel.selectedApp?.bundleID, "com.apple.Music")
-        XCTAssertTrue(viewModel.recordAppAudio)
+        #expect(viewModel.selectedApp?.bundleID == "com.apple.Music")
+        #expect(viewModel.recordAppAudio)
     }
 
+    @Test
     func testSelectAppNilDisablesAppAudioAndClearsSelection() {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         permissionService.screenRecordingStatus = .granted
         let app = CapturedApp(bundleID: "com.apple.Music", name: "Music", pid: 123, icon: nil)
         appAudioService.runningApps = [app]
@@ -196,140 +239,204 @@ final class NewSessionViewModelTests: XCTestCase {
 
         viewModel.selectApp(nil)
 
-        XCTAssertFalse(viewModel.recordAppAudio)
-        XCTAssertNil(viewModel.selectedApp)
+        #expect(!(viewModel.recordAppAudio))
+        #expect(viewModel.selectedApp == nil)
     }
 
+    @Test
     func testSelectAppRequestsPermissionWhenNotGranted() {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         permissionService.screenRecordingStatus = .denied
         let app = CapturedApp(bundleID: "com.apple.Music", name: "Music", pid: 123, icon: nil)
 
         viewModel.selectApp(app)
 
-        XCTAssertEqual(permissionService.requestScreenRecordingCalls, 1)
-        XCTAssertFalse(viewModel.recordAppAudio)
-        XCTAssertNil(viewModel.selectedApp)
+        #expect(permissionService.requestScreenRecordingCalls == 1)
+        #expect(!(viewModel.recordAppAudio))
+        #expect(viewModel.selectedApp == nil)
     }
 
+    @Test
     func testMicrophonePermissionPromptStateTracksMicStatus() {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         permissionService.micStatus = .notDetermined
-        XCTAssertTrue(viewModel.shouldShowMicrophonePermissionPrompt)
+        #expect(viewModel.shouldShowMicrophonePermissionPrompt)
 
         permissionService.micStatus = .denied
-        XCTAssertTrue(viewModel.shouldShowMicrophonePermissionPrompt)
+        #expect(viewModel.shouldShowMicrophonePermissionPrompt)
 
         permissionService.micStatus = .granted
-        XCTAssertFalse(viewModel.shouldShowMicrophonePermissionPrompt)
+        #expect(!(viewModel.shouldShowMicrophonePermissionPrompt))
     }
 
+    @Test
     func testPermissionStatusWarningTextReflectsMicAndScreenVerificationState() {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         permissionService.micStatus = .notDetermined
-        XCTAssertEqual(
-            viewModel.permissionStatusWarningText,
-            "Microphone permission is not verified. Recording is unavailable until access is granted."
+        #expect(
+            viewModel.permissionStatusWarningText
+                == "Microphone permission is not verified. Recording is unavailable until access is granted."
         )
 
         permissionService.micStatus = .granted
         permissionService.screenRecordingStatus = .denied
-        XCTAssertEqual(
-            viewModel.permissionStatusWarningText,
-            "Screen Recording permission verification failed. App audio capture may be unavailable until access is re-enabled in System Settings."
+        #expect(
+            viewModel.permissionStatusWarningText
+                == "Screen Recording permission verification failed. App audio capture may be unavailable until access is re-enabled in System Settings."
         )
 
         permissionService.screenRecordingStatus = .granted
-        XCTAssertNil(viewModel.permissionStatusWarningText)
+        #expect(viewModel.permissionStatusWarningText == nil)
     }
 
+    @Test
     func testRequestMicrophonePermissionInvokesPermissionService() async {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         permissionService.requestMicResult = true
         permissionService.micStatus = .notDetermined
 
         await viewModel.requestMicrophonePermission()
 
-        XCTAssertEqual(permissionService.requestMicCalls, 1)
-        XCTAssertTrue(viewModel.microphonePermissionGranted)
+        #expect(permissionService.requestMicCalls == 1)
+        #expect(viewModel.microphonePermissionGranted)
     }
 
+    @Test
     func testRequestScreenRecordingPermissionInvokesPermissionService() {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         viewModel.requestScreenRecordingPermission()
-        XCTAssertEqual(permissionService.requestScreenRecordingCalls, 1)
+        #expect(permissionService.requestScreenRecordingCalls == 1)
     }
 
+    @Test
     func testRecheckPermissionsInvokesCheckAndVerifyMethods() async {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         await viewModel.recheckPermissions()
-        XCTAssertEqual(permissionService.checkAllCalls, 1)
-        XCTAssertEqual(permissionService.verifyMicCalls, 1)
-        XCTAssertEqual(permissionService.verifyScreenRecordingCalls, 1)
+        #expect(permissionService.checkAllCalls == 1)
+        #expect(permissionService.verifyMicCalls == 1)
+        #expect(permissionService.verifyScreenRecordingCalls == 1)
     }
 
+    @Test
     func testRefreshAudioDevicesOnAppearCallsAudioDeviceServiceRefresh() {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         viewModel.refreshAudioDevicesOnAppear()
-        XCTAssertEqual(audioDeviceService.refreshDevicesCalls, 1)
+        #expect(audioDeviceService.refreshDevicesCalls == 1)
     }
 
+    @Test
     func testRefreshAudioDevicesOnPanelExpandedCallsAudioDeviceServiceRefresh() {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         viewModel.refreshAudioDevicesOnPanelExpanded()
-        XCTAssertEqual(audioDeviceService.refreshDevicesCalls, 1)
+        #expect(audioDeviceService.refreshDevicesCalls == 1)
     }
 
+    @Test
     func testAppAudioToggleRemainsEnabledWhenScreenPermissionNotGranted() {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         permissionService.screenRecordingStatus = .denied
-        XCTAssertTrue(viewModel.appAudioToggleEnabled)
+        #expect(viewModel.appAudioToggleEnabled)
     }
 
+    @Test
     func testAirPodsDisconnectScenarioUpdatesSelectedDeviceStateFromService() {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         let airPods = AudioInputDevice(id: 2, uid: "uid-airpods", name: "AirPods")
         let builtIn = AudioInputDevice(id: 1, uid: "uid-built-in", name: "Built-in Mic")
         audioDeviceService.availableDevices = [airPods, builtIn]
         audioDeviceService.selectedDevice = airPods
-        XCTAssertEqual(viewModel.selectedDevice?.uid, "uid-airpods")
+        #expect(viewModel.selectedDevice?.uid == "uid-airpods")
 
         // Simulate disconnect fallback emitted by AudioDeviceService.
         audioDeviceService.availableDevices = [builtIn]
         audioDeviceService.selectedDevice = builtIn
-        XCTAssertEqual(viewModel.selectedDevice?.uid, "uid-built-in")
+        #expect(viewModel.selectedDevice?.uid == "uid-built-in")
 
         // Simulate reconnect recovery emitted by AudioDeviceService.
         audioDeviceService.availableDevices = [airPods, builtIn]
         audioDeviceService.selectedDevice = airPods
-        XCTAssertEqual(viewModel.selectedDevice?.uid, "uid-airpods")
+        #expect(viewModel.selectedDevice?.uid == "uid-airpods")
     }
 
+    @Test
     func testNewSessionPanelShowsGrantMicrophoneAccessPrompt() throws {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         let source = try newSessionPanelSource()
-        XCTAssertTrue(source.contains("if viewModel.shouldShowMicrophonePermissionPrompt"))
-        XCTAssertTrue(source.contains("Grant Microphone Access"))
+        #expect(source.contains("if viewModel.shouldShowMicrophonePermissionPrompt"))
+        #expect(source.contains("Grant Microphone Access"))
     }
 
+    @Test
     func testNewSessionPanelPromptRequestsMicPermissionViaViewModel() throws {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         let source = try newSessionPanelSource()
-        XCTAssertTrue(source.contains("await viewModel.requestMicrophonePermission()"))
+        #expect(source.contains("await viewModel.requestMicrophonePermission()"))
     }
 
+    @Test
     func testNewSessionPanelRefreshesAudioDevicesOnAppear() throws {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         let source = try newSessionPanelSource()
-        XCTAssertTrue(source.contains("viewModel.refreshAudioDevicesOnAppear()"))
+        #expect(source.contains("viewModel.refreshAudioDevicesOnAppear()"))
     }
 
+    @Test
     func testNewSessionPanelShowsPermissionStatusWarningBanner() throws {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         let source = try newSessionPanelSource()
-        XCTAssertTrue(source.contains("if let permissionStatusWarningText = viewModel.permissionStatusWarningText"))
-        XCTAssertTrue(source.contains("exclamationmark.triangle.fill"))
-        XCTAssertTrue(source.contains("Re-check Permissions"))
-        XCTAssertTrue(source.contains("Request Screen Access"))
-        XCTAssertTrue(source.contains("Open Privacy Settings"))
+        #expect(source.contains("if let permissionStatusWarningText = viewModel.permissionStatusWarningText"))
+        #expect(source.contains("exclamationmark.triangle.fill"))
+        #expect(source.contains("Re-check Permissions"))
+        #expect(source.contains("Request Screen Access"))
+        #expect(source.contains("Open Privacy Settings"))
     }
 
+    @Test
     func testRefreshAudioDevicesOnAppearPreparesLiveTranscriptionWithWorkspace() throws {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         let source = try newSessionViewModelSource()
-        XCTAssertTrue(source.contains("if let workspace = await workspaceService.currentWorkspace()"))
-        XCTAssertTrue(source.contains("await liveTranscriptionService.prepare(workspace: workspace)"))
+        #expect(source.contains("if let workspace = await workspaceService.currentWorkspace()"))
+        #expect(source.contains("await liveTranscriptionService.prepare(workspace: workspace)"))
     }
 
+    @Test
     func testInitializationFailureMessageDirectsUserToSettingsModels() throws {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+
         let source = try newSessionViewModelSource()
-        XCTAssertTrue(source.contains("catch LiveTranscriptionError.initializationFailed"))
-        XCTAssertTrue(source.contains("Open Settings → Models to install ASR and Speaker Diarization models."))
+        #expect(source.contains("catch LiveTranscriptionError.initializationFailed"))
+        #expect(source.contains("Open Settings → Models to install ASR and Speaker Diarization models."))
     }
 
     private func newSessionPanelSource() throws -> String {

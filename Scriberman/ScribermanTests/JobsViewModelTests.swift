@@ -1,19 +1,19 @@
+import Foundation
 import SwiftData
-import XCTest
+import Testing
 @testable import Scriberman
 
 @MainActor
-final class JobsViewModelTests: XCTestCase {
-    nonisolated(unsafe) private var workspaceService: MockWorkspaceService!
-    nonisolated(unsafe) private var transcriptionService: MockTranscriptionService!
-    nonisolated(unsafe) private var retranscriptionService: RetranscriptionService!
-    nonisolated(unsafe) private var audioImportService: AudioImportService!
-    nonisolated(unsafe) private var viewModel: JobsViewModel!
-    nonisolated(unsafe) private var container: ModelContainer!
-    nonisolated(unsafe) private var context: ModelContext!
+final class JobsViewModelTests {
+    private let workspaceService: MockWorkspaceService
+    private let transcriptionService: MockTranscriptionService
+    private let retranscriptionService: RetranscriptionService
+    private let audioImportService: AudioImportService
+    private let viewModel: JobsViewModel
+    private let container: ModelContainer
+    private let context: ModelContext
 
-    nonisolated override func setUpWithError() throws {
-        try super.setUpWithError()
+    init() throws {
         workspaceService = MockWorkspaceService()
         transcriptionService = MockTranscriptionService()
         retranscriptionService = RetranscriptionService(
@@ -43,40 +43,29 @@ final class JobsViewModelTests: XCTestCase {
         )
         context = ModelContext(container)
 
-        viewModel = MainActor.assumeIsolated {
-            JobsViewModel(
-                workspaceService: workspaceService,
-                transcriptionService: transcriptionService,
-                retranscriptionService: retranscriptionService,
-                audioImportService: audioImportService
-            )
-        }
+        viewModel = JobsViewModel(
+            workspaceService: workspaceService,
+            transcriptionService: transcriptionService,
+            retranscriptionService: retranscriptionService,
+            audioImportService: audioImportService
+        )
     }
 
-    nonisolated override func tearDown() {
-        viewModel = nil
-        context = nil
-        container = nil
-        transcriptionService = nil
-        workspaceService = nil
-        retranscriptionService = nil
-        audioImportService = nil
-        super.tearDown()
-    }
-
+    @Test
     func testRetryResetsErrorStatusToRecorded() throws {
-        let session = makeSession(status: .error("boom"))
+        let session = makeSession(status: RecordingStatus.error("boom"))
         context.insert(session)
         try context.save()
 
         viewModel.retry(session: session, context: context)
 
-        XCTAssertEqual(session.status, .recorded)
-        XCTAssertNil(session.errorMessage)
+        #expect(session.status == .recorded)
+        #expect(session.errorMessage == nil)
     }
 
+    @Test
     func testTranscribeSkipsNonRecordedSessions() async throws {
-        let session = makeSession(status: .done)
+        let session = makeSession(status: RecordingStatus.done)
         context.insert(session)
         try context.save()
 
@@ -85,29 +74,30 @@ final class JobsViewModelTests: XCTestCase {
         // Give asynchronous work chance to start if it was incorrectly queued.
         try await Task.sleep(for: .milliseconds(100))
 
-        XCTAssertEqual(session.status, .done)
-        XCTAssertNil(session.errorMessage)
+        #expect(session.status == .done)
+        #expect(session.errorMessage == nil)
     }
 
+    @Test
     func testGroupedSectionsOrdersExpectedBucketsAndOmitsEmpty() {
         let calendar = Calendar(identifier: .gregorian)
         let referenceDate = makeDate(year: 2026, month: 3, day: 28, hour: 12)
 
         let todaySession = makeSession(
             createdAt: makeDate(year: 2026, month: 3, day: 28, hour: 9),
-            status: .done
+            status: RecordingStatus.done
         )
         let yesterdaySession = makeSession(
             createdAt: makeDate(year: 2026, month: 3, day: 27, hour: 15),
-            status: .done
+            status: RecordingStatus.done
         )
         let thisWeekSession = makeSession(
             createdAt: makeDate(year: 2026, month: 3, day: 24, hour: 8),
-            status: .done
+            status: RecordingStatus.done
         )
         let earlierSession = makeSession(
             createdAt: makeDate(year: 2026, month: 3, day: 17, hour: 8),
-            status: .done
+            status: RecordingStatus.done
         )
 
         let items: [JobsViewModel.SessionListItem] = [
@@ -119,19 +109,28 @@ final class JobsViewModelTests: XCTestCase {
 
         let sections = viewModel.groupedSections(for: items, referenceDate: referenceDate, calendar: calendar)
 
-        XCTAssertEqual(sections.map(\.group), [.today, .yesterday, .thisWeek, .earlier])
-        XCTAssertEqual(sections[0].items.count, 1)
-        XCTAssertEqual(sections[1].items.count, 1)
-        XCTAssertEqual(sections[2].items.count, 1)
-        XCTAssertEqual(sections[3].items.count, 1)
+        #expect(
+            sections.map { $0.group }
+                == [
+                    JobsViewModel.SessionDateGroup.today,
+                    JobsViewModel.SessionDateGroup.yesterday,
+                    JobsViewModel.SessionDateGroup.thisWeek,
+                    JobsViewModel.SessionDateGroup.earlier
+                ]
+        )
+        #expect(sections[0].items.count == 1)
+        #expect(sections[1].items.count == 1)
+        #expect(sections[2].items.count == 1)
+        #expect(sections[3].items.count == 1)
     }
 
+    @Test
     func testGroupedSectionsExcludesPendingItems() {
         let calendar = Calendar(identifier: .gregorian)
         let referenceDate = makeDate(year: 2026, month: 3, day: 28, hour: 12)
         let todaySession = makeSession(
             createdAt: makeDate(year: 2026, month: 3, day: 28, hour: 9),
-            status: .done
+            status: RecordingStatus.done
         )
         let pending = PendingSession(
             id: UUID(uuidString: "11111111-1111-1111-1111-111111111111") ?? UUID(),
@@ -146,51 +145,51 @@ final class JobsViewModelTests: XCTestCase {
 
         let sections = viewModel.groupedSections(for: items, referenceDate: referenceDate, calendar: calendar)
 
-        XCTAssertEqual(sections.map(\.group), [.today])
-        XCTAssertEqual(sections.first?.items.count, 1)
+        #expect(sections.map { $0.group } == [JobsViewModel.SessionDateGroup.today])
+        #expect(sections.first?.items.count == 1)
         guard let firstItem = sections.first?.items.first else {
-            return XCTFail("Expected at least one grouped item")
+            Issue.record("Expected at least one grouped item")
+            return
         }
         if case .pending = firstItem {
-            XCTFail("Pending item should not be included in grouped sections")
+            Issue.record("Pending item should not be included in grouped sections")
         }
     }
 
+    @Test
     func testRelativeTimestampFormattingForNowMinutesAndHours() {
         let calendar = Calendar(identifier: .gregorian)
         let referenceDate = makeDate(year: 2026, month: 3, day: 28, hour: 12)
 
-        XCTAssertEqual(
+        #expect(
             JobsViewModel.relativeTimestampText(
                 for: referenceDate.addingTimeInterval(-30),
                 referenceDate: referenceDate,
                 calendar: calendar
-            ),
-            "Now"
+            ) == "Now"
         )
 
-        XCTAssertEqual(
+        #expect(
             JobsViewModel.relativeTimestampText(
                 for: referenceDate.addingTimeInterval(-(2 * 60)),
                 referenceDate: referenceDate,
                 calendar: calendar
-            ),
-            "2m ago"
+            ) == "2m ago"
         )
 
-        XCTAssertEqual(
+        #expect(
             JobsViewModel.relativeTimestampText(
                 for: referenceDate.addingTimeInterval(-(3 * 3600)),
                 referenceDate: referenceDate,
                 calendar: calendar
-            ),
-            "3h ago"
+            ) == "3h ago"
         )
     }
 
+    @Test
     func testShouldDiscardPendingSessionOnSelectionChangeIdleOnly() {
         let pending = PendingSession(title: "Pending")
-        let recording = makeSession(status: .done)
+        let recording = makeSession(status: RecordingStatus.done)
         let nonPendingSelection = JobsViewModel.SessionListItem.recording(recording)
 
         let shouldDiscardIdle = viewModel.shouldDiscardPendingSessionOnSelectionChange(
@@ -209,11 +208,12 @@ final class JobsViewModelTests: XCTestCase {
             isNewSessionIdle: true
         )
 
-        XCTAssertTrue(shouldDiscardIdle)
-        XCTAssertFalse(shouldDiscardRecording)
-        XCTAssertFalse(shouldDiscardWhenPendingSelected)
+        #expect(shouldDiscardIdle)
+        #expect(!(shouldDiscardRecording))
+        #expect(!(shouldDiscardWhenPendingSelected))
     }
 
+    @Test
     func testSessionItemsReturnsEmptyForEmptyInputs() {
         let items = viewModel.sessionItems(
             recordingSessions: [],
@@ -221,13 +221,14 @@ final class JobsViewModelTests: XCTestCase {
             preserving: nil
         )
 
-        XCTAssertTrue(items.isEmpty)
+        #expect(items.isEmpty)
     }
 
+    @Test
     func testSessionItemsMergesRecordingAndImportedSessionsSortedDescending() {
-        let oldestRecording = makeSession(createdAt: makeDate(year: 2026, month: 3, day: 20, hour: 8), status: .done)
+        let oldestRecording = makeSession(createdAt: makeDate(year: 2026, month: 3, day: 20, hour: 8), status: RecordingStatus.done)
         let newestImported = makeImportedSession(createdAt: makeDate(year: 2026, month: 3, day: 22, hour: 9))
-        let middleRecording = makeSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 10), status: .done)
+        let middleRecording = makeSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 10), status: RecordingStatus.done)
 
         let items = viewModel.sessionItems(
             recordingSessions: [oldestRecording, middleRecording],
@@ -235,17 +236,18 @@ final class JobsViewModelTests: XCTestCase {
             preserving: nil
         )
 
-        XCTAssertEqual(items.count, 3)
-        XCTAssertEqual(items.map(\.id), [
+        #expect(items.count == 3)
+        #expect(items.map { $0.id } == [
             JobsViewModel.SessionListItem.imported(newestImported).id,
             JobsViewModel.SessionListItem.recording(middleRecording).id,
             JobsViewModel.SessionListItem.recording(oldestRecording).id
         ])
     }
 
+    @Test
     func testSessionItemsPreservesSelectedRecordingWhenMissingFromRefreshedQuery() {
-        let selectedRecording = makeSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 12), status: .done)
-        let refreshedRecording = makeSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 10), status: .done)
+        let selectedRecording = makeSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 12), status: RecordingStatus.done)
+        let refreshedRecording = makeSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 10), status: RecordingStatus.done)
 
         let items = viewModel.sessionItems(
             recordingSessions: [refreshedRecording],
@@ -253,13 +255,14 @@ final class JobsViewModelTests: XCTestCase {
             preserving: .recording(selectedRecording)
         )
 
-        XCTAssertEqual(items.count, 2)
-        XCTAssertTrue(items.contains(where: { $0.id == JobsViewModel.SessionListItem.recording(selectedRecording).id }))
+        #expect(items.count == 2)
+        #expect(items.contains(where: { $0.id == JobsViewModel.SessionListItem.recording(selectedRecording).id }))
     }
 
+    @Test
     func testSessionItemsDoesNotPreserveNonRecordingSelections() {
         let selectedImported = makeImportedSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 12))
-        let refreshedRecording = makeSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 10), status: .done)
+        let refreshedRecording = makeSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 10), status: RecordingStatus.done)
 
         let items = viewModel.sessionItems(
             recordingSessions: [refreshedRecording],
@@ -267,10 +270,11 @@ final class JobsViewModelTests: XCTestCase {
             preserving: .imported(selectedImported)
         )
 
-        XCTAssertEqual(items.count, 1)
-        XCTAssertEqual(items.first?.id, JobsViewModel.SessionListItem.recording(refreshedRecording).id)
+        #expect(items.count == 1)
+        #expect(items.first?.id == JobsViewModel.SessionListItem.recording(refreshedRecording).id)
     }
 
+    @Test
     func testExportTranscriptWritesMarkdownWhenDestinationSelected() async throws {
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
@@ -286,16 +290,17 @@ final class JobsViewModelTests: XCTestCase {
             savePanelPresenter: { _ in outputURL }
         )
 
-        let session = makeSession(status: .done)
+        let session = makeSession(status: RecordingStatus.done)
         session.transcript = makeTranscript()
 
         try await exportViewModel.exportTranscript(for: session)
 
         let content = try String(contentsOf: outputURL, encoding: .utf8)
-        XCTAssertTrue(content.hasPrefix("# Session"))
-        XCTAssertTrue(content.contains("**Speaker 1** [00:00 – 00:02]"))
+        #expect(content.hasPrefix("# Session"))
+        #expect(content.contains("**Speaker 1** [00:00 – 00:02]"))
     }
 
+    @Test
     func testExportTranscriptReturnsWithoutWritingWhenSavePanelCancelled() async throws {
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
@@ -311,14 +316,15 @@ final class JobsViewModelTests: XCTestCase {
             savePanelPresenter: { _ in nil }
         )
 
-        let session = makeSession(status: .done)
+        let session = makeSession(status: RecordingStatus.done)
         session.transcript = makeTranscript()
 
         try await exportViewModel.exportTranscript(for: session)
 
-        XCTAssertFalse(FileManager.default.fileExists(atPath: outputURL.path))
+        #expect(!(FileManager.default.fileExists(atPath: outputURL.path)))
     }
 
+    @Test
     func testExportTranscriptThrowsWhenTranscriptUnavailable() async {
         let exportViewModel = JobsViewModel(
             workspaceService: workspaceService,
@@ -329,15 +335,15 @@ final class JobsViewModelTests: XCTestCase {
             savePanelPresenter: { _ in nil }
         )
 
-        let session = makeSession(status: .done)
+        let session = makeSession(status: RecordingStatus.done)
 
         do {
             try await exportViewModel.exportTranscript(for: session)
-            XCTFail("Expected transcriptUnavailable error")
+            Issue.record("Expected transcriptUnavailable error")
         } catch let error as TranscriptExportError {
-            XCTAssertEqual(error, .transcriptUnavailable)
+            #expect(error == .transcriptUnavailable)
         } catch {
-            XCTFail("Unexpected error: \(error)")
+            Issue.record("Unexpected error: \(error)")
         }
     }
 

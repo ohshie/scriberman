@@ -1,10 +1,9 @@
 import Foundation
 import OpenAI
-import XCTest
+import Testing
 @testable import Scriberman
 
-@MainActor
-final class TranscriptDetailViewModelTests: XCTestCase {
+struct TranscriptDetailViewModelTests {
     private enum TestError: LocalizedError {
         case expectedFailure
 
@@ -13,24 +12,23 @@ final class TranscriptDetailViewModelTests: XCTestCase {
         }
     }
 
-    nonisolated(unsafe) private var defaults: UserDefaults!
-    nonisolated(unsafe) private var suiteName: String!
-
-    override func setUp() {
-        super.setUp()
-        suiteName = "TranscriptDetailViewModelTests.\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suiteName)
+    private func makeDefaults() -> (defaults: UserDefaults, suiteName: String) {
+        let suiteName = "TranscriptDetailViewModelTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName) ?? .standard
         defaults.removePersistentDomain(forName: suiteName)
+        return (defaults, suiteName)
     }
 
-    override func tearDown() {
-        defaults.removePersistentDomain(forName: suiteName)
-        defaults = nil
-        suiteName = nil
-        super.tearDown()
+    private func cleanupDefaults(named suiteName: String) {
+        UserDefaults.standard.removePersistentDomain(forName: suiteName)
     }
 
+    @Test
+    @MainActor
     func testLoadPromptsSortsAlphabeticallyAndRestoresLastUsedSelection() {
+        let (defaults, suiteName) = makeDefaults()
+        defer { cleanupDefaults(named: suiteName) }
+
         let promptStore = AIPromptStore(defaults: defaults)
         let alpha = promptStore.addPrompt(name: "alpha", content: "A")
         _ = promptStore.addPrompt(name: "zeta", content: "Z")
@@ -39,22 +37,28 @@ final class TranscriptDetailViewModelTests: XCTestCase {
 
         let viewModel = TranscriptDetailViewModel(
             session: makeRecordingSession(),
-            aiProviderService: makeService(),
+            aiProviderService: makeService(defaults: defaults),
             promptStore: promptStore
         )
 
         viewModel.loadPrompts()
 
-        XCTAssertEqual(viewModel.prompts.map(\.name), ["alpha", "Beta", "zeta"])
-        XCTAssertEqual(viewModel.selectedPromptID, alpha.id)
+        #expect(viewModel.prompts.map { $0.name } == ["alpha", "Beta", "zeta"])
+        #expect(viewModel.selectedPromptID == alpha.id)
     }
 
+    @Test
+    @MainActor
     func testRunTransformationSuccessTogglesRunningAndAppendsResult() async {
+        let (defaults, suiteName) = makeDefaults()
+        defer { cleanupDefaults(named: suiteName) }
+
         let promptStore = AIPromptStore(defaults: defaults)
         let prompt = promptStore.addPrompt(name: "Summary", content: "Summarize")
         let session = makeRecordingSession(transcriptText: "Transcript")
 
         let service = makeService(
+            defaults: defaults,
             responseCreator: { _, _ in
                 try await Task.sleep(nanoseconds: 120_000_000)
                 return try Self.makeResponse(text: "Result text")
@@ -75,25 +79,31 @@ final class TranscriptDetailViewModelTests: XCTestCase {
         }
 
         try? await Task.sleep(nanoseconds: 20_000_000)
-        XCTAssertTrue(viewModel.isRunningTransformation)
+        #expect(viewModel.isRunningTransformation)
 
         await task.value
 
-        XCTAssertFalse(viewModel.isRunningTransformation)
-        XCTAssertNil(viewModel.transformationErrorMessage)
-        XCTAssertEqual(session.aiTransformations.count, 1)
-        XCTAssertEqual(session.aiTransformations.first?.resultText, "Result text")
-        XCTAssertEqual(session.aiTransformations.first?.promptName, "Summary")
-        XCTAssertEqual(viewModel.selectedTransformationID, session.aiTransformations.first?.id)
-        XCTAssertEqual(promptStore.loadLastUsedPromptID(), prompt.id)
+        #expect(viewModel.isRunningTransformation == false)
+        #expect(viewModel.transformationErrorMessage == nil)
+        #expect(session.aiTransformations.count == 1)
+        #expect(session.aiTransformations.first?.resultText == "Result text")
+        #expect(session.aiTransformations.first?.promptName == "Summary")
+        #expect(viewModel.selectedTransformationID == session.aiTransformations.first?.id)
+        #expect(promptStore.loadLastUsedPromptID() == prompt.id)
     }
 
+    @Test
+    @MainActor
     func testRunTransformationErrorSurfacesMessageAndResetsRunning() async {
+        let (defaults, suiteName) = makeDefaults()
+        defer { cleanupDefaults(named: suiteName) }
+
         let promptStore = AIPromptStore(defaults: defaults)
         let prompt = promptStore.addPrompt(name: "Summary", content: "Summarize")
         let session = makeRecordingSession(transcriptText: "Transcript")
 
         let service = makeService(
+            defaults: defaults,
             responseCreator: { _, _ in
                 throw TestError.expectedFailure
             }
@@ -110,12 +120,17 @@ final class TranscriptDetailViewModelTests: XCTestCase {
 
         await viewModel.runTransformation()
 
-        XCTAssertFalse(viewModel.isRunningTransformation)
-        XCTAssertNotNil(viewModel.transformationErrorMessage)
-        XCTAssertEqual(session.aiTransformations.count, 0)
+        #expect(viewModel.isRunningTransformation == false)
+        #expect(viewModel.transformationErrorMessage != nil)
+        #expect(session.aiTransformations.count == 0)
     }
 
+    @Test
+    @MainActor
     func testDerivedSessionProperties() {
+        let (defaults, suiteName) = makeDefaults()
+        defer { cleanupDefaults(named: suiteName) }
+
         let session = makeRecordingSession(
             transcriptText: "Original",
             retranscriptText: "Retranscript",
@@ -138,19 +153,24 @@ final class TranscriptDetailViewModelTests: XCTestCase {
         )
         session.aiTransformations = [newTransformation, oldTransformation]
 
-        let viewModel = TranscriptDetailViewModel(session: session, aiProviderService: makeService())
+        let viewModel = TranscriptDetailViewModel(
+            session: session,
+            aiProviderService: makeService(defaults: defaults)
+        )
 
-        XCTAssertEqual(viewModel.displayedTranscript?.fullText, "Retranscript")
-        XCTAssertEqual(viewModel.finalTranscriptText, "Retranscript")
-        XCTAssertEqual(viewModel.originalTranscriptText, "Original")
-        XCTAssertEqual(viewModel.applicationName, "Zoom")
-        XCTAssertEqual(viewModel.availableTransformations.map(\.promptName), ["Old", "New"])
-        XCTAssertFalse(viewModel.canReprocess)
-        XCTAssertTrue(viewModel.isReprocessing)
-        XCTAssertTrue(viewModel.isReprocessed)
+        #expect(viewModel.displayedTranscript?.fullText == "Retranscript")
+        #expect(viewModel.finalTranscriptText == "Retranscript")
+        #expect(viewModel.originalTranscriptText == "Original")
+        #expect(viewModel.applicationName == "Zoom")
+        #expect(viewModel.availableTransformations.map { $0.promptName } == ["Old", "New"])
+        #expect(viewModel.canReprocess == false)
+        #expect(viewModel.isReprocessing)
+        #expect(viewModel.isReprocessed)
     }
 
+    @MainActor
     private func makeService(
+        defaults: UserDefaults,
         responseCreator: ((OpenAI, CreateModelResponseQuery) async throws -> ResponseObject)? = nil
     ) -> AIProviderService {
         let keychainStore = MockKeychainStore()

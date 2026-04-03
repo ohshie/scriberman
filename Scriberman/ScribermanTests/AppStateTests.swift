@@ -1,29 +1,26 @@
+import Foundation
 import SwiftData
-import XCTest
+import Testing
 @testable import Scriberman
 
 @MainActor
-final class AppStateTests: XCTestCase {
-    nonisolated(unsafe) private var modelContainer: ModelContainer!
+final class AppStateTests {
+    private let modelContainer: ModelContainer
 
-    override func setUpWithError() throws {
-        try super.setUpWithError()
+    init() throws {
         modelContainer = try ModelContainer(
             for: RecordingSession.self, ImportedSession.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
     }
 
-    override func tearDown() {
-        modelContainer = nil
-        super.tearDown()
-    }
-
+    @Test
     func testIsBootstrappingIsTrueInitially() {
         let appState = AppState(services: makeServiceContainer(permissionService: MockPermissionService()))
-        XCTAssertTrue(appState.isBootstrapping)
+        #expect(appState.isBootstrapping)
     }
 
+    @Test
     func testIsBootstrappingIsFalseAfterBootstrapWorkspaceCompletes() async {
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString, isDirectory: true))
         let appState = AppState(
@@ -33,9 +30,10 @@ final class AppStateTests: XCTestCase {
 
         await appState.bootstrapWorkspace()
 
-        XCTAssertFalse(appState.isBootstrapping)
+        #expect(!(appState.isBootstrapping))
     }
 
+    @Test
     func testRequiredOnboardingStepReturnsNilWhenEverythingIsReady() async {
         let permissionService = MockPermissionService()
         permissionService.micStatus = .granted
@@ -50,41 +48,45 @@ final class AppStateTests: XCTestCase {
         )
 
         await appState.bootstrapWorkspace()
-        appState.settingsViewModel.bundlePhase = .allReady
+        appState.settingsViewModel.bundlePhase = BundleInstallPhase.allReady
 
-        XCTAssertNil(appState.requiredOnboardingStep)
+        #expect(appState.requiredOnboardingStep == nil)
     }
 
+    @Test
     func testRequiredOnboardingStepPrioritizesScreenRecording() {
         let permissionService = MockPermissionService()
         permissionService.micStatus = .granted
         permissionService.screenRecordingStatus = .denied
         let appState = AppState(services: makeServiceContainer(permissionService: permissionService))
-        appState.settingsViewModel.bundlePhase = .allReady
+        appState.settingsViewModel.bundlePhase = BundleInstallPhase.allReady
 
-        XCTAssertEqual(appState.requiredOnboardingStep, .screenRecording)
+        #expect(appState.requiredOnboardingStep == .screenRecording)
     }
 
+    @Test
     func testRequiredOnboardingStepReturnsMicrophoneWhenScreenRecordingGranted() {
         let permissionService = MockPermissionService()
         permissionService.micStatus = .denied
         permissionService.screenRecordingStatus = .granted
         let appState = AppState(services: makeServiceContainer(permissionService: permissionService))
-        appState.settingsViewModel.bundlePhase = .allReady
+        appState.settingsViewModel.bundlePhase = BundleInstallPhase.allReady
 
-        XCTAssertEqual(appState.requiredOnboardingStep, .microphone)
+        #expect(appState.requiredOnboardingStep == .microphone)
     }
 
+    @Test
     func testRequiredOnboardingStepReturnsWorkspaceWhenPermissionsGranted() {
         let permissionService = MockPermissionService()
         permissionService.micStatus = .granted
         permissionService.screenRecordingStatus = .granted
         let appState = AppState(services: makeServiceContainer(permissionService: permissionService))
-        appState.settingsViewModel.bundlePhase = .allReady
+        appState.settingsViewModel.bundlePhase = BundleInstallPhase.allReady
 
-        XCTAssertEqual(appState.requiredOnboardingStep, .workspace)
+        #expect(appState.requiredOnboardingStep == .workspace)
     }
 
+    @Test
     func testRequiredOnboardingStepReturnsModelsWhenWorkspacePresentAndBundleNotReady() async {
         let permissionService = MockPermissionService()
         permissionService.micStatus = .granted
@@ -99,11 +101,12 @@ final class AppStateTests: XCTestCase {
         )
 
         await appState.bootstrapWorkspace()
-        appState.settingsViewModel.bundlePhase = .idle
+        appState.settingsViewModel.bundlePhase = BundleInstallPhase.idle
 
-        XCTAssertEqual(appState.requiredOnboardingStep, .models)
+        #expect(appState.requiredOnboardingStep == OnboardingStep.models)
     }
 
+    @Test
     func testBootstrapWorkspacePerformsStrictPermissionVerificationBeforeAppShell() async {
         let permissionService = MockPermissionService()
         permissionService.verifyMicResult = true
@@ -118,12 +121,13 @@ final class AppStateTests: XCTestCase {
 
         await appState.bootstrapWorkspace()
 
-        XCTAssertEqual(permissionService.checkAllCalls, 1)
-        XCTAssertEqual(permissionService.verifyMicCalls, 1)
-        XCTAssertEqual(permissionService.verifyScreenRecordingCalls, 1)
-        XCTAssertEqual(appState.workspace, workspace)
+        #expect(permissionService.checkAllCalls == 1)
+        #expect(permissionService.verifyMicCalls == 1)
+        #expect(permissionService.verifyScreenRecordingCalls == 1)
+        #expect(appState.workspace == workspace)
     }
 
+    @Test
     func testRefreshPermissionsOnActivationPerformsStrictVerification() async {
         let permissionService = MockPermissionService()
         let services = makeServiceContainer(permissionService: permissionService)
@@ -131,11 +135,12 @@ final class AppStateTests: XCTestCase {
 
         await appState.refreshPermissionsOnActivation()
 
-        XCTAssertEqual(permissionService.checkAllCalls, 1)
-        XCTAssertEqual(permissionService.verifyMicCalls, 1)
-        XCTAssertEqual(permissionService.verifyScreenRecordingCalls, 1)
+        #expect(permissionService.checkAllCalls == 1)
+        #expect(permissionService.verifyMicCalls == 1)
+        #expect(permissionService.verifyScreenRecordingCalls == 1)
     }
 
+    @Test
     func testAppSourceDeclaresSettingsScene() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let appFileURL = testsDirectory
@@ -143,12 +148,13 @@ final class AppStateTests: XCTestCase {
             .appendingPathComponent("ScribermanApp.swift")
         let appSource = try String(contentsOf: appFileURL, encoding: .utf8)
 
-        XCTAssertTrue(
+        #expect(
             appSource.contains("Settings {"),
             "Expected ScribermanApp.swift to declare a SwiftUI Settings scene."
         )
     }
 
+    @Test
     func testSelectPendingSessionCreatesSinglePendingSession() {
         let permissionService = MockPermissionService()
         let services = makeServiceContainer(permissionService: permissionService)
@@ -158,10 +164,11 @@ final class AppStateTests: XCTestCase {
         let firstPending = appState.pendingSession
         appState.selectPendingSession()
 
-        XCTAssertNotNil(firstPending)
-        XCTAssertEqual(appState.pendingSession?.id, firstPending?.id)
+        #expect(firstPending != nil)
+        #expect(appState.pendingSession?.id == firstPending?.id)
     }
 
+    @Test
     func testDiscardPendingSessionClearsPendingAndResetsNewSessionState() {
         let permissionService = MockPermissionService()
         let services = makeServiceContainer(permissionService: permissionService)
@@ -178,9 +185,10 @@ final class AppStateTests: XCTestCase {
         appState.newSessionViewModel.state = .recording(duration: 10, level: 0)
         appState.discardPendingSession()
 
-        XCTAssertNil(appState.pendingSession)
+        #expect(appState.pendingSession == nil)
         guard case .idle = appState.newSessionViewModel.state else {
-            return XCTFail("Expected new session state to reset to idle")
+            Issue.record("Expected new session state to reset to idle")
+            return
         }
     }
 

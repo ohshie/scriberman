@@ -1,21 +1,20 @@
 import Foundation
 import SwiftData
-import XCTest
+import Testing
 @testable import Scriberman
 
 @MainActor
-final class SettingsViewModelTests: XCTestCase {
-    nonisolated(unsafe) private var tempRoots: [URL] = []
+final class SettingsViewModelTests {
+    private var tempRoots: [URL] = []
 
-    override func tearDown() {
+    deinit {
         let fileManager = FileManager.default
         for root in tempRoots {
             try? fileManager.removeItem(at: root)
         }
-        tempRoots.removeAll()
-        super.tearDown()
     }
 
+    @Test
     func testDownloadAllTappedSuccessTransitionsToAllReady() async throws {
         let workspaceRoot = try makeTempRoot()
         let workspace = Workspace(rootURL: workspaceRoot)
@@ -46,19 +45,20 @@ final class SettingsViewModelTests: XCTestCase {
         _ = await observer.result
 
         let observed = await probe.snapshot()
-        XCTAssertTrue(observed.contains { phase in
+        #expect(observed.contains { phase in
             if case .downloading = phase { return true }
             return false
         })
-        XCTAssertTrue(observed.contains(.warmingUp))
-        XCTAssertEqual(viewModel.bundlePhase, .allReady)
+        #expect(observed.contains(.warmingUp))
+        #expect(viewModel.bundlePhase == .allReady)
 
         let installOrder = await mockService.installOrder()
-        XCTAssertEqual(installOrder, [.asrParakeetV3, .vadSilero, .offlineDiarization])
+        #expect(installOrder == [.asrParakeetV3, .vadSilero, .offlineDiarization])
         let warmedUp = await mockService.didWarmUp()
-        XCTAssertTrue(warmedUp)
+        #expect(warmedUp)
     }
 
+    @Test
     func testDownloadAllTappedFailureTransitionsToError() async throws {
         let workspaceRoot = try makeTempRoot()
         let workspace = Workspace(rootURL: workspaceRoot)
@@ -80,15 +80,17 @@ final class SettingsViewModelTests: XCTestCase {
 
         switch viewModel.bundlePhase {
         case .error(let message):
-            XCTAssertTrue(message.contains("VAD"))
+            #expect(message.contains("VAD"))
         default:
-            XCTFail("Expected .error phase, got \(viewModel.bundlePhase)")
+            Issue.record("Expected .error phase, got \(viewModel.bundlePhase)")
+            return
         }
 
-        XCTAssertEqual(viewModel.modelStates[.vadSilero], .error)
-        XCTAssertEqual(viewModel.currentModelStatusText, "Installed")
+        #expect(viewModel.modelStates[.vadSilero] == .error)
+        #expect(viewModel.currentModelStatusText == "Installed")
     }
 
+    @Test
     func testRefreshSetsBundlePhaseForReadyAndMissingStates() async throws {
         let workspaceService = MockWorkspaceService()
         let mockService = MockModelInstallService()
@@ -104,11 +106,11 @@ final class SettingsViewModelTests: XCTestCase {
         )
 
         await viewModel.refresh()
-        XCTAssertEqual(viewModel.bundlePhase, .allReady)
+        #expect(viewModel.bundlePhase == .allReady)
 
         await mockService.setState(.missing, for: .vadSilero)
         await viewModel.refresh()
-        XCTAssertEqual(viewModel.bundlePhase, .idle)
+        #expect(viewModel.bundlePhase == .idle)
     }
 
     private func makeTempRoot() throws -> URL {
