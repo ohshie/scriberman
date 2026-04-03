@@ -16,6 +16,7 @@ final class NewSessionViewModelTests: XCTestCase {
     nonisolated(unsafe) private var context: ModelContext!
     nonisolated(unsafe) private var workspace: Workspace!
 
+    @MainActor
     override func setUpWithError() throws {
         try super.setUpWithError()
         workspaceService = MockWorkspaceService()
@@ -44,6 +45,7 @@ final class NewSessionViewModelTests: XCTestCase {
         )
     }
 
+    @MainActor
     override func tearDown() {
         viewModel = nil
         context = nil
