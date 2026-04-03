@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidBecomeActive(_ notification: Notification) {
         logger.info("applicationDidBecomeActive")
         attachWindowDelegateIfNeeded()
+        ensureMainWindowVisibleIfNeeded()
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -72,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self.logger.error(
                 "hideToTray verification failed: menu bar extra rejected; keeping main window visible"
             )
+            self.ensureMainWindowVisibleIfNeeded()
         }
     }
 
@@ -166,5 +168,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         return nil
+    }
+
+    private func ensureMainWindowVisibleIfNeeded() {
+        guard let appState else {
+            return
+        }
+
+        guard appState.menuBarSettings.isInTrayMode == false else {
+            return
+        }
+
+        guard let window = resolveMainWindow() else {
+            return
+        }
+
+        if window.isVisible == false {
+            logger.info("ensureMainWindowVisibleIfNeeded restoring hidden main window")
+            showMainWindow()
+        }
     }
 }
