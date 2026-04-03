@@ -191,6 +191,20 @@ final class AppStateTests {
     }
 
     @Test
+    func testMenuBarExtraViewSourceDeclaresRecordWithSections() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let viewFileURL = testsDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("UI/MenuBarExtraView.swift")
+        let viewSource = try String(contentsOf: viewFileURL, encoding: .utf8)
+
+        #expect(viewSource.contains("Menu(\"Record with…\")"))
+        #expect(viewSource.contains("Text(\"Microphone\")"))
+        #expect(viewSource.contains("Text(\"App Audio\")"))
+        #expect(viewSource.contains("No App Audio"))
+    }
+
+    @Test
     func testSelectPendingSessionCreatesSinglePendingSession() {
         let permissionService = MockPermissionService()
         let services = makeServiceContainer(permissionService: permissionService)
