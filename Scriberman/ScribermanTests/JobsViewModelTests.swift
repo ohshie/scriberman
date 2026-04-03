@@ -12,6 +12,7 @@ final class JobsViewModelTests: XCTestCase {
     nonisolated(unsafe) private var container: ModelContainer!
     nonisolated(unsafe) private var context: ModelContext!
 
+    @MainActor
     override func setUpWithError() throws {
         try super.setUpWithError()
         workspaceService = MockWorkspaceService()
@@ -51,6 +52,7 @@ final class JobsViewModelTests: XCTestCase {
         )
     }
 
+    @MainActor
     override func tearDown() {
         viewModel = nil
         context = nil

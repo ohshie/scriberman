@@ -1,6 +1,13 @@
 import Foundation
 import Observation
 
+enum OnboardingStep: Int, CaseIterable {
+    case screenRecording
+    case microphone
+    case workspace
+    case models
+}
+
 @Observable
 @MainActor
 final class AppState {
@@ -16,8 +23,27 @@ final class AppState {
     var pendingSession: PendingSession?
     private(set) var workspace: Workspace?
     private(set) var workspaceErrorMessage: String?
-    var workspaceSelectionRequired = false
-    var showPermissionsOnboarding = false
+    var isBootstrapping = true
+
+    var requiredOnboardingStep: OnboardingStep? {
+        if permissionService.screenRecordingStatus != .granted {
+            return .screenRecording
+        }
+
+        if permissionService.micStatus != .granted {
+            return .microphone
+        }
+
+        if workspace == nil {
+            return .workspace
+        }
+
+        if settingsViewModel.bundlePhase != .allReady {
+            return .models
+        }
+
+        return nil
+    }
 
     var aiProviderService: AIProviderService {
         mainServices.aiProviderService
@@ -76,22 +102,23 @@ final class AppState {
     }
 
     func bootstrapWorkspace() async {
+        defer { isBootstrapping = false }
+
         do {
             let restoredWorkspace = try await restoreWorkspaceHandler()
             workspace = restoredWorkspace
             workspaceErrorMessage = nil
-            workspaceSelectionRequired = false
         } catch WorkspaceError.notConfigured {
             workspace = nil
             workspaceErrorMessage = nil
-            workspaceSelectionRequired = true
         } catch {
             workspace = nil
             workspaceErrorMessage = error.localizedDescription
-            workspaceSelectionRequired = true
         }
 
-        await refreshPermissionPresentationState(strictVerification: true)
+        permissionService.checkAll()
+        _ = await permissionService.verifyMic()
+        _ = await permissionService.verifyScreenRecording()
 
         await settingsViewModel.refresh()
     }
@@ -101,13 +128,9 @@ final class AppState {
             let configuredWorkspace = try await setWorkspaceHandler(url)
             workspace = configuredWorkspace
             workspaceErrorMessage = nil
-            workspaceSelectionRequired = false
-            await refreshPermissionPresentationState(strictVerification: true)
         } catch {
             workspace = nil
             workspaceErrorMessage = error.localizedDescription
-            workspaceSelectionRequired = true
-            showPermissionsOnboarding = false
         }
 
         await settingsViewModel.refresh()
@@ -118,18 +141,18 @@ final class AppState {
             let writableWorkspace = try await backgroundServices.workspaceService.requireWritableWorkspace()
             workspace = writableWorkspace
             workspaceErrorMessage = nil
-            workspaceSelectionRequired = false
             return true
         } catch {
             workspace = nil
             workspaceErrorMessage = error.localizedDescription
-            workspaceSelectionRequired = true
             return false
         }
     }
 
     func refreshPermissionsOnActivation() async {
-        await refreshPermissionPresentationState(strictVerification: true)
+        permissionService.checkAll()
+        _ = await permissionService.verifyMic()
+        _ = await permissionService.verifyScreenRecording()
     }
 
     private static func defaultPendingSessionTitle(referenceDate: Date = .now) -> String {
@@ -138,16 +161,5 @@ final class AppState {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return "Session \(formatter.string(from: referenceDate))"
-    }
-
-    private func refreshPermissionPresentationState(strictVerification: Bool) async {
-        permissionService.checkAll()
-
-        if strictVerification {
-            _ = await permissionService.verifyMic()
-            _ = await permissionService.verifyScreenRecording()
-        }
-
-        showPermissionsOnboarding = !workspaceSelectionRequired && permissionService.needsOnboarding
     }
 }

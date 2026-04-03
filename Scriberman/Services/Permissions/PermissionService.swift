@@ -14,17 +14,10 @@ enum PermissionStatus: Equatable {
 final class PermissionService: PermissionServiceProtocol {
     enum DefaultsKey {
         static let screenRecordingPromptHasBeenShown = "screenRecordingPromptHasBeenShown"
-        static let permissionsOnboardingHasBeenShown = "permissionsOnboardingHasBeenShown"
     }
 
     private(set) var micStatus: PermissionStatus = .notDetermined
     private(set) var screenRecordingStatus: PermissionStatus = .notDetermined
-
-    var needsOnboarding: Bool {
-        let hasShownOnboarding = userDefaults.bool(forKey: DefaultsKey.permissionsOnboardingHasBeenShown)
-        let hasUnverifiedPermission = micStatus != .granted || screenRecordingStatus != .granted
-        return !hasShownOnboarding && hasUnverifiedPermission
-    }
 
     private let microphonePermissions: MicrophonePermissionProviding
     private let screenRecordingPermissions: ScreenRecordingPermissionProviding
@@ -74,13 +67,10 @@ final class PermissionService: PermissionServiceProtocol {
         let preflightGranted = screenRecordingPermissions.preflightAccess()
 
         if preflightGranted {
-            if screenRecordingStatus != .denied {
-                screenRecordingStatus = .granted
-            }
+            screenRecordingStatus = .granted
         } else {
-            if screenRecordingStatus != .denied {
-                screenRecordingStatus = .notDetermined
-            }
+            let hasShownPrompt = userDefaults.bool(forKey: DefaultsKey.screenRecordingPromptHasBeenShown)
+            screenRecordingStatus = hasShownPrompt ? .denied : .notDetermined
         }
 
         logger.info(
@@ -121,9 +111,8 @@ final class PermissionService: PermissionServiceProtocol {
         let preflightGranted = screenRecordingPermissions.preflightAccess()
 
         guard preflightGranted else {
-            if screenRecordingStatus != .denied {
-                screenRecordingStatus = .notDetermined
-            }
+            let hasShownPrompt = userDefaults.bool(forKey: DefaultsKey.screenRecordingPromptHasBeenShown)
+            screenRecordingStatus = hasShownPrompt ? .denied : .notDetermined
 
             logger.info(
                 "[\(self.timestamp(), privacy: .public)] source=verifyScreenRecording screenPreflight=\(preflightGranted, privacy: .public) functional=false windowCount=0 appCount=0 screenStatus=\(self.description(for: self.screenRecordingStatus), privacy: .public)"
@@ -147,11 +136,6 @@ final class PermissionService: PermissionServiceProtocol {
             )
             return false
         }
-    }
-
-    func markOnboardingShown() {
-        userDefaults.set(true, forKey: DefaultsKey.permissionsOnboardingHasBeenShown)
-        checkAll()
     }
 
     private func mapMicrophoneStatus(_ status: AVAuthorizationStatus) -> PermissionStatus {
