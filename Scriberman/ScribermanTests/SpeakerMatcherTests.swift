@@ -1,9 +1,10 @@
 import Foundation
-import XCTest
+import Testing
 @testable import Scriberman
 
-final class SpeakerMatcherTests: XCTestCase {
-    func testFindBestMatchReturnsClosestWithinThreshold() {
+struct SpeakerMatcherTests {
+    @Test
+    func findBestMatchReturnsClosestWithinThreshold() {
         let matcher = SpeakerMatcher(threshold: 0.28)
 
         var aliceEmbedding = Array(repeating: Float(0), count: 192)
@@ -20,10 +21,11 @@ final class SpeakerMatcherTests: XCTestCase {
         query[1] = 0.05
 
         let match = matcher.findBestMatch(for: query, in: profiles)
-        XCTAssertEqual(match?.name, "Alice")
+        #expect(match?.name == "Alice")
     }
 
-    func testFindBestMatchReturnsNilWhenAllAreOutsideThreshold() {
+    @Test
+    func findBestMatchReturnsNilWhenAllAreOutsideThreshold() {
         let matcher = SpeakerMatcher(threshold: 0.28)
 
         var aliceEmbedding = Array(repeating: Float(0), count: 192)
@@ -37,17 +39,19 @@ final class SpeakerMatcherTests: XCTestCase {
             in: [SpeakerProfile(name: "Alice", embedding: aliceEmbedding)]
         )
 
-        XCTAssertNil(match)
+        #expect(match == nil)
     }
 
-    func testFindBestMatchReturnsNilForEmptyProfiles() {
+    @Test
+    func findBestMatchReturnsNilForEmptyProfiles() {
         let matcher = SpeakerMatcher()
         let query = Array(repeating: Float(0), count: 192)
 
-        XCTAssertNil(matcher.findBestMatch(for: query, in: [SpeakerProfile]()))
+        #expect(matcher.findBestMatch(for: query, in: [SpeakerProfile]()) == nil)
     }
 
-    func testFindBestMatchBreaksTiesByOldestLastSeen() {
+    @Test
+    func findBestMatchBreaksTiesByOldestLastSeen() {
         let matcher = SpeakerMatcher(threshold: 0.28)
 
         var embedding = Array(repeating: Float(0), count: 192)
@@ -66,6 +70,6 @@ final class SpeakerMatcherTests: XCTestCase {
 
         let match = matcher.findBestMatch(for: embedding, in: [newer, older])
 
-        XCTAssertEqual(match?.name, "Older")
+        #expect(match?.name == "Older")
     }
 }
