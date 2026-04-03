@@ -8,11 +8,17 @@ struct MenuBarExtraView: View {
     @Environment(\.modelContext) private var modelContext
 
     var body: some View {
-        switch appState.newSessionViewModel.state {
-        case .idle:
-            idleMenu
-        case let .recording(duration, _):
-            recordingMenu(duration: duration)
+        Group {
+            switch appState.newSessionViewModel.state {
+            case .idle:
+                idleMenu
+            case let .recording(duration, _):
+                recordingMenu(duration: duration)
+            }
+        }
+        .onAppear {
+            appState.audioDeviceService.refreshDevices()
+            appState.appAudioService.refreshRunningApps()
         }
     }
 
@@ -23,7 +29,48 @@ struct MenuBarExtraView: View {
         }
 
         Menu("Record with…") {
-            Text("Microphone and app selection will be added next.")
+            Text("Microphone")
+
+            ForEach(appState.audioDeviceService.availableDevices) { device in
+                Button {
+                    appState.menuBarSettings.lastUsedMicUID = device.uid
+                    startQuickRecording()
+                } label: {
+                    if appState.menuBarSettings.lastUsedMicUID == device.uid {
+                        Label(device.name, systemImage: "checkmark")
+                    } else {
+                        Text(device.name)
+                    }
+                }
+            }
+
+            Divider()
+
+            Text("App Audio")
+
+            Button {
+                appState.menuBarSettings.lastUsedAppBundleID = nil
+                startQuickRecording()
+            } label: {
+                if appState.menuBarSettings.lastUsedAppBundleID == nil {
+                    Label("No App Audio", systemImage: "checkmark")
+                } else {
+                    Text("No App Audio")
+                }
+            }
+
+            ForEach(appState.appAudioService.runningApps) { app in
+                Button {
+                    appState.menuBarSettings.lastUsedAppBundleID = app.bundleID
+                    startQuickRecording()
+                } label: {
+                    if appState.menuBarSettings.lastUsedAppBundleID == app.bundleID {
+                        Label(app.name, systemImage: "checkmark")
+                    } else {
+                        Text(app.name)
+                    }
+                }
+            }
         }
 
         Divider()
@@ -42,6 +89,7 @@ struct MenuBarExtraView: View {
     @ViewBuilder
     private func recordingMenu(duration: TimeInterval) -> some View {
         Text("Recording: \(menuDuration(duration))")
+            .disabled(true)
 
         Button("Stop Recording") {
             Task {
@@ -63,8 +111,18 @@ struct MenuBarExtraView: View {
     }
 
     private func startQuickRecording() {
+        let selectedMic = appState.menuBarSettings.lastUsedMicUID
+        let selectedApp = appState.appAudioService.runningApps.first {
+            $0.bundleID == appState.menuBarSettings.lastUsedAppBundleID
+        }
+
         Task {
-            await appState.newSessionViewModel.startRecording(title: "Quick Recording", context: modelContext)
+            await appState.newSessionViewModel.startRecording(
+                title: "Quick Recording",
+                micDeviceUID: selectedMic,
+                app: selectedApp,
+                context: modelContext
+            )
         }
     }
 

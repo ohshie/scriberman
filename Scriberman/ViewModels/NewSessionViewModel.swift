@@ -341,6 +341,27 @@ final class NewSessionViewModel {
         }
     }
 
+    func startRecording(
+        title: String,
+        micDeviceUID: String?,
+        app: CapturedApp?,
+        context: ModelContext
+    ) async {
+        audioDeviceService.refreshDevices()
+        appAudioService.refreshRunningApps()
+
+        if let micDeviceUID {
+            selectedDevice = availableDevices.first(where: { $0.uid == micDeviceUID })
+        } else {
+            selectedDevice = nil
+        }
+
+        selectedApp = app
+        recordAppAudio = app != nil
+
+        await startRecording(title: title, context: context)
+    }
+
     func stopRecording(context: ModelContext) async -> RecordingSession? {
         recordingMonitorTask?.cancel()
         recordingMonitorTask = nil

@@ -467,6 +467,14 @@ struct NewSessionViewModelTests {
         #expect(source.contains("Open Settings → Models to install ASR and Speaker Diarization models."))
     }
 
+    @Test
+    func testMenuBarStartRecordingOverloadIsPresent() throws {
+        let source = try newSessionViewModelSource()
+        #expect(source.contains("func startRecording("))
+        #expect(source.contains("micDeviceUID: String?"))
+        #expect(source.contains("app: CapturedApp?"))
+    }
+
     private func newSessionPanelSource() throws -> String {
         try readSourceFile(relativePathFromTests: "../UI/NewSessionPanelView.swift")
     }

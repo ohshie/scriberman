@@ -50,6 +50,14 @@ final class AppState {
         mainServices.aiProviderService
     }
 
+    var audioDeviceService: AudioDeviceService {
+        mainServices.audioDeviceService
+    }
+
+    var appAudioService: AppAudioService {
+        mainServices.appAudioService
+    }
+
     convenience init() {
         self.init(services: .live())
     }
