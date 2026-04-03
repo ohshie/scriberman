@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import OSLog
 
 @MainActor
 @Observable
@@ -20,13 +19,10 @@ final class MenuBarSettings {
     }
 
     private let userDefaults: UserDefaults
-    private let logger = Logger(subsystem: "Scriberman", category: "MenuBarSettings")
-
     var isInTrayMode: Bool {
         get { userDefaults.bool(forKey: Key.isInTrayMode) }
         set {
             userDefaults.set(newValue, forKey: Key.isInTrayMode)
-            logger.info("set isInTrayMode=\(newValue)")
         }
     }
 
@@ -43,7 +39,6 @@ final class MenuBarSettings {
         }
         set {
             userDefaults.set(newValue.rawValue, forKey: Key.closeAction)
-            logger.info("set closeAction=\(newValue.rawValue, privacy: .public)")
         }
     }
 
@@ -51,7 +46,6 @@ final class MenuBarSettings {
         get { userDefaults.bool(forKey: Key.hasShownFirstTimeTrayAlert) }
         set {
             userDefaults.set(newValue, forKey: Key.hasShownFirstTimeTrayAlert)
-            logger.info("set hasShownFirstTimeTrayAlert=\(newValue)")
         }
     }
 
@@ -59,7 +53,6 @@ final class MenuBarSettings {
         get { userDefaults.string(forKey: Key.lastUsedMicUID) }
         set {
             userDefaults.set(newValue, forKey: Key.lastUsedMicUID)
-            logger.info("set lastUsedMicUID=\(newValue ?? "nil", privacy: .public)")
         }
     }
 
@@ -67,7 +60,6 @@ final class MenuBarSettings {
         get { userDefaults.string(forKey: Key.lastUsedAppBundleID) }
         set {
             userDefaults.set(newValue, forKey: Key.lastUsedAppBundleID)
-            logger.info("set lastUsedAppBundleID=\(newValue ?? "nil", privacy: .public)")
         }
     }
 

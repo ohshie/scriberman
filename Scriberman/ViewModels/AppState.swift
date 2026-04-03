@@ -22,6 +22,7 @@ final class AppState {
     private let setWorkspaceHandler: (URL) async throws -> Workspace
 
     var pendingSession: PendingSession?
+    private var shouldFocusPendingSessionFromMenuBar = false
     private(set) var workspace: Workspace?
     private(set) var workspaceErrorMessage: String?
     var isBootstrapping = true
@@ -110,6 +111,16 @@ final class AppState {
     func discardPendingSession() {
         pendingSession = nil
         newSessionViewModel.reset()
+    }
+
+    func requestPendingSessionFocusFromMenuBar() {
+        shouldFocusPendingSessionFromMenuBar = true
+    }
+
+    func consumePendingSessionFocusRequest() -> Bool {
+        let shouldFocus = shouldFocusPendingSessionFromMenuBar
+        shouldFocusPendingSessionFromMenuBar = false
+        return shouldFocus
     }
 
     func bootstrapWorkspace() async {

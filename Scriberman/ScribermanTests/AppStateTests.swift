@@ -173,24 +173,6 @@ final class AppStateTests {
     }
 
     @Test
-    func testAppSourceDeclaresMenuBarExtraScene() throws {
-        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let appFileURL = testsDirectory
-            .deletingLastPathComponent()
-            .appendingPathComponent("ScribermanApp.swift")
-        let appSource = try String(contentsOf: appFileURL, encoding: .utf8)
-
-        #expect(
-            appSource.contains("MenuBarExtra("),
-            "Expected ScribermanApp.swift to declare a MenuBarExtra scene."
-        )
-        #expect(
-            appSource.contains("MenuBarExtraView(appState: appState)"),
-            "Expected ScribermanApp.swift to use MenuBarExtraView."
-        )
-    }
-
-    @Test
     func testMenuBarExtraViewSourceDeclaresRecordWithSections() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let viewFileURL = testsDirectory
@@ -235,26 +217,6 @@ final class AppStateTests {
     }
 
     @Test
-    func testAppDelegateSourceDeclaresTrayRequestAndWindowRestore() throws {
-        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let delegateFileURL = testsDirectory
-            .deletingLastPathComponent()
-            .appendingPathComponent("AppDelegate.swift")
-        let delegateSource = try String(contentsOf: delegateFileURL, encoding: .utf8)
-
-        #expect(delegateSource.contains("func hideToTray"))
-        #expect(delegateSource.contains("appState?.menuBarSettings.isInTrayMode = true"))
-        #expect(delegateSource.contains("pendingTrayWindow = window ?? resolveMainWindow()"))
-        #expect(delegateSource.contains("func finalizeHideToTrayIfRequested()"))
-        #expect(delegateSource.contains("windowToHide.orderOut(nil)"))
-        #expect(delegateSource.contains("NSApp.setActivationPolicy(.accessory)"))
-        #expect(delegateSource.contains("func showMainWindow()"))
-        #expect(delegateSource.contains("NSApp.setActivationPolicy(.regular)"))
-        #expect(delegateSource.contains("NSApp.activate(ignoringOtherApps: true)"))
-        #expect(delegateSource.contains("window.makeKeyAndOrderFront(nil)"))
-    }
-
-    @Test
     func testAppDelegateSourceGuardsOnboardingBeforeFirstTimeTrayAlert() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let delegateFileURL = testsDirectory
@@ -282,20 +244,17 @@ final class AppStateTests {
     }
 
     @Test
-    func testAppSourceDeclaresMenuBarElapsedIconAndInsertionBinding() throws {
+    func testAppDelegateSourceDeclaresStatusItemRecordingMenuActions() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let appFileURL = testsDirectory
+        let delegateFileURL = testsDirectory
             .deletingLastPathComponent()
-            .appendingPathComponent("ScribermanApp.swift")
-        let appSource = try String(contentsOf: appFileURL, encoding: .utf8)
+            .appendingPathComponent("AppDelegate.swift")
+        let delegateSource = try String(contentsOf: delegateFileURL, encoding: .utf8)
 
-        #expect(appSource.contains("MenuBarExtra("))
-        #expect(appSource.contains("isInserted: Binding("))
-        #expect(appSource.contains("appState.menuBarSettings.isInTrayMode"))
-        #expect(appSource.contains("case let .recording(duration, _)"))
-        #expect(appSource.contains("Text(Self.menuBarDuration(duration))"))
-        #expect(appSource.contains("finalizeHideToTrayIfRequested()"))
-        #expect(appSource.contains("NSApp.setActivationPolicy(.regular)"))
+        #expect(delegateSource.contains("Start Recording"))
+        #expect(delegateSource.contains("Record with…"))
+        #expect(delegateSource.contains("Stop Recording"))
+        #expect(delegateSource.contains("func menuNeedsUpdate"))
     }
 
     @Test
@@ -334,6 +293,18 @@ final class AppStateTests {
             Issue.record("Expected new session state to reset to idle")
             return
         }
+    }
+
+    @Test
+    func testPendingSessionFocusRequestConsumesOnce() {
+        let permissionService = MockPermissionService()
+        let services = makeServiceContainer(permissionService: permissionService)
+        let appState = AppState(services: services)
+
+        #expect(appState.consumePendingSessionFocusRequest() == false)
+        appState.requestPendingSessionFocusFromMenuBar()
+        #expect(appState.consumePendingSessionFocusRequest())
+        #expect(appState.consumePendingSessionFocusRequest() == false)
     }
 
     private func makeServiceContainer(permissionService: PermissionServiceProtocol) -> ServiceContainer {

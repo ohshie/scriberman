@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
@@ -91,6 +92,7 @@ struct AppShellView: View {
             Task {
                 await appState.refreshPermissionsOnActivation()
             }
+            focusPendingSessionIfRequested()
         }
         .onChange(of: selectedSession) { oldValue, newValue in
             guard oldValue?.id != newValue?.id else {
@@ -107,6 +109,35 @@ struct AppShellView: View {
             detailMode = .standard
             selectedTransformationID = nil
         }
+        .onReceive(NotificationCenter.default.publisher(for: AppDelegate.focusPendingSessionNotification)) { _ in
+            focusPendingSessionIfRequested()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AppDelegate.focusRecordingSessionNotification)) { notification in
+            guard let sessionID = notification.userInfo?["sessionID"] as? UUID else {
+                return
+            }
+            focusRecordingSession(sessionID: sessionID)
+        }
+    }
+
+    private func focusPendingSessionIfRequested() {
+        guard appState.consumePendingSessionFocusRequest() else {
+            return
+        }
+
+        guard let pendingSession = appState.pendingSession else {
+            return
+        }
+
+        selectedSession = .pending(pendingSession)
+    }
+
+    private func focusRecordingSession(sessionID: UUID) {
+        guard let session = recordingSessions.first(where: { $0.id == sessionID }) else {
+            return
+        }
+
+        selectedSession = .recording(session)
     }
 
     @ViewBuilder
