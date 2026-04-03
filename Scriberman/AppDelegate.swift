@@ -54,10 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         appState?.menuBarSettings.isInTrayMode = true
         let windowToHide = window ?? resolveMainWindow()
         windowToHide?.orderOut(nil)
-        let changed = NSApp.setActivationPolicy(.accessory)
-        logger.info(
-            "hideToTray activationPolicyChanged=\(changed) currentPolicy=\(String(describing: NSApp.activationPolicy), privacy: .public)"
-        )
+        logger.info("hideToTray requested menu bar insertion; waiting for scene insertion callback")
 
         // If the system/user customization immediately rejects insertion, recover
         // by restoring the main window so the app never becomes inaccessible.
