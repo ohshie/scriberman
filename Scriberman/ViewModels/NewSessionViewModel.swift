@@ -21,6 +21,7 @@ final class NewSessionViewModel {
     private let lastUsedAppNameKey = "lastUsedAppName"
     private var recordingMonitorTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
+    var menuBarSettings: MenuBarSettings?
 
     var state: State = .idle
     var isIdle: Bool {
@@ -315,6 +316,9 @@ final class NewSessionViewModel {
             if let selectedApp {
                 appAudioService.incrementUsage(for: selectedApp.bundleID)
             }
+
+            menuBarSettings?.lastUsedMicUID = selectedDevice?.uid
+            menuBarSettings?.lastUsedAppBundleID = selectedApp?.bundleID
 
             if let fallbackMessage {
                 errorMessage = fallbackMessage
