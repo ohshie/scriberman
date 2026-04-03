@@ -17,6 +17,7 @@ final class AppState {
     let newSessionViewModel: NewSessionViewModel
     let jobsViewModel: JobsViewModel
     let settingsViewModel: SettingsViewModel
+    let menuBarSettings: MenuBarSettings
     private let restoreWorkspaceHandler: () async throws -> Workspace
     private let setWorkspaceHandler: (URL) async throws -> Workspace
 
@@ -87,6 +88,7 @@ final class AppState {
             modelInstallService: services.background.modelInstallService,
             speakerEmbeddingStore: services.background.speakerEmbeddingStore
         )
+        self.menuBarSettings = MenuBarSettings()
     }
 
     func selectPendingSession() {
