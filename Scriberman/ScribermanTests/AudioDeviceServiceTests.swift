@@ -1,18 +1,17 @@
 import AVFoundation
 import CoreAudio
-import XCTest
+import Testing
 @testable import Scriberman
 
 @MainActor
-final class AudioDeviceServiceTests: XCTestCase {
+final class AudioDeviceServiceTests {
     nonisolated(unsafe) private var hardware: MockAudioDeviceHardware!
     nonisolated(unsafe) private var userDefaults: UserDefaults!
     nonisolated(unsafe) private var notificationCenter: NotificationCenter!
     nonisolated(unsafe) private var service: AudioDeviceService!
     nonisolated(unsafe) private var userDefaultsSuiteName: String!
 
-    override func setUp() {
-        super.setUp()
+    init() {
         hardware = MockAudioDeviceHardware()
         notificationCenter = NotificationCenter()
         userDefaultsSuiteName = "AudioDeviceServiceTests.\(UUID().uuidString)"
@@ -20,7 +19,7 @@ final class AudioDeviceServiceTests: XCTestCase {
         userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
     }
 
-    override func tearDown() {
+    deinit {
         service = nil
         if let userDefaultsSuiteName {
             userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
@@ -29,8 +28,9 @@ final class AudioDeviceServiceTests: XCTestCase {
         userDefaultsSuiteName = nil
         notificationCenter = nil
         hardware = nil
-        super.tearDown()
     }
+
+    @Test
 
     func testEnumerateInputDevicesFiltersOutputOnlyAndSortsByUsageThenName() {
         hardware.devices = [
@@ -48,8 +48,10 @@ final class AudioDeviceServiceTests: XCTestCase {
             notificationCenter: notificationCenter
         )
 
-        XCTAssertEqual(service.availableDevices.map(\.uid), ["uid-1", "uid-3", "uid-4"])
+        #expect(service.availableDevices.map(\.uid) == ["uid-1", "uid-3", "uid-4"])
     }
+
+    @Test
 
     func testIncrementUsagePersistsUsageScoresAndResortsDevices() {
         hardware.devices = [
@@ -64,14 +66,16 @@ final class AudioDeviceServiceTests: XCTestCase {
             notificationCenter: notificationCenter
         )
 
-        XCTAssertEqual(service.availableDevices.map(\.uid), ["uid-2", "uid-1"])
+        #expect(service.availableDevices.map(\.uid) == ["uid-2", "uid-1"])
 
         service.incrementUsage(for: "uid-1")
 
         let persistedScores = userDefaults.dictionary(forKey: "deviceUsageScores") as? [String: Int]
-        XCTAssertEqual(persistedScores?["uid-1"], 1)
-        XCTAssertEqual(service.availableDevices.map(\.uid), ["uid-1", "uid-2"])
+        #expect(persistedScores?["uid-1"] == 1)
+        #expect(service.availableDevices.map(\.uid) == ["uid-1", "uid-2"])
     }
+
+    @Test
 
     func testUsageScoresPersistAcrossServiceRecreation() {
         hardware.devices = [
@@ -95,8 +99,10 @@ final class AudioDeviceServiceTests: XCTestCase {
             notificationCenter: notificationCenter
         )
 
-        XCTAssertEqual(recreated.availableDevices.map(\.uid), ["uid-2", "uid-1"])
+        #expect(recreated.availableDevices.map(\.uid) == ["uid-2", "uid-1"])
     }
+
+    @Test
 
     func testSelectedDevicePersistsUID() {
         hardware.devices = [
@@ -113,8 +119,10 @@ final class AudioDeviceServiceTests: XCTestCase {
 
         service.selectedDevice = service.availableDevices.first(where: { $0.uid == "uid-2" })
 
-        XCTAssertEqual(userDefaults.string(forKey: "selectedMicUID"), "uid-2")
+        #expect(userDefaults.string(forKey: "selectedMicUID") == "uid-2")
     }
+
+    @Test
 
     func testRestoreSelectionBySavedUIDOnLaunch() {
         hardware.devices = [
@@ -130,8 +138,10 @@ final class AudioDeviceServiceTests: XCTestCase {
             notificationCenter: notificationCenter
         )
 
-        XCTAssertEqual(service.selectedDevice?.uid, "uid-2")
+        #expect(service.selectedDevice?.uid == "uid-2")
     }
+
+    @Test
 
     func testMissingSavedUIDClearsPersistenceAndFallsBackToDefaultInput() {
         hardware.devices = [
@@ -147,9 +157,11 @@ final class AudioDeviceServiceTests: XCTestCase {
             notificationCenter: notificationCenter
         )
 
-        XCTAssertEqual(service.selectedDevice?.uid, "uid-1")
-        XCTAssertNil(userDefaults.string(forKey: "selectedMicUID"))
+        #expect(service.selectedDevice?.uid == "uid-1")
+        #expect(userDefaults.string(forKey: "selectedMicUID") == nil)
     }
+
+    @Test
 
     func testConfigurationChangeRefreshesDevicesAndRevalidatesSelection() async throws {
         hardware.devices = [
@@ -163,7 +175,7 @@ final class AudioDeviceServiceTests: XCTestCase {
             notificationCenter: notificationCenter
         )
 
-        XCTAssertEqual(service.selectedDevice?.uid, "uid-1")
+        #expect(service.selectedDevice?.uid == "uid-1")
 
         hardware.devices = [
             MockAudioDevice(id: 2, uid: "uid-2", name: "Second Mic", hasInput: true)
@@ -173,9 +185,11 @@ final class AudioDeviceServiceTests: XCTestCase {
         notificationCenter.post(name: .AVAudioEngineConfigurationChange, object: nil)
         try await Task.sleep(for: .milliseconds(100))
 
-        XCTAssertEqual(service.availableDevices.map(\.uid), ["uid-2"])
-        XCTAssertEqual(service.selectedDevice?.uid, "uid-2")
+        #expect(service.availableDevices.map(\.uid) == ["uid-2"])
+        #expect(service.selectedDevice?.uid == "uid-2")
     }
+
+    @Test
 
     func testRefreshDevicesFallsBackToSystemDefaultWhenSelectedDeviceIsRemoved() {
         hardware.devices = [
@@ -198,8 +212,10 @@ final class AudioDeviceServiceTests: XCTestCase {
 
         service.refreshDevices()
 
-        XCTAssertEqual(service.selectedDevice?.uid, "uid-1")
+        #expect(service.selectedDevice?.uid == "uid-1")
     }
+
+    @Test
 
     func testRefreshDevicesRecoversDisconnectedDeviceWhenCurrentSelectionIsDefault() {
         hardware.devices = [
@@ -219,7 +235,7 @@ final class AudioDeviceServiceTests: XCTestCase {
             MockAudioDevice(id: 1, uid: "uid-1", name: "Built-in Mic", hasInput: true)
         ]
         service.refreshDevices()
-        XCTAssertEqual(service.selectedDevice?.uid, "uid-1")
+        #expect(service.selectedDevice?.uid == "uid-1")
 
         hardware.devices = [
             MockAudioDevice(id: 1, uid: "uid-1", name: "Built-in Mic", hasInput: true),
@@ -229,8 +245,10 @@ final class AudioDeviceServiceTests: XCTestCase {
 
         service.refreshDevices()
 
-        XCTAssertEqual(service.selectedDevice?.uid, "uid-2")
+        #expect(service.selectedDevice?.uid == "uid-2")
     }
+
+    @Test
 
     func testRefreshDevicesDoesNotRecoverDisconnectedDeviceAfterManualOverride() {
         hardware.devices = [
@@ -252,10 +270,10 @@ final class AudioDeviceServiceTests: XCTestCase {
             MockAudioDevice(id: 3, uid: "uid-3", name: "USB Mic", hasInput: true)
         ]
         service.refreshDevices()
-        XCTAssertEqual(service.selectedDevice?.uid, "uid-1")
+        #expect(service.selectedDevice?.uid == "uid-1")
 
         service.selectedDevice = service.availableDevices.first(where: { $0.uid == "uid-3" })
-        XCTAssertEqual(service.selectedDevice?.uid, "uid-3")
+        #expect(service.selectedDevice?.uid == "uid-3")
 
         hardware.devices = [
             MockAudioDevice(id: 1, uid: "uid-1", name: "Built-in Mic", hasInput: true),
@@ -264,7 +282,7 @@ final class AudioDeviceServiceTests: XCTestCase {
         ]
         service.refreshDevices()
 
-        XCTAssertEqual(service.selectedDevice?.uid, "uid-3")
+        #expect(service.selectedDevice?.uid == "uid-3")
     }
 }
 

@@ -1,8 +1,9 @@
 import CoreAudio
-import XCTest
+import Testing
 @testable import Scriberman
 
-final class AggregateDeviceBuilderTests: XCTestCase {
+final class AggregateDeviceBuilderTests {
+    @Test
     func testCreateTapBuildsStereoMixdownTapAndReturnsID() throws {
         let hardware = MockAggregateHardware()
         hardware.createTapResult = 101
@@ -11,10 +12,12 @@ final class AggregateDeviceBuilderTests: XCTestCase {
 
         let tapID = try builder.createTap(for: 222)
 
-        XCTAssertEqual(tapID, 101)
-        XCTAssertEqual(hardware.requestedPIDs, [222])
-        XCTAssertEqual(hardware.createdTapProcessObjectIDs, [902])
+        #expect(tapID == 101)
+        #expect(hardware.requestedPIDs == [222])
+        #expect(hardware.createdTapProcessObjectIDs == [902])
     }
+
+    @Test
 
     func testCreateAggregateDeviceUpdatesTapList() throws {
         let hardware = MockAggregateHardware()
@@ -23,11 +26,13 @@ final class AggregateDeviceBuilderTests: XCTestCase {
 
         let aggregateID = try builder.createAggregateDevice(micUID: "mic-uid", tapID: 101)
 
-        XCTAssertEqual(aggregateID, 303)
-        XCTAssertEqual(hardware.createAggregateMicUIDs, ["mic-uid"])
-        XCTAssertEqual(hardware.tapListUpdates.count, 1)
-        XCTAssertEqual(hardware.tapListUpdates.first?.aggregateDeviceID, 303)
+        #expect(aggregateID == 303)
+        #expect(hardware.createAggregateMicUIDs == ["mic-uid"])
+        #expect(hardware.tapListUpdates.count == 1)
+        #expect(hardware.tapListUpdates.first?.aggregateDeviceID == 303)
     }
+
+    @Test
 
     func testCreateAggregateDeviceCleansUpWhenTapListUpdateFails() {
         let hardware = MockAggregateHardware()
@@ -35,9 +40,11 @@ final class AggregateDeviceBuilderTests: XCTestCase {
         hardware.updateTapListError = AggregateDeviceBuilderError.failedToUpdateTapList(-999)
         let builder = AggregateDeviceBuilder(hardware: hardware)
 
-        XCTAssertThrowsError(try builder.createAggregateDevice(micUID: "mic-uid", tapID: 101))
-        XCTAssertEqual(hardware.destroyedAggregateIDs, [303])
+        #expect(throws: (any Error).self) { try builder.createAggregateDevice(micUID: "mic-uid", tapID: 101) }
+        #expect(hardware.destroyedAggregateIDs == [303])
     }
+
+    @Test
 
     func testTeardownDestroysTapThenAggregate() {
         let hardware = MockAggregateHardware()
@@ -45,7 +52,7 @@ final class AggregateDeviceBuilderTests: XCTestCase {
 
         builder.teardown(tapID: 123, aggregateDeviceID: 456)
 
-        XCTAssertEqual(hardware.callOrder, ["destroyTap:123", "destroyAggregate:456"])
+        #expect(hardware.callOrder == ["destroyTap:123", "destroyAggregate:456"])
     }
 }
 

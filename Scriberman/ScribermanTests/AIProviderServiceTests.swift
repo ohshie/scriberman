@@ -1,44 +1,50 @@
 import Foundation
 import OpenAI
-import XCTest
+import Testing
 @testable import Scriberman
 
 @MainActor
-final class AIProviderServiceTests: XCTestCase {
+final class AIProviderServiceTests {
     private enum TestError: Error {
         case expectedFailure
     }
+
+    @Test
 
     func testIsConfiguredTransitionsForValidInvalidAndDeletedKey() {
         let keychainStore = MockKeychainStore()
         let service = makeService(keychainStore: keychainStore)
 
-        XCTAssertFalse(service.isConfigured)
+        #expect(!(service.isConfigured))
 
         service.saveAPIKey("sk-12345678901234567890")
-        XCTAssertTrue(service.isConfigured)
+        #expect(service.isConfigured)
 
         service.saveAPIKey("invalid-key")
-        XCTAssertFalse(service.isConfigured)
+        #expect(!(service.isConfigured))
 
         service.saveAPIKey("")
-        XCTAssertFalse(service.isConfigured)
-        XCTAssertEqual(keychainStore.deleteCalls.count, 1)
+        #expect(!(service.isConfigured))
+        #expect(keychainStore.deleteCalls.count == 1)
     }
+
+    @Test
 
     func testIsEnabledPersistsToAIProviderStore() {
         let suiteSuffix = "isEnabled"
         let defaults = makeUserDefaults(suffix: suiteSuffix)
 
         let service = makeService(defaults: defaults)
-        XCTAssertFalse(service.isEnabled)
+        #expect(!(service.isEnabled))
 
         service.isEnabled = true
 
         let restored = AIProviderStore(defaults: defaults)
-        XCTAssertTrue(restored.isEnabled)
+        #expect(restored.isEnabled)
         defaults.removePersistentDomain(forName: "AIProviderServiceTests.\(suiteSuffix)")
     }
+
+    @Test
 
     func testConnectionShortCircuitsWithoutConfiguredKeyAndDoesNotCreateClient() async {
         var clientFactoryCalls = 0
@@ -51,9 +57,11 @@ final class AIProviderServiceTests: XCTestCase {
 
         await service.testConnection()
 
-        XCTAssertEqual(clientFactoryCalls, 0)
-        XCTAssertEqual(service.connectionStatus, .failed("No API key configured"))
+        #expect(clientFactoryCalls == 0)
+        #expect(service.connectionStatus == .failed("No API key configured"))
     }
+
+    @Test
 
     func testFetchModelsFallsBackWhenFetchingThrows() async {
         let keychainStore = MockKeychainStore()
@@ -66,13 +74,17 @@ final class AIProviderServiceTests: XCTestCase {
 
         await service.fetchModels()
 
-        XCTAssertEqual(service.availableModels, ["gpt-5.2"])
+        #expect(service.availableModels == ["gpt-5.2"])
     }
+
+    @Test
 
     func testMakeClientReturnsNilWhenNoKeyStored() {
         let service = makeService()
-        XCTAssertNil(service.makeClient())
+        #expect(service.makeClient() == nil)
     }
+
+    @Test
 
     func testPerformTransformationBuildsExpectedRequestStructure() async {
         let keychainStore = MockKeychainStore()
@@ -93,28 +105,30 @@ final class AIProviderServiceTests: XCTestCase {
                 transcript: "Transcript body",
                 systemPrompt: "Summarize this transcript"
             )
-            XCTFail("Expected provider failure")
+            Issue.record("Expected provider failure")
         } catch {
-            XCTAssertEqual(
-                error.localizedDescription,
-                "Could not transform transcript right now. Check your key/network and try again."
+            #expect(
+                error.localizedDescription
+                    == "Could not transform transcript right now. Check your key/network and try again."
             )
         }
 
-        XCTAssertEqual(capturedQuery?.model, "gpt-5.2")
-        XCTAssertEqual(capturedQuery?.instructions, "Summarize this transcript")
+        #expect(capturedQuery?.model == "gpt-5.2")
+        #expect(capturedQuery?.instructions == "Summarize this transcript")
         if case let .textInput(input)? = capturedQuery?.input {
-            XCTAssertEqual(input, "Transcript body")
+            #expect(input == "Transcript body")
         } else {
-            XCTFail("Expected text input request")
+            Issue.record("Expected text input request")
         }
     }
+
+    @Test
 
     func testShouldWarnAboutTranscriptLengthThreshold() {
         let service = makeService()
 
-        XCTAssertFalse(service.shouldWarnAboutTranscriptLength(String(repeating: "a", count: 40_000)))
-        XCTAssertTrue(service.shouldWarnAboutTranscriptLength(String(repeating: "a", count: 40_001)))
+        #expect(!(service.shouldWarnAboutTranscriptLength(String(repeating: "a", count: 40_000))))
+        #expect(service.shouldWarnAboutTranscriptLength(String(repeating: "a", count: 40_001)))
     }
 
     private func makeService(
@@ -146,23 +160,23 @@ final class AIProviderServiceTests: XCTestCase {
 }
 
 @MainActor
-final class AIPromptStoreTests: XCTestCase {
+final class AIPromptStoreTests {
     nonisolated(unsafe) private var defaults: UserDefaults!
     nonisolated(unsafe) private var suiteName: String!
 
-    override func setUp() {
-        super.setUp()
+    init() {
         suiteName = "AIPromptStoreTests.\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)
         defaults.removePersistentDomain(forName: suiteName)
     }
 
-    override func tearDown() {
+    deinit {
         defaults.removePersistentDomain(forName: suiteName)
         defaults = nil
         suiteName = nil
-        super.tearDown()
     }
+
+    @Test
 
     func testAddPromptPersistsPrompt() {
         let store = AIPromptStore(defaults: defaults)
@@ -170,9 +184,11 @@ final class AIPromptStoreTests: XCTestCase {
         let added = store.addPrompt(name: "Summary", content: "Summarize this transcript")
         let prompts = store.loadPrompts()
 
-        XCTAssertEqual(prompts.count, 1)
-        XCTAssertEqual(prompts.first, added)
+        #expect(prompts.count == 1)
+        #expect(prompts.first == added)
     }
+
+    @Test
 
     func testUpdatePromptUpdatesPersistedPrompt() {
         let store = AIPromptStore(defaults: defaults)
@@ -181,11 +197,13 @@ final class AIPromptStoreTests: XCTestCase {
         store.updatePrompt(id: added.id, name: "Action Items", content: "Extract actions")
         let prompts = store.loadPrompts()
 
-        XCTAssertEqual(prompts.count, 1)
-        XCTAssertEqual(prompts.first?.id, added.id)
-        XCTAssertEqual(prompts.first?.name, "Action Items")
-        XCTAssertEqual(prompts.first?.content, "Extract actions")
+        #expect(prompts.count == 1)
+        #expect(prompts.first?.id == added.id)
+        #expect(prompts.first?.name == "Action Items")
+        #expect(prompts.first?.content == "Extract actions")
     }
+
+    @Test
 
     func testDeletePromptRemovesPromptAndClearsLastUsedWhenNeeded() {
         let store = AIPromptStore(defaults: defaults)
@@ -196,35 +214,38 @@ final class AIPromptStoreTests: XCTestCase {
         store.deletePrompt(id: second.id)
 
         let prompts = store.loadPrompts()
-        XCTAssertEqual(prompts.count, 1)
-        XCTAssertEqual(prompts.first?.id, first.id)
-        XCTAssertNil(store.loadLastUsedPromptID())
+        #expect(prompts.count == 1)
+        #expect(prompts.first?.id == first.id)
+        #expect(store.loadLastUsedPromptID() == nil)
     }
 }
 
-final class SettingsViewSourceTests: XCTestCase {
+final class SettingsViewSourceTests {
+    @Test
     func testSettingsViewUsesTabViewWithGeneralAndPromptsTabs() throws {
         let source = try settingsSource()
 
-        XCTAssertTrue(source.contains("TabView(selection: $selectedTab)"))
-        XCTAssertTrue(source.contains("Label(\"General\", systemImage: \"gearshape\")"))
-        XCTAssertTrue(source.contains("Label(\"Prompts\", systemImage: \"text.bubble\")"))
+        #expect(source.contains("TabView(selection: $selectedTab)"))
+        #expect(source.contains("Label(\"General\", systemImage: \"gearshape\")"))
+        #expect(source.contains("Label(\"Prompts\", systemImage: \"text.bubble\")"))
     }
+
+    @Test
 
     func testPromptsTabSupportsCRUDAndValidationHooks() throws {
         let settingsSource = try settingsSource()
         let promptViewModelSource = try promptManagementViewModelSource()
 
-        XCTAssertTrue(settingsSource.contains("Button(\"Add Prompt\")"))
-        XCTAssertTrue(settingsSource.contains("Button(\"Edit\")"))
-        XCTAssertTrue(settingsSource.contains("Button(\"Delete\", role: .destructive)"))
-        XCTAssertTrue(settingsSource.contains("promptVM.savePrompt()"))
-        XCTAssertTrue(settingsSource.contains("promptVM.deletePrompt(prompt)"))
-        XCTAssertTrue(settingsSource.contains("promptVM.presentEditor(for: nil)"))
+        #expect(settingsSource.contains("Button(\"Add Prompt\")"))
+        #expect(settingsSource.contains("Button(\"Edit\")"))
+        #expect(settingsSource.contains("Button(\"Delete\", role: .destructive)"))
+        #expect(settingsSource.contains("promptVM.savePrompt()"))
+        #expect(settingsSource.contains("promptVM.deletePrompt(prompt)"))
+        #expect(settingsSource.contains("promptVM.presentEditor(for: nil)"))
 
-        XCTAssertTrue(promptViewModelSource.contains("\"Prompt name is required.\""))
-        XCTAssertTrue(promptViewModelSource.contains("\"Prompt content is required.\""))
-        XCTAssertTrue(promptViewModelSource.contains("\"Prompt name must be unique.\""))
+        #expect(promptViewModelSource.contains("\"Prompt name is required.\""))
+        #expect(promptViewModelSource.contains("\"Prompt content is required.\""))
+        #expect(promptViewModelSource.contains("\"Prompt name must be unique.\""))
     }
 
     private func settingsSource() throws -> String {

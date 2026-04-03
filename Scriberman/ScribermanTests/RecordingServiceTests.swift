@@ -1,22 +1,26 @@
 import Foundation
 import SwiftData
-import XCTest
+import Testing
 @testable import Scriberman
 
-final class RecordingServiceTests: XCTestCase {
+final class RecordingServiceTests {
     private func fetchRecordingSession(id: UUID, from context: ModelContext) throws -> RecordingSession {
         var descriptor = FetchDescriptor<RecordingSession>()
         descriptor.fetchLimit = 1_000
-        return try XCTUnwrap(context.fetch(descriptor).first(where: { $0.id == id }))
+        return try #require(context.fetch(descriptor).first(where: { $0.id == id }))
     }
+
+    @Test
 
     func testStartRecordingUsesTmpFolderMicPath() {
         let workspace = makeWorkspace()
         let urls = RecordingService.recordingFileURLs(in: workspace)
 
-        XCTAssertTrue(urls.mic.path.hasSuffix("/recordings/tmp/mic.wav"))
-        XCTAssertTrue(urls.app.path.hasSuffix("/recordings/tmp/app.wav"))
+        #expect(urls.mic.path.hasSuffix("/recordings/tmp/mic.wav"))
+        #expect(urls.app.path.hasSuffix("/recordings/tmp/app.wav"))
     }
+
+    @Test
 
     func testStopRecordingPromotesTmpFolderToNamedFolderPattern() throws {
         let workspace = makeWorkspace()
@@ -36,10 +40,12 @@ final class RecordingServiceTests: XCTestCase {
         let folderName = result.mic.deletingLastPathComponent().lastPathComponent
         let expectedPattern = #"^Recording [A-Z][a-z]{2} \d{2} at \d{2}-\d{2} [A-Za-z0-9]{2}$"#
 
-        XCTAssertFalse(FileManager.default.fileExists(atPath: workspace.tmpRecordingURL.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: result.mic.path))
-        XCTAssertNotNil(folderName.range(of: expectedPattern, options: .regularExpression))
+        #expect(!(FileManager.default.fileExists(atPath: workspace.tmpRecordingURL.path)))
+        #expect(FileManager.default.fileExists(atPath: result.mic.path))
+        #expect(folderName.range(of: expectedPattern, options: .regularExpression) != nil)
     }
+
+    @Test
 
     func testStopRecordingMicPathUsesNamedFolderNotTmp() throws {
         let workspace = makeWorkspace()
@@ -57,9 +63,11 @@ final class RecordingServiceTests: XCTestCase {
         )
         let folderName = RecordingService.folderName(createdAt: createdAt, recordingIdentifier: "abcdef12")
 
-        XCTAssertTrue(result.mic.path.hasSuffix("/recordings/\(folderName)/mic.wav"))
-        XCTAssertFalse(result.mic.path.contains("/recordings/tmp/"))
+        #expect(result.mic.path.hasSuffix("/recordings/\(folderName)/mic.wav"))
+        #expect(!(result.mic.path.contains("/recordings/tmp/")))
     }
+
+    @Test
 
     func testFolderBasedPathExpectationUsesNamedFolderMicFile() throws {
         let workspace = makeWorkspace()
@@ -79,9 +87,11 @@ final class RecordingServiceTests: XCTestCase {
         )
         let folderName = RecordingService.folderName(createdAt: createdAt, recordingIdentifier: "11111111-a3")
 
-        XCTAssertEqual(result.mic.path, workspace.recordingsURL.appendingPathComponent("\(folderName)/mic.wav").path)
-        XCTAssertEqual(result.app?.path, workspace.recordingsURL.appendingPathComponent("\(folderName)/app.wav").path)
+        #expect(result.mic.path == workspace.recordingsURL.appendingPathComponent("\(folderName)/mic.wav").path)
+        #expect(result.app?.path == workspace.recordingsURL.appendingPathComponent("\(folderName)/app.wav").path)
     }
+
+    @Test
 
     func testMixdownFailureLeavesSessionMixdownURLNilAndStatusUnchanged() async throws {
         let container = try ModelContainer(
@@ -125,9 +135,11 @@ final class RecordingServiceTests: XCTestCase {
 
         let sessionID = session.id
         let persisted = try fetchRecordingSession(id: sessionID, from: context)
-        XCTAssertNil(persisted.mixdownURL)
-        XCTAssertEqual(persisted.status, .recorded)
+        #expect(persisted.mixdownURL == nil)
+        #expect(persisted.status == .recorded)
     }
+
+    @Test
 
     func testStopRecordingWhenNotRecordingReturnsNil() async throws {
         let container = try ModelContainer(
@@ -140,8 +152,10 @@ final class RecordingServiceTests: XCTestCase {
         )
 
         let result = await service.stopRecording()
-        XCTAssertNil(result)
+        #expect(result == nil)
     }
+
+    @Test
 
     func testCaptureHostTimesKeepsFirstObservedValues() async throws {
         let container = try ModelContainer(
@@ -159,9 +173,11 @@ final class RecordingServiceTests: XCTestCase {
         await service.captureAppStartHostTimeIfNeeded(4_000)
 
         let hostTimes = await service.capturedHostTimes()
-        XCTAssertEqual(hostTimes.mic, 1_000)
-        XCTAssertEqual(hostTimes.app, 3_000)
+        #expect(hostTimes.mic == 1_000)
+        #expect(hostTimes.app == 3_000)
     }
+
+    @Test
 
     func testStartRecordingWithCustomTitlePersistsTitle() async throws {
         let workspace = makeWorkspace()
@@ -193,11 +209,13 @@ final class RecordingServiceTests: XCTestCase {
         )
 
         let sessionID = await service.stopRecording()
-        XCTAssertNotNil(sessionID)
+        #expect(sessionID != nil)
         let ctx = ModelContext(container)
-        let fetched = try fetchRecordingSession(id: try XCTUnwrap(sessionID), from: ctx)
-        XCTAssertEqual(fetched.title, customTitle)
+        let fetched = try fetchRecordingSession(id: try #require(sessionID), from: ctx)
+        #expect(fetched.title == customTitle)
     }
+
+    @Test
 
     func testStopRecordingFallbacksToDefaultTitleWhenNoPendingTitle() async throws {
         let workspace = makeWorkspace()
@@ -224,10 +242,10 @@ final class RecordingServiceTests: XCTestCase {
         )
 
         let sessionID = await service.stopRecording()
-        XCTAssertNotNil(sessionID)
+        #expect(sessionID != nil)
         let ctx = ModelContext(container)
-        let fetched = try fetchRecordingSession(id: try XCTUnwrap(sessionID), from: ctx)
-        XCTAssertTrue(fetched.title.hasPrefix("Recording "))
+        let fetched = try fetchRecordingSession(id: try #require(sessionID), from: ctx)
+        #expect(fetched.title.hasPrefix("Recording "))
     }
 
     private func makeWorkspace() -> Workspace {

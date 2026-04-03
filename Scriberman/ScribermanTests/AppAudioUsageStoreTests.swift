@@ -1,27 +1,27 @@
-import XCTest
+import Foundation
+import Testing
 @testable import Scriberman
 
-final class AppAudioUsageStoreTests: XCTestCase {
+final class AppAudioUsageStoreTests {
     private var userDefaults: UserDefaults!
     private var suiteName: String!
 
-    override func setUp() {
-        super.setUp()
+    init() {
         suiteName = "AppAudioUsageStoreTests.\(UUID().uuidString)"
         userDefaults = UserDefaults(suiteName: suiteName)
         userDefaults.removePersistentDomain(forName: suiteName)
     }
 
-    override func tearDown() {
+    deinit {
         if let suiteName {
             userDefaults.removePersistentDomain(forName: suiteName)
         }
         userDefaults = nil
         suiteName = nil
-        super.tearDown()
     }
 
     @MainActor
+    @Test
     func testSortOrdersByUsageThenNameThenBundleID() {
         userDefaults.set(
             [
@@ -41,13 +41,14 @@ final class AppAudioUsageStoreTests: XCTestCase {
 
         let sorted = store.sort(apps)
 
-        XCTAssertEqual(
-            sorted.map(\.bundleID),
-            ["com.test.bravo", "com.test.charlie", "com.test.alpha", "com.test.beta"]
+        #expect(
+            sorted.map(\.bundleID)
+                == ["com.test.bravo", "com.test.charlie", "com.test.alpha", "com.test.beta"]
         )
     }
 
     @MainActor
+    @Test
     func testIncrementPersistsScores() {
         let store = AppAudioUsageStore(userDefaults: userDefaults)
 
@@ -55,10 +56,11 @@ final class AppAudioUsageStoreTests: XCTestCase {
         store.increment(bundleID: "com.test.spotify")
 
         let persistedScores = userDefaults.dictionary(forKey: "appAudioUsageScores") as? [String: Int]
-        XCTAssertEqual(persistedScores?["com.test.spotify"], 2)
+        #expect(persistedScores?["com.test.spotify"] == 2)
     }
 
     @MainActor
+    @Test
     func testInitLoadsPersistedScoresForSorting() {
         userDefaults.set(["com.test.music": 5], forKey: "appAudioUsageScores")
 
@@ -68,6 +70,6 @@ final class AppAudioUsageStoreTests: XCTestCase {
             CapturedApp(bundleID: "com.test.music", name: "Music", pid: 2, icon: nil)
         ]
 
-        XCTAssertEqual(store.sort(apps).map(\.bundleID), ["com.test.music", "com.test.browser"])
+        #expect(store.sort(apps).map(\.bundleID) == ["com.test.music", "com.test.browser"])
     }
 }

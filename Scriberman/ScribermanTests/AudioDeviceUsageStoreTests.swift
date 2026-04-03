@@ -1,29 +1,28 @@
 import CoreAudio
 import Foundation
-import XCTest
+import Testing
 @testable import Scriberman
 
-final class AudioDeviceUsageStoreTests: XCTestCase {
+final class AudioDeviceUsageStoreTests {
     private var userDefaults: UserDefaults!
     private var suiteName: String!
 
-    override func setUp() {
-        super.setUp()
+    init() {
         suiteName = "AudioDeviceUsageStoreTests.\(UUID().uuidString)"
         userDefaults = UserDefaults(suiteName: suiteName)
         userDefaults.removePersistentDomain(forName: suiteName)
     }
 
-    override func tearDown() {
+    deinit {
         if let suiteName {
             userDefaults.removePersistentDomain(forName: suiteName)
         }
         userDefaults = nil
         suiteName = nil
-        super.tearDown()
     }
 
     @MainActor
+    @Test
     func testSortOrdersByUsageThenNameThenUID() {
         userDefaults.set(["uid-1": 2, "uid-3": 1], forKey: "deviceUsageScores")
 
@@ -37,10 +36,11 @@ final class AudioDeviceUsageStoreTests: XCTestCase {
 
         let sorted = store.sort(devices)
 
-        XCTAssertEqual(sorted.map(\.uid), ["uid-1", "uid-3", "uid-2", "uid-4"])
+        #expect(sorted.map(\.uid) == ["uid-1", "uid-3", "uid-2", "uid-4"])
     }
 
     @MainActor
+    @Test
     func testIncrementPersistsScores() {
         let store = AudioDeviceUsageStore(userDefaults: userDefaults)
 
@@ -48,10 +48,11 @@ final class AudioDeviceUsageStoreTests: XCTestCase {
         store.increment(uid: "uid-7")
 
         let persistedScores = userDefaults.dictionary(forKey: "deviceUsageScores") as? [String: Int]
-        XCTAssertEqual(persistedScores?["uid-7"], 2)
+        #expect(persistedScores?["uid-7"] == 2)
     }
 
     @MainActor
+    @Test
     func testInitLoadsPersistedScoresForSorting() {
         userDefaults.set(["uid-2": 5], forKey: "deviceUsageScores")
 
@@ -61,6 +62,6 @@ final class AudioDeviceUsageStoreTests: XCTestCase {
             AudioInputDevice(id: AudioDeviceID(2), uid: "uid-2", name: "Mic Two")
         ]
 
-        XCTAssertEqual(store.sort(devices).map(\.uid), ["uid-2", "uid-1"])
+        #expect(store.sort(devices).map(\.uid) == ["uid-2", "uid-1"])
     }
 }

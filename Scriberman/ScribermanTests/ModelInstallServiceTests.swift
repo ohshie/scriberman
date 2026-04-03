@@ -1,9 +1,10 @@
 import FluidAudio
 import Foundation
-import XCTest
+import Testing
 @testable import Scriberman
 
-final class ModelInstallServiceTests: XCTestCase {
+final class ModelInstallServiceTests {
+    @Test
     func testValidateInstalledRepoOfflineDiarizationReturnsFalseWhenOnlyStreamingFilesPresent() async throws {
         let service = makeService()
         let tempRoot = try makeTempRoot()
@@ -13,8 +14,10 @@ final class ModelInstallServiceTests: XCTestCase {
         try createRequiredFiles(ModelNames.Diarizer.requiredModels, in: repoURL)
 
         let isValid = try await service.validateInstalledRepoForTesting(for: .offlineDiarization, at: repoURL)
-        XCTAssertFalse(isValid)
+        #expect(!(isValid))
     }
+
+    @Test
 
     func testValidateInstalledRepoOfflineDiarizationReturnsTrueWhenStreamingAndOfflineFilesPresent() async throws {
         let service = makeService()
@@ -26,8 +29,10 @@ final class ModelInstallServiceTests: XCTestCase {
         try createRequiredFiles(ModelNames.OfflineDiarizer.requiredModels, in: repoURL)
 
         let isValid = try await service.validateInstalledRepoForTesting(for: .offlineDiarization, at: repoURL)
-        XCTAssertTrue(isValid)
+        #expect(isValid)
     }
+
+    @Test
 
     func testValidateInstalledRepoOfflineDiarizationReturnsFalseWhenOnlyOfflineFilesPresent() async throws {
         let service = makeService()
@@ -38,8 +43,10 @@ final class ModelInstallServiceTests: XCTestCase {
         try createRequiredFiles(ModelNames.OfflineDiarizer.requiredModels, in: repoURL)
 
         let isValid = try await service.validateInstalledRepoForTesting(for: .offlineDiarization, at: repoURL)
-        XCTAssertFalse(isValid)
+        #expect(!(isValid))
     }
+
+    @Test
 
     func testWarmUpModelsCompletesWithoutThrowWhenModelDirectoriesExist() async throws {
         let service = makeService()
@@ -58,6 +65,8 @@ final class ModelInstallServiceTests: XCTestCase {
 
         await service.warmUpModels(workspace: workspace)
     }
+
+    @Test
 
     func testWarmUpModelsVADFailureIsNonFatalWhenASRAndDiarizerWarmUpSucceed() async {
         let service = makeService()
@@ -80,9 +89,9 @@ final class ModelInstallServiceTests: XCTestCase {
         let didRunDiarizer = await probe.didRunDiarizer()
         let didAttemptVAD = await probe.didAttemptVAD()
 
-        XCTAssertTrue(didRunASR)
-        XCTAssertTrue(didRunDiarizer)
-        XCTAssertTrue(didAttemptVAD)
+        #expect(didRunASR)
+        #expect(didRunDiarizer)
+        #expect(didAttemptVAD)
     }
 
     private func makeService() -> ModelInstallService {

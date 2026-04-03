@@ -1,9 +1,9 @@
 import AVFoundation
-import XCTest
+import Testing
 @testable import Scriberman
 
 @MainActor
-final class PermissionServiceTests: XCTestCase {
+final class PermissionServiceTests {
     nonisolated(unsafe) private var userDefaults: UserDefaults!
     nonisolated(unsafe) private var userDefaultsSuiteName: String!
     nonisolated(unsafe) private var notificationCenter: NotificationCenter!
@@ -12,8 +12,7 @@ final class PermissionServiceTests: XCTestCase {
     nonisolated(unsafe) private var functionalPermissions: MockScreenRecordingFunctionalPermissionProvider!
     nonisolated(unsafe) private var service: PermissionService!
 
-    override func setUp() {
-        super.setUp()
+    init() {
         userDefaultsSuiteName = "PermissionServiceTests.\(UUID().uuidString)"
         userDefaults = UserDefaults(suiteName: userDefaultsSuiteName)
         userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
@@ -23,7 +22,7 @@ final class PermissionServiceTests: XCTestCase {
         functionalPermissions = MockScreenRecordingFunctionalPermissionProvider()
     }
 
-    override func tearDown() {
+    deinit {
         service = nil
         functionalPermissions = nil
         screenRecordingPermissions = nil
@@ -34,8 +33,9 @@ final class PermissionServiceTests: XCTestCase {
         }
         userDefaults = nil
         userDefaultsSuiteName = nil
-        super.tearDown()
     }
+
+    @Test
 
     func testMicTransitionsFromNotDeterminedToGrantedAfterRequest() async {
         microphonePermissions.status = .notDetermined
@@ -51,13 +51,15 @@ final class PermissionServiceTests: XCTestCase {
             notificationCenter: notificationCenter
         )
 
-        XCTAssertEqual(service.micStatus, .notDetermined)
+        #expect(service.micStatus == .notDetermined)
 
         let granted = await service.requestMic()
 
-        XCTAssertTrue(granted)
-        XCTAssertEqual(service.micStatus, .granted)
+        #expect(granted)
+        #expect(service.micStatus == .granted)
     }
+
+    @Test
 
     func testScreenRecordingStatusSynthesizesNotDeterminedThenDeniedAfterRequest() {
         microphonePermissions.status = .authorized
@@ -72,13 +74,15 @@ final class PermissionServiceTests: XCTestCase {
             notificationCenter: notificationCenter
         )
 
-        XCTAssertEqual(service.screenRecordingStatus, .notDetermined)
+        #expect(service.screenRecordingStatus == .notDetermined)
 
         _ = service.requestScreenRecording()
 
-        XCTAssertEqual(service.screenRecordingStatus, .denied)
-        XCTAssertTrue(userDefaults.bool(forKey: PermissionService.DefaultsKey.screenRecordingPromptHasBeenShown))
+        #expect(service.screenRecordingStatus == .denied)
+        #expect(userDefaults.bool(forKey: PermissionService.DefaultsKey.screenRecordingPromptHasBeenShown))
     }
+
+    @Test
 
     func testCheckAllMapsScreenRecordingToDeniedWhenPromptWasShownAndPreflightIsFalse() {
         microphonePermissions.status = .authorized
@@ -93,8 +97,10 @@ final class PermissionServiceTests: XCTestCase {
             notificationCenter: notificationCenter
         )
 
-        XCTAssertEqual(service.screenRecordingStatus, .denied)
+        #expect(service.screenRecordingStatus == .denied)
     }
+
+    @Test
 
     func testVerifyMicRechecksCurrentAuthorizationStatus() async {
         microphonePermissions.status = .notDetermined
@@ -111,9 +117,11 @@ final class PermissionServiceTests: XCTestCase {
         microphonePermissions.status = .authorized
         let granted = await service.verifyMic()
 
-        XCTAssertTrue(granted)
-        XCTAssertEqual(service.micStatus, .granted)
+        #expect(granted)
+        #expect(service.micStatus == .granted)
     }
+
+    @Test
 
     func testVerifyScreenRecordingReturnsFalseWhenPreflightDenied() async {
         microphonePermissions.status = .authorized
@@ -130,9 +138,11 @@ final class PermissionServiceTests: XCTestCase {
 
         let granted = await service.verifyScreenRecording()
 
-        XCTAssertFalse(granted)
-        XCTAssertEqual(service.screenRecordingStatus, .denied)
+        #expect(!(granted))
+        #expect(service.screenRecordingStatus == .denied)
     }
+
+    @Test
 
     func testVerifyScreenRecordingRequiresFunctionalShareableContent() async {
         microphonePermissions.status = .authorized
@@ -152,9 +162,11 @@ final class PermissionServiceTests: XCTestCase {
 
         let granted = await service.verifyScreenRecording()
 
-        XCTAssertFalse(granted)
-        XCTAssertEqual(service.screenRecordingStatus, .denied)
+        #expect(!(granted))
+        #expect(service.screenRecordingStatus == .denied)
     }
+
+    @Test
 
     func testVerifyScreenRecordingSucceedsWhenShareableContentExists() async {
         microphonePermissions.status = .authorized
@@ -174,9 +186,11 @@ final class PermissionServiceTests: XCTestCase {
 
         let granted = await service.verifyScreenRecording()
 
-        XCTAssertTrue(granted)
-        XCTAssertEqual(service.screenRecordingStatus, .granted)
+        #expect(granted)
+        #expect(service.screenRecordingStatus == .granted)
     }
+
+    @Test
 
     func testAppAudioCaptureDeniedNotificationForcesScreenStatusDenied() async {
         microphonePermissions.status = .authorized
@@ -189,7 +203,7 @@ final class PermissionServiceTests: XCTestCase {
             userDefaults: userDefaults,
             notificationCenter: notificationCenter
         )
-        XCTAssertEqual(service.screenRecordingStatus, .granted)
+        #expect(service.screenRecordingStatus == .granted)
 
         notificationCenter.post(
             name: .appAudioCaptureAccessDenied,
@@ -198,8 +212,8 @@ final class PermissionServiceTests: XCTestCase {
         )
 
         await Task.yield()
-        XCTAssertEqual(service.screenRecordingStatus, .denied)
-        XCTAssertTrue(userDefaults.bool(forKey: PermissionService.DefaultsKey.screenRecordingPromptHasBeenShown))
+        #expect(service.screenRecordingStatus == .denied)
+        #expect(userDefaults.bool(forKey: PermissionService.DefaultsKey.screenRecordingPromptHasBeenShown))
     }
 }
 
