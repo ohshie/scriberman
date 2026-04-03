@@ -58,6 +58,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         logger.info(
             "hideToTray activationPolicyChanged=\(changed) currentPolicy=\(String(describing: NSApp.activationPolicy), privacy: .public)"
         )
+
+        // If the system/user customization immediately rejects insertion, recover
+        // by restoring the main window so the app never becomes inaccessible.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard let self, let appState else {
+                return
+            }
+
+            if appState.menuBarSettings.isInTrayMode {
+                self.logger.info("hideToTray verification succeeded: menu bar item remains inserted")
+                return
+            }
+
+            self.logger.error(
+                "hideToTray verification failed: menu bar extra rejected; restoring regular activation and main window"
+            )
+            self.showMainWindow()
+        }
     }
 
     func showMainWindow() {
