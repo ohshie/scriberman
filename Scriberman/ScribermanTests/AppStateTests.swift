@@ -205,6 +205,36 @@ final class AppStateTests {
     }
 
     @Test
+    func testSettingsViewSourceDeclaresMenuBarTab() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let viewFileURL = testsDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("UI/SettingsView.swift")
+        let viewSource = try String(contentsOf: viewFileURL, encoding: .utf8)
+
+        #expect(viewSource.contains("case menuBar"))
+        #expect(viewSource.contains("Label(\"Menu Bar\", systemImage: \"menubar.rectangle\")"))
+        #expect(viewSource.contains("MenuBarSettingsView("))
+    }
+
+    @Test
+    func testMenuBarSettingsViewSourceDeclaresCloseActionAndReset() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let viewFileURL = testsDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("UI/MenuBarSettingsView.swift")
+        let viewSource = try String(contentsOf: viewFileURL, encoding: .utf8)
+
+        #expect(viewSource.contains("Picker(\"When closing main window\""))
+        #expect(viewSource.contains("MenuBarSettings.CloseAction.ask"))
+        #expect(viewSource.contains("MenuBarSettings.CloseAction.tray"))
+        #expect(viewSource.contains("MenuBarSettings.CloseAction.quit"))
+        #expect(viewSource.contains("Button(\"Reset to Defaults\")"))
+        #expect(viewSource.contains("return \"System Default\""))
+        #expect(viewSource.contains("return \"None\""))
+    }
+
+    @Test
     func testSelectPendingSessionCreatesSinglePendingSession() {
         let permissionService = MockPermissionService()
         let services = makeServiceContainer(permissionService: permissionService)

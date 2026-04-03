@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     private enum SettingsTab {
         case general
+        case menuBar
         case prompts
         case advanced
     }
@@ -128,6 +129,25 @@ struct SettingsView: View {
                     Label("General", systemImage: "gearshape")
                 }
                 .tag(SettingsTab.general)
+
+                Form {
+                    Section("Menu Bar") {
+                        MenuBarSettingsView(
+                            menuBarSettings: appState.menuBarSettings,
+                            availableDevices: appState.audioDeviceService.availableDevices,
+                            runningApps: appState.appAudioService.runningApps
+                        )
+                    }
+                }
+                .formStyle(.grouped)
+                .onAppear {
+                    appState.audioDeviceService.refreshDevices()
+                    appState.appAudioService.refreshRunningApps()
+                }
+                .tabItem {
+                    Label("Menu Bar", systemImage: "menubar.rectangle")
+                }
+                .tag(SettingsTab.menuBar)
 
                 Form {
                     Section("Saved Prompts") {

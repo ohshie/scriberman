@@ -102,6 +102,7 @@
 		79C2018C2F7FAE7D002A1163 /* MenuBarSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79C2018B2F7FAE7D002A1163 /* MenuBarSettingsTests.swift */; };
 		79C2018F2F7FB050002A1163 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79C2018E2F7FB050002A1163 /* AppDelegate.swift */; };
 		79C201912F7FB1DA002A1163 /* MenuBarExtraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79C201902F7FB1DA002A1163 /* MenuBarExtraView.swift */; };
+		79C201932F7FB6AE002A1163 /* MenuBarSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79C201922F7FB6AE002A1163 /* MenuBarSettingsView.swift */; };
 		79DCE41A2F77BC3D0024DC26 /* TranscriptionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */; };
 		79DCE41D2F77CC1E0024DC26 /* PermissionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */; };
 		79DCE4212F77D02C0024DC26 /* PermissionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4202F77D02C0024DC26 /* PermissionServiceTests.swift */; };
@@ -268,6 +269,7 @@
 		79C2018B2F7FAE7D002A1163 /* MenuBarSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarSettingsTests.swift; sourceTree = "<group>"; };
 		79C2018E2F7FB050002A1163 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		79C201902F7FB1DA002A1163 /* MenuBarExtraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarExtraView.swift; sourceTree = "<group>"; };
+		79C201922F7FB6AE002A1163 /* MenuBarSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarSettingsView.swift; sourceTree = "<group>"; };
 		79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionServiceTests.swift; sourceTree = "<group>"; };
 		79DCE41B2F77CC0B0024DC26 /* Scriberman.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = Scriberman.xctestplan; sourceTree = "<group>"; };
 		79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionService.swift; sourceTree = "<group>"; };
@@ -492,6 +494,7 @@
 				79BE35382F7EA83000DB542F /* AudioPlayerBar.swift */,
 				79C2017E2F7F8BB1002A1163 /* Onboarding */,
 				79C201902F7FB1DA002A1163 /* MenuBarExtraView.swift */,
+				79C201922F7FB6AE002A1163 /* MenuBarSettingsView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -887,6 +890,7 @@
 				F0A1B2C3D4E5F60718293B43 /* RunningApplicationProvider.swift in Sources */,
 				F0A1B2C3D4E5F60718293B44 /* AppAudioServiceProtocol.swift in Sources */,
 				F0A1B2C3D4E5F60718293B45 /* AudioDeviceHardware.swift in Sources */,
+				79C201932F7FB6AE002A1163 /* MenuBarSettingsView.swift in Sources */,
 				79C201882F7F8C15002A1163 /* WorkspaceOnboardingStep.swift in Sources */,
 				F0A1B2C3D4E5F60718293B46 /* AggregateDeviceHardware.swift in Sources */,
 				F0A1B2C3D4E5F60718293B47 /* AIProviderServiceProtocol.swift in Sources */,
