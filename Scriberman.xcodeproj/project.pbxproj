@@ -100,6 +100,7 @@
 		79C201882F7F8C15002A1163 /* WorkspaceOnboardingStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79C201872F7F8C15002A1163 /* WorkspaceOnboardingStep.swift */; };
 		79C2018A2F7FAE79002A1163 /* MenuBarSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79C201892F7FAE79002A1163 /* MenuBarSettings.swift */; };
 		79C2018C2F7FAE7D002A1163 /* MenuBarSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79C2018B2F7FAE7D002A1163 /* MenuBarSettingsTests.swift */; };
+		79C2018F2F7FB050002A1163 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79C2018E2F7FB050002A1163 /* AppDelegate.swift */; };
 		79DCE41A2F77BC3D0024DC26 /* TranscriptionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */; };
 		79DCE41D2F77CC1E0024DC26 /* PermissionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */; };
 		79DCE4212F77D02C0024DC26 /* PermissionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DCE4202F77D02C0024DC26 /* PermissionServiceTests.swift */; };
@@ -264,6 +265,7 @@
 		79C201872F7F8C15002A1163 /* WorkspaceOnboardingStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceOnboardingStep.swift; sourceTree = "<group>"; };
 		79C201892F7FAE79002A1163 /* MenuBarSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarSettings.swift; sourceTree = "<group>"; };
 		79C2018B2F7FAE7D002A1163 /* MenuBarSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarSettingsTests.swift; sourceTree = "<group>"; };
+		79C2018E2F7FB050002A1163 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		79DCE4192F77BC3D0024DC26 /* TranscriptionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionServiceTests.swift; sourceTree = "<group>"; };
 		79DCE41B2F77CC0B0024DC26 /* Scriberman.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = Scriberman.xctestplan; sourceTree = "<group>"; };
 		79DCE41C2F77CC1E0024DC26 /* PermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionService.swift; sourceTree = "<group>"; };
@@ -680,6 +682,7 @@
 				7873A0E448826250C7E4857D /* UI */,
 				B009250BE9EC27987EBE1F4A /* Helpers */,
 				8880B4E13E4B3CE440F0B1E3 /* Persistence */,
+				79C2018E2F7FB050002A1163 /* AppDelegate.swift */,
 			);
 			path = Scriberman;
 			sourceTree = "<group>";
@@ -894,6 +897,7 @@
 				798732712F7D8EB600570A03 /* AudioChannelReader.swift in Sources */,
 				8875A7B9DB44C4468FE50F93 /* ServiceContainer.swift in Sources */,
 				A1B2C3D4E5F60718293A4B5D /* NewSessionViewModel.swift in Sources */,
+				79C2018F2F7FB050002A1163 /* AppDelegate.swift in Sources */,
 				79BE353D2F7ED90D00DB542F /* AppAudioUsageStore.swift in Sources */,
 				79E005D62F76756000D3EAD9 /* AudioDeviceService.swift in Sources */,
 				89EB4800C21A7DBD573FE1B2 /* JobsViewModel.swift in Sources */,

@@ -155,6 +155,24 @@ final class AppStateTests {
     }
 
     @Test
+    func testAppSourceDeclaresApplicationDelegateAdaptor() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let appFileURL = testsDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("ScribermanApp.swift")
+        let appSource = try String(contentsOf: appFileURL, encoding: .utf8)
+
+        #expect(
+            appSource.contains("@NSApplicationDelegateAdaptor(AppDelegate.self)"),
+            "Expected ScribermanApp.swift to declare AppDelegate adaptor."
+        )
+        #expect(
+            appSource.contains("appDelegate.appState = appState"),
+            "Expected ScribermanApp.swift to inject appState into AppDelegate."
+        )
+    }
+
+    @Test
     func testSelectPendingSessionCreatesSinglePendingSession() {
         let permissionService = MockPermissionService()
         let services = makeServiceContainer(permissionService: permissionService)
