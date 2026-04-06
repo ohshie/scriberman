@@ -78,6 +78,7 @@
 		7987328A2F7DA41C00570A03 /* SpeakerMatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798732892F7DA41C00570A03 /* SpeakerMatcherTests.swift */; };
 		7987328C2F7DB47F00570A03 /* ModelInstallServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987328B2F7DB47F00570A03 /* ModelInstallServiceTests.swift */; };
 		7987328E2F7DBC2800570A03 /* SettingsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987328D2F7DBC2800570A03 /* SettingsViewModelTests.swift */; };
+		79AF763F2F7FF35600F5B259 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 79AF763E2F7FF35600F5B259 /* Assets.xcassets */; };
 		79BE35232F7E52ED00DB542F /* ThirdPartySendable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35222F7E52ED00DB542F /* ThirdPartySendable.swift */; };
 		79BE35252F7E6EF700DB542F /* TranscriptDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35242F7E6EF700DB542F /* TranscriptDetailViewModel.swift */; };
 		79BE35272F7E71F200DB542F /* PromptManagementViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35262F7E71F200DB542F /* PromptManagementViewModel.swift */; };
@@ -245,6 +246,7 @@
 		798732892F7DA41C00570A03 /* SpeakerMatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMatcherTests.swift; sourceTree = "<group>"; };
 		7987328B2F7DB47F00570A03 /* ModelInstallServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelInstallServiceTests.swift; sourceTree = "<group>"; };
 		7987328D2F7DBC2800570A03 /* SettingsViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModelTests.swift; sourceTree = "<group>"; };
+		79AF763E2F7FF35600F5B259 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		79BE35222F7E52ED00DB542F /* ThirdPartySendable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThirdPartySendable.swift; sourceTree = "<group>"; };
 		79BE35242F7E6EF700DB542F /* TranscriptDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptDetailViewModel.swift; sourceTree = "<group>"; };
 		79BE35262F7E71F200DB542F /* PromptManagementViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptManagementViewModel.swift; sourceTree = "<group>"; };
@@ -689,6 +691,7 @@
 				B009250BE9EC27987EBE1F4A /* Helpers */,
 				8880B4E13E4B3CE440F0B1E3 /* Persistence */,
 				79C2018E2F7FB050002A1163 /* AppDelegate.swift */,
+				79AF763E2F7FF35600F5B259 /* Assets.xcassets */,
 			);
 			path = Scriberman;
 			sourceTree = "<group>";
@@ -848,6 +851,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				79AF763F2F7FF35600F5B259 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1123,8 +1127,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ARCHS = arm64;
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Scriberman/Scriberman.Debug.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				COMBINE_HIDPI_IMAGES = YES;
@@ -1241,8 +1246,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ARCHS = arm64;
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Scriberman/Scriberman.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Manual;
