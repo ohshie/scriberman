@@ -18,6 +18,7 @@ final class AppState {
     let jobsViewModel: JobsViewModel
     let settingsViewModel: SettingsViewModel
     let menuBarSettings: MenuBarSettings
+    let appAudioSettings: AppAudioSettings
     private let restoreWorkspaceHandler: () async throws -> Workspace
     private let setWorkspaceHandler: (URL) async throws -> Workspace
 
@@ -98,6 +99,7 @@ final class AppState {
             speakerEmbeddingStore: services.background.speakerEmbeddingStore
         )
         self.menuBarSettings = MenuBarSettings()
+        self.appAudioSettings = services.main.appAudioSettings
         self.newSessionViewModel.menuBarSettings = self.menuBarSettings
         self.newSessionViewModel.settingsViewModel = self.settingsViewModel
     }

@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import SwiftData
 import Testing
@@ -99,9 +100,11 @@ final class RecordingServiceTests {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let workspaceService = MockWorkspaceService()
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         let service = RecordingService(
             workspaceService: workspaceService,
-            modelContainer: container
+            modelContainer: container,
+            appAudioSettings: appAudioSettings
         )
 
         let context = ModelContext(container)
@@ -146,9 +149,11 @@ final class RecordingServiceTests {
             for: RecordingSession.self, ImportedSession.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         let service = RecordingService(
             workspaceService: MockWorkspaceService(),
-            modelContainer: container
+            modelContainer: container,
+            appAudioSettings: appAudioSettings
         )
 
         let result = await service.stopRecording()
@@ -162,9 +167,11 @@ final class RecordingServiceTests {
             for: RecordingSession.self, ImportedSession.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         let service = RecordingService(
             workspaceService: MockWorkspaceService(),
-            modelContainer: container
+            modelContainer: container,
+            appAudioSettings: appAudioSettings
         )
 
         await service.captureMicStartHostTimeIfNeeded(1_000)
@@ -190,9 +197,11 @@ final class RecordingServiceTests {
         let workspaceService = MockWorkspaceService()
         workspaceService.requireWritableResult = .success(workspace)
 
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         let service = RecordingService(
             workspaceService: workspaceService,
-            modelContainer: container
+            modelContainer: container,
+            appAudioSettings: appAudioSettings
         )
 
         let customTitle = "My Custom Title"
@@ -225,9 +234,11 @@ final class RecordingServiceTests {
             for: RecordingSession.self, ImportedSession.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         let service = RecordingService(
             workspaceService: MockWorkspaceService(),
-            modelContainer: container
+            modelContainer: container,
+            appAudioSettings: appAudioSettings
         )
 
         try FileManager.default.createDirectory(at: workspace.tmpRecordingURL, withIntermediateDirectories: true)
@@ -248,6 +259,80 @@ final class RecordingServiceTests {
         #expect(fetched.title.hasPrefix("Recording "))
     }
 
+    @Test @MainActor
+    func testVoiceProcessingSetterCalledWhenEnabled() async throws {
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let suiteName = "RecordingServiceTests.vp.\(UUID().uuidString)"
+        let ud = UserDefaults(suiteName: suiteName) ?? .standard
+        ud.removePersistentDomain(forName: suiteName)
+        defer { ud.removePersistentDomain(forName: suiteName) }
+
+        let appAudioSettings = AppAudioSettings(userDefaults: ud)
+        appAudioSettings.voiceProcessingEnabled = true
+
+        let counter = VPCallCounter()
+        let service = RecordingService(
+            workspaceService: MockWorkspaceService(),
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            voiceProcessingPropertySetter: { @Sendable [counter] _ in counter.increment() }
+        )
+
+        let engine = AVAudioEngine()
+        service.applyVoiceProcessingIfNeeded(to: engine.inputNode, enabled: true)
+        #expect(counter.callCount == 1)
+
+        service.applyVoiceProcessingIfNeeded(to: engine.inputNode, enabled: false)
+        #expect(counter.callCount == 1) // not called again when disabled
+    }
+
+    @Test @MainActor
+    func testVoiceProcessingSetterNotCalledWhenDisabled() async throws {
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let appAudioSettings = AppAudioSettings()
+        // voiceProcessingEnabled defaults to false
+
+        let counter = VPCallCounter()
+        let service = RecordingService(
+            workspaceService: MockWorkspaceService(),
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            voiceProcessingPropertySetter: { @Sendable [counter] _ in counter.increment() }
+        )
+
+        let engine = AVAudioEngine()
+        service.applyVoiceProcessingIfNeeded(to: engine.inputNode, enabled: false)
+        #expect(counter.callCount == 0)
+    }
+
+    @Test @MainActor
+    func testVoiceProcessingSetterErrorDoesNotInterruptFlow() async throws {
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let appAudioSettings = AppAudioSettings()
+        let service = RecordingService(
+            workspaceService: MockWorkspaceService(),
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            voiceProcessingPropertySetter: { @Sendable _ in
+                throw NSError(domain: "test", code: -1, userInfo: nil) // simulate failure
+            }
+        )
+
+        let engine = AVAudioEngine()
+        // Should not throw or crash; failure is logged and recording continues
+        service.applyVoiceProcessingIfNeeded(to: engine.inputNode, enabled: true)
+        // Reaching here means no crash/throw
+    }
+
     private func makeWorkspace() -> Workspace {
         let rootURL = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -257,4 +342,10 @@ final class RecordingServiceTests {
     private func removeWorkspace(at url: URL) {
         try? FileManager.default.removeItem(at: url)
     }
+}
+
+// Thread-safe call counter for voice processing setter tests
+private final class VPCallCounter: @unchecked Sendable {
+    private(set) var callCount = 0
+    func increment() { callCount += 1 }
 }

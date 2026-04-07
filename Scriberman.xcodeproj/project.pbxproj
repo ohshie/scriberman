@@ -80,6 +80,8 @@
 		7987328A2F7DA41C00570A03 /* SpeakerMatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798732892F7DA41C00570A03 /* SpeakerMatcherTests.swift */; };
 		7987328C2F7DB47F00570A03 /* ModelInstallServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987328B2F7DB47F00570A03 /* ModelInstallServiceTests.swift */; };
 		7987328E2F7DBC2800570A03 /* SettingsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987328D2F7DBC2800570A03 /* SettingsViewModelTests.swift */; };
+		79A11C1D2F856CE40084F195 /* AppAudioSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79A11C1C2F856CE40084F195 /* AppAudioSettings.swift */; };
+		79A11C1F2F856CEC0084F195 /* AppAudioSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79A11C1E2F856CEC0084F195 /* AppAudioSettingsTests.swift */; };
 		79AF763F2F7FF35600F5B259 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 79AF763E2F7FF35600F5B259 /* Assets.xcassets */; };
 		79BE35232F7E52ED00DB542F /* ThirdPartySendable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35222F7E52ED00DB542F /* ThirdPartySendable.swift */; };
 		79BE35252F7E6EF700DB542F /* TranscriptDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35242F7E6EF700DB542F /* TranscriptDetailViewModel.swift */; };
@@ -250,6 +252,8 @@
 		798732892F7DA41C00570A03 /* SpeakerMatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMatcherTests.swift; sourceTree = "<group>"; };
 		7987328B2F7DB47F00570A03 /* ModelInstallServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelInstallServiceTests.swift; sourceTree = "<group>"; };
 		7987328D2F7DBC2800570A03 /* SettingsViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModelTests.swift; sourceTree = "<group>"; };
+		79A11C1C2F856CE40084F195 /* AppAudioSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAudioSettings.swift; sourceTree = "<group>"; };
+		79A11C1E2F856CEC0084F195 /* AppAudioSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAudioSettingsTests.swift; sourceTree = "<group>"; };
 		79AF763E2F7FF35600F5B259 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		79BE35222F7E52ED00DB542F /* ThirdPartySendable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThirdPartySendable.swift; sourceTree = "<group>"; };
 		79BE35242F7E6EF700DB542F /* TranscriptDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptDetailViewModel.swift; sourceTree = "<group>"; };
@@ -423,6 +427,7 @@
 				79BE353E2F7ED91100DB542F /* AppAudioUsageStoreTests.swift */,
 				79C2018B2F7FAE7D002A1163 /* MenuBarSettingsTests.swift */,
 				79155F242F84188C0082157E /* LiveTranscriptionPipelineSettingsTests.swift */,
+				79A11C1E2F856CEC0084F195 /* AppAudioSettingsTests.swift */,
 			);
 			path = ScribermanTests;
 			sourceTree = "<group>";
@@ -460,6 +465,7 @@
 				79BE35262F7E71F200DB542F /* PromptManagementViewModel.swift */,
 				79BE35362F7EA76800DB542F /* AudioPlayerViewModel.swift */,
 				79C201892F7FAE79002A1163 /* MenuBarSettings.swift */,
+				79A11C1C2F856CE40084F195 /* AppAudioSettings.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -870,6 +876,7 @@
 			files = (
 				9B0A47F88ECCCF249F0581C9 /* ScribermanApp.swift in Sources */,
 				4540437FF944A6BA6E754CE5 /* ContentView.swift in Sources */,
+				79A11C1D2F856CE40084F195 /* AppAudioSettings.swift in Sources */,
 				7987325E2F7C191B00570A03 /* ModelPathResolver.swift in Sources */,
 				798732802F7DA16100570A03 /* AudioDownmixer.swift in Sources */,
 				A11A11A11A11A11A11A11A11 /* AIProvider.swift in Sources */,
@@ -1022,6 +1029,7 @@
 				B1C2D3E4F5061728394A5B6C /* StatusTagViewTests.swift in Sources */,
 				65E0EE498B357398375D8185 /* JobsViewModelTests.swift in Sources */,
 				79C2018C2F7FAE7D002A1163 /* MenuBarSettingsTests.swift in Sources */,
+				79A11C1F2F856CEC0084F195 /* AppAudioSettingsTests.swift in Sources */,
 				C1B2C3D4E5F60718293A4B5C /* NewSessionViewModelTests.swift in Sources */,
 				7987328A2F7DA41C00570A03 /* SpeakerMatcherTests.swift in Sources */,
 				797571802F7A400D006AEFB6 /* SpeakerRecognitionTests.swift in Sources */,

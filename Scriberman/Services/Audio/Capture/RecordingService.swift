@@ -39,6 +39,9 @@ actor RecordingService: RecordingServiceProtocol {
     private let fileManager = FileManager.default
     private let mixdownService = AudioMixdownService()
     private let logger = Logger(subsystem: "Scriberman", category: "RecordingService")
+    private let appAudioSettings: AppAudioSettings
+    // Injected for testing; nil uses the real setVoiceProcessingEnabled(_:)
+    private let voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)?
 
     private var audioEngine: AVAudioEngine?
     private let micStreamer = AudioFileStreamer()
@@ -68,11 +71,15 @@ actor RecordingService: RecordingServiceProtocol {
     init(
         workspaceService: WorkspaceServiceProtocol,
         modelContainer: ModelContainer,
-        notificationCenter: NotificationCenter = .default
+        appAudioSettings: AppAudioSettings,
+        notificationCenter: NotificationCenter = .default,
+        voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)? = nil
     ) {
         self.workspaceService = workspaceService
         self.modelContainer = modelContainer
+        self.appAudioSettings = appAudioSettings
         self.notificationCenter = notificationCenter
+        self.voiceProcessingPropertySetter = voiceProcessingPropertySetter
         self.liveAudioStreamTuple = AsyncStream<([Float], AudioSource, Double)>.makeStream()
 
         engineConfigurationObserver = notificationCenter.addObserver(
@@ -193,6 +200,12 @@ actor RecordingService: RecordingServiceProtocol {
                 }
             }
 
+            // Voice processing: enable AUVoiceIO before engine.prepare() if the user opted in.
+            // Must run before format query — AUVoiceIO may change the preferred input format.
+            let vpEnabled = await MainActor.run { appAudioSettings.voiceProcessingEnabled }
+            applyVoiceProcessingIfNeeded(to: inputNode, enabled: vpEnabled)
+
+            // Re-query after potential voice processing activation (AUVoiceIO may change format).
             let inputFormat = inputNode.inputFormat(forBus: 0)
             if isValidTapFormat(inputFormat) {
                 do {
@@ -474,6 +487,19 @@ actor RecordingService: RecordingServiceProtocol {
 
     func capturedHostTimes() -> (mic: UInt64?, app: UInt64?) {
         (micStartHostTime, appStartHostTime)
+    }
+
+    nonisolated func applyVoiceProcessingIfNeeded(to inputNode: AVAudioInputNode, enabled: Bool) {
+        guard enabled else { return }
+        do {
+            if let setter = voiceProcessingPropertySetter {
+                try setter(inputNode)
+            } else {
+                try inputNode.setVoiceProcessingEnabled(true)
+            }
+        } catch {
+            logger.warning("Voice processing activation failed: \(error.localizedDescription, privacy: .public). Continuing without VP.")
+        }
     }
 
     func runMixdown(

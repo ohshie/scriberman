@@ -319,6 +319,8 @@ final class AppStateTests {
         userDefaults.removePersistentDomain(forName: defaultsSuite)
         let aiProviderStore = AIProviderStore(defaults: userDefaults)
 
+        let appAudioSettings = AppAudioSettings(userDefaults: userDefaults)
+
         return ServiceContainer(
             main: MainServiceContainer(
                 bookmarkStore: bookmarkStore,
@@ -329,14 +331,16 @@ final class AppStateTests {
                 audioDeviceService: AudioDeviceService(),
                 appAudioService: AppAudioService(),
                 permissionService: permissionService,
-                transcriptExportService: TranscriptExportService()
+                transcriptExportService: TranscriptExportService(),
+                appAudioSettings: appAudioSettings
             ),
             background: BackgroundServiceContainer(
                 workspaceService: workspaceService,
                 modelInstallService: ModelInstallService(workspaceService: workspaceService),
                 recordingService: RecordingService(
                     workspaceService: workspaceService,
-                    modelContainer: modelContainer
+                    modelContainer: modelContainer,
+                    appAudioSettings: appAudioSettings
                 ),
                 transcriptionService: transcriptionService,
                 retranscriptionService: retranscriptionService,

@@ -9,6 +9,7 @@ struct MainServiceContainer {
     let appAudioService: AppAudioService
     let permissionService: PermissionServiceProtocol
     let transcriptExportService: TranscriptExportService
+    let appAudioSettings: AppAudioSettings
 }
 
 struct BackgroundServiceContainer: Sendable {
@@ -34,6 +35,7 @@ struct ServiceContainer {
         let transcriptionService = TranscriptionService(speakerEmbeddingStore: speakerEmbeddingStore)
         let retranscriptionService = RetranscriptionService(transcriptionService: transcriptionService)
         let audioImportService = AudioImportService(retranscriptionService: retranscriptionService)
+        let appAudioSettings = AppAudioSettings()
 
         return ServiceContainer(
             main: MainServiceContainer(
@@ -45,14 +47,16 @@ struct ServiceContainer {
                 audioDeviceService: AudioDeviceService(),
                 appAudioService: AppAudioService(),
                 permissionService: PermissionService(),
-                transcriptExportService: TranscriptExportService()
+                transcriptExportService: TranscriptExportService(),
+                appAudioSettings: appAudioSettings
             ),
             background: BackgroundServiceContainer(
                 workspaceService: workspaceService,
                 modelInstallService: ModelInstallService(workspaceService: workspaceService),
                 recordingService: RecordingService(
                     workspaceService: workspaceService,
-                    modelContainer: modelContainer
+                    modelContainer: modelContainer,
+                    appAudioSettings: appAudioSettings
                 ),
                 transcriptionService: transcriptionService,
                 retranscriptionService: retranscriptionService,

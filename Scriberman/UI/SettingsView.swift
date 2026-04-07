@@ -193,6 +193,14 @@ struct SettingsView: View {
                 .tag(SettingsTab.prompts)
 
                 Form {
+                    Section("Audio Processing") {
+                        @Bindable var audioSettings = appState.appAudioSettings
+                        Toggle("Noise Suppression (Voice Processing)", isOn: $audioSettings.voiceProcessingEnabled)
+                        Text("Applies hardware noise suppression and echo cancellation to the microphone. Takes effect on the next recording. May add minor latency.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     Section("Recording Pipeline") {
                         VStack(alignment: .leading) {
                             HStack {
