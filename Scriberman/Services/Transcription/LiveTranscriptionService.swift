@@ -135,7 +135,7 @@ actor LiveTranscriptionService {
             initializeDiarizer: { workspace, config in
                 let diarizerConfig = DiarizerConfig(
                     clusteringThreshold: Float(config.speakerSimilarityThreshold),
-                    minSpeechDuration: 0.5,
+                    minSpeechDuration: Float(config.vadMinSpeechDuration),
                     minSilenceGap: Float(config.minSilenceGap)
                 )
                 let mgr = DiarizerManager(config: diarizerConfig)

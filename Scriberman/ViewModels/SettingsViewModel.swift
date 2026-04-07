@@ -80,10 +80,10 @@ final class SettingsViewModel {
         self.asrAmplitudeGate = asrAmplitudeGateStored ?? LiveTranscriptionPipelineSettings.defaults.asrAmplitudeGate
 
         let threshold = userDefaults.double(forKey: "speakerThreshold")
-        self.speakerThreshold = threshold == 0 ? 0.65 : threshold
+        self.speakerThreshold = threshold == 0 ? LiveTranscriptionPipelineSettings.defaults.speakerSimilarityThreshold : threshold
 
         let gap = userDefaults.double(forKey: "minSilenceGap")
-        self.minSilenceGap = gap == 0 ? 0.5 : gap
+        self.minSilenceGap = gap == 0 ? LiveTranscriptionPipelineSettings.defaults.minSilenceGap : gap
 
         ModelGroup.allCases.forEach { group in
             modelStates[group] = .missing
