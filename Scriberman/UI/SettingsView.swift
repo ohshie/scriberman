@@ -20,6 +20,7 @@ struct SettingsView: View {
     @State private var apiKeyDraft = ""
     @State private var lastCommittedAPIKeyDraft = ""
     @State private var promptVM = PromptManagementViewModel()
+    @State private var showResetAllConfirmation = false
     @FocusState private var focusedField: Field?
 
     var body: some View {
@@ -195,8 +196,17 @@ struct SettingsView: View {
                 Form {
                     Section("Audio Processing") {
                         @Bindable var audioSettings = appState.appAudioSettings
-                        Toggle("Noise Suppression (Voice Processing)", isOn: $audioSettings.voiceProcessingEnabled)
-                        Text("Applies hardware noise suppression and echo cancellation to the microphone. Takes effect on the next recording. May add minor latency.")
+                        HStack {
+                            Toggle("Noise Suppression (Voice Processing)", isOn: $audioSettings.voiceProcessingEnabled)
+                            Button {
+                                appState.appAudioSettings.voiceProcessingEnabled = false
+                            } label: {
+                                Image(systemName: "arrow.counterclockwise")
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Reset to default")
+                        }
+                        Text("Applies hardware noise suppression and echo cancellation to the microphone. Takes effect on the next recording. May add minor latency. Default: Off (disabled).")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -208,9 +218,16 @@ struct SettingsView: View {
                                 Spacer()
                                 Text(String(format: "%.2f", bindableViewModel.vadThreshold))
                                     .monospacedDigit()
+                                Button {
+                                    viewModel.vadThreshold = LiveTranscriptionPipelineSettings.defaults.vadThreshold
+                                } label: {
+                                    Image(systemName: "arrow.counterclockwise")
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Reset to default")
                             }
                             Slider(value: $bindableViewModel.vadThreshold, in: 0.50...0.98, step: 0.01)
-                            Text("Speech detection sensitivity. Higher values reduce false-positives. Default: 0.85")
+                            Text("Speech detection sensitivity. Higher values reduce false-positives. Default: 0.85.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -221,9 +238,16 @@ struct SettingsView: View {
                                 Spacer()
                                 Text(String(format: "%.2fs", bindableViewModel.vadMinSpeechDuration))
                                     .monospacedDigit()
+                                Button {
+                                    viewModel.vadMinSpeechDuration = LiveTranscriptionPipelineSettings.defaults.vadMinSpeechDuration
+                                } label: {
+                                    Image(systemName: "arrow.counterclockwise")
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Reset to default")
                             }
                             Slider(value: $bindableViewModel.vadMinSpeechDuration, in: 0.10...2.0, step: 0.05)
-                            Text("Minimum audio length considered speech. Filters transient noise. Default: 0.30s")
+                            Text("Minimum audio length considered speech. Filters transient noise. Default: 0.30s.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -240,9 +264,16 @@ struct SettingsView: View {
                                     Text(String(format: "%.2f", bindableViewModel.asrConfidenceGate))
                                         .monospacedDigit()
                                 }
+                                Button {
+                                    viewModel.asrConfidenceGate = LiveTranscriptionPipelineSettings.defaults.asrConfidenceGate
+                                } label: {
+                                    Image(systemName: "arrow.counterclockwise")
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Reset to default")
                             }
                             Slider(value: $bindableViewModel.asrConfidenceGate, in: 0.0...1.0, step: 0.01)
-                            Text("Discard transcription results below this confidence level. Higher values reduce hallucinations. Default: Off")
+                            Text("Discard transcription results below this confidence level. Higher values reduce hallucinations. Default: Off.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -259,9 +290,16 @@ struct SettingsView: View {
                                     Text(String(format: "%.4f", bindableViewModel.asrAmplitudeGate))
                                         .monospacedDigit()
                                 }
+                                Button {
+                                    viewModel.asrAmplitudeGate = LiveTranscriptionPipelineSettings.defaults.asrAmplitudeGate
+                                } label: {
+                                    Image(systemName: "arrow.counterclockwise")
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Reset to default")
                             }
                             Slider(value: $bindableViewModel.asrAmplitudeGate, in: 0.0...0.10, step: 0.005)
-                            Text("Discard near-silent audio before transcription. Filters background noise. Default: Off")
+                            Text("Discard near-silent audio before transcription. Filters background noise. Default: Off.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -274,9 +312,16 @@ struct SettingsView: View {
                                 Spacer()
                                 Text(String(format: "%.2f", bindableViewModel.speakerThreshold))
                                     .monospacedDigit()
+                                Button {
+                                    viewModel.speakerThreshold = LiveTranscriptionPipelineSettings.defaults.speakerSimilarityThreshold
+                                } label: {
+                                    Image(systemName: "arrow.counterclockwise")
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Reset to default")
                             }
                             Slider(value: $bindableViewModel.speakerThreshold, in: 0.1...0.9, step: 0.01)
-                            Text("Lower values are stricter, higher values group more aggressively.")
+                            Text("Lower values are stricter, higher values group more aggressively. Default: 0.65.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -287,11 +332,24 @@ struct SettingsView: View {
                                 Spacer()
                                 Text(String(format: "%.2fs", bindableViewModel.minSilenceGap))
                                     .monospacedDigit()
+                                Button {
+                                    viewModel.minSilenceGap = LiveTranscriptionPipelineSettings.defaults.minSilenceGap
+                                } label: {
+                                    Image(systemName: "arrow.counterclockwise")
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Reset to default")
                             }
                             Slider(value: $bindableViewModel.minSilenceGap, in: 0.1...2.0, step: 0.1)
-                            Text("Minimum duration of silence between speaker turns.")
+                            Text("Minimum duration of silence between speaker turns. Default: 0.50s.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Section {
+                        Button("Reset All Pipeline Settings to Defaults", role: .destructive) {
+                            showResetAllConfirmation = true
                         }
                     }
 
@@ -300,6 +358,15 @@ struct SettingsView: View {
                     }
                 }
                 .formStyle(.grouped)
+                .confirmationDialog(
+                    "Reset all pipeline settings to their defaults?",
+                    isPresented: $showResetAllConfirmation
+                ) {
+                    Button("Reset All", role: .destructive) {
+                        viewModel.resetAllPipelineSettingsToDefaults()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                }
                 .tabItem {
                     Label("Advanced", systemImage: "slider.horizontal.3")
                 }

@@ -499,7 +499,7 @@ struct NewSessionViewModelTests {
 
         let source = try newSessionViewModelSource()
         #expect(source.contains("if let workspace = await workspaceService.currentWorkspace()"))
-        #expect(source.contains("await liveTranscriptionService.prepare(workspace: workspace)"))
+        #expect(source.contains("await liveTranscriptionService.prepare(workspace: workspace, config: pipelineConfig)"))
     }
 
     @Test

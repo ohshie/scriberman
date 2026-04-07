@@ -16,4 +16,8 @@ struct LiveTranscriptionPipelineSettings: Sendable {
         speakerSimilarityThreshold: 0.65,
         minSilenceGap: 0.50
     )
+
+    mutating func resetToDefaults() {
+        self = Self.defaults
+    }
 }

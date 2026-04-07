@@ -96,7 +96,8 @@ final class AppState {
         self.settingsViewModel = SettingsViewModel(
             workspaceService: services.background.workspaceService,
             modelInstallService: services.background.modelInstallService,
-            speakerEmbeddingStore: services.background.speakerEmbeddingStore
+            speakerEmbeddingStore: services.background.speakerEmbeddingStore,
+            appAudioSettings: services.main.appAudioSettings
         )
         self.menuBarSettings = MenuBarSettings()
         self.appAudioSettings = services.main.appAudioSettings
