@@ -37,7 +37,7 @@ actor RecordingService: RecordingServiceProtocol {
     private let modelContainer: ModelContainer
     private let notificationCenter: NotificationCenter
     private let fileManager = FileManager.default
-    private let mixdownService = AudioMixdownService()
+    private let mixdownCoordinator: RecordingMixdownCoordinator
     private let logger = Logger(subsystem: "Scriberman", category: "RecordingService")
     private let appAudioSettings: AppAudioSettings
     // Injected for testing; nil uses the real setVoiceProcessingEnabled(_:)
@@ -80,6 +80,10 @@ actor RecordingService: RecordingServiceProtocol {
         self.appAudioSettings = appAudioSettings
         self.notificationCenter = notificationCenter
         self.voiceProcessingPropertySetter = voiceProcessingPropertySetter
+        self.mixdownCoordinator = RecordingMixdownCoordinator(
+            workspaceService: workspaceService,
+            modelContainer: modelContainer
+        )
         self.liveAudioStreamTuple = AsyncStream<([Float], AudioSource, Double)>.makeStream()
 
         engineConfigurationObserver = notificationCenter.addObserver(
@@ -374,24 +378,7 @@ actor RecordingService: RecordingServiceProtocol {
     }
 
     private func ensureMicrophonePermission() async throws(RecordingError) {
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .authorized:
-            return
-        case .notDetermined:
-            let granted = await withCheckedContinuation { continuation in
-                AVCaptureDevice.requestAccess(for: .audio) { isGranted in
-                    continuation.resume(returning: isGranted)
-                }
-            }
-
-            guard granted else {
-                throw RecordingError.microphoneDenied
-            }
-        case .restricted, .denied:
-            throw RecordingError.microphoneDenied
-        @unknown default:
-            throw RecordingError.microphoneDenied
-        }
+        try await RecordingPermissionService.ensureMicrophonePermission()
     }
 
     private func makeSessionTitle(createdAt: Date) -> String {
@@ -510,91 +497,25 @@ actor RecordingService: RecordingServiceProtocol {
         micStartHostTime: UInt64,
         appStartHostTime: UInt64?
     ) async {
-        var scopedWorkspaceRoot: URL?
-        var didStartScopedAccess = false
-        if let workspace = await workspaceService.currentWorkspace(),
-           micURL.path.hasPrefix(workspace.rootURL.path) {
-            scopedWorkspaceRoot = workspace.rootURL
-            didStartScopedAccess = workspace.rootURL.startAccessingSecurityScopedResource()
-            logger.info(
-                "Mixdown workspace scope for session \(sessionID, privacy: .public): started=\(didStartScopedAccess, privacy: .public) root=\(workspace.rootURL.path, privacy: .public)"
-            )
-        }
-        defer {
-            if didStartScopedAccess {
-                scopedWorkspaceRoot?.stopAccessingSecurityScopedResource()
-            }
-        }
-
-        logger.info(
-            "Mixdown started for session \(sessionID, privacy: .public). mic=\(micURL.path, privacy: .public) app=\(appURL?.path ?? "nil", privacy: .public) out=\(mixdownURL.path, privacy: .public)"
+        await mixdownCoordinator.runMixdown(
+            sessionID: sessionID,
+            micURL: micURL,
+            appURL: appURL,
+            mixdownURL: mixdownURL,
+            micStartHostTime: micStartHostTime,
+            appStartHostTime: appStartHostTime
         )
-        let micSize = (try? fileManager.attributesOfItem(atPath: micURL.path)[.size] as? NSNumber)?.int64Value ?? -1
-        let appSize = appURL.flatMap { url in
-            (try? fileManager.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value
-        } ?? -1
-        logger.info(
-            "Mixdown input sizes for session \(sessionID, privacy: .public). micBytes=\(micSize, privacy: .public) appBytes=\(appSize, privacy: .public)"
-        )
-        logger.info(
-            "Mixdown timing for session \(sessionID, privacy: .public). micStart=\(micStartHostTime, privacy: .public) appStart=\(appStartHostTime ?? 0, privacy: .public)"
-        )
-        do {
-            try await mixdownService.mix(
-                micURL: micURL,
-                appURL: appURL,
-                micStartHostTime: micStartHostTime,
-                appStartHostTime: appStartHostTime,
-                into: mixdownURL
-            )
-        } catch {
-            logger.error("Mixdown failed for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            return
-        }
-
-        let existsAfterMix = fileManager.fileExists(atPath: mixdownURL.path)
-        logger.info(
-            "Mixdown finished for session \(sessionID, privacy: .public). outputExists=\(existsAfterMix, privacy: .public) path=\(mixdownURL.path, privacy: .public)"
-        )
-
-        do {
-            let context = ModelContext(modelContainer)
-            let descriptor = FetchDescriptor<RecordingSession>()
-            let sessions = try context.fetch(descriptor)
-            var persistedSession: RecordingSession?
-            for session in sessions where session.id == sessionID {
-                persistedSession = session
-                break
-            }
-            guard let persistedSession else {
-                logger.error("Mixdown succeeded but session \(sessionID, privacy: .public) was not found for persistence update.")
-                return
-            }
-
-            persistedSession.mixdownURL = mixdownURL.path
-            try context.save()
-            logger.info("Persisted mixdownURL for session \(sessionID, privacy: .public): \(mixdownURL.path, privacy: .public)")
-        } catch {
-            logger.error("Failed to persist mixdown URL for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
-        }
     }
 
 }
 
 extension RecordingService {
     static func recordingFileURLs(in workspace: Workspace) -> (mic: URL, app: URL) {
-        (
-            workspace.tmpRecordingURL.appendingPathComponent("mic.wav"),
-            workspace.tmpRecordingURL.appendingPathComponent("app.wav")
-        )
+        RecordingFileLayout.recordingFileURLs(in: workspace)
     }
 
     static func folderName(createdAt: Date, recordingIdentifier: String) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "MMM dd 'at' HH-mm"
-        let suffix = String(recordingIdentifier.suffix(2))
-        return "Recording \(formatter.string(from: createdAt)) \(suffix)"
+        RecordingFileLayout.folderName(createdAt: createdAt, recordingIdentifier: recordingIdentifier)
     }
 
     static func promoteTmpRecordingFolder(
@@ -603,13 +524,11 @@ extension RecordingService {
         recordingIdentifier: String,
         fileManager: FileManager = .default
     ) throws -> (mic: URL, app: URL?) {
-        let folderName = folderName(createdAt: createdAt, recordingIdentifier: recordingIdentifier)
-        let namedFolderURL = workspace.recordingsURL.appendingPathComponent(folderName, isDirectory: true)
-        try fileManager.moveItem(at: workspace.tmpRecordingURL, to: namedFolderURL)
-
-        let micURL = namedFolderURL.appendingPathComponent("mic.wav")
-        let appURL = namedFolderURL.appendingPathComponent("app.wav")
-        let finalAppURL = fileManager.fileExists(atPath: appURL.path) ? appURL : nil
-        return (micURL, finalAppURL)
+        try RecordingFileLayout.promoteTmpRecordingFolder(
+            in: workspace,
+            createdAt: createdAt,
+            recordingIdentifier: recordingIdentifier,
+            fileManager: fileManager
+        )
     }
 }
