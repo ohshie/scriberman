@@ -137,8 +137,8 @@ struct LiveTranscriptionServiceTests {
         await service.prepareForTesting(
             workspace: workspace,
             initializeAsr: { _ in AsrManager(config: ASRConfig()) },
-            initializeDiarizer: { _ in DiarizerManager(config: DiarizerConfig(clusteringThreshold: 0.5, minSpeechDuration: 0.5, minSilenceGap: 0.2)) },
-            initializeVad: { _ in throw TestError.vadInitializationFailed }
+            initializeDiarizer: { _, _ in DiarizerManager(config: DiarizerConfig(clusteringThreshold: 0.5, minSpeechDuration: 0.5, minSilenceGap: 0.2)) },
+            initializeVad: { _, _ in throw TestError.vadInitializationFailed }
         )
 
         #expect(await service.isInitialized == false)
@@ -212,6 +212,172 @@ struct LiveTranscriptionServiceTests {
 
         await service.process(samples: Array(repeating: 0.1, count: 4096), source: .mic, sampleRate: 16_000)
         _ = await service.stop()
+
+        #expect(await flushProbe.callCount() == 1)
+    }
+
+    // MARK: - Confidence Gate Tests (task 3.2)
+
+    @Test
+    func lowConfidenceResultDiscardedWhenGateAboveZero() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        var config = LiveTranscriptionPipelineSettings.defaults
+        config.asrConfidenceGate = 0.30
+        await service.setStoredConfigForTesting(config)
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+        await service.setAsrTranscribeHookForTesting { _, _ in
+            ASRResult(text: "hello world", confidence: 0.15, duration: 1.0, processingTime: 0.1)
+        }
+
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        var receivedSegments: [TranscriptSegment] = []
+        let collectTask = Task {
+            for await segment in await service.transcriptStream {
+                receivedSegments.append(segment)
+            }
+        }
+
+        let loudSamples = Array(repeating: Float(0.1), count: 8192)
+        await service.process(samples: loudSamples, source: .mic, sampleRate: 16_000)
+        try? await Task.sleep(for: .milliseconds(50))
+        collectTask.cancel()
+
+        #expect(receivedSegments.isEmpty)
+    }
+
+    @Test
+    func confidenceGateDisabledPassesAllResults() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        // Default gate is 0.0 — all results pass
+        await service.setStoredConfigForTesting(.defaults)
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+        await service.setAsrTranscribeHookForTesting { _, _ in
+            ASRResult(text: "hello world", confidence: 0.05, duration: 1.0, processingTime: 0.1)
+        }
+
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        var receivedSegments: [TranscriptSegment] = []
+        let collectTask = Task {
+            for await segment in await service.transcriptStream {
+                receivedSegments.append(segment)
+            }
+        }
+
+        let loudSamples = Array(repeating: Float(0.1), count: 8192)
+        await service.process(samples: loudSamples, source: .mic, sampleRate: 16_000)
+        try? await Task.sleep(for: .milliseconds(50))
+        collectTask.cancel()
+
+        #expect(receivedSegments.count == 1)
+    }
+
+    @Test
+    func highConfidenceResultAboveGatePasses() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        var config = LiveTranscriptionPipelineSettings.defaults
+        config.asrConfidenceGate = 0.30
+        await service.setStoredConfigForTesting(config)
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+        await service.setAsrTranscribeHookForTesting { _, _ in
+            ASRResult(text: "hello world", confidence: 0.55, duration: 1.0, processingTime: 0.1)
+        }
+
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        var receivedSegments: [TranscriptSegment] = []
+        let collectTask = Task {
+            for await segment in await service.transcriptStream {
+                receivedSegments.append(segment)
+            }
+        }
+
+        let loudSamples = Array(repeating: Float(0.1), count: 8192)
+        await service.process(samples: loudSamples, source: .mic, sampleRate: 16_000)
+        try? await Task.sleep(for: .milliseconds(50))
+        collectTask.cancel()
+
+        #expect(receivedSegments.count == 1)
+    }
+
+    // MARK: - Amplitude Gate Tests (task 4.2)
+
+    @Test
+    func nearSilentBufferDiscardedWhenAmplitudeGateAboveZero() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        var config = LiveTranscriptionPipelineSettings.defaults
+        config.asrAmplitudeGate = 0.01
+        await service.setStoredConfigForTesting(config)
+
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        let flushProbe = FlushProbe()
+        await service.setProcessChunkHookForTesting { _, _, _ in
+            await flushProbe.recordCall()
+        }
+
+        // Near-silent samples: peak amplitude ~ 0.003, below gate of 0.01
+        let silentSamples = Array(repeating: Float(0.003), count: 8192)
+        await service.process(samples: silentSamples, source: .mic, sampleRate: 16_000)
+
+        #expect(await flushProbe.callCount() == 0)
+    }
+
+    @Test
+    func bufferForwardedWhenAmplitudeGateIsZero() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        // Gate is 0.0 (default) — all buffers pass
+        await service.setStoredConfigForTesting(.defaults)
+
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        let flushProbe = FlushProbe()
+        await service.setProcessChunkHookForTesting { _, _, _ in
+            await flushProbe.recordCall()
+        }
+
+        let silentSamples = Array(repeating: Float(0.003), count: 8192)
+        await service.process(samples: silentSamples, source: .mic, sampleRate: 16_000)
+
+        #expect(await flushProbe.callCount() == 1)
+    }
+
+    @Test
+    func bufferAboveAmplitudeGateProceeds() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        var config = LiveTranscriptionPipelineSettings.defaults
+        config.asrAmplitudeGate = 0.01
+        await service.setStoredConfigForTesting(config)
+
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        let flushProbe = FlushProbe()
+        await service.setProcessChunkHookForTesting { _, _, _ in
+            await flushProbe.recordCall()
+        }
+
+        // Samples with peak amplitude 0.05, well above gate of 0.01
+        let loudSamples = Array(repeating: Float(0.05), count: 8192)
+        await service.process(samples: loudSamples, source: .mic, sampleRate: 16_000)
 
         #expect(await flushProbe.callCount() == 1)
     }

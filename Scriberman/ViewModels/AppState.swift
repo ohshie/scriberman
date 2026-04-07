@@ -99,6 +99,7 @@ final class AppState {
         )
         self.menuBarSettings = MenuBarSettings()
         self.newSessionViewModel.menuBarSettings = self.menuBarSettings
+        self.newSessionViewModel.settingsViewModel = self.settingsViewModel
     }
 
     func selectPendingSession() {

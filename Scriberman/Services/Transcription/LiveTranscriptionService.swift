@@ -75,6 +75,9 @@ actor LiveTranscriptionService {
     private static let VAD_CHUNK_SIZE = 4096
     private static let MAX_SPEECH_SAMPLES = 480_000
 
+    // Pipeline configuration (set at start() time, used throughout session)
+    private var storedConfig: LiveTranscriptionPipelineSettings = .defaults
+
     // Chunk accumulation state
     private var audioConverters: [AudioSource: AudioConverter] = [:]
     private var vadStreamStates: [AudioSource: VadStreamState] = [:]
@@ -84,6 +87,7 @@ actor LiveTranscriptionService {
     private var totalSamplesProcessed: [AudioSource: Int] = [:]
 #if DEBUG
     private var processChunkHookForTesting: (@Sendable ([Float], AudioSource, Float) async -> Void)?
+    private var asrTranscribeHookForTesting: (@Sendable ([Float], AudioSource) async throws -> ASRResult)?
 #endif
 
     // Authoritative record of all final segments accumulated this session
@@ -110,7 +114,7 @@ actor LiveTranscriptionService {
 
     /// Loads ASR and diarizer models without starting the audio pipeline.
     /// Idempotent: subsequent calls are no-ops if already initialized.
-    func prepare(workspace: Workspace) async {
+    func prepare(workspace: Workspace, config: LiveTranscriptionPipelineSettings = .defaults) async {
         guard !isInitialized else {
             logger.info("LiveTranscriptionService already initialized, skipping prepare()")
             return
@@ -119,19 +123,20 @@ actor LiveTranscriptionService {
         logger.info("Pre-warming live transcription models...")
         await prepare(
             workspace: workspace,
+            config: config,
             initializeAsr: { workspace in
                 let asrConfig = ASRConfig()
                 let asr = AsrManager(config: asrConfig)
                 let asrDirectory = try ModelPathResolver().modelDirectory(for: .asrParakeetV3, in: workspace)
                 let asrModels = try await AsrModels.load(from: asrDirectory)
-                try await asr.initialize(models: asrModels)
+                try await asr.loadModels(asrModels)
                 return asr
             },
-            initializeDiarizer: { workspace in
+            initializeDiarizer: { workspace, config in
                 let diarizerConfig = DiarizerConfig(
-                    clusteringThreshold: 0.5,
+                    clusteringThreshold: Float(config.speakerSimilarityThreshold),
                     minSpeechDuration: 0.5,
-                    minSilenceGap: 0.2
+                    minSilenceGap: Float(config.minSilenceGap)
                 )
                 let mgr = DiarizerManager(config: diarizerConfig)
                 let diarizerRepo = try ModelPathResolver().modelDirectory(for: .offlineDiarization, in: workspace)
@@ -151,13 +156,13 @@ actor LiveTranscriptionService {
                 mgr.initialize(models: models)
                 return mgr
             },
-            initializeVad: { workspace in
+            initializeVad: { workspace, config in
                 let vadDirectory = try ModelPathResolver().modelDirectory(for: .vadSilero, in: workspace)
                 let vadModelURL = vadDirectory.appendingPathComponent(ModelNames.VAD.sileroVadFile, isDirectory: true)
                 let mlConfig = MLModelConfiguration()
                 mlConfig.computeUnits = .cpuAndNeuralEngine
                 let mlModel = try await MLModel.load(contentsOf: vadModelURL, configuration: mlConfig)
-                let manager = VadManager(config: VadConfig(defaultThreshold: 0.75), vadModel: mlModel)
+                let manager = VadManager(config: VadConfig(defaultThreshold: Float(config.vadThreshold)), vadModel: mlModel)
                 return (manager, VadManagerStreamProcessor(manager: manager))
             }
         )
@@ -165,10 +170,13 @@ actor LiveTranscriptionService {
 
     private func prepare(
         workspace: Workspace,
+        config: LiveTranscriptionPipelineSettings,
         initializeAsr: @Sendable (Workspace) async throws -> AsrManager,
-        initializeDiarizer: @Sendable (Workspace) async throws -> DiarizerManager,
-        initializeVad: @Sendable (Workspace) async throws -> (VadManager, any LiveVADStreamingProcessing)
+        initializeDiarizer: @Sendable (Workspace, LiveTranscriptionPipelineSettings) async throws -> DiarizerManager,
+        initializeVad: @Sendable (Workspace, LiveTranscriptionPipelineSettings) async throws -> (VadManager, any LiveVADStreamingProcessing)
     ) async {
+        storedConfig = config
+
         // 1. Initialize ASR
         do {
             let asr = try await initializeAsr(workspace)
@@ -186,7 +194,7 @@ actor LiveTranscriptionService {
 
         // 2. Initialize DiarizerManager
         do {
-            let mgr = try await initializeDiarizer(workspace)
+            let mgr = try await initializeDiarizer(workspace, config)
             self.diarizer = mgr
             logger.info("DiarizerManager initialized from workspace models")
         } catch {
@@ -200,7 +208,7 @@ actor LiveTranscriptionService {
 
         // 3. Initialize VAD
         do {
-            let (manager, processor) = try await initializeVad(workspace)
+            let (manager, processor) = try await initializeVad(workspace, config)
             self.vadManager = manager
             self.vadStreamProcessor = processor
             logger.info("VadManager initialized from workspace models")
@@ -219,7 +227,7 @@ actor LiveTranscriptionService {
 
     // MARK: - Lifecycle
 
-    func start(workspace: Workspace) async throws {
+    func start(workspace: Workspace, config: LiveTranscriptionPipelineSettings = .defaults) async throws {
         logger.info("Starting live transcription service (Offline Chunking Mode)")
 
         audioConverters.removeAll()
@@ -231,9 +239,11 @@ actor LiveTranscriptionService {
         collectedFinalSegments.removeAll()
         sessionSpeakers.removeAll()
 
+        storedConfig = config
+
         // task 4.2: skip model loading if already initialized by prepare()
         if !isInitialized {
-            await prepare(workspace: workspace)
+            await prepare(workspace: workspace, config: config)
         }
 
         guard isInitialized, asrManager != nil, diarizer != nil, vadStreamProcessor != nil else {
@@ -346,10 +356,11 @@ actor LiveTranscriptionService {
             for startIndex in stride(from: 0, to: processableCount, by: chunkSize) {
                 let chunk = Array(processableSamples[startIndex..<(startIndex + chunkSize)])
                 let streamState = vadStreamStates[source] ?? .initial()
+                let vadSegmentationConfig = VadSegmentationConfig(minSpeechDuration: storedConfig.vadMinSpeechDuration)
                 let result = try await vadStreamProcessor.processStreamingChunk(
                     chunk,
                     state: streamState,
-                    config: VadSegmentationConfig.default
+                    config: vadSegmentationConfig
                 )
                 vadStreamStates[source] = result.state
 
@@ -396,6 +407,15 @@ actor LiveTranscriptionService {
             return
         }
 
+        let amplitudeGate = storedConfig.asrAmplitudeGate
+        if amplitudeGate > 0.0 {
+            let peakAmplitude = samples.map { abs($0) }.max() ?? 0.0
+            if peakAmplitude < Float(amplitudeGate) {
+                logger.debug("🔇 Near-silent buffer discarded (peak: \(String(format: "%.6f", peakAmplitude)) < gate: \(String(format: "%.6f", amplitudeGate)))")
+                return
+            }
+        }
+
         let startOffset = speechStartOffsets[source]
             ?? max(0, currentSessionOffset(for: source) - Float(samples.count) / Self.SAMPLE_RATE)
         await processChunk(samples: samples, source: source, currentOffset: startOffset)
@@ -419,10 +439,23 @@ actor LiveTranscriptionService {
 
             // task 2.2: pass correct ASR source based on audio origin
             // (.microphone for mic, .system for app — inferred as FluidAudio.AudioSource from call-site)
-            let asrResult = try await asrManager.transcribe(
-                samples,
-                source: source == .mic ? .microphone : .system
-            )
+            #if DEBUG
+            let asrResult: ASRResult
+            if let asrTranscribeHookForTesting {
+                asrResult = try await asrTranscribeHookForTesting(samples, source)
+            } else {
+                asrResult = try await asrManager.transcribe(samples, source: source == .mic ? .microphone : .system)
+            }
+            #else
+            let asrResult = try await asrManager.transcribe(samples, source: source == .mic ? .microphone : .system)
+            #endif
+
+            let confidenceGate = storedConfig.asrConfidenceGate
+            if confidenceGate > 0.0, asrResult.confidence < Float(confidenceGate) {
+                logger.info("🚫 Low-confidence result discarded (confidence: \(String(format: "%.3f", asrResult.confidence)) < gate: \(String(format: "%.3f", confidenceGate)))")
+                return
+            }
+
             let cleanedText = asrResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
             guard !cleanedText.isEmpty else {
@@ -528,12 +561,14 @@ actor LiveTranscriptionService {
 extension LiveTranscriptionService {
     func prepareForTesting(
         workspace: Workspace,
+        config: LiveTranscriptionPipelineSettings = .defaults,
         initializeAsr: @Sendable (Workspace) async throws -> AsrManager,
-        initializeDiarizer: @Sendable (Workspace) async throws -> DiarizerManager,
-        initializeVad: @Sendable (Workspace) async throws -> (VadManager, any LiveVADStreamingProcessing)
+        initializeDiarizer: @Sendable (Workspace, LiveTranscriptionPipelineSettings) async throws -> DiarizerManager,
+        initializeVad: @Sendable (Workspace, LiveTranscriptionPipelineSettings) async throws -> (VadManager, any LiveVADStreamingProcessing)
     ) async {
         await prepare(
             workspace: workspace,
+            config: config,
             initializeAsr: initializeAsr,
             initializeDiarizer: initializeDiarizer,
             initializeVad: initializeVad
@@ -546,6 +581,18 @@ extension LiveTranscriptionService {
 
     func setProcessChunkHookForTesting(_ hook: @escaping @Sendable ([Float], AudioSource, Float) async -> Void) {
         self.processChunkHookForTesting = hook
+    }
+
+    func setStoredConfigForTesting(_ config: LiveTranscriptionPipelineSettings) {
+        self.storedConfig = config
+    }
+
+    func setAsrManagerForTesting(_ manager: AsrManager) {
+        self.asrManager = manager
+    }
+
+    func setAsrTranscribeHookForTesting(_ hook: @escaping @Sendable ([Float], AudioSource) async throws -> ASRResult) {
+        self.asrTranscribeHookForTesting = hook
     }
 }
 #endif

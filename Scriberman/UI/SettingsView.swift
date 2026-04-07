@@ -193,6 +193,72 @@ struct SettingsView: View {
                 .tag(SettingsTab.prompts)
 
                 Form {
+                    Section("Recording Pipeline") {
+                        VStack(alignment: .leading) {
+                            HStack {
+                                Text("VAD Threshold")
+                                Spacer()
+                                Text(String(format: "%.2f", bindableViewModel.vadThreshold))
+                                    .monospacedDigit()
+                            }
+                            Slider(value: $bindableViewModel.vadThreshold, in: 0.50...0.98, step: 0.01)
+                            Text("Speech detection sensitivity. Higher values reduce false-positives. Default: 0.85")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading) {
+                            HStack {
+                                Text("Min Speech Duration")
+                                Spacer()
+                                Text(String(format: "%.2fs", bindableViewModel.vadMinSpeechDuration))
+                                    .monospacedDigit()
+                            }
+                            Slider(value: $bindableViewModel.vadMinSpeechDuration, in: 0.10...2.0, step: 0.05)
+                            Text("Minimum audio length considered speech. Filters transient noise. Default: 0.30s")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading) {
+                            HStack {
+                                Text("Confidence Gate")
+                                Spacer()
+                                if bindableViewModel.asrConfidenceGate == 0.0 {
+                                    Text("Off")
+                                        .monospacedDigit()
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Text(String(format: "%.2f", bindableViewModel.asrConfidenceGate))
+                                        .monospacedDigit()
+                                }
+                            }
+                            Slider(value: $bindableViewModel.asrConfidenceGate, in: 0.0...1.0, step: 0.01)
+                            Text("Discard transcription results below this confidence level. Higher values reduce hallucinations. Default: Off")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading) {
+                            HStack {
+                                Text("Amplitude Gate")
+                                Spacer()
+                                if bindableViewModel.asrAmplitudeGate == 0.0 {
+                                    Text("Off")
+                                        .monospacedDigit()
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Text(String(format: "%.4f", bindableViewModel.asrAmplitudeGate))
+                                        .monospacedDigit()
+                                }
+                            }
+                            Slider(value: $bindableViewModel.asrAmplitudeGate, in: 0.0...0.10, step: 0.005)
+                            Text("Discard near-silent audio before transcription. Filters background noise. Default: Off")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
                     Section("Diarization Settings") {
                         VStack(alignment: .leading) {
                             HStack {

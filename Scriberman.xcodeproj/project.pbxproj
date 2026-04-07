@@ -47,6 +47,8 @@
 		791009612F7859DF00225294 /* AudioImportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009602F7859DF00225294 /* AudioImportService.swift */; };
 		791009632F7859E200225294 /* AudioImportServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009622F7859E200225294 /* AudioImportServiceTests.swift */; };
 		791009652F785B5900225294 /* ImportedSessionRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009642F785B5900225294 /* ImportedSessionRow.swift */; };
+		79155F252F84188C0082157E /* LiveTranscriptionPipelineSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79155F242F84188C0082157E /* LiveTranscriptionPipelineSettingsTests.swift */; };
+		79155F272F8418900082157E /* LiveTranscriptionPipelineSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79155F262F8418900082157E /* LiveTranscriptionPipelineSettings.swift */; };
 		7975716A2F7983A2006AEFB6 /* TranscriptBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 797571692F7983A2006AEFB6 /* TranscriptBlockView.swift */; };
 		7975716C2F7983A7006AEFB6 /* TranscriptPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7975716B2F7983A7006AEFB6 /* TranscriptPreviewView.swift */; };
 		7975716E2F7983AC006AEFB6 /* TranscriptStudyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7975716D2F7983AC006AEFB6 /* TranscriptStudyView.swift */; };
@@ -215,6 +217,8 @@
 		791009602F7859DF00225294 /* AudioImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioImportService.swift; sourceTree = "<group>"; };
 		791009622F7859E200225294 /* AudioImportServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioImportServiceTests.swift; sourceTree = "<group>"; };
 		791009642F785B5900225294 /* ImportedSessionRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedSessionRow.swift; sourceTree = "<group>"; };
+		79155F242F84188C0082157E /* LiveTranscriptionPipelineSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranscriptionPipelineSettingsTests.swift; sourceTree = "<group>"; };
+		79155F262F8418900082157E /* LiveTranscriptionPipelineSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranscriptionPipelineSettings.swift; sourceTree = "<group>"; };
 		797571692F7983A2006AEFB6 /* TranscriptBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptBlockView.swift; sourceTree = "<group>"; };
 		7975716B2F7983A7006AEFB6 /* TranscriptPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptPreviewView.swift; sourceTree = "<group>"; };
 		7975716D2F7983AC006AEFB6 /* TranscriptStudyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptStudyView.swift; sourceTree = "<group>"; };
@@ -418,6 +422,7 @@
 				79BE353A2F7EA92C00DB542F /* AudioPlayerViewModelTests.swift */,
 				79BE353E2F7ED91100DB542F /* AppAudioUsageStoreTests.swift */,
 				79C2018B2F7FAE7D002A1163 /* MenuBarSettingsTests.swift */,
+				79155F242F84188C0082157E /* LiveTranscriptionPipelineSettingsTests.swift */,
 			);
 			path = ScribermanTests;
 			sourceTree = "<group>";
@@ -649,6 +654,7 @@
 				7910095E2F7855F200225294 /* ImportedSession.swift */,
 				B1B2C3D4E5F60718293A4B5C /* PendingSession.swift */,
 				7975716F2F79C71C006AEFB6 /* SpeakerProfile.swift */,
+				79155F262F8418900082157E /* LiveTranscriptionPipelineSettings.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -963,6 +969,7 @@
 				797571702F79C71C006AEFB6 /* SpeakerProfile.swift in Sources */,
 				F1A2B3C4D5E6F708192A3B4C /* TranscriptGrouper.swift in Sources */,
 				06B30512C65DF04AFA9A0026 /* MarkdownRenderer.swift in Sources */,
+				79155F272F8418900082157E /* LiveTranscriptionPipelineSettings.swift in Sources */,
 				993FF0F23A6CE7ED3F1B8F49 /* WorkspaceServiceProtocol.swift in Sources */,
 				79BE35332F7E8F5E00DB542F /* AITransformationPreviewCard.swift in Sources */,
 				C16E1FE0441F3C95A965E4C0 /* RecordingServiceProtocol.swift in Sources */,
@@ -987,6 +994,7 @@
 				798732732F7D8EE600570A03 /* AudioFileProberTests.swift in Sources */,
 				A2E8F18069EB9CB0F14A58BA /* RecordingStatusTests.swift in Sources */,
 				79BE353B2F7EA92C00DB542F /* AudioPlayerViewModelTests.swift in Sources */,
+				79155F252F84188C0082157E /* LiveTranscriptionPipelineSettingsTests.swift in Sources */,
 				79DCE4252F77D0A10024DC26 /* MockPermissionService.swift in Sources */,
 				C4EC45D56DEE48C672BEE45A /* TimeFormatterTests.swift in Sources */,
 				79DCE41A2F77BC3D0024DC26 /* TranscriptionServiceTests.swift in Sources */,
@@ -1312,8 +1320,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/MacPaw/OpenAI.git";
 			requirement = {
-				branch = main;
-				kind = branch;
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.4.8;
 			};
 		};
 		C9C9D7C4E41BA2318ED6E595 /* XCRemoteSwiftPackageReference "FluidAudio" */ = {
@@ -1321,7 +1329,7 @@
 			repositoryURL = "https://github.com/FluidInference/FluidAudio.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.7.9;
+				minimumVersion = 0.13.6;
 			};
 		};
 		E1E1E1E1E1E1E1E1E1E1E1E1 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {

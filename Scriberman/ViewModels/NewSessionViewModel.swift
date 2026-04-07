@@ -22,6 +22,7 @@ final class NewSessionViewModel {
     private var recordingMonitorTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
     var menuBarSettings: MenuBarSettings?
+    var settingsViewModel: SettingsViewModel?
 
     var state: State = .idle
     var isIdle: Bool {
@@ -199,7 +200,8 @@ final class NewSessionViewModel {
         // Pre-warm ASR + diarizer models when a workspace is available.
         Task {
             if let workspace = await workspaceService.currentWorkspace() {
-                await liveTranscriptionService.prepare(workspace: workspace)
+                let pipelineConfig = settingsViewModel?.pipelineSettings ?? .defaults
+                await liveTranscriptionService.prepare(workspace: workspace, config: pipelineConfig)
             }
         }
     }
@@ -330,7 +332,8 @@ final class NewSessionViewModel {
             
             // Start Live Transcription
             do {
-                try await liveTranscriptionService.start(workspace: workspace)
+                let pipelineConfig = settingsViewModel?.pipelineSettings ?? .defaults
+                try await liveTranscriptionService.start(workspace: workspace, config: pipelineConfig)
                 startLiveTranscriptionPipeline()
             } catch LiveTranscriptionError.initializationFailed {
                 errorMessage = "Live transcription unavailable: Required models are missing. Open Settings → Models to install ASR and Speaker Diarization models."

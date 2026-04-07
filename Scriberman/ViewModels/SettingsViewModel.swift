@@ -24,22 +24,65 @@ final class SettingsViewModel {
     var bundlePhase: BundleInstallPhase = .idle
     var canDownloadModels = false
 
+    var vadThreshold: Double {
+        didSet { userDefaults.set(vadThreshold, forKey: "vadThreshold") }
+    }
+    var vadMinSpeechDuration: Double {
+        didSet { userDefaults.set(vadMinSpeechDuration, forKey: "vadMinSpeechDuration") }
+    }
+    var asrConfidenceGate: Double {
+        didSet { userDefaults.set(asrConfidenceGate, forKey: "asrConfidenceGate") }
+    }
+    var asrAmplitudeGate: Double {
+        didSet { userDefaults.set(asrAmplitudeGate, forKey: "asrAmplitudeGate") }
+    }
     var speakerThreshold: Double {
-        didSet { UserDefaults.standard.set(speakerThreshold, forKey: "speakerThreshold") }
+        didSet { userDefaults.set(speakerThreshold, forKey: "speakerThreshold") }
     }
     var minSilenceGap: Double {
-        didSet { UserDefaults.standard.set(minSilenceGap, forKey: "minSilenceGap") }
+        didSet { userDefaults.set(minSilenceGap, forKey: "minSilenceGap") }
     }
 
-    init(workspaceService: any WorkspaceServiceProtocol, modelInstallService: any ModelInstallServicing, speakerEmbeddingStore: SpeakerEmbeddingStore) {
+    var pipelineSettings: LiveTranscriptionPipelineSettings {
+        LiveTranscriptionPipelineSettings(
+            vadThreshold: vadThreshold,
+            vadMinSpeechDuration: vadMinSpeechDuration,
+            asrConfidenceGate: asrConfidenceGate,
+            asrAmplitudeGate: asrAmplitudeGate,
+            speakerSimilarityThreshold: speakerThreshold,
+            minSilenceGap: minSilenceGap
+        )
+    }
+
+    private let userDefaults: UserDefaults
+
+    init(
+        workspaceService: any WorkspaceServiceProtocol,
+        modelInstallService: any ModelInstallServicing,
+        speakerEmbeddingStore: SpeakerEmbeddingStore,
+        userDefaults: UserDefaults = .standard
+    ) {
         self.workspaceService = workspaceService
         self.modelInstallService = modelInstallService
         self.speakerEmbeddingStore = speakerEmbeddingStore
+        self.userDefaults = userDefaults
 
-        let threshold = UserDefaults.standard.double(forKey: "speakerThreshold")
+        let vadThresholdStored = userDefaults.double(forKey: "vadThreshold")
+        self.vadThreshold = vadThresholdStored == 0 ? LiveTranscriptionPipelineSettings.defaults.vadThreshold : vadThresholdStored
+
+        let vadMinSpeechDurationStored = userDefaults.double(forKey: "vadMinSpeechDuration")
+        self.vadMinSpeechDuration = vadMinSpeechDurationStored == 0 ? LiveTranscriptionPipelineSettings.defaults.vadMinSpeechDuration : vadMinSpeechDurationStored
+
+        let asrConfidenceGateStored = userDefaults.object(forKey: "asrConfidenceGate") as? Double
+        self.asrConfidenceGate = asrConfidenceGateStored ?? LiveTranscriptionPipelineSettings.defaults.asrConfidenceGate
+
+        let asrAmplitudeGateStored = userDefaults.object(forKey: "asrAmplitudeGate") as? Double
+        self.asrAmplitudeGate = asrAmplitudeGateStored ?? LiveTranscriptionPipelineSettings.defaults.asrAmplitudeGate
+
+        let threshold = userDefaults.double(forKey: "speakerThreshold")
         self.speakerThreshold = threshold == 0 ? 0.65 : threshold
 
-        let gap = UserDefaults.standard.double(forKey: "minSilenceGap")
+        let gap = userDefaults.double(forKey: "minSilenceGap")
         self.minSilenceGap = gap == 0 ? 0.5 : gap
 
         ModelGroup.allCases.forEach { group in
