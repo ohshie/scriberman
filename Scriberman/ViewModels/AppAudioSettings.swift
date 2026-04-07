@@ -18,4 +18,8 @@ final class AppAudioSettings {
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
     }
+
+    func resetToDefaults() {
+        voiceProcessingEnabled = false
+    }
 }

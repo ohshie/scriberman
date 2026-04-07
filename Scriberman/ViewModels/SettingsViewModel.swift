@@ -15,6 +15,7 @@ final class SettingsViewModel {
     private let workspaceService: any WorkspaceServiceProtocol
     private let modelInstallService: any ModelInstallServicing
     let speakerEmbeddingStore: SpeakerEmbeddingStore
+    let appAudioSettings: AppAudioSettings
 
     var workspacePathText: String = "Not configured"
     var workspaceStatusText: String = "Select a workspace to enable model installs."
@@ -60,11 +61,13 @@ final class SettingsViewModel {
         workspaceService: any WorkspaceServiceProtocol,
         modelInstallService: any ModelInstallServicing,
         speakerEmbeddingStore: SpeakerEmbeddingStore,
+        appAudioSettings: AppAudioSettings = AppAudioSettings(),
         userDefaults: UserDefaults = .standard
     ) {
         self.workspaceService = workspaceService
         self.modelInstallService = modelInstallService
         self.speakerEmbeddingStore = speakerEmbeddingStore
+        self.appAudioSettings = appAudioSettings
         self.userDefaults = userDefaults
 
         let vadThresholdStored = userDefaults.double(forKey: "vadThreshold")
@@ -190,6 +193,17 @@ final class SettingsViewModel {
             }
             bundlePhase = .error(error.localizedDescription)
         }
+    }
+
+    func resetAllPipelineSettingsToDefaults() {
+        let d = LiveTranscriptionPipelineSettings.defaults
+        vadThreshold = d.vadThreshold
+        vadMinSpeechDuration = d.vadMinSpeechDuration
+        asrConfidenceGate = d.asrConfidenceGate
+        asrAmplitudeGate = d.asrAmplitudeGate
+        speakerThreshold = d.speakerSimilarityThreshold
+        minSilenceGap = d.minSilenceGap
+        appAudioSettings.resetToDefaults()
     }
 
     private static func isInProgress(_ phase: BundleInstallPhase) -> Bool {
