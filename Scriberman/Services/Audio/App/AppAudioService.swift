@@ -77,10 +77,6 @@ final class AppAudioService: AppAudioServiceProtocol {
             return
         }
 
-        if savedBundleID != nil {
-            userDefaults.removeObject(forKey: selectedAppBundleIDKey)
-        }
-
         applySelection(nil)
     }
 

@@ -17,8 +17,6 @@ final class NewSessionViewModel {
     private let appAudioService: AppAudioServiceProtocol
     private let permissionService: PermissionServiceProtocol
     private let liveTranscriptionService: LiveTranscriptionService
-    private let userDefaults: UserDefaults
-    private let lastUsedAppNameKey = "lastUsedAppName"
     private var recordingMonitorTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
     var menuBarSettings: MenuBarSettings?
@@ -47,7 +45,6 @@ final class NewSessionViewModel {
     var selectedApp: CapturedApp? {
         get { appAudioService.selectedApp }
         set {
-            lastUsedAppName = newValue?.name
             appAudioService.selectedApp = newValue
         }
     }
@@ -131,17 +128,6 @@ final class NewSessionViewModel {
         return false
     }
 
-    private var lastUsedAppName: String? {
-        get { userDefaults.string(forKey: lastUsedAppNameKey) }
-        set {
-            if let newValue {
-                userDefaults.set(newValue, forKey: lastUsedAppNameKey)
-            } else {
-                userDefaults.removeObject(forKey: lastUsedAppNameKey)
-            }
-        }
-    }
-
     init(
         workspaceService: WorkspaceServiceProtocol,
         recordingService: RecordingServiceProtocol,
@@ -149,7 +135,7 @@ final class NewSessionViewModel {
         appAudioService: AppAudioServiceProtocol,
         permissionService: PermissionServiceProtocol,
         speakerEmbeddingStore: SpeakerEmbeddingStore? = nil,
-        userDefaults: UserDefaults = .standard
+        userDefaults _: UserDefaults = .standard
     ) {
         self.liveTranscriptionService = LiveTranscriptionService(speakerEmbeddingStore: speakerEmbeddingStore)
         self.workspaceService = workspaceService
@@ -157,7 +143,6 @@ final class NewSessionViewModel {
         self.audioDeviceService = audioDeviceService
         self.appAudioService = appAudioService
         self.permissionService = permissionService
-        self.userDefaults = userDefaults
         enforceAppAudioSelectionForCurrentPermissions()
     }
 
@@ -229,14 +214,7 @@ final class NewSessionViewModel {
     }
 
     func restoreLastUsedApp() {
-        let lastUsedAppName = lastUsedAppName
         appAudioService.refreshRunningApps()
-        guard let lastUsedAppName else {
-            selectedApp = nil
-            return
-        }
-
-        selectedApp = runningApps.first(where: { $0.name == lastUsedAppName })
     }
 
     func startRecording(title: String, context _: ModelContext) async {
@@ -439,7 +417,6 @@ final class NewSessionViewModel {
             recordAppAudio = false
             selectedApp = nil
             appAudioService.selectedApp = nil
-            lastUsedAppName = nil
             return
         }
     }
