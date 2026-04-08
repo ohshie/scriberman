@@ -4,8 +4,21 @@ struct AudioPlayerBar: View {
     let viewModel: AudioPlayerViewModel
     let sessionHasAudio: Bool
     let mixdownURL: String?
+    let onResumeScroll: (() -> Void)?
 
     @State private var previousMixdownURL: String?
+
+    init(
+        viewModel: AudioPlayerViewModel,
+        sessionHasAudio: Bool,
+        mixdownURL: String?,
+        onResumeScroll: (() -> Void)? = nil
+    ) {
+        self.viewModel = viewModel
+        self.sessionHasAudio = sessionHasAudio
+        self.mixdownURL = mixdownURL
+        self.onResumeScroll = onResumeScroll
+    }
 
     var body: some View {
         Group {
@@ -92,6 +105,32 @@ struct AudioPlayerBar: View {
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 86, alignment: .trailing)
+
+            if let onResumeScroll {
+                Button(action: onResumeScroll) {
+                    Image(systemName: "arrow.down.to.line")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("Resume Transcript Auto-Scroll")
+            }
+
+            Button {
+                if viewModel.isPlaying {
+                    viewModel.pause()
+                } else {
+                    viewModel.play()
+                }
+            } label: {
+                EmptyView()
+            }
+            .keyboardShortcut(.space, modifiers: [])
+            .disabled(viewModel.isReady == false)
+            .accessibilityHidden(true)
+            .frame(width: 0, height: 0)
+            .opacity(0)
+            .allowsHitTesting(false)
         }
     }
 

@@ -38,9 +38,9 @@ struct TranscriptStudyView: View {
                 } else {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(blocks) { block in
-                            TranscriptBlockView(block: block) { newName in
+                            TranscriptBlockView(block: block, onSpeakerRename: { newName in
                                 renameSpeaker(id: block.speaker.id, to: newName)
-                            }
+                            })
                         }
                     }
                 }
