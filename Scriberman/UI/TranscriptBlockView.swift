@@ -2,10 +2,24 @@ import SwiftUI
 
 struct TranscriptBlockView: View {
     let block: TranscriptBlock
+    let isActive: Bool
+    let onTap: () -> Void
     var onSpeakerRename: ((String) -> Void)? = nil
 
     @State private var isEditingSpeaker = false
     @State private var speakerNameDraft = ""
+
+    init(
+        block: TranscriptBlock,
+        isActive: Bool = false,
+        onTap: @escaping () -> Void = {},
+        onSpeakerRename: ((String) -> Void)? = nil
+    ) {
+        self.block = block
+        self.isActive = isActive
+        self.onTap = onTap
+        self.onSpeakerRename = onSpeakerRename
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -54,6 +68,16 @@ struct TranscriptBlockView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(isActive ? speakerColor.opacity(0.4) : .clear, lineWidth: 1.5)
+        }
+        .scaleEffect(isActive ? 1.01 : 1)
+        .shadow(color: isActive ? Color("ActiveBlockShadow") : .clear, radius: 6, x: 0, y: 3)
+        .animation(.easeOut(duration: 0.15), value: isActive)
+        .onTapGesture {
+            onTap()
+        }
     }
 
     private var timeRange: String {
