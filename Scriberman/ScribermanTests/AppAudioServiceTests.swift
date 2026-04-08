@@ -107,7 +107,7 @@ final class AppAudioServiceTests {
 
     @MainActor
     @Test
-    func testMissingSavedSelectionIsClearedAndSelectionIsNil() {
+    func testMissingSavedSelectionKeepsBundleIDAndNilsSelection() {
         provider.apps = [
             RunningApplicationSnapshot(bundleID: "com.test.zoom", name: "Zoom", pid: 2, icon: nil, activationPolicy: .regular)
         ]
@@ -119,7 +119,7 @@ final class AppAudioServiceTests {
         )
 
         #expect(service.selectedApp == nil)
-        #expect(userDefaults.string(forKey: "selectedAppBundleID") == nil)
+        #expect(userDefaults.string(forKey: "selectedAppBundleID") == "com.test.missing")
     }
 
     @MainActor
@@ -143,7 +143,34 @@ final class AppAudioServiceTests {
         service.refreshRunningApps()
 
         #expect(service.selectedApp == nil)
-        #expect(userDefaults.string(forKey: "selectedAppBundleID") == nil)
+        #expect(userDefaults.string(forKey: "selectedAppBundleID") == "com.test.zoom")
+    }
+
+    @MainActor
+    @Test
+    func testRefreshRestoresSelectionAfterTransientMiss() {
+        provider.apps = [
+            RunningApplicationSnapshot(bundleID: "com.test.browser", name: "Browser", pid: 9, icon: nil, activationPolicy: .regular)
+        ]
+        userDefaults.set("com.test.zoom", forKey: "selectedAppBundleID")
+
+        service = AppAudioService(
+            runningApplicationProvider: provider,
+            userDefaults: userDefaults
+        )
+
+        #expect(service.selectedApp == nil)
+        #expect(userDefaults.string(forKey: "selectedAppBundleID") == "com.test.zoom")
+
+        provider.apps = [
+            RunningApplicationSnapshot(bundleID: "com.test.zoom", name: "Zoom", pid: 2, icon: nil, activationPolicy: .regular),
+            RunningApplicationSnapshot(bundleID: "com.test.browser", name: "Browser", pid: 9, icon: nil, activationPolicy: .regular)
+        ]
+
+        service.refreshRunningApps()
+
+        #expect(service.selectedApp?.bundleID == "com.test.zoom")
+        #expect(userDefaults.string(forKey: "selectedAppBundleID") == "com.test.zoom")
     }
 
     @MainActor
