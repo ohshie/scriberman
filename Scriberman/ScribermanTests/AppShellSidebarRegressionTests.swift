@@ -171,7 +171,7 @@ struct AppShellSidebarRegressionTests {
     func studyModeRendersTranscriptStudyViewInPlace() throws {
         let source = try appShellSource()
         #expect(
-            source.contains("if detailMode == .study, let transcript = displayedTranscript(for: session) {\n                TranscriptStudyView(\n                    session: session,\n                    transcript: transcript,\n                    store: appState.backgroundServices.speakerEmbeddingStore\n                )"),
+            source.contains("if detailMode == .study, let transcript = displayedTranscript(for: session) {\n                TranscriptStudyView(\n                    session: session,\n                    audioPlayerViewModel: audioPlayerViewModel,\n                    autoScrollEnabled: $transcriptAutoScrollEnabled,\n                    transcript: transcript,\n                    store: appState.backgroundServices.speakerEmbeddingStore\n                )"),
             "App shell should render TranscriptStudyView in the detail column when study mode is active."
         )
     }
