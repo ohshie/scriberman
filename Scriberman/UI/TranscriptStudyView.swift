@@ -1,22 +1,37 @@
 import SwiftUI
 
+@MainActor
+protocol TranscriptPlaybackControlling: AnyObject {
+    func seek(to seconds: Double)
+    func play()
+}
+
+extension AudioPlayerViewModel: TranscriptPlaybackControlling {}
+
 struct TranscriptStudyView: View {
     let session: any TranscribableSession
+    let audioPlayerViewModel: AudioPlayerViewModel
+    @Binding var autoScrollEnabled: Bool
     @State private var transcript: Transcript
     let store: SpeakerEmbeddingStore?
     let showRawMarkdownToggle: Bool
 
     @State private var showRawMarkdown = false
+    @State private var scrollTargetID: UUID?
 
     private let markdownRenderer = MarkdownRenderer()
 
     init(
         session: any TranscribableSession,
+        audioPlayerViewModel: AudioPlayerViewModel,
+        autoScrollEnabled: Binding<Bool>,
         transcript: Transcript,
         store: SpeakerEmbeddingStore? = nil,
         showRawMarkdownToggle: Bool = true
     ) {
         self.session = session
+        self.audioPlayerViewModel = audioPlayerViewModel
+        self._autoScrollEnabled = autoScrollEnabled
         self._transcript = State(initialValue: transcript)
         self.store = store
         self.showRawMarkdownToggle = showRawMarkdownToggle
@@ -38,15 +53,34 @@ struct TranscriptStudyView: View {
                 } else {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(blocks) { block in
-                            TranscriptBlockView(block: block, onSpeakerRename: { newName in
-                                renameSpeaker(id: block.speaker.id, to: newName)
-                            })
+                            TranscriptBlockView(
+                                block: block,
+                                isActive: activeBlock?.id == block.id,
+                                onTap: {
+                                    Self.seekAndPlay(block: block, player: audioPlayerViewModel)
+                                },
+                                onSpeakerRename: { newName in
+                                    renameSpeaker(id: block.speaker.id, to: newName)
+                                }
+                            )
                         }
                     }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(20)
+        }
+        .scrollPosition(id: $scrollTargetID)
+        .onChange(of: activeBlock?.id) {
+            guard autoScrollEnabled else {
+                return
+            }
+            scrollTargetID = activeBlock?.id
+        }
+        .onScrollPhaseChange { _, newPhase in
+            if newPhase == .interacting {
+                autoScrollEnabled = false
+            }
         }
         .safeAreaInset(edge: .top) {
             if showRawMarkdownToggle {
@@ -64,6 +98,21 @@ struct TranscriptStudyView: View {
 
     private var blocks: [TranscriptBlock] {
         TranscriptGrouper.makeBlocks(from: transcript)
+    }
+
+    private var activeBlock: TranscriptBlock? {
+        Self.activeBlock(for: blocks, currentTime: audioPlayerViewModel.currentTime)
+    }
+
+    static func activeBlock(for blocks: [TranscriptBlock], currentTime: Double) -> TranscriptBlock? {
+        let time = Float(currentTime)
+        return blocks.first { time >= $0.startTime && time < $0.endTime }
+    }
+
+    @MainActor
+    static func seekAndPlay(block: TranscriptBlock, player: any TranscriptPlaybackControlling) {
+        player.seek(to: Double(block.startTime))
+        player.play()
     }
 
     private var rawMarkdown: String {

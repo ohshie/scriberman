@@ -21,6 +21,7 @@ struct AppShellView: View {
     @State private var selectedTransformationID: UUID?
     @State private var studyActionErrorMessage: String?
     @State private var audioPlayerViewModel = AudioPlayerViewModel()
+    @State private var transcriptAutoScrollEnabled = true
 
     var body: some View {
         NavigationSplitView {
@@ -45,7 +46,10 @@ struct AppShellView: View {
                         AudioPlayerBar(
                             viewModel: audioPlayerViewModel,
                             sessionHasAudio: audioURL(for: selectedSession) != nil || selectedSessionHasMixdownNil(selectedSession),
-                            mixdownURL: mixdownURLString(for: selectedSession)
+                            mixdownURL: mixdownURLString(for: selectedSession),
+                            onResumeScroll: transcriptAutoScrollEnabled ? nil : {
+                                transcriptAutoScrollEnabled = true
+                            }
                         )
                     }
                     .navigationSplitViewColumnWidth(min: 560, ideal: 860)
@@ -99,6 +103,7 @@ struct AppShellView: View {
                 return
             }
 
+            transcriptAutoScrollEnabled = true
             audioPlayerViewModel.stop()
             if let url = audioURL(for: newValue) {
                 audioPlayerViewModel.load(url: url)
@@ -108,6 +113,11 @@ struct AppShellView: View {
 
             detailMode = .standard
             selectedTransformationID = nil
+        }
+        .onChange(of: detailMode) { _, newValue in
+            if newValue != .study {
+                transcriptAutoScrollEnabled = true
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: AppDelegate.focusPendingSessionNotification)) { _ in
             focusPendingSessionIfRequested()
@@ -170,6 +180,8 @@ struct AppShellView: View {
             if detailMode == .study, let transcript = displayedTranscript(for: session) {
                 TranscriptStudyView(
                     session: session,
+                    audioPlayerViewModel: audioPlayerViewModel,
+                    autoScrollEnabled: $transcriptAutoScrollEnabled,
                     transcript: transcript,
                     store: appState.backgroundServices.speakerEmbeddingStore
                 )
@@ -205,6 +217,8 @@ struct AppShellView: View {
             if detailMode == .study, let transcript = displayedTranscript(for: session) {
                 TranscriptStudyView(
                     session: session,
+                    audioPlayerViewModel: audioPlayerViewModel,
+                    autoScrollEnabled: $transcriptAutoScrollEnabled,
                     transcript: transcript,
                     store: appState.backgroundServices.speakerEmbeddingStore
                 )

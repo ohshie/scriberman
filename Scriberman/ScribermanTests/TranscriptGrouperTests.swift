@@ -2,6 +2,8 @@ import Testing
 @testable import Scriberman
 
 struct TranscriptGrouperTests {
+    private let speaker = TranscriptSpeaker(id: "S1", label: "Speaker 1", colorHex: "#111111")
+
     @Test
     func makeBlocksMergesConsecutiveSegmentsWithSameSpeakerAndSource() {
         let transcript = Transcript(
@@ -57,5 +59,33 @@ struct TranscriptGrouperTests {
         #expect(blocks[0].speaker.id == "missing")
         #expect(blocks[0].speaker.label == "missing")
         #expect(blocks[0].speaker.colorHex == "#6B7280")
+    }
+
+    @Test
+    @MainActor
+    func activeBlockSelectsCorrectBlockForBoundariesAndGaps() {
+        let blocks = [
+            TranscriptBlock(speaker: speaker, audioSource: .mic, startTime: 0, endTime: 2, text: "A"),
+            TranscriptBlock(speaker: speaker, audioSource: .mic, startTime: 2, endTime: 3, text: "B"),
+            TranscriptBlock(speaker: speaker, audioSource: .mic, startTime: 4, endTime: 5, text: "C")
+        ]
+
+        #expect(TranscriptStudyView.activeBlock(for: blocks, currentTime: 0)?.text == "A")
+        #expect(TranscriptStudyView.activeBlock(for: blocks, currentTime: 1.999)?.text == "A")
+        #expect(TranscriptStudyView.activeBlock(for: blocks, currentTime: 2)?.text == "B")
+        #expect(TranscriptStudyView.activeBlock(for: blocks, currentTime: 3) == nil)
+        #expect(TranscriptStudyView.activeBlock(for: blocks, currentTime: 4)?.text == "C")
+    }
+
+    @Test
+    @MainActor
+    func activeBlockReturnsNilOutsideBlockRanges() {
+        let blocks = [
+            TranscriptBlock(speaker: speaker, audioSource: .mic, startTime: 1, endTime: 2, text: "A")
+        ]
+
+        #expect(TranscriptStudyView.activeBlock(for: blocks, currentTime: 0.5) == nil)
+        #expect(TranscriptStudyView.activeBlock(for: blocks, currentTime: 2.0) == nil)
+        #expect(TranscriptStudyView.activeBlock(for: blocks, currentTime: 10.0) == nil)
     }
 }
