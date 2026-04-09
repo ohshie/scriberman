@@ -18,12 +18,17 @@ struct NewSessionViewModelTests {
         cleanup: () -> Void
     )
 
-    private func makeFixture() -> Fixture {
+    private func makeFixture(
+        screenRecordingStatus: PermissionStatus = .notDetermined,
+        initialSelectedApp: CapturedApp? = nil
+    ) -> Fixture {
         let workspaceService = MockWorkspaceService()
         let recordingService = MockRecordingService()
         let audioDeviceService = MockAudioDeviceService()
         let appAudioService = MockNewSessionAppAudioService()
         let permissionService = MockPermissionService()
+        permissionService.screenRecordingStatus = screenRecordingStatus
+        appAudioService.selectedApp = initialSelectedApp
         let userDefaultsSuiteName = "NewSessionViewModelTests-\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: userDefaultsSuiteName) ?? .standard
         let workspace = Workspace(rootURL: URL(fileURLWithPath: "/tmp/workspace"))
@@ -124,6 +129,28 @@ struct NewSessionViewModelTests {
         await viewModel.startRecording(title: "Session", context: context)
 
         #expect(appAudioService.incrementUsageCalls == ["com.apple.Music"])
+    }
+
+    @Test
+    func testRestoredSelectionOnLaunchEnablesAppAudioForRecording() async {
+        let restoredApp = CapturedApp(bundleID: "com.apple.Music", name: "Music", pid: 123, icon: nil)
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture(
+            screenRecordingStatus: .granted,
+            initialSelectedApp: restoredApp
+        )
+        defer { cleanup() }
+        _ = (workspaceService, audioDeviceService, appAudioService, menuBarSettings)
+
+        permissionService.micStatus = .granted
+
+        #expect(viewModel.recordAppAudio)
+        #expect(viewModel.selectedApp?.bundleID == "com.apple.Music")
+
+        await viewModel.startRecording(title: "Session", context: context)
+
+        #expect(recordingService.startCalls.count == 1)
+        #expect(recordingService.startCalls.first?.capturedAppName == "Music")
+        #expect(recordingService.startCalls.first?.appProcessID == 123)
     }
 
     @Test

@@ -419,6 +419,8 @@ final class NewSessionViewModel {
             appAudioService.selectedApp = nil
             return
         }
+
+        recordAppAudio = appAudioService.selectedApp != nil
     }
 
     private func startRecordingMonitor() {
