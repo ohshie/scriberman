@@ -25,6 +25,7 @@ enum TranscriptGrouper {
                     .joined(separator: " ")
 
                 lastBlock = TranscriptBlock(
+                    id: lastBlock.id,
                     speaker: lastBlock.speaker,
                     audioSource: lastBlock.audioSource,
                     startTime: lastBlock.startTime,
@@ -35,6 +36,7 @@ enum TranscriptGrouper {
             } else {
                 blocks.append(
                     TranscriptBlock(
+                        id: segment.id,
                         speaker: speaker,
                         audioSource: segment.audioSource,
                         startTime: segment.startTime,

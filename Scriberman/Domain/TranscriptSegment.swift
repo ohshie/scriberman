@@ -68,10 +68,26 @@ struct TranscriptSegment: Codable, Equatable {
 }
 
 struct TranscriptBlock: Identifiable {
-    let id = UUID()
+    let id: UUID
     let speaker: TranscriptSpeaker
     let audioSource: AudioSource
     let startTime: Float
     let endTime: Float
     let text: String
+
+    init(
+        id: UUID = UUID(),
+        speaker: TranscriptSpeaker,
+        audioSource: AudioSource,
+        startTime: Float,
+        endTime: Float,
+        text: String
+    ) {
+        self.id = id
+        self.speaker = speaker
+        self.audioSource = audioSource
+        self.startTime = startTime
+        self.endTime = endTime
+        self.text = text
+    }
 }
