@@ -4,6 +4,21 @@ import Testing
 @MainActor
 @Suite
 struct AudioPlayerViewModelTests {
+    @MainActor
+    private final class MockPlaybackController: TranscriptPlaybackControlling {
+        var actions: [String] = []
+        var soughtTime: Double?
+
+        func seek(to seconds: Double) {
+            soughtTime = seconds
+            actions.append("seek")
+        }
+
+        func play() {
+            actions.append("play")
+        }
+    }
+
     @Test
     func initialState() {
         let viewModel = AudioPlayerViewModel()
@@ -53,5 +68,22 @@ struct AudioPlayerViewModelTests {
         viewModel.pause()
 
         #expect(viewModel.isPlaying == false)
+    }
+
+    @Test
+    func tappingBlockSeeksThenStartsPlayback() {
+        let player = MockPlaybackController()
+        let block = TranscriptBlock(
+            speaker: TranscriptSpeaker(id: "S1", label: "Speaker 1", colorHex: "#111111"),
+            audioSource: .mic,
+            startTime: 12.34,
+            endTime: 14,
+            text: "Hello"
+        )
+
+        TranscriptStudyView.seekAndPlay(block: block, player: player)
+
+        #expect(player.soughtTime == Double(block.startTime))
+        #expect(player.actions == ["seek", "play"])
     }
 }
