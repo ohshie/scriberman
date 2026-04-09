@@ -1,4 +1,5 @@
 import AppKit
+import SwiftData
 import SwiftUI
 
 struct TranscriptDetailView: View {
@@ -8,8 +9,11 @@ struct TranscriptDetailView: View {
     let onOpenStudy: (() -> Void)?
     let onOpenTransformation: ((UUID) -> Void)?
 
+    @Environment(\.modelContext) private var modelContext
     @State private var showingDeleteConfirmation = false
+    @State private var editingTitle: String
     @State private var viewModel: TranscriptDetailViewModel
+    @FocusState private var titleFocused: Bool
 
     init(
         session: any TranscribableSession,
@@ -24,6 +28,7 @@ struct TranscriptDetailView: View {
         self.onDelete = onDelete
         self.onOpenStudy = onOpenStudy
         self.onOpenTransformation = onOpenTransformation
+        _editingTitle = State(initialValue: session.title)
         _viewModel = State(initialValue: TranscriptDetailViewModel(session: session, aiProviderService: aiProviderService))
     }
 
@@ -38,6 +43,12 @@ struct TranscriptDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(28)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if titleFocused {
+                titleFocused = false
+            }
         }
         .navigationTitle("")
         .toolbar {
@@ -78,8 +89,19 @@ struct TranscriptDetailView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(session.title)
+            TextField("Title", text: $editingTitle)
+                .textFieldStyle(.plain)
                 .font(.largeTitle.weight(.semibold))
+                .focused($titleFocused)
+                .onSubmit {
+                    commitTitle()
+                    titleFocused = false
+                }
+                .onChange(of: titleFocused) { _, focused in
+                    if focused == false {
+                        commitTitle()
+                    }
+                }
 
             Text(formattedDate)
                 .font(.headline)
@@ -201,5 +223,10 @@ struct TranscriptDetailView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(viewModel.finalTranscriptText, forType: .string)
+    }
+
+    private func commitTitle() {
+        session.title = editingTitle
+        try? modelContext.save()
     }
 }
