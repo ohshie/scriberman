@@ -47,6 +47,7 @@ actor RecordingService: RecordingServiceProtocol {
     private let micStreamer = AudioFileStreamer()
     private var audioRecorder: AVAudioRecorder?
     private var recordingStartedAt: Date?
+    private var recordingCreatedAt: Date?
     private var recordingIdentifier: String?
     private var appAudioURL: URL?
     private var micStartHostTime: UInt64?
@@ -112,11 +113,13 @@ actor RecordingService: RecordingServiceProtocol {
         isRecording: Bool,
         recordingIdentifier: String? = nil,
         recordingWorkspaceRootURL: URL? = nil,
+        recordingCreatedAt: Date? = nil,
         pendingTitle: String? = nil
     ) {
         self.isRecordingValue = isRecording
         self.recordingIdentifier = recordingIdentifier
         self.recordingWorkspaceRootURL = recordingWorkspaceRootURL
+        self.recordingCreatedAt = recordingCreatedAt
         self.pendingTitle = pendingTitle
     }
     #endif
@@ -170,10 +173,20 @@ actor RecordingService: RecordingServiceProtocol {
 
         do {
             try fileManager.createDirectory(at: workspace.recordingsURL, withIntermediateDirectories: true)
-            try fileManager.createDirectory(at: workspace.tmpRecordingURL, withIntermediateDirectories: true)
-
+            let recordingCreatedAt = Date()
             let recordingIdentifier = UUID().uuidString
-            let fileURLs = Self.recordingFileURLs(in: workspace)
+            let recordingFolderURL = Self.recordingFolderURL(
+                in: workspace,
+                createdAt: recordingCreatedAt,
+                recordingIdentifier: recordingIdentifier
+            )
+            try fileManager.createDirectory(at: recordingFolderURL, withIntermediateDirectories: true)
+
+            let fileURLs = Self.recordingFileURLs(
+                in: workspace,
+                createdAt: recordingCreatedAt,
+                recordingIdentifier: recordingIdentifier
+            )
             let micFileURL = fileURLs.mic
             let appFileURL = fileURLs.app
             self.micStartHostTime = nil
@@ -242,6 +255,7 @@ actor RecordingService: RecordingServiceProtocol {
                 try startRecorderFallback(to: micFileURL)
             }
             self.recordingStartedAt = Date()
+            self.recordingCreatedAt = recordingCreatedAt
             self.recordingIdentifier = recordingIdentifier
             self.isRecordingValue = true
             self.audioLevelValue = 0
@@ -296,9 +310,10 @@ actor RecordingService: RecordingServiceProtocol {
         await appAudioCaptureSession?.stop()
         appAudioCaptureSession = nil
 
-        let startedAt = recordingStartedAt ?? Date()
-        let createdAt = Date()
-        let duration = max(0, createdAt.timeIntervalSince(startedAt))
+        let startedAt = recordingStartedAt ?? recordingCreatedAt ?? Date()
+        let createdAt = recordingCreatedAt ?? startedAt
+        let stoppedAt = Date()
+        let duration = max(0, stoppedAt.timeIntervalSince(startedAt))
 
         guard let recordingIdentifier, let recordingWorkspaceRootURL else {
             cleanupRecordingState()
@@ -306,18 +321,20 @@ actor RecordingService: RecordingServiceProtocol {
         }
 
         let workspace = Workspace(rootURL: recordingWorkspaceRootURL)
-        let finalRecordingURLs: (mic: URL, app: URL?)
-        do {
-            finalRecordingURLs = try Self.promoteTmpRecordingFolder(
-                in: workspace,
-                createdAt: createdAt,
-                recordingIdentifier: recordingIdentifier,
-                fileManager: fileManager
-            )
-        } catch {
+        let captureFileURLs = Self.recordingFileURLs(
+            in: workspace,
+            createdAt: createdAt,
+            recordingIdentifier: recordingIdentifier
+        )
+
+        guard fileManager.fileExists(atPath: captureFileURLs.mic.path) else {
             cleanupRecordingState()
             return nil
         }
+        let finalRecordingURLs: (mic: URL, app: URL?) = (
+            captureFileURLs.mic,
+            fileManager.fileExists(atPath: captureFileURLs.app.path) ? captureFileURLs.app : nil
+        )
 
         logger.info(
             "Prepared recording session folder. mic=\(finalRecordingURLs.mic.path, privacy: .public) app=\(finalRecordingURLs.app?.path ?? "nil", privacy: .public)"
@@ -394,6 +411,7 @@ actor RecordingService: RecordingServiceProtocol {
         appAudioCaptureSession = nil
         appAudioURL = nil
         recordingStartedAt = nil
+        recordingCreatedAt = nil
         recordingIdentifier = nil
         activeCapturedAppName = nil
         pendingTitle = nil
@@ -510,25 +528,32 @@ actor RecordingService: RecordingServiceProtocol {
 }
 
 extension RecordingService {
-    static func recordingFileURLs(in workspace: Workspace) -> (mic: URL, app: URL) {
-        RecordingFileLayout.recordingFileURLs(in: workspace)
+    static func recordingFolderURL(
+        in workspace: Workspace,
+        createdAt: Date,
+        recordingIdentifier: String
+    ) -> URL {
+        RecordingFileLayout.recordingFolderURL(
+            in: workspace,
+            createdAt: createdAt,
+            recordingIdentifier: recordingIdentifier
+        )
+    }
+
+    static func recordingFileURLs(
+        in workspace: Workspace,
+        createdAt: Date,
+        recordingIdentifier: String
+    ) -> (mic: URL, app: URL) {
+        RecordingFileLayout.recordingFileURLs(
+            in: workspace,
+            createdAt: createdAt,
+            recordingIdentifier: recordingIdentifier
+        )
     }
 
     static func folderName(createdAt: Date, recordingIdentifier: String) -> String {
         RecordingFileLayout.folderName(createdAt: createdAt, recordingIdentifier: recordingIdentifier)
     }
 
-    static func promoteTmpRecordingFolder(
-        in workspace: Workspace,
-        createdAt: Date,
-        recordingIdentifier: String,
-        fileManager: FileManager = .default
-    ) throws -> (mic: URL, app: URL?) {
-        try RecordingFileLayout.promoteTmpRecordingFolder(
-            in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: recordingIdentifier,
-            fileManager: fileManager
-        )
-    }
 }
