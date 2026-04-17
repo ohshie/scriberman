@@ -19,6 +19,13 @@ struct StatusTagViewTests {
     }
 
     @Test
+    func recordingMapsToRecordingLabelWithOrangeTint() {
+        let style = StatusTagView.style(for: .recording)
+        #expect(style.label == "Recording")
+        #expect(style.tint == .orange)
+    }
+
+    @Test
     func failedMapsToRedTint() {
         let style = StatusTagView.style(for: .error("boom"))
         #expect(style.label == "Failed")

@@ -27,6 +27,8 @@ struct StatusTagView: View {
 
     static func style(for status: RecordingStatus) -> Style {
         switch status {
+        case .recording:
+            return Style(label: "Recording", tint: .orange)
         case .done:
             return Style(label: "Done", tint: .green)
         case .error:

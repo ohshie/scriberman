@@ -55,7 +55,7 @@ final class TranscriptDetailViewModel {
     var canReprocess: Bool {
         guard session.mixdownURL != nil else { return false }
         switch session.status {
-        case .converting, .transcribing, .retranscribing:
+        case .recording, .converting, .transcribing, .retranscribing:
             return false
         case .recorded, .done, .error:
             return true
