@@ -212,6 +212,16 @@ final class RecordingServiceTests {
             withIntermediateDirectories: true
         )
         _ = FileManager.default.createFile(atPath: sessionURLs.mic.path, contents: Data("mic".utf8))
+        let seededSession = RecordingSession(
+            createdAt: recordingCreatedAt,
+            duration: 0,
+            micAudioURL: sessionURLs.mic.path,
+            title: customTitle,
+            status: .recording
+        )
+        let seedContext = ModelContext(container)
+        seedContext.insert(seededSession)
+        try seedContext.save()
 
         // Fake the recording state
         await service.setRecordingStateForTesting(
@@ -219,7 +229,8 @@ final class RecordingServiceTests {
             recordingIdentifier: recordingIdentifier,
             recordingWorkspaceRootURL: workspace.rootURL,
             recordingCreatedAt: recordingCreatedAt,
-            pendingTitle: customTitle
+            pendingTitle: customTitle,
+            currentSessionID: seededSession.id
         )
 
         let sessionID = await service.stopRecording()
@@ -258,13 +269,24 @@ final class RecordingServiceTests {
             withIntermediateDirectories: true
         )
         _ = FileManager.default.createFile(atPath: sessionURLs.mic.path, contents: Data("mic".utf8))
+        let seededSession = RecordingSession(
+            createdAt: recordingCreatedAt,
+            duration: 0,
+            micAudioURL: sessionURLs.mic.path,
+            title: "Recording Seed",
+            status: .recording
+        )
+        let seedContext = ModelContext(container)
+        seedContext.insert(seededSession)
+        try seedContext.save()
 
         await service.setRecordingStateForTesting(
             isRecording: true,
             recordingIdentifier: recordingIdentifier,
             recordingWorkspaceRootURL: workspace.rootURL,
             recordingCreatedAt: recordingCreatedAt,
-            pendingTitle: nil
+            pendingTitle: nil,
+            currentSessionID: seededSession.id
         )
 
         let sessionID = await service.stopRecording()
@@ -296,11 +318,11 @@ final class RecordingServiceTests {
             voiceProcessingPropertySetter: { @Sendable [counter] _ in counter.increment() }
         )
 
-        let engine = AVAudioEngine()
-        service.applyVoiceProcessingIfNeeded(to: engine.inputNode, enabled: true)
+        let inputNode = unsafeBitCast(NSObject(), to: AVAudioInputNode.self)
+        service.applyVoiceProcessingIfNeeded(to: inputNode, enabled: true)
         #expect(counter.callCount == 1)
 
-        service.applyVoiceProcessingIfNeeded(to: engine.inputNode, enabled: false)
+        service.applyVoiceProcessingIfNeeded(to: inputNode, enabled: false)
         #expect(counter.callCount == 1) // not called again when disabled
     }
 
@@ -321,8 +343,8 @@ final class RecordingServiceTests {
             voiceProcessingPropertySetter: { @Sendable [counter] _ in counter.increment() }
         )
 
-        let engine = AVAudioEngine()
-        service.applyVoiceProcessingIfNeeded(to: engine.inputNode, enabled: false)
+        let inputNode = unsafeBitCast(NSObject(), to: AVAudioInputNode.self)
+        service.applyVoiceProcessingIfNeeded(to: inputNode, enabled: false)
         #expect(counter.callCount == 0)
     }
 
@@ -342,9 +364,9 @@ final class RecordingServiceTests {
             }
         )
 
-        let engine = AVAudioEngine()
+        let inputNode = unsafeBitCast(NSObject(), to: AVAudioInputNode.self)
         // Should not throw or crash; failure is logged and recording continues
-        service.applyVoiceProcessingIfNeeded(to: engine.inputNode, enabled: true)
+        service.applyVoiceProcessingIfNeeded(to: inputNode, enabled: true)
         // Reaching here means no crash/throw
     }
 

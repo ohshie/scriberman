@@ -13,7 +13,7 @@ protocol RecordingServiceProtocol: Sendable {
         capturedAppName: String?,
         appProcessID: pid_t?,
         title: String?
-    ) async throws(RecordingError)
+    ) async throws(RecordingError) -> UUID
     func stopRecording() async -> UUID?
     func consumePendingError() async -> RecordingError?
 }
