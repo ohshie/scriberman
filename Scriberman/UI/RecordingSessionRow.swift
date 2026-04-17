@@ -55,6 +55,15 @@ struct RecordingSessionRow: View {
     @ViewBuilder
     private var accessory: some View {
         switch session.status {
+        case .recording:
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Recording")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
         case .recorded:
             Button("Transcribe", action: onTranscribe)
                 .buttonStyle(.borderedProminent)

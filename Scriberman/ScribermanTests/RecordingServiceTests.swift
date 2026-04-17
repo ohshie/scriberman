@@ -96,7 +96,7 @@ final class RecordingServiceTests {
 
     func testMixdownFailureLeavesSessionMixdownURLNilAndStatusUnchanged() async throws {
         let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let workspaceService = MockWorkspaceService()
@@ -146,7 +146,7 @@ final class RecordingServiceTests {
 
     func testStopRecordingWhenNotRecordingReturnsNil() async throws {
         let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let appAudioSettings = await MainActor.run { AppAudioSettings() }
@@ -164,7 +164,7 @@ final class RecordingServiceTests {
 
     func testCaptureHostTimesKeepsFirstObservedValues() async throws {
         let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let appAudioSettings = await MainActor.run { AppAudioSettings() }
@@ -191,7 +191,7 @@ final class RecordingServiceTests {
         defer { removeWorkspace(at: workspace.rootURL) }
 
         let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let workspaceService = MockWorkspaceService()
@@ -231,7 +231,7 @@ final class RecordingServiceTests {
         defer { removeWorkspace(at: workspace.rootURL) }
 
         let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let appAudioSettings = await MainActor.run { AppAudioSettings() }
@@ -262,7 +262,7 @@ final class RecordingServiceTests {
     @Test @MainActor
     func testVoiceProcessingSetterCalledWhenEnabled() async throws {
         let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let suiteName = "RecordingServiceTests.vp.\(UUID().uuidString)"
@@ -292,7 +292,7 @@ final class RecordingServiceTests {
     @Test @MainActor
     func testVoiceProcessingSetterNotCalledWhenDisabled() async throws {
         let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let appAudioSettings = AppAudioSettings()
@@ -314,7 +314,7 @@ final class RecordingServiceTests {
     @Test @MainActor
     func testVoiceProcessingSetterErrorDoesNotInterruptFlow() async throws {
         let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let appAudioSettings = AppAudioSettings()

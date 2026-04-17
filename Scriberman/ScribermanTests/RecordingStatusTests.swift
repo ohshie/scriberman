@@ -7,7 +7,7 @@ struct RecordingStatusTests {
     
     @Test
     func testNonErrorStatusesRoundTripPersistence() {
-        let statuses: [RecordingStatus] = [.recorded, .converting, .transcribing, .retranscribing, .done]
+        let statuses: [RecordingStatus] = [.recording, .recorded, .converting, .transcribing, .retranscribing, .done]
 
         for status in statuses {
             let reconstructed = RecordingStatus(persistedValue: status.persistedValue, errorMessage: nil)
@@ -131,6 +131,33 @@ struct RecordingStatusTests {
         )
 
         #expect(session.mixdownURL == nil)
+    }
+
+    @Test
+    func testRecordingSessionMixdownAttemptCountDefaultsToZero() {
+        let session = RecordingSession(
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 10,
+            micAudioURL: "/tmp/mic.wav",
+            title: "Session",
+            status: .recording
+        )
+
+        #expect(session.mixdownAttemptCount == 0)
+    }
+
+    @Test
+    func testRecordingSessionStoresProvidedMixdownAttemptCount() {
+        let session = RecordingSession(
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 10,
+            micAudioURL: "/tmp/mic.wav",
+            title: "Session",
+            status: .recorded,
+            mixdownAttemptCount: 3
+        )
+
+        #expect(session.mixdownAttemptCount == 3)
     }
 
     

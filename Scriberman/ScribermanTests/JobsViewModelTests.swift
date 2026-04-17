@@ -38,7 +38,7 @@ final class JobsViewModelTests {
         )
 
         container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         context = ModelContext(container)

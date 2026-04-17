@@ -35,7 +35,7 @@ struct NewSessionViewModelTests {
         workspaceService.requireWritableResult = .success(workspace)
 
         let modelContainer = try! ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = ModelContext(modelContainer)

@@ -13,9 +13,11 @@ final class RecordingSession {
     var capturedAppName: String?
     var statusRawValue: String
     var errorMessage: String?
+    var mixdownAttemptCountValue: Int?
     var transcriptData: Data?
     var retranscriptData: Data?
     var aiTransformationsData: Data?
+    var transcriptSegments: [RecordingTranscriptSegment] = []
 
     var status: RecordingStatus {
         get { RecordingStatus(persistedValue: statusRawValue, errorMessage: errorMessage) }
@@ -28,6 +30,11 @@ final class RecordingSession {
                 errorMessage = nil
             }
         }
+    }
+
+    var mixdownAttemptCount: Int {
+        get { mixdownAttemptCountValue ?? 0 }
+        set { mixdownAttemptCountValue = newValue }
     }
 
     var transcript: Transcript? {
@@ -69,6 +76,7 @@ final class RecordingSession {
         capturedAppName: String? = nil,
         status: RecordingStatus = .recorded,
         errorMessage: String? = nil,
+        mixdownAttemptCount: Int = 0,
         transcriptData: Data? = nil,
         retranscriptData: Data? = nil,
         aiTransformationsData: Data? = nil
@@ -83,6 +91,7 @@ final class RecordingSession {
         self.capturedAppName = capturedAppName
         self.statusRawValue = status.persistedValue
         self.errorMessage = errorMessage
+        self.mixdownAttemptCountValue = mixdownAttemptCount
         self.transcriptData = transcriptData
         self.retranscriptData = retranscriptData
         self.aiTransformationsData = aiTransformationsData
