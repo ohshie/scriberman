@@ -49,6 +49,7 @@ actor RecordingService: RecordingServiceProtocol {
     private var recordingStartedAt: Date?
     private var recordingCreatedAt: Date?
     private var recordingIdentifier: String?
+    private var currentSessionID: UUID?
     private var appAudioURL: URL?
     private var micStartHostTime: UInt64?
     private var appStartHostTime: UInt64?
@@ -114,13 +115,15 @@ actor RecordingService: RecordingServiceProtocol {
         recordingIdentifier: String? = nil,
         recordingWorkspaceRootURL: URL? = nil,
         recordingCreatedAt: Date? = nil,
-        pendingTitle: String? = nil
+        pendingTitle: String? = nil,
+        currentSessionID: UUID? = nil
     ) {
         self.isRecordingValue = isRecording
         self.recordingIdentifier = recordingIdentifier
         self.recordingWorkspaceRootURL = recordingWorkspaceRootURL
         self.recordingCreatedAt = recordingCreatedAt
         self.pendingTitle = pendingTitle
+        self.currentSessionID = currentSessionID
     }
     #endif
 
@@ -152,7 +155,7 @@ actor RecordingService: RecordingServiceProtocol {
         capturedAppName: String? = nil,
         appProcessID: pid_t? = nil,
         title: String? = nil
-    ) async throws(RecordingError) {
+    ) async throws(RecordingError) -> UUID {
         guard !isRecordingValue else {
             throw RecordingError.alreadyRecording
         }
@@ -281,6 +284,21 @@ actor RecordingService: RecordingServiceProtocol {
                 self.appAudioCaptureSession = nil
                 self.appAudioURL = nil
             }
+
+            let session = RecordingSession(
+                createdAt: recordingCreatedAt,
+                duration: 0,
+                micAudioURL: micFileURL.path,
+                appAudioURL: appProcessID != nil ? appFileURL.path : nil,
+                title: title ?? makeSessionTitle(createdAt: recordingCreatedAt),
+                capturedAppName: capturedAppName,
+                status: .recording
+            )
+            let context = ModelContext(modelContainer)
+            context.insert(session)
+            try context.save()
+            self.currentSessionID = session.id
+            return session.id
         } catch {
             audioEngine?.inputNode.removeTap(onBus: 0)
             audioEngine?.stop()
@@ -315,7 +333,7 @@ actor RecordingService: RecordingServiceProtocol {
         let stoppedAt = Date()
         let duration = max(0, stoppedAt.timeIntervalSince(startedAt))
 
-        guard let recordingIdentifier, let recordingWorkspaceRootURL else {
+        guard let recordingIdentifier, let recordingWorkspaceRootURL, let sessionID = currentSessionID else {
             cleanupRecordingState()
             return nil
         }
@@ -340,19 +358,7 @@ actor RecordingService: RecordingServiceProtocol {
             "Prepared recording session folder. mic=\(finalRecordingURLs.mic.path, privacy: .public) app=\(finalRecordingURLs.app?.path ?? "nil", privacy: .public)"
         )
 
-        let session = RecordingSession(
-            createdAt: createdAt,
-            duration: duration,
-            micAudioURL: finalRecordingURLs.mic.path,
-            appAudioURL: finalRecordingURLs.app?.path,
-            title: pendingTitle ?? makeSessionTitle(createdAt: createdAt),
-            capturedAppName: activeCapturedAppName,
-            status: .recorded
-        )
-
         do {
-            let sessionID = session.id
-            let persistentID = session.id
             let micStartHostTime = self.micStartHostTime ?? self.appStartHostTime ?? 0
             let appStartHostTime = self.appStartHostTime
             let mixdownURL = finalRecordingURLs.mic.deletingLastPathComponent().appendingPathComponent("recording.m4a")
@@ -365,7 +371,18 @@ actor RecordingService: RecordingServiceProtocol {
             )
 
             let context = ModelContext(modelContainer)
-            context.insert(session)
+            var descriptor = FetchDescriptor<RecordingSession>()
+            descriptor.fetchLimit = 1_000
+            guard let sessions = try? context.fetch(descriptor),
+                  let session = sessions.first(where: { $0.id == sessionID })
+            else {
+                cleanupRecordingState()
+                return nil
+            }
+            session.duration = duration
+            session.micAudioURL = finalRecordingURLs.mic.path
+            session.appAudioURL = finalRecordingURLs.app?.path
+            session.status = .recorded
             try context.save()
 
             // Release capture writer resources before background mixdown starts.
@@ -382,7 +399,7 @@ actor RecordingService: RecordingServiceProtocol {
                 )
             }
 
-            return persistentID
+            return sessionID
         } catch {
             cleanupRecordingState()
             return nil
@@ -413,6 +430,7 @@ actor RecordingService: RecordingServiceProtocol {
         recordingStartedAt = nil
         recordingCreatedAt = nil
         recordingIdentifier = nil
+        currentSessionID = nil
         activeCapturedAppName = nil
         pendingTitle = nil
         micStartHostTime = nil
