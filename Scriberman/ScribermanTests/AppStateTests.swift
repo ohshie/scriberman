@@ -391,7 +391,11 @@ final class AppStateTests {
                 transcriptionService: transcriptionService,
                 retranscriptionService: retranscriptionService,
                 audioImportService: AudioImportService(retranscriptionService: retranscriptionService),
-                speakerEmbeddingStore: speakerEmbeddingStore
+                speakerEmbeddingStore: speakerEmbeddingStore,
+                recoveryService: RecordingRecoveryService(
+                    workspaceService: workspaceService,
+                    modelContainer: modelContainer
+                )
             )
         )
     }

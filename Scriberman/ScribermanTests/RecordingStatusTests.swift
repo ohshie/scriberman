@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import Testing
 @testable import Scriberman
 
@@ -131,6 +132,42 @@ struct RecordingStatusTests {
         )
 
         #expect(session.mixdownURL == nil)
+    }
+
+    @Test
+    func testRecordingStatusRecordingPersistsAndRoundTripsInSwiftData() throws {
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = ModelContext(container)
+        let session = RecordingSession(
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 5,
+            micAudioURL: "/tmp/mic.wav",
+            title: "S",
+            status: .recording
+        )
+        context.insert(session)
+        try context.save()
+
+        let fetched = try context.fetch(FetchDescriptor<RecordingSession>())
+        #expect(fetched.first?.status == .recording)
+        #expect(fetched.first?.statusRawValue == "recording")
+    }
+
+    @Test
+    func testRecordingSessionRowShowsProgressIndicatorAndRecordingLabelForRecordingStatus() throws {
+        let source = try sourceForFile(named: "RecordingSessionRow.swift")
+        #expect(source.contains("case .recording:"))
+        #expect(source.contains("ProgressView()"))
+        #expect(source.contains("\"Recording\""))
+    }
+
+    private func sourceForFile(named fileName: String) throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let fileURL = testsDirectory.appendingPathComponent("../UI/\(fileName)")
+        return try String(contentsOf: fileURL, encoding: .utf8)
     }
 
     @Test

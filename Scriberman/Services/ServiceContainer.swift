@@ -20,6 +20,7 @@ struct BackgroundServiceContainer: Sendable {
     let retranscriptionService: RetranscriptionService
     let audioImportService: AudioImportService
     let speakerEmbeddingStore: SpeakerEmbeddingStore
+    let recoveryService: RecordingRecoveryService
 }
 
 struct ServiceContainer {
@@ -61,7 +62,11 @@ struct ServiceContainer {
                 transcriptionService: transcriptionService,
                 retranscriptionService: retranscriptionService,
                 audioImportService: audioImportService,
-                speakerEmbeddingStore: speakerEmbeddingStore
+                speakerEmbeddingStore: speakerEmbeddingStore,
+                recoveryService: RecordingRecoveryService(
+                    workspaceService: workspaceService,
+                    modelContainer: modelContainer
+                )
             )
         )
     }

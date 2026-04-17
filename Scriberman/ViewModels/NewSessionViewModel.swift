@@ -552,27 +552,7 @@ final class NewSessionViewModel {
     }
 
     private func appendSegmentToTranscriptMarkdown(_ segment: RecordingTranscriptSegment, for session: RecordingSession) {
-        let sessionFolderURL = URL(fileURLWithPath: session.micAudioURL).deletingLastPathComponent()
-        let transcriptMarkdownURL = sessionFolderURL.appendingPathComponent("transcript.md")
-        let line = "[\(formatTimestamp(segment.startTime))-\(formatTimestamp(segment.endTime))] \(segment.speakerId): \(segment.text)\n"
-
-        if fileManager.fileExists(atPath: transcriptMarkdownURL.path) {
-            if let fileHandle = try? FileHandle(forWritingTo: transcriptMarkdownURL) {
-                defer { try? fileHandle.close() }
-                try? fileHandle.seekToEnd()
-                if let data = line.data(using: .utf8) {
-                    try? fileHandle.write(contentsOf: data)
-                }
-            }
-            return
-        }
-
-        let initialContents = "# Transcript\n\n\(line)"
-        try? initialContents.write(to: transcriptMarkdownURL, atomically: true, encoding: .utf8)
-    }
-
-    private func formatTimestamp(_ seconds: Float) -> String {
-        String(format: "%.2f", max(0, seconds))
+        appendTranscriptSegmentToMarkdown(segment, for: session, fileManager: fileManager)
     }
 
     private func updateLiveSegments(with segment: TranscriptSegment) {
