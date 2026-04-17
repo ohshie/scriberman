@@ -12,7 +12,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     private weak var mainWindow: NSWindow?
     private var statusItem: NSStatusItem?
+    private var lifecycleObserverTokens: [NSObjectProtocol] = []
     private let logger = Logger(subsystem: "Scriberman", category: "MenuBarFlow")
+
+    // Test seams for lifecycle behavior.
+    var isRecordingForLifecycleHandler: (() -> Bool)?
+    var stopRecordingForLifecycleHandler: (() async -> Void)?
+    var terminationReplyHandler: (Bool) -> Void = { shouldTerminate in
+        NSApp.reply(toApplicationShouldTerminate: shouldTerminate)
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        registerLifecycleObservers()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        for token in lifecycleObserverTokens {
+            NSWorkspace.shared.notificationCenter.removeObserver(token)
+        }
+        lifecycleObserverTokens.removeAll()
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard modelContext != nil else {
+            return .terminateNow
+        }
+
+        guard isRecordingForLifecycle() else {
+            return .terminateNow
+        }
+
+        Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            await stopRecordingForLifecycle()
+            terminationReplyHandler(true)
+        }
+        return .terminateLater
+    }
 
     func applicationDidBecomeActive(_ notification: Notification) {
         attachWindowDelegateIfNeeded()
@@ -432,5 +471,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc
     private func quitScribermanFromStatusItem() {
         NSApp.terminate(nil)
+    }
+
+    private func registerLifecycleObservers() {
+        let workspaceNotificationCenter = NSWorkspace.shared.notificationCenter
+
+        let willSleepToken = workspaceNotificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else {
+                return
+            }
+
+            guard self.modelContext != nil, self.isRecordingForLifecycle() else {
+                return
+            }
+
+            Task { @MainActor [weak self] in
+                guard let self else {
+                    return
+                }
+
+                await self.stopRecordingForLifecycle()
+            }
+        }
+
+        let didWakeToken = workspaceNotificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else {
+                return
+            }
+
+            guard let appState = self.appState else {
+                return
+            }
+
+            if case .recording = appState.newSessionViewModel.state {
+                appState.newSessionViewModel.reset()
+            }
+        }
+
+        lifecycleObserverTokens = [willSleepToken, didWakeToken]
+    }
+
+    private func isRecordingForLifecycle() -> Bool {
+        if let isRecordingForLifecycleHandler {
+            return isRecordingForLifecycleHandler()
+        }
+
+        guard let appState else {
+            return false
+        }
+
+        if case .recording = appState.newSessionViewModel.state {
+            return true
+        }
+
+        return false
+    }
+
+    private func stopRecordingForLifecycle() async {
+        if let stopRecordingForLifecycleHandler {
+            await stopRecordingForLifecycleHandler()
+            return
+        }
+
+        guard let appState, let modelContext else {
+            return
+        }
+
+        _ = await appState.newSessionViewModel.stopRecording(context: modelContext)
     }
 }

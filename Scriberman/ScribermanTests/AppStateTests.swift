@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftData
 import Testing
@@ -258,6 +259,51 @@ final class AppStateTests {
     }
 
     @Test
+    func testApplicationShouldTerminateReturnsTerminateNowWhenIdle() {
+        let delegate = AppDelegate()
+        delegate.modelContext = modelContainer.mainContext
+        delegate.isRecordingForLifecycleHandler = { false }
+
+        let result = delegate.applicationShouldTerminate(NSApp)
+
+        #expect(result == .terminateNow)
+    }
+
+    @Test
+    func testApplicationShouldTerminateReturnsTerminateLaterAndStopsRecordingWhenRecording() async {
+        let delegate = AppDelegate()
+        delegate.modelContext = modelContainer.mainContext
+        delegate.isRecordingForLifecycleHandler = { true }
+
+        var stopCallCount = 0
+        var didReplyToTerminate = false
+        delegate.stopRecordingForLifecycleHandler = {
+            stopCallCount += 1
+        }
+        delegate.terminationReplyHandler = { shouldTerminate in
+            didReplyToTerminate = shouldTerminate
+        }
+
+        let result = delegate.applicationShouldTerminate(NSApp)
+
+        #expect(result == .terminateLater)
+        await assertEventuallyTrue("Expected stopRecording and termination reply to execute") {
+            stopCallCount == 1 && didReplyToTerminate
+        }
+    }
+
+    @Test
+    func testApplicationShouldTerminateReturnsTerminateNowWhenModelContextIsNil() {
+        let delegate = AppDelegate()
+        delegate.modelContext = nil
+        delegate.isRecordingForLifecycleHandler = { true }
+
+        let result = delegate.applicationShouldTerminate(NSApp)
+
+        #expect(result == .terminateNow)
+    }
+
+    @Test
     func testSelectPendingSessionCreatesSinglePendingSession() {
         let permissionService = MockPermissionService()
         let services = makeServiceContainer(permissionService: permissionService)
@@ -348,6 +394,31 @@ final class AppStateTests {
                 speakerEmbeddingStore: speakerEmbeddingStore
             )
         )
+    }
+
+    private func assertEventuallyTrue(
+        _ message: String,
+        timeoutNanoseconds: UInt64 = 1_000_000_000,
+        pollIntervalNanoseconds: UInt64 = 20_000_000,
+        predicate: @escaping @MainActor () -> Bool
+    ) async {
+        let start = DispatchTime.now().uptimeNanoseconds
+        let timeout = start + timeoutNanoseconds
+
+        while DispatchTime.now().uptimeNanoseconds < timeout {
+            if predicate() {
+                return
+            }
+
+            try? await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+        }
+
+        let timeoutError = NSError(
+            domain: "AppStateTests",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
+        Issue.record(timeoutError)
     }
 }
 
