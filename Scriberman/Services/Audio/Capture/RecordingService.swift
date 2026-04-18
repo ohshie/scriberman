@@ -209,6 +209,15 @@ actor RecordingService: RecordingServiceProtocol {
     private var appAudioURL: URL?
     private var micStartHostTime: UInt64?
     private var appStartHostTime: UInt64?
+    private var desiredMicDeviceUID: String?
+    private var micFileURL: URL?
+    private let micTargetFormat = AVAudioFormat(
+        commonFormat: .pcmFormatFloat32,
+        sampleRate: 48_000,
+        channels: 1,
+        interleaved: false
+    )!
+    private var isRecoveringMicCapture = false
     private var hasScopedRecordingAccess = false
     private var recordingWorkspaceRootURL: URL?
     private var activeCapturedAppName: String?
@@ -354,67 +363,20 @@ actor RecordingService: RecordingServiceProtocol {
             let appFileURL = fileURLs.app
             self.micStartHostTime = nil
             self.appStartHostTime = nil
-
-            let audioEngine = AVAudioEngine()
-            let inputNode = audioEngine.inputNode
-
+            self.micFileURL = micFileURL
             if let micDeviceID, micDeviceID != 0 {
-                guard let inputAudioUnit = inputNode.audioUnit else {
-                    throw RecordingError.failedToStart("Audio input unit is unavailable.")
-                }
-
-                var targetDeviceID = micDeviceID
-                let status = withUnsafePointer(to: &targetDeviceID) { pointer in
-                    AudioUnitSetProperty(
-                        inputAudioUnit,
-                        kAudioOutputUnitProperty_CurrentDevice,
-                        kAudioUnitScope_Global,
-                        0,
-                        pointer,
-                        UInt32(MemoryLayout<AudioDeviceID>.size)
-                    )
-                }
-
-                if status != noErr {
-                    // On some sandboxed/runtime combinations explicit mic routing fails; continue on default input.
-                }
+                desiredMicDeviceUID = hardware.deviceUID(deviceID: micDeviceID)
+            } else {
+                desiredMicDeviceUID = nil
             }
 
-            // Voice processing: enable AUVoiceIO before engine.prepare() if the user opted in.
-            // Must run before format query — AUVoiceIO may change the preferred input format.
-            let vpEnabled = await MainActor.run { appAudioSettings.voiceProcessingEnabled }
-            applyVoiceProcessingIfNeeded(to: inputNode, enabled: vpEnabled)
-
-            // Re-query after potential voice processing activation (AUVoiceIO may change format).
-            let inputFormat = inputNode.inputFormat(forBus: 0)
-            if isValidTapFormat(inputFormat) {
-                do {
-                    try micStreamer.prepare(url: micFileURL, format: inputFormat)
-
-                    inputNode.removeTap(onBus: 0)
-                    inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, audioTime in
-                        if audioTime.hostTime != 0 {
-                            Task { [weak self] in
-                                await self?.captureMicStartHostTimeIfNeeded(audioTime.hostTime)
-                            }
-                        }
-
-                        self?.micStreamer.write(buffer: buffer)
-                        let samples = AudioDownmixer.toMono(buffer: buffer)
-                        self?.liveAudioStreamTuple.continuation.yield((samples, .mic, buffer.format.sampleRate))
-                    }
-
-                    audioEngine.prepare()
-                    try audioEngine.start()
-
-                    self.audioEngine = audioEngine
-                    self.audioRecorder = nil
-                } catch {
-                    inputNode.removeTap(onBus: 0)
-                    audioEngine.stop()
-                    try startRecorderFallback(to: micFileURL)
-                }
-            } else {
+            do {
+                try await startMicCapture(
+                    deviceUID: desiredMicDeviceUID,
+                    micFileURL: micFileURL,
+                    liveContinuation: liveAudioStreamTuple.continuation
+                )
+            } catch {
                 try startRecorderFallback(to: micFileURL)
             }
             self.recordingStartedAt = Date()
@@ -460,8 +422,7 @@ actor RecordingService: RecordingServiceProtocol {
             self.currentSessionID = session.id
             return session.id
         } catch {
-            audioEngine?.inputNode.removeTap(onBus: 0)
-            audioEngine?.stop()
+            stopMicCapture()
             audioRecorder?.stop()
             await appAudioCaptureSession?.stop()
             cleanupRecordingState()
@@ -481,8 +442,7 @@ actor RecordingService: RecordingServiceProtocol {
             releaseRecordingScopeIfNeeded()
         }
 
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        audioEngine?.stop()
+        stopMicCapture()
         audioRecorder?.stop()
         micStreamer.close()
         await appAudioCaptureSession?.stop()
@@ -582,7 +542,7 @@ actor RecordingService: RecordingServiceProtocol {
     }
 
     private func cleanupRecordingState() {
-        audioEngine = nil
+        stopMicCapture()
         micStreamer.close()
         audioRecorder = nil
         appAudioCaptureSession = nil
@@ -595,6 +555,9 @@ actor RecordingService: RecordingServiceProtocol {
         pendingTitle = nil
         micStartHostTime = nil
         appStartHostTime = nil
+        desiredMicDeviceUID = nil
+        micFileURL = nil
+        isRecoveringMicCapture = false
     }
 
     private func releaseRecordingScopeIfNeeded() {
@@ -646,12 +609,75 @@ actor RecordingService: RecordingServiceProtocol {
             throw RecordingError.failedToStart("Unable to start recorder fallback.")
         }
 
+        stopMicCapture()
         self.audioEngine = nil
         self.audioRecorder = recorder
     }
 
-    private func isValidTapFormat(_ format: AVAudioFormat) -> Bool {
-        format.sampleRate.isFinite && format.sampleRate > 0 && format.channelCount > 0
+    private func startMicCapture(
+        deviceUID: String?,
+        micFileURL: URL,
+        liveContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation
+    ) async throws {
+        let vpEnabled = await MainActor.run { appAudioSettings.voiceProcessingEnabled }
+        let deviceID = resolveDeviceID(for: deviceUID)
+        try micCaptureController.startCapture(
+            deviceID: deviceID,
+            targetFormat: micTargetFormat,
+            micFileURL: micFileURL,
+            micStreamer: micStreamer,
+            voiceProcessingEnabled: vpEnabled,
+            applyVoiceProcessing: { [weak self] inputNode, enabled in
+                self?.applyVoiceProcessingIfNeeded(to: inputNode, enabled: enabled)
+            },
+            onFirstHostTime: { [weak self] hostTime in
+                Task { [weak self] in
+                    await self?.captureMicStartHostTimeIfNeeded(hostTime)
+                }
+            },
+            onBuffer: { samples, sampleRate in
+                liveContinuation.yield((samples, .mic, sampleRate))
+            }
+        )
+        self.audioRecorder = nil
+        self.audioEngine = nil
+        self.micFileURL = micFileURL
+    }
+
+    private func stopMicCapture() {
+        micCaptureController.stopCapture()
+        audioEngine = nil
+    }
+
+    private func teardownEngineForRecovery() {
+        stopMicCapture()
+    }
+
+    private func recoverMicCapture() async -> Bool {
+        guard let micFileURL else {
+            return false
+        }
+        teardownEngineForRecovery()
+        do {
+            try await startMicCapture(
+                deviceUID: desiredMicDeviceUID,
+                micFileURL: micFileURL,
+                liveContinuation: liveAudioStreamTuple.continuation
+            )
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func resolveDeviceID(for deviceUID: String?) -> AudioDeviceID? {
+        guard let deviceUID, !deviceUID.isEmpty else {
+            return nil
+        }
+        guard let allDevices = try? hardware.allDeviceIDs() else {
+            return nil
+        }
+        return allDevices.first(where: { hardware.deviceUID(deviceID: $0) == deviceUID })
     }
 
     func captureMicStartHostTimeIfNeeded(_ hostTime: UInt64) {
