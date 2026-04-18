@@ -4,6 +4,7 @@ struct RecordingSessionRow: View {
     let session: RecordingSession
     let onTranscribe: () -> Void
     let onRetry: () -> Void
+    @State private var isPulsing = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -56,13 +57,17 @@ struct RecordingSessionRow: View {
     private var accessory: some View {
         switch session.status {
         case .recording:
-            HStack(spacing: 6) {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Recording")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Circle()
+                .fill(.red)
+                .frame(width: 8, height: 8)
+                .opacity(isPulsing ? 1.0 : 0.35)
+                .animation(
+                    .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+                    value: isPulsing
+                )
+                .onAppear {
+                    isPulsing = true
+                }
 
         case .recorded:
             Button("Transcribe", action: onTranscribe)

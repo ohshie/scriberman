@@ -383,9 +383,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             return
         }
 
-        appState.selectPendingSession()
-        appState.requestPendingSessionFocusFromMenuBar()
-        NotificationCenter.default.post(name: Self.focusPendingSessionNotification, object: nil)
+        if appState.pendingSession != nil {
+            appState.discardPendingSession()
+        }
         appState.appAudioService.refreshRunningApps()
 
         let selectedMic = appState.menuBarSettings.lastUsedMicUID
@@ -395,12 +395,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let title = appState.pendingSession?.title ?? "Untitled Session"
 
         Task {
-            await appState.newSessionViewModel.startRecording(
+            if let session = await appState.newSessionViewModel.startRecording(
                 title: title,
                 micDeviceUID: selectedMic,
                 app: selectedApp,
                 context: modelContext
-            )
+            ) {
+                NotificationCenter.default.post(
+                    name: Self.focusRecordingSessionNotification,
+                    object: nil,
+                    userInfo: ["sessionID": session.id]
+                )
+            }
         }
     }
 

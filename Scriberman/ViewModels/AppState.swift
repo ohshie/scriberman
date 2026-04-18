@@ -114,6 +114,9 @@ final class AppState {
 
     func discardPendingSession() {
         pendingSession = nil
+        if case .recording = newSessionViewModel.state {
+            return
+        }
         newSessionViewModel.reset()
     }
 

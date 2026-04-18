@@ -40,19 +40,11 @@ struct AudioPlayerBar: View {
         }
         .onAppear {
             previousMixdownURL = mixdownURL
+            loadMixdownIfAvailable()
         }
         .onChange(of: mixdownURL) {
-            let oldValue = previousMixdownURL
             previousMixdownURL = mixdownURL
-
-            guard oldValue == nil,
-                  let mixdownURL,
-                  mixdownURL.isEmpty == false
-            else {
-                return
-            }
-
-            viewModel.load(url: URL(fileURLWithPath: mixdownURL))
+            loadMixdownIfAvailable()
         }
     }
 
@@ -143,5 +135,18 @@ struct AudioPlayerBar: View {
         let minutes = totalSeconds / 60
         let remainder = totalSeconds % 60
         return String(format: "%d:%02d", minutes, remainder)
+    }
+
+    private func loadMixdownIfAvailable() {
+        guard let mixdownURL, mixdownURL.isEmpty == false else {
+            return
+        }
+
+        let url = URL(fileURLWithPath: mixdownURL)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return
+        }
+
+        viewModel.load(url: url)
     }
 }
