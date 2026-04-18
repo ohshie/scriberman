@@ -1,35 +1,40 @@
+import Foundation
 import Testing
 @testable import Scriberman
 
 @MainActor
 struct StatusTagViewTests {
     @Test
-    func doneMapsToGreenTint() {
-        let style = StatusTagView.style(for: .done)
-        #expect(style.label == "Done")
-        #expect(style.tint == .green)
+    func recordingRendersNoTagViaEmptyViewPath() throws {
+        let source = try statusTagViewSource()
+        #expect(source.contains("case .recording:"))
+        #expect(source.contains("EmptyView()"))
+        #expect(!source.contains("case .recording:\n            Text(\"Recording\")"))
     }
 
     @Test
-    func pendingMapsToOrangeTint() {
-        #expect(StatusTagView.style(for: .recorded).tint == .orange)
-        #expect(StatusTagView.style(for: .converting).tint == .orange)
-        #expect(StatusTagView.style(for: .transcribing).tint == .orange)
-        #expect(StatusTagView.style(for: .retranscribing).tint == .orange)
+    func doneWithNoTranscriptOrAIShowsOneCheckmark() throws {
+        let source = try statusTagViewSource()
+        #expect(source.contains("var count = 1"))
     }
 
     @Test
-    func recordingMapsToRecordingLabelWithOrangeTint() {
-        let style = StatusTagView.style(for: .recording)
-        #expect(style.label == "Recording")
-        #expect(style.tint == .orange)
+    func doneWithTranscriptShowsTwoCheckmarks() throws {
+        let source = try statusTagViewSource()
+        #expect(source.contains("if hasTranscript { count += 1 }"))
     }
 
     @Test
-    func failedMapsToRedTint() {
-        let style = StatusTagView.style(for: .error("boom"))
-        #expect(style.label == "Failed")
-        #expect(style.tint == .red)
+    func doneWithTranscriptAndAIShowsThreeCheckmarks() throws {
+        let source = try statusTagViewSource()
+        #expect(source.contains("if hasAITransformation { count += 1 }"))
+    }
+
+    @Test
+    func errorRendersXmarkIconPath() throws {
+        let source = try statusTagViewSource()
+        #expect(source.contains("case .error:"))
+        #expect(source.contains("Image(systemName: \"xmark\")"))
     }
 
     @Test
@@ -57,5 +62,14 @@ struct StatusTagViewTests {
         #expect(ModelGroup.asrParakeetV3.title == "ASR (Parakeet v3)")
         #expect(ModelGroup.vadSilero.title == "VAD (Silero CoreML)")
         #expect(ModelGroup.offlineDiarization.title == "Diarization (Global Offline)")
+    }
+
+    private func statusTagViewSource() throws -> String {
+        let testsFileURL = URL(fileURLWithPath: #filePath)
+        let moduleRoot = testsFileURL.deletingLastPathComponent().deletingLastPathComponent()
+        let statusTagFileURL = moduleRoot
+            .appendingPathComponent("UI")
+            .appendingPathComponent("StatusTagView.swift")
+        return try String(contentsOf: statusTagFileURL, encoding: .utf8)
     }
 }

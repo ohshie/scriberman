@@ -32,7 +32,9 @@ struct RecordingSessionRow: View {
             Spacer(minLength: 12)
 
             VStack(alignment: .trailing, spacing: 8) {
-                StatusTagView(status: session.status)
+                if !statusIndicatorBelongsInAccessory {
+                    statusIndicator
+                }
                 accessory
             }
         }
@@ -58,7 +60,7 @@ struct RecordingSessionRow: View {
         switch session.status {
         case .recording:
             Circle()
-                .fill(.red)
+                .fill(Color("StatusRecordingColor"))
                 .frame(width: 8, height: 8)
                 .opacity(isPulsing ? 1.0 : 0.35)
                 .animation(
@@ -84,13 +86,33 @@ struct RecordingSessionRow: View {
             }
 
         case .done:
-            EmptyView()
+            statusIndicator
 
         case .error:
-            Button("Retry", action: onRetry)
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+            HStack(spacing: 6) {
+                statusIndicator
+                Button("Retry", action: onRetry)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
         }
+    }
+
+    private var statusIndicatorBelongsInAccessory: Bool {
+        switch session.status {
+        case .done, .error:
+            return true
+        case .recording, .recorded, .converting, .transcribing, .retranscribing:
+            return false
+        }
+    }
+
+    private var statusIndicator: some View {
+        StatusTagView(
+            status: session.status,
+            hasTranscript: session.transcriptData != nil,
+            hasAITransformation: session.aiTransformationsData != nil
+        )
     }
 
     private func durationText(_ duration: TimeInterval) -> String {
