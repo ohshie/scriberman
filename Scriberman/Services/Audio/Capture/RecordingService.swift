@@ -32,6 +32,160 @@ extension Notification.Name {
     static let appAudioCaptureAccessDenied = Notification.Name("appAudioCaptureAccessDenied")
 }
 
+protocol MicCaptureControlling: AnyObject {
+    func startCapture(
+        deviceID: AudioDeviceID?,
+        targetFormat: AVAudioFormat,
+        micFileURL: URL,
+        micStreamer: AudioFileStreamer,
+        voiceProcessingEnabled: Bool,
+        applyVoiceProcessing: @Sendable (AVAudioInputNode, Bool) -> Void,
+        onFirstHostTime: @escaping @Sendable (UInt64) -> Void,
+        onBuffer: @escaping @Sendable ([Float], Double) -> Void
+    ) throws
+    func stopCapture()
+    func retargetDevice(_ deviceID: AudioDeviceID?) throws
+}
+
+final class AVAudioEngineMicCaptureController: MicCaptureControlling {
+    private var audioEngine: AVAudioEngine?
+    private var converter: AVAudioConverter?
+
+    func startCapture(
+        deviceID: AudioDeviceID?,
+        targetFormat: AVAudioFormat,
+        micFileURL: URL,
+        micStreamer: AudioFileStreamer,
+        voiceProcessingEnabled: Bool,
+        applyVoiceProcessing: @Sendable (AVAudioInputNode, Bool) -> Void,
+        onFirstHostTime: @escaping @Sendable (UInt64) -> Void,
+        onBuffer: @escaping @Sendable ([Float], Double) -> Void
+    ) throws {
+        stopCapture()
+
+        let engine = AVAudioEngine()
+        let inputNode = engine.inputNode
+
+        if let deviceID, deviceID != 0 {
+            try setInputDevice(deviceID, on: inputNode)
+        }
+
+        applyVoiceProcessing(inputNode, voiceProcessingEnabled)
+
+        let inputFormat = inputNode.inputFormat(forBus: 0)
+        guard inputFormat.sampleRate.isFinite, inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+            throw RecordingError.failedToStart("Invalid audio input format.")
+        }
+
+        if inputFormat.sampleRate == targetFormat.sampleRate,
+           inputFormat.channelCount == targetFormat.channelCount,
+           inputFormat.commonFormat == targetFormat.commonFormat,
+           inputFormat.isInterleaved == targetFormat.isInterleaved {
+            converter = nil
+        } else {
+            guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
+                throw RecordingError.failedToStart("Unable to create mic audio converter.")
+            }
+            self.converter = converter
+        }
+
+        try micStreamer.prepare(url: micFileURL, format: targetFormat)
+
+        inputNode.removeTap(onBus: 0)
+        inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, audioTime in
+            guard let self else {
+                return
+            }
+
+            if audioTime.hostTime != 0 {
+                onFirstHostTime(audioTime.hostTime)
+            }
+
+            let outputBuffer: AVAudioPCMBuffer
+            if let converter = self.converter {
+                guard let converted = self.convert(buffer, with: converter, to: targetFormat) else {
+                    return
+                }
+                outputBuffer = converted
+            } else {
+                outputBuffer = buffer
+            }
+
+            micStreamer.write(buffer: outputBuffer)
+            let samples = AudioDownmixer.toMono(buffer: outputBuffer)
+            onBuffer(samples, outputBuffer.format.sampleRate)
+        }
+
+        engine.prepare()
+        try engine.start()
+        audioEngine = engine
+    }
+
+    func stopCapture() {
+        audioEngine?.inputNode.removeTap(onBus: 0)
+        audioEngine?.stop()
+        audioEngine = nil
+        converter = nil
+    }
+
+    func retargetDevice(_ deviceID: AudioDeviceID?) throws {
+        guard let audioEngine else {
+            return
+        }
+        try setInputDevice(deviceID, on: audioEngine.inputNode)
+    }
+
+    private func setInputDevice(_ deviceID: AudioDeviceID?, on inputNode: AVAudioInputNode) throws {
+        guard let deviceID, deviceID != 0 else {
+            return
+        }
+        guard let inputAudioUnit = inputNode.audioUnit else {
+            throw RecordingError.failedToStart("Audio input unit is unavailable.")
+        }
+        var targetDeviceID = deviceID
+        let status = withUnsafePointer(to: &targetDeviceID) { pointer in
+            AudioUnitSetProperty(
+                inputAudioUnit,
+                kAudioOutputUnitProperty_CurrentDevice,
+                kAudioUnitScope_Global,
+                0,
+                pointer,
+                UInt32(MemoryLayout<AudioDeviceID>.size)
+            )
+        }
+        if status != noErr {
+            throw RecordingError.failedToStart("Unable to route microphone input.")
+        }
+    }
+
+    private func convert(
+        _ buffer: AVAudioPCMBuffer,
+        with converter: AVAudioConverter,
+        to targetFormat: AVAudioFormat
+    ) -> AVAudioPCMBuffer? {
+        let ratio = targetFormat.sampleRate / buffer.format.sampleRate
+        let estimatedCapacity = max(AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 32, 1)
+        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: estimatedCapacity) else {
+            return nil
+        }
+
+        var error: NSError?
+        let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+            outStatus.pointee = .haveData
+            return buffer
+        }
+
+        switch status {
+        case .haveData, .inputRanDry, .endOfStream:
+            return outputBuffer.frameLength > 0 ? outputBuffer : nil
+        case .error:
+            return nil
+        @unknown default:
+            return nil
+        }
+    }
+}
+
 actor RecordingService: RecordingServiceProtocol {
     private let workspaceService: WorkspaceServiceProtocol
     private let modelContainer: ModelContainer
@@ -40,6 +194,8 @@ actor RecordingService: RecordingServiceProtocol {
     private let mixdownCoordinator: RecordingMixdownCoordinator
     private let logger = Logger(subsystem: "Scriberman", category: "RecordingService")
     private let appAudioSettings: AppAudioSettings
+    private let hardware: AudioDeviceHardwareProviding
+    private let micCaptureController: MicCaptureControlling
     // Injected for testing; nil uses the real setVoiceProcessingEnabled(_:)
     private let voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)?
 
@@ -74,12 +230,16 @@ actor RecordingService: RecordingServiceProtocol {
         workspaceService: WorkspaceServiceProtocol,
         modelContainer: ModelContainer,
         appAudioSettings: AppAudioSettings,
+        hardware: AudioDeviceHardwareProviding = CoreAudioDeviceHardware(),
+        micCaptureController: MicCaptureControlling? = nil,
         notificationCenter: NotificationCenter = .default,
         voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)? = nil
     ) {
         self.workspaceService = workspaceService
         self.modelContainer = modelContainer
         self.appAudioSettings = appAudioSettings
+        self.hardware = hardware
+        self.micCaptureController = micCaptureController ?? AVAudioEngineMicCaptureController()
         self.notificationCenter = notificationCenter
         self.voiceProcessingPropertySetter = voiceProcessingPropertySetter
         self.mixdownCoordinator = RecordingMixdownCoordinator(
