@@ -16,4 +16,5 @@ protocol RecordingServiceProtocol: Sendable {
     ) async throws(RecordingError) -> UUID
     func stopRecording() async -> UUID?
     func consumePendingError() async -> RecordingError?
+    func retargetMic(desiredDeviceUID: String?) async
 }

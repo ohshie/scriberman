@@ -39,7 +39,13 @@ final class NewSessionViewModel {
     }
     var selectedDevice: AudioInputDevice? {
         get { audioDeviceService.selectedDevice }
-        set { audioDeviceService.selectedDevice = newValue }
+        set {
+            audioDeviceService.selectedDevice = newValue
+            let desiredUID = newValue?.uid
+            Task { [weak self] in
+                await self?.retargetRecordingMicIfNeeded(desiredDeviceUID: desiredUID)
+            }
+        }
     }
     var runningApps: [CapturedApp] {
         appAudioService.runningApps
@@ -495,6 +501,13 @@ final class NewSessionViewModel {
             appProcessID: appProcessID,
             title: title
         )
+    }
+
+    private func retargetRecordingMicIfNeeded(desiredDeviceUID: String?) async {
+        guard await recordingService.isRecording() else {
+            return
+        }
+        await recordingService.retargetMic(desiredDeviceUID: desiredDeviceUID)
     }
 
     private func startLiveTranscriptionPipeline(context: ModelContext) {

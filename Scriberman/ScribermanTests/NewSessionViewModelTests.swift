@@ -474,6 +474,37 @@ struct NewSessionViewModelTests {
     }
 
     @Test
+    func testSelectedDeviceChangeWhileRecordingRetargetsRecordingService() async {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+        _ = (workspaceService, audioDeviceService, appAudioService, permissionService, menuBarSettings, context)
+
+        recordingService.isRecordingOverride = true
+        let device = AudioInputDevice(id: 7, uid: "uid-7", name: "Desk Mic")
+
+        viewModel.selectedDevice = device
+        await waitForRetargetCalls(recordingService, expectedCount: 1)
+
+        #expect(recordingService.retargetMicCalls == ["uid-7"])
+    }
+
+    @Test
+    func testSelectedDeviceChangeWhileIdleDoesNotRetargetRecordingService() async {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+        _ = (workspaceService, audioDeviceService, appAudioService, permissionService, menuBarSettings, context)
+
+        recordingService.isRecordingOverride = false
+        let device = AudioInputDevice(id: 7, uid: "uid-7", name: "Desk Mic")
+
+        viewModel.selectedDevice = device
+        await Task.yield()
+        await Task.yield()
+
+        #expect(recordingService.retargetMicCalls.isEmpty)
+    }
+
+    @Test
     func testNewSessionPanelShowsGrantMicrophoneAccessPrompt() throws {
         let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
         defer { cleanup() }
@@ -560,6 +591,21 @@ struct NewSessionViewModelTests {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let fileURL = testsDirectory.appendingPathComponent(relativePathFromTests)
         return try String(contentsOf: fileURL, encoding: .utf8)
+    }
+
+    private func waitForRetargetCalls(
+        _ recordingService: MockRecordingService,
+        expectedCount: Int,
+        timeoutNanoseconds: UInt64 = 1_000_000_000,
+        pollNanoseconds: UInt64 = 10_000_000
+    ) async {
+        let start = DispatchTime.now().uptimeNanoseconds
+        while DispatchTime.now().uptimeNanoseconds - start < timeoutNanoseconds {
+            if recordingService.retargetMicCalls.count >= expectedCount {
+                return
+            }
+            try? await Task.sleep(nanoseconds: pollNanoseconds)
+        }
     }
 }
 
