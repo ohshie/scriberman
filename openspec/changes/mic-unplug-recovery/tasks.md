@@ -33,13 +33,13 @@
 
 ## 6. Unit Tests (ScribermanTests)
 
-- [ ] 6.1 Create `MockMicCaptureController: MicCaptureControlling` with controllable `startCapture` success/failure and a `stopCapture` call counter
-- [ ] 6.2 Test: config change while recording with mock controller returning success → `isRecordingValue` remains true, `pendingError` nil
-- [ ] 6.3 Test: config change while recording with mock controller throwing → `isRecordingValue` false, `pendingError == .captureInterrupted`
-- [ ] 6.4 Test: config change while `audioEngine == nil` (recorder fallback) → handler is no-op, `pendingError` nil
-- [ ] 6.5 Test: re-entrant config change during recovery is ignored (second call while `isRecoveringMicCapture == true`)
-- [ ] 6.6 Test: `micStartHostTime` not overwritten on recovery — set to 1000, trigger recovery, call `captureMicStartHostTimeIfNeeded(2000)`, expect 1000
-- [ ] 6.7 Test: UID resolution — mock hardware with two devices; `desiredMicDeviceUID` matches device B → recovery calls `startCapture` with device B's ID
-- [ ] 6.8 Test: UID not found during recovery → `startCapture` called with `nil` (system default), `pendingError` not set
-- [ ] 6.9 Test: `retargetMic` while not recording is a no-op
-- [ ] 6.10 Test: `retargetMic` while recording updates `desiredMicDeviceUID` and triggers recovery via mock controller
+- [x] 6.1 Create `MockMicCaptureController: MicCaptureControlling` with controllable `startCapture` success/failure and a `stopCapture` call counter
+- [x] 6.2 Test: config change while recording with mock controller returning success → `isRecordingValue` remains true, `pendingError` nil
+- [x] 6.3 Test: config change while recording with mock controller throwing → `isRecordingValue` false, `pendingError == .captureInterrupted`
+- [x] 6.4 Test: config change while `audioEngine == nil` (recorder fallback) → handler is no-op, `pendingError` nil
+- [x] 6.5 Test: re-entrant config change during recovery is ignored (second call while `isRecoveringMicCapture == true`)
+- [x] 6.6 Test: `micStartHostTime` not overwritten on recovery — set to 1000, trigger recovery, call `captureMicStartHostTimeIfNeeded(2000)`, expect 1000
+- [x] 6.7 Test: UID resolution — mock hardware with two devices; `desiredMicDeviceUID` matches device B → recovery calls `startCapture` with device B's ID
+- [x] 6.8 Test: UID not found during recovery → `startCapture` called with `nil` (system default), `pendingError` not set
+- [x] 6.9 Test: `retargetMic` while not recording is a no-op
+- [x] 6.10 Test: `retargetMic` while recording updates `desiredMicDeviceUID` and triggers recovery via mock controller

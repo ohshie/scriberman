@@ -370,6 +370,165 @@ final class RecordingServiceTests {
         // Reaching here means no crash/throw
     }
 
+    @Test
+    func testConfigChangeWhileRecordingRecoverySuccessKeepsRecordingAndNoPendingError() async throws {
+        let fixture = try await makeRecoveryFixture()
+        let micURL = fixture.workspace.rootURL.appendingPathComponent("mic.wav")
+
+        await fixture.service.setRecordingStateForTesting(isRecording: true)
+        await fixture.service.setMicRecoveryStateForTesting(
+            desiredMicDeviceUID: nil,
+            micFileURL: micURL
+        )
+        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
+
+        #expect(await fixture.service.isRecording())
+        #expect(await fixture.service.consumePendingError() == nil)
+    }
+
+    @Test
+    func testConfigChangeWhileRecordingRecoveryFailureStopsRecordingAndSetsPendingError() async throws {
+        let fixture = try await makeRecoveryFixture()
+        fixture.micController.startCaptureError = RecordingError.failedToStart("forced")
+        let micURL = fixture.workspace.rootURL.appendingPathComponent("mic.wav")
+
+        await fixture.service.setRecordingStateForTesting(isRecording: true)
+        await fixture.service.setMicRecoveryStateForTesting(
+            desiredMicDeviceUID: nil,
+            micFileURL: micURL
+        )
+        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
+
+        #expect(!(await fixture.service.isRecording()))
+        if case .captureInterrupted = await fixture.service.consumePendingError() {
+            // expected
+        } else {
+            Issue.record("Expected .captureInterrupted pending error")
+        }
+    }
+
+    @Test
+    func testConfigChangeWhileRecorderFallbackIsNoOp() async throws {
+        let fixture = try await makeRecoveryFixture()
+        let micURL = fixture.workspace.rootURL.appendingPathComponent("mic.wav")
+
+        await fixture.service.setRecordingStateForTesting(isRecording: true)
+        await fixture.service.setMicRecoveryStateForTesting(
+            desiredMicDeviceUID: nil,
+            micFileURL: micURL,
+            recorderFallbackActive: true
+        )
+        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
+
+        #expect(await fixture.service.consumePendingError() == nil)
+        #expect(fixture.micController.startCaptureCalls.isEmpty)
+    }
+
+    @Test
+    func testReentrantConfigChangeDuringRecoveryIsIgnored() async throws {
+        let fixture = try await makeRecoveryFixture()
+        let micURL = fixture.workspace.rootURL.appendingPathComponent("mic.wav")
+
+        await fixture.service.setRecordingStateForTesting(isRecording: true)
+        await fixture.service.setMicRecoveryStateForTesting(
+            desiredMicDeviceUID: nil,
+            micFileURL: micURL,
+            isRecoveringMicCapture: true
+        )
+        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
+
+        #expect(fixture.micController.startCaptureCalls.isEmpty)
+        #expect(await fixture.service.consumePendingError() == nil)
+    }
+
+    @Test
+    func testMicStartHostTimeNotOverwrittenOnRecovery() async throws {
+        let fixture = try await makeRecoveryFixture()
+        let micURL = fixture.workspace.rootURL.appendingPathComponent("mic.wav")
+
+        await fixture.service.setRecordingStateForTesting(isRecording: true)
+        await fixture.service.setMicRecoveryStateForTesting(
+            desiredMicDeviceUID: nil,
+            micFileURL: micURL
+        )
+        await fixture.service.captureMicStartHostTimeIfNeeded(1_000)
+        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
+        await fixture.service.captureMicStartHostTimeIfNeeded(2_000)
+
+        #expect(await fixture.service.capturedHostTimes().mic == 1_000)
+    }
+
+    @Test
+    func testRecoveryResolvesDesiredUIDToMatchingDeviceID() async throws {
+        let fixture = try await makeRecoveryFixture()
+        let micURL = fixture.workspace.rootURL.appendingPathComponent("mic.wav")
+        fixture.hardware.devices = [
+            (id: 11, uid: "uid-a"),
+            (id: 22, uid: "uid-b")
+        ]
+
+        await fixture.service.setRecordingStateForTesting(isRecording: true)
+        await fixture.service.setMicRecoveryStateForTesting(
+            desiredMicDeviceUID: "uid-b",
+            micFileURL: micURL
+        )
+        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
+
+        #expect(fixture.micController.startCaptureCalls.last?.deviceID == 22)
+        #expect(await fixture.service.consumePendingError() == nil)
+    }
+
+    @Test
+    func testRecoveryUIDNotFoundFallsBackToDefaultDevice() async throws {
+        let fixture = try await makeRecoveryFixture()
+        let micURL = fixture.workspace.rootURL.appendingPathComponent("mic.wav")
+        fixture.hardware.devices = [
+            (id: 11, uid: "uid-a")
+        ]
+
+        await fixture.service.setRecordingStateForTesting(isRecording: true)
+        await fixture.service.setMicRecoveryStateForTesting(
+            desiredMicDeviceUID: "uid-missing",
+            micFileURL: micURL
+        )
+        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
+
+        #expect(fixture.micController.startCaptureCalls.last?.deviceID == nil)
+        #expect(await fixture.service.consumePendingError() == nil)
+    }
+
+    @Test
+    func testRetargetMicWhileNotRecordingIsNoOp() async throws {
+        let fixture = try await makeRecoveryFixture()
+
+        await fixture.service.setRecordingStateForTesting(isRecording: false)
+        await fixture.service.retargetMic(desiredDeviceUID: "uid-b")
+
+        #expect(fixture.micController.startCaptureCalls.isEmpty)
+    }
+
+    @Test
+    func testRetargetMicWhileRecordingUpdatesDesiredUIDAndTriggersRecovery() async throws {
+        let fixture = try await makeRecoveryFixture()
+        let micURL = fixture.workspace.rootURL.appendingPathComponent("mic.wav")
+        fixture.hardware.devices = [
+            (id: 11, uid: "uid-a"),
+            (id: 22, uid: "uid-b")
+        ]
+
+        await fixture.service.setRecordingStateForTesting(isRecording: true)
+        await fixture.service.setMicRecoveryStateForTesting(
+            desiredMicDeviceUID: "uid-a",
+            micFileURL: micURL
+        )
+
+        await fixture.service.retargetMic(desiredDeviceUID: "uid-b")
+
+        #expect(fixture.micController.startCaptureCalls.last?.deviceID == 22)
+        let debugState = await fixture.service.recoveryDebugStateForTesting()
+        #expect(debugState.desiredMicDeviceUID == "uid-b")
+    }
+
     private func makeWorkspace() -> Workspace {
         let rootURL = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -379,10 +538,92 @@ final class RecordingServiceTests {
     private func removeWorkspace(at url: URL) {
         try? FileManager.default.removeItem(at: url)
     }
+
+    private func makeRecoveryFixture() async throws -> (
+        service: RecordingService,
+        workspace: Workspace,
+        hardware: MockRecoveryAudioDeviceHardware,
+        micController: MockMicCaptureController
+    ) {
+        let workspace = makeWorkspace()
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let modelContainer = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let hardware = MockRecoveryAudioDeviceHardware()
+        let micController = MockMicCaptureController()
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        let service = RecordingService(
+            workspaceService: MockWorkspaceService(),
+            modelContainer: modelContainer,
+            appAudioSettings: appAudioSettings,
+            hardware: hardware,
+            micCaptureController: micController
+        )
+        return (service, workspace, hardware, micController)
+    }
 }
 
 // Thread-safe call counter for voice processing setter tests
 private final class VPCallCounter: @unchecked Sendable {
     private(set) var callCount = 0
     func increment() { callCount += 1 }
+}
+
+private final class MockMicCaptureController: MicCaptureControlling, @unchecked Sendable {
+    struct StartCall {
+        let deviceID: AudioDeviceID?
+        let targetSampleRate: Double
+    }
+
+    var startCaptureError: Error?
+    private(set) var startCaptureCalls: [StartCall] = []
+    private(set) var stopCaptureCallCount = 0
+
+    func startCapture(
+        deviceID: AudioDeviceID?,
+        targetFormat: AVAudioFormat,
+        micFileURL _: URL,
+        micStreamer _: AudioFileStreamer,
+        voiceProcessingEnabled _: Bool,
+        applyVoiceProcessing _: @Sendable (AVAudioInputNode, Bool) -> Void,
+        onFirstHostTime _: @escaping @Sendable (UInt64) -> Void,
+        onBuffer _: @escaping @Sendable ([Float], Double) -> Void
+    ) throws {
+        if let startCaptureError {
+            throw startCaptureError
+        }
+        startCaptureCalls.append(.init(deviceID: deviceID, targetSampleRate: targetFormat.sampleRate))
+    }
+
+    func stopCapture() {
+        stopCaptureCallCount += 1
+    }
+
+    func retargetDevice(_: AudioDeviceID?) throws {}
+}
+
+private final class MockRecoveryAudioDeviceHardware: AudioDeviceHardwareProviding, @unchecked Sendable {
+    var devices: [(id: AudioDeviceID, uid: String)] = []
+
+    func allDeviceIDs() throws -> [AudioDeviceID] {
+        devices.map(\.id)
+    }
+
+    func hasInputStream(deviceID _: AudioDeviceID) -> Bool {
+        true
+    }
+
+    func deviceUID(deviceID: AudioDeviceID) -> String? {
+        devices.first(where: { $0.id == deviceID })?.uid
+    }
+
+    func deviceName(deviceID _: AudioDeviceID) -> String? {
+        "Mock Device"
+    }
+
+    func defaultInputDeviceID() -> AudioDeviceID? {
+        devices.first?.id
+    }
 }

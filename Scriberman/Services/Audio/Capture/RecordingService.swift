@@ -237,6 +237,9 @@ actor RecordingService: RecordingServiceProtocol {
 
     private var isRecordingValue = false
     private var audioLevelValue: Float = 0
+#if DEBUG
+    private var recorderFallbackActiveForTesting = false
+#endif
 
     func liveAudioStream() async -> AsyncStream<([Float], AudioSource, Double)> {
         liveAudioStreamTuple.stream
@@ -335,6 +338,32 @@ actor RecordingService: RecordingServiceProtocol {
         self.recordingCreatedAt = recordingCreatedAt
         self.pendingTitle = pendingTitle
         self.currentSessionID = currentSessionID
+    }
+
+    func setMicRecoveryStateForTesting(
+        desiredMicDeviceUID: String?,
+        micFileURL: URL?,
+        isRecoveringMicCapture: Bool = false,
+        recorderFallbackActive: Bool = false,
+        currentCaptureDeviceID: AudioDeviceID? = nil
+    ) {
+        self.desiredMicDeviceUID = desiredMicDeviceUID
+        self.micFileURL = micFileURL
+        self.isRecoveringMicCapture = isRecoveringMicCapture
+        self.recorderFallbackActiveForTesting = recorderFallbackActive
+        self.currentCaptureDeviceID = currentCaptureDeviceID
+    }
+
+    func simulateAudioEngineConfigurationChangeForTesting() async {
+        await handleAudioEngineConfigurationChange()
+    }
+
+    func recoveryDebugStateForTesting() -> (
+        desiredMicDeviceUID: String?,
+        currentCaptureDeviceID: AudioDeviceID?,
+        isRecoveringMicCapture: Bool
+    ) {
+        (desiredMicDeviceUID, currentCaptureDeviceID, isRecoveringMicCapture)
     }
     #endif
 
@@ -617,6 +646,9 @@ actor RecordingService: RecordingServiceProtocol {
         currentCaptureDeviceID = nil
         micFileURL = nil
         isRecoveringMicCapture = false
+#if DEBUG
+        recorderFallbackActiveForTesting = false
+#endif
     }
 
     private func releaseRecordingScopeIfNeeded() {
@@ -637,7 +669,12 @@ actor RecordingService: RecordingServiceProtocol {
             return
         }
         // Recorder fallback is naturally resilient to device changes.
-        guard audioRecorder == nil else {
+#if DEBUG
+        let isRecorderFallbackActive = audioRecorder != nil || recorderFallbackActiveForTesting
+#else
+        let isRecorderFallbackActive = audioRecorder != nil
+#endif
+        guard !isRecorderFallbackActive else {
             return
         }
 
