@@ -5,6 +5,8 @@ import Foundation
 import OSLog
 import SwiftData
 
+private let recordingAudioObjectSystemObjectID = AudioObjectID(kAudioObjectSystemObject)
+
 enum RecordingError: LocalizedError {
     case alreadyRecording
     case microphoneDenied
@@ -210,6 +212,7 @@ actor RecordingService: RecordingServiceProtocol {
     private var micStartHostTime: UInt64?
     private var appStartHostTime: UInt64?
     private var desiredMicDeviceUID: String?
+    private var currentCaptureDeviceID: AudioDeviceID?
     private var micFileURL: URL?
     private let micTargetFormat = AVAudioFormat(
         commonFormat: .pcmFormatFloat32,
@@ -227,6 +230,10 @@ actor RecordingService: RecordingServiceProtocol {
     private let liveAudioStreamTuple: (stream: AsyncStream<([Float], AudioSource, Double)>, continuation: AsyncStream<([Float], AudioSource, Double)>.Continuation)
     // nonisolated(unsafe): written once in init on the actor; read only in deinit; lifetime matches the actor
     nonisolated(unsafe) private var engineConfigurationObserver: NSObjectProtocol?
+    // nonisolated(unsafe): initialized once and used for CoreAudio C callback registration/removal lifecycle.
+    nonisolated(unsafe) private var hardwarePropertyListener: AudioObjectPropertyListenerBlock?
+    nonisolated(unsafe) private var hasRegisteredHardwareListeners = false
+    private let hardwareListenerQueue: DispatchQueue
 
     private var isRecordingValue = false
     private var audioLevelValue: Float = 0
@@ -251,11 +258,17 @@ actor RecordingService: RecordingServiceProtocol {
         self.micCaptureController = micCaptureController ?? AVAudioEngineMicCaptureController()
         self.notificationCenter = notificationCenter
         self.voiceProcessingPropertySetter = voiceProcessingPropertySetter
+        self.hardwareListenerQueue = DispatchQueue(label: "Scriberman.RecordingService.HardwareListeners")
         self.mixdownCoordinator = RecordingMixdownCoordinator(
             workspaceService: workspaceService,
             modelContainer: modelContainer
         )
         self.liveAudioStreamTuple = AsyncStream<([Float], AudioSource, Double)>.makeStream()
+        self.hardwarePropertyListener = { [weak self] _, _ in
+            Task {
+                await self?.handleHardwareChange()
+            }
+        }
 
         engineConfigurationObserver = notificationCenter.addObserver(
             forName: .AVAudioEngineConfigurationChange,
@@ -271,6 +284,35 @@ actor RecordingService: RecordingServiceProtocol {
     deinit {
         if let engineConfigurationObserver {
             notificationCenter.removeObserver(engineConfigurationObserver)
+        }
+        if hasRegisteredHardwareListeners,
+           let hardwarePropertyListener {
+            var devicesAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioHardwarePropertyDevices,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            _ = withUnsafePointer(to: &devicesAddress) { addressPointer in
+                AudioObjectRemovePropertyListenerBlock(
+                    recordingAudioObjectSystemObjectID,
+                    addressPointer,
+                    hardwareListenerQueue,
+                    hardwarePropertyListener
+                )
+            }
+            var defaultInputAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioHardwarePropertyDefaultInputDevice,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            _ = withUnsafePointer(to: &defaultInputAddress) { addressPointer in
+                AudioObjectRemovePropertyListenerBlock(
+                    recordingAudioObjectSystemObjectID,
+                    addressPointer,
+                    hardwareListenerQueue,
+                    hardwarePropertyListener
+                )
+            }
         }
     }
 
@@ -420,6 +462,7 @@ actor RecordingService: RecordingServiceProtocol {
             context.insert(session)
             try context.save()
             self.currentSessionID = session.id
+            registerMicHardwareListeners()
             return session.id
         } catch {
             stopMicCapture()
@@ -442,6 +485,7 @@ actor RecordingService: RecordingServiceProtocol {
             releaseRecordingScopeIfNeeded()
         }
 
+        deregisterMicHardwareListeners()
         stopMicCapture()
         audioRecorder?.stop()
         micStreamer.close()
@@ -542,6 +586,7 @@ actor RecordingService: RecordingServiceProtocol {
     }
 
     private func cleanupRecordingState() {
+        deregisterMicHardwareListeners()
         stopMicCapture()
         micStreamer.close()
         audioRecorder = nil
@@ -556,6 +601,7 @@ actor RecordingService: RecordingServiceProtocol {
         micStartHostTime = nil
         appStartHostTime = nil
         desiredMicDeviceUID = nil
+        currentCaptureDeviceID = nil
         micFileURL = nil
         isRecoveringMicCapture = false
     }
@@ -599,6 +645,28 @@ actor RecordingService: RecordingServiceProtocol {
         isRecordingValue = false
         pendingError = .captureInterrupted
         releaseRecordingScopeIfNeeded()
+    }
+
+    private func handleHardwareChange() async {
+        guard isRecordingValue else {
+            return
+        }
+        guard !isRecoveringMicCapture else {
+            return
+        }
+        guard audioRecorder == nil else {
+            return
+        }
+        guard let desiredMicDeviceUID,
+              let desiredDeviceID = resolveDeviceID(for: desiredMicDeviceUID),
+              currentCaptureDeviceID != desiredDeviceID
+        else {
+            return
+        }
+
+        isRecoveringMicCapture = true
+        _ = await recoverMicCapture()
+        isRecoveringMicCapture = false
     }
 
     private func startRecorderFallback(to fileURL: URL) throws {
@@ -649,11 +717,13 @@ actor RecordingService: RecordingServiceProtocol {
         )
         self.audioRecorder = nil
         self.audioEngine = nil
+        self.currentCaptureDeviceID = deviceID
         self.micFileURL = micFileURL
     }
 
     private func stopMicCapture() {
         micCaptureController.stopCapture()
+        currentCaptureDeviceID = nil
         audioEngine = nil
     }
 
@@ -686,6 +756,79 @@ actor RecordingService: RecordingServiceProtocol {
             return nil
         }
         return allDevices.first(where: { hardware.deviceUID(deviceID: $0) == deviceUID })
+    }
+
+    private func registerMicHardwareListeners() {
+        guard !hasRegisteredHardwareListeners,
+              let hardwarePropertyListener
+        else {
+            return
+        }
+        var devicesAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        _ = withUnsafePointer(to: &devicesAddress) { addressPointer in
+            AudioObjectAddPropertyListenerBlock(
+                recordingAudioObjectSystemObjectID,
+                addressPointer,
+                hardwareListenerQueue,
+                hardwarePropertyListener
+            )
+        }
+
+        var defaultInputAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        _ = withUnsafePointer(to: &defaultInputAddress) { addressPointer in
+            AudioObjectAddPropertyListenerBlock(
+                recordingAudioObjectSystemObjectID,
+                addressPointer,
+                hardwareListenerQueue,
+                hardwarePropertyListener
+            )
+        }
+        hasRegisteredHardwareListeners = true
+    }
+
+    private func deregisterMicHardwareListeners() {
+        guard hasRegisteredHardwareListeners,
+              let hardwarePropertyListener
+        else {
+            return
+        }
+
+        var devicesAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        _ = withUnsafePointer(to: &devicesAddress) { addressPointer in
+            AudioObjectRemovePropertyListenerBlock(
+                recordingAudioObjectSystemObjectID,
+                addressPointer,
+                hardwareListenerQueue,
+                hardwarePropertyListener
+            )
+        }
+
+        var defaultInputAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        _ = withUnsafePointer(to: &defaultInputAddress) { addressPointer in
+            AudioObjectRemovePropertyListenerBlock(
+                recordingAudioObjectSystemObjectID,
+                addressPointer,
+                hardwareListenerQueue,
+                hardwarePropertyListener
+            )
+        }
+        hasRegisteredHardwareListeners = false
     }
 
     func captureMicStartHostTimeIfNeeded(_ hostTime: UInt64) {
