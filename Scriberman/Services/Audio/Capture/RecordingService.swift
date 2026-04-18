@@ -574,15 +574,23 @@ actor RecordingService: RecordingServiceProtocol {
         guard isRecordingValue else {
             return
         }
-        guard let audioEngine else {
+        guard !isRecoveringMicCapture else {
             return
         }
-        guard !audioEngine.isRunning else {
+        // Recorder fallback is naturally resilient to device changes.
+        guard audioRecorder == nil else {
             return
         }
 
-        audioEngine.inputNode.removeTap(onBus: 0)
-        audioEngine.stop()
+        isRecoveringMicCapture = true
+        let didRecover = await recoverMicCapture()
+        isRecoveringMicCapture = false
+
+        guard !didRecover else {
+            return
+        }
+
+        micStreamer.close()
         audioRecorder?.stop()
         await appAudioCaptureSession?.stop()
         appAudioCaptureSession = nil
