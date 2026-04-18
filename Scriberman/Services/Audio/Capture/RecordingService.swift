@@ -575,6 +575,19 @@ actor RecordingService: RecordingServiceProtocol {
         return pendingError
     }
 
+    func retargetMic(desiredDeviceUID: String?) async {
+        guard isRecordingValue else {
+            return
+        }
+        self.desiredMicDeviceUID = desiredDeviceUID
+        guard !isRecoveringMicCapture else {
+            return
+        }
+        isRecoveringMicCapture = true
+        _ = await recoverMicCapture()
+        isRecoveringMicCapture = false
+    }
+
     private func ensureMicrophonePermission() async throws(RecordingError) {
         try await RecordingPermissionService.ensureMicrophonePermission()
     }

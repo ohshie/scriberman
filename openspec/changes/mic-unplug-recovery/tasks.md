@@ -27,9 +27,9 @@
 
 ## 5. Manual Mid-Recording Retarget
 
-- [ ] 5.1 Add `retargetMic(desiredDeviceUID: String?) async` to `RecordingService` — guard on `isRecordingValue`, update `desiredMicDeviceUID`, call `recoverMicCapture()`
-- [ ] 5.2 Add `retargetMic(desiredDeviceUID:)` to `RecordingServiceProtocol`
-- [ ] 5.3 Wire `retargetMic` call from the ViewModel/coordinator when `AudioDeviceService.selectedDevice` changes during an active recording
+- [x] 5.1 Add `retargetMic(desiredDeviceUID: String?) async` to `RecordingService` — guard on `isRecordingValue`, update `desiredMicDeviceUID`, call `recoverMicCapture()`
+- [x] 5.2 Add `retargetMic(desiredDeviceUID:)` to `RecordingServiceProtocol`
+- [x] 5.3 Wire `retargetMic` call from the ViewModel/coordinator when `AudioDeviceService.selectedDevice` changes during an active recording
 
 ## 6. Unit Tests (ScribermanTests)
 

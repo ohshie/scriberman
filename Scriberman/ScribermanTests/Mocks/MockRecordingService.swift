@@ -10,6 +10,7 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
     var startReturns: UUID = UUID()
     var stopReturns: UUID?
     var startCalls: [(workspace: Workspace, micDeviceID: AudioDeviceID?, capturedAppName: String?, appProcessID: pid_t?, title: String?)] = []
+    var retargetMicCalls: [String?] = []
     var pendingError: RecordingError?
 
     func liveAudioStream() async -> AsyncStream<([Float], AudioSource, Double)> {
@@ -56,5 +57,9 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
     func consumePendingError() async -> RecordingError? {
         defer { pendingError = nil }
         return pendingError
+    }
+
+    func retargetMic(desiredDeviceUID: String?) async {
+        retargetMicCalls.append(desiredDeviceUID)
     }
 }
