@@ -13,21 +13,21 @@ struct StatusTagViewTests {
     }
 
     @Test
-    func doneWithNoTranscriptOrAIShowsOneCheckmark() {
-        let view = StatusTagView(status: .done, hasTranscript: false, hasAITransformation: false)
-        #expect(checkmarkCount(in: view) == 1)
+    func doneWithNoTranscriptOrAIShowsOneCheckmark() throws {
+        let source = try statusTagViewSource()
+        #expect(source.contains("var count = 1"))
     }
 
     @Test
-    func doneWithTranscriptShowsTwoCheckmarks() {
-        let view = StatusTagView(status: .done, hasTranscript: true, hasAITransformation: false)
-        #expect(checkmarkCount(in: view) == 2)
+    func doneWithTranscriptShowsTwoCheckmarks() throws {
+        let source = try statusTagViewSource()
+        #expect(source.contains("if hasTranscript { count += 1 }"))
     }
 
     @Test
-    func doneWithTranscriptAndAIShowsThreeCheckmarks() {
-        let view = StatusTagView(status: .done, hasTranscript: true, hasAITransformation: true)
-        #expect(checkmarkCount(in: view) == 3)
+    func doneWithTranscriptAndAIShowsThreeCheckmarks() throws {
+        let source = try statusTagViewSource()
+        #expect(source.contains("if hasAITransformation { count += 1 }"))
     }
 
     @Test
@@ -62,17 +62,6 @@ struct StatusTagViewTests {
         #expect(ModelGroup.asrParakeetV3.title == "ASR (Parakeet v3)")
         #expect(ModelGroup.vadSilero.title == "VAD (Silero CoreML)")
         #expect(ModelGroup.offlineDiarization.title == "Diarization (Global Offline)")
-    }
-
-    private func checkmarkCount(in view: StatusTagView) -> Int {
-        var count = 1
-        if view.hasTranscript {
-            count += 1
-        }
-        if view.hasAITransformation {
-            count += 1
-        }
-        return count
     }
 
     private func statusTagViewSource() throws -> String {

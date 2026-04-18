@@ -161,7 +161,7 @@ struct RecordingStatusTests {
         let source = try sourceForFile(named: "RecordingSessionRow.swift")
         #expect(source.contains("case .recording:"))
         #expect(source.contains("Circle()"))
-        #expect(source.contains(".fill(.red)"))
+        #expect(source.contains(".fill(Color(\"StatusRecordingColor\"))"))
         #expect(source.contains("isPulsing"))
     }
 

@@ -30,11 +30,9 @@ struct ImportedSessionRow: View {
             Spacer(minLength: 12)
 
             VStack(alignment: .trailing, spacing: 8) {
-                StatusTagView(
-                    status: session.status,
-                    hasTranscript: session.transcriptData != nil,
-                    hasAITransformation: session.aiTransformationsData != nil
-                )
+                if !statusIndicatorBelongsInAccessory {
+                    statusIndicator
+                }
                 accessory
             }
         }
@@ -73,13 +71,33 @@ struct ImportedSessionRow: View {
             }
 
         case .done:
-            EmptyView()
+            statusIndicator
 
         case .error:
-            Button("Retry", action: onRetry)
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+            HStack(spacing: 6) {
+                statusIndicator
+                Button("Retry", action: onRetry)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
         }
+    }
+
+    private var statusIndicatorBelongsInAccessory: Bool {
+        switch session.status {
+        case .done, .error:
+            return true
+        case .recorded, .recording, .converting, .transcribing, .retranscribing:
+            return false
+        }
+    }
+
+    private var statusIndicator: some View {
+        StatusTagView(
+            status: session.status,
+            hasTranscript: session.transcriptData != nil,
+            hasAITransformation: session.aiTransformationsData != nil
+        )
     }
 
     private func durationText(_ duration: TimeInterval) -> String {

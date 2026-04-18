@@ -11,27 +11,28 @@ struct StatusTagView: View {
         case .recording:
             EmptyView()
         case .done:
-            ZStack(alignment: .leading) {
+            ZStack(alignment: .trailing) {
                 ForEach(0 ..< doneCheckmarkCount, id: \.self) { i in
                     Image(systemName: "checkmark")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color("StatusDoneMarkColor"))
                         .font(.caption.weight(.semibold))
-                        .offset(x: CGFloat(i) * 5, y: CGFloat(-i) * 3)
+                        .offset(x: CGFloat(-i) * 4)
                 }
             }
-            .frame(width: 28, height: 14, alignment: .leading)
+            .frame(width: 8, height: 8, alignment: .center)
         case .error:
             Image(systemName: "xmark")
-                .foregroundStyle(.red.opacity(0.6))
+                .foregroundStyle(Color("StatusErrorColor"))
                 .font(.caption.weight(.semibold))
+                .frame(width: 8, height: 8, alignment: .center)
         case .recorded, .converting, .transcribing, .retranscribing:
             Text("Pending")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.orange)
+                .foregroundStyle(Color("StatusPendingColor"))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
                 .glassEffect(.regular, in: Capsule())
-                .tint(.orange)
+                .tint(Color("StatusPendingColor"))
         }
     }
 
