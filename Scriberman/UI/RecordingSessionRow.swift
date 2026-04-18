@@ -32,7 +32,11 @@ struct RecordingSessionRow: View {
             Spacer(minLength: 12)
 
             VStack(alignment: .trailing, spacing: 8) {
-                StatusTagView(status: session.status)
+                StatusTagView(
+                    status: session.status,
+                    hasTranscript: session.transcriptData != nil,
+                    hasAITransformation: session.aiTransformationsData != nil
+                )
                 accessory
             }
         }
