@@ -5,7 +5,7 @@ import SwiftUI
 struct NewSessionPanelView: View {
     var viewModel: NewSessionViewModel
     @Binding var pendingSession: PendingSession
-    var onRecordingFinished: (RecordingSession) -> Void
+    var onRecordingStarted: (RecordingSession) -> Void = { _ in }
     var onImportFile: () -> Void = {}
 
     @Environment(\.modelContext) private var modelContext
@@ -75,12 +75,7 @@ struct NewSessionPanelView: View {
                 )
             }
 
-            switch viewModel.state {
-            case .idle:
-                idleState
-            case let .recording(duration, level):
-                recordingState(duration: duration, level: level)
-            }
+            idleState
             Spacer(minLength: 0)
         }
         .padding(20)
@@ -117,7 +112,9 @@ struct NewSessionPanelView: View {
                 Spacer()
                 Button {
                     Task {
-                        await viewModel.startRecording(title: pendingSession.title, context: modelContext)
+                        if let session = await viewModel.startRecording(title: pendingSession.title, context: modelContext) {
+                            onRecordingStarted(session)
+                        }
                     }
                 } label: {
                     Label("Record", systemImage: "record.circle")
@@ -131,68 +128,6 @@ struct NewSessionPanelView: View {
                 onImportFile()
             }
             .buttonStyle(.borderless)
-        }
-    }
-
-    private func recordingState(duration: TimeInterval, level: Float) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            sessionNameReadOnlyCard
-
-            FlowingWaveView(level: level, showAppWave: viewModel.recordAppAudio, isRecording: true)
-                .frame(height: 110)
-
-            Text(durationText(duration))
-                .font(.title3.monospacedDigit())
-                .foregroundStyle(.secondary)
-
-            if !viewModel.liveSegments.isEmpty {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(Array(viewModel.liveSegments.enumerated()), id: \.offset) { _, segment in
-                                HStack(alignment: .top, spacing: 8) {
-                                    Text(segment.audioSource == .mic ? "Mic" : "App")
-                                        .font(.caption2.bold())
-                                        .foregroundStyle(.secondary)
-                                        .padding(.horizontal, 4)
-                                        .padding(.vertical, 2)
-                                        .background(Capsule().stroke(.secondary.opacity(0.3)))
-
-                                    Text(segment.text)
-                                        .font(.callout)
-                                        .foregroundStyle(segment.isFinal ? .primary : .secondary)
-                                }
-                                .id(segment.startTime)
-                            }
-                        }
-                        .padding(.vertical, 8)
-                    }
-                    .frame(height: 120)
-                    .onChange(of: viewModel.liveSegments.count) {
-                        if let last = viewModel.liveSegments.last {
-                            proxy.scrollTo(last.startTime, anchor: .bottom)
-                        }
-                    }
-                }
-            }
-
-            HStack {
-                Spacer()
-                Button {
-                    Task {
-                        if let session = await viewModel.stopRecording(context: modelContext) {
-                            onRecordingFinished(session)
-                        }
-                    }
-                } label: {
-                    Label("Stop", systemImage: "stop.circle.fill")
-                }
-                .buttonStyle(.glassProminent)
-                .tint(.red)
-                Spacer()
-            }
-
-            controlsSection(isInteractive: false)
         }
     }
 
@@ -338,25 +273,6 @@ struct NewSessionPanelView: View {
             }
         }
         .animation(.easeInOut(duration: 0.15), value: isNameCardHovering)
-    }
-
-    private var sessionNameReadOnlyCard: some View {
-        Text(pendingSession.title.isEmpty ? "Untitled Session" : pendingSession.title)
-            .font(.title2.weight(.semibold))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            )
-    }
-
-    private func durationText(_ duration: TimeInterval) -> String {
-        let totalSeconds = max(0, Int(duration.rounded(.down)))
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        return String(format: "%02d:%02d", minutes, seconds)
     }
 
     private func openPrivacySettings() {

@@ -318,7 +318,7 @@ final class AppStateTests {
     }
 
     @Test
-    func testDiscardPendingSessionClearsPendingAndResetsNewSessionState() {
+    func testDiscardPendingSessionClearsPendingAndPreservesRecordingState() {
         let permissionService = MockPermissionService()
         let services = makeServiceContainer(permissionService: permissionService)
         let appState = AppState(services: services)
@@ -335,8 +335,25 @@ final class AppStateTests {
         appState.discardPendingSession()
 
         #expect(appState.pendingSession == nil)
+        guard case .recording = appState.newSessionViewModel.state else {
+            Issue.record("Expected recording state to be preserved while an active recording is in progress")
+            return
+        }
+    }
+
+    @Test
+    func testDiscardPendingSessionResetsNewSessionStateWhenIdle() {
+        let permissionService = MockPermissionService()
+        let services = makeServiceContainer(permissionService: permissionService)
+        let appState = AppState(services: services)
+
+        appState.selectPendingSession()
+        appState.newSessionViewModel.state = .idle
+        appState.discardPendingSession()
+
+        #expect(appState.pendingSession == nil)
         guard case .idle = appState.newSessionViewModel.state else {
-            Issue.record("Expected new session state to reset to idle")
+            Issue.record("Expected idle state after discarding a pending session while idle")
             return
         }
     }
