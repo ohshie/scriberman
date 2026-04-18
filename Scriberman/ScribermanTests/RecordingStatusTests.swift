@@ -157,11 +157,12 @@ struct RecordingStatusTests {
     }
 
     @Test
-    func testRecordingSessionRowShowsProgressIndicatorAndRecordingLabelForRecordingStatus() throws {
+    func testRecordingSessionRowShowsPulsingDotForRecordingStatus() throws {
         let source = try sourceForFile(named: "RecordingSessionRow.swift")
         #expect(source.contains("case .recording:"))
-        #expect(source.contains("ProgressView()"))
-        #expect(source.contains("\"Recording\""))
+        #expect(source.contains("Circle()"))
+        #expect(source.contains(".fill(.red)"))
+        #expect(source.contains("isPulsing"))
     }
 
     private func sourceForFile(named fileName: String) throws -> String {

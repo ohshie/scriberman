@@ -220,7 +220,8 @@ final class NewSessionViewModel {
         appAudioService.refreshRunningApps()
     }
 
-    func startRecording(title: String, context: ModelContext) async {
+    @discardableResult
+    func startRecording(title: String, context: ModelContext) async -> RecordingSession? {
         recordingMonitorTask?.cancel()
         recordingMonitorTask = nil
         errorMessage = nil
@@ -315,6 +316,9 @@ final class NewSessionViewModel {
             activeRecordingSessionID = recordingSessionID
             state = .recording(duration: 0, level: 0)
             liveSegments = []
+
+            let descriptor = FetchDescriptor<RecordingSession>()
+            let session = try? context.fetch(descriptor).first(where: { $0.id == recordingSessionID })
             
             // Start Live Transcription
             do {
@@ -328,18 +332,21 @@ final class NewSessionViewModel {
             }
             
             startRecordingMonitor()
+            return session
         } catch {
             errorMessage = error.localizedDescription
             state = .idle
+            return nil
         }
     }
 
+    @discardableResult
     func startRecording(
         title: String,
         micDeviceUID: String?,
         app: CapturedApp?,
         context: ModelContext
-    ) async {
+    ) async -> RecordingSession? {
         audioDeviceService.refreshDevices()
         appAudioService.refreshRunningApps()
 
@@ -352,7 +359,7 @@ final class NewSessionViewModel {
         selectedApp = app
         recordAppAudio = app != nil
 
-        await startRecording(title: title, context: context)
+        return await startRecording(title: title, context: context)
     }
 
     func stopRecording(context: ModelContext) async -> RecordingSession? {

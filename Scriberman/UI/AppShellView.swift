@@ -142,8 +142,14 @@ struct AppShellView: View {
         selectedSession = .pending(pendingSession)
     }
 
-    private func focusRecordingSession(sessionID: UUID) {
+    private func focusRecordingSession(sessionID: UUID, retriesRemaining: Int = 3) {
         guard let session = recordingSessions.first(where: { $0.id == sessionID }) else {
+            if retriesRemaining > 0 {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(120))
+                    focusRecordingSession(sessionID: sessionID, retriesRemaining: retriesRemaining - 1)
+                }
+            }
             return
         }
 
@@ -161,7 +167,7 @@ struct AppShellView: View {
                         get: { appState.pendingSession ?? pendingSession },
                         set: { appState.pendingSession = $0 }
                     ),
-                    onRecordingFinished: { session in
+                    onRecordingStarted: { session in
                         appState.discardPendingSession()
                         selectedSession = .recording(session)
                     },
@@ -177,7 +183,14 @@ struct AppShellView: View {
                 )
             }
         case .recording(let session):
-            if detailMode == .study, let transcript = displayedTranscript(for: session) {
+            if session.status == .recording {
+                ActiveRecordingDetailView(
+                    session: session,
+                    viewModel: appState.newSessionViewModel,
+                    modelContext: modelContext
+                )
+                .id(session.id)
+            } else if detailMode == .study, let transcript = displayedTranscript(for: session) {
                 TranscriptStudyView(
                     session: session,
                     audioPlayerViewModel: audioPlayerViewModel,
@@ -289,9 +302,9 @@ struct AppShellView: View {
     private func selectedSessionHasMixdownNil(_ item: JobsViewModel.SessionListItem?) -> Bool {
         switch item {
         case .recording(let session):
-            return session.mixdownURL == nil
+            return session.mixdownURL == nil && session.status != .done
         case .imported(let session):
-            return session.mixdownURL == nil
+            return session.mixdownURL == nil && session.status != .done
         case .pending, .none:
             return false
         }

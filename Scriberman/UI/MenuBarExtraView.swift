@@ -117,7 +117,7 @@ struct MenuBarExtraView: View {
         }
 
         Task {
-            await appState.newSessionViewModel.startRecording(
+            _ = await appState.newSessionViewModel.startRecording(
                 title: "Quick Recording",
                 micDeviceUID: selectedMic,
                 app: selectedApp,
