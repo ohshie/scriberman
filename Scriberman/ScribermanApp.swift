@@ -9,7 +9,7 @@ struct ScribermanApp: App {
 
     private static let appModelContainer: ModelContainer = {
         do {
-            return try ModelContainer(for: RecordingSession.self, ImportedSession.self, SpeakerProfile.self)
+            return try ModelContainer(for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self, SpeakerProfile.self)
         } catch {
             fatalError("Failed to initialize app model container: \(error.localizedDescription)")
         }

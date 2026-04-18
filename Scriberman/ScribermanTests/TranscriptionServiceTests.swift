@@ -89,7 +89,7 @@ struct TranscriptionServiceTests {
         let service = TranscriptionService()
         let workspace = Workspace(rootURL: FileManager.default.temporaryDirectory)
         let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let session = RecordingSession(
@@ -138,7 +138,7 @@ struct TranscriptionServiceTests {
         )
 
         let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let session = RecordingSession(

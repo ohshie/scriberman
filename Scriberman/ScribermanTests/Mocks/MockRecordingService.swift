@@ -7,6 +7,7 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
     var audioLevelOverride: Float = 0
     var startShouldThrow: RecordingError?
     var startThrowSequence: [RecordingError] = []
+    var startReturns: UUID = UUID()
     var stopReturns: UUID?
     var startCalls: [(workspace: Workspace, micDeviceID: AudioDeviceID?, capturedAppName: String?, appProcessID: pid_t?, title: String?)] = []
     var pendingError: RecordingError?
@@ -31,7 +32,7 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
         capturedAppName: String?,
         appProcessID: pid_t?,
         title: String?
-    ) async throws(RecordingError) {
+    ) async throws(RecordingError) -> UUID {
         startCalls.append((
             workspace: workspace,
             micDeviceID: micDeviceID,
@@ -45,6 +46,7 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
         if let startShouldThrow {
             throw startShouldThrow
         }
+        return startReturns
     }
 
     func stopRecording() async -> UUID? {

@@ -19,6 +19,8 @@ final class NewSessionViewModel {
     private let liveTranscriptionService: LiveTranscriptionService
     private var recordingMonitorTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
+    private var activeRecordingSessionID: UUID?
+    private let fileManager = FileManager.default
     var menuBarSettings: MenuBarSettings?
     var settingsViewModel: SettingsViewModel?
 
@@ -150,6 +152,7 @@ final class NewSessionViewModel {
         recordingMonitorTask?.cancel()
         recordingMonitorTask = nil
         recordingStartedAt = nil
+        activeRecordingSessionID = nil
         errorMessage = nil
         state = .idle
     }
@@ -217,7 +220,7 @@ final class NewSessionViewModel {
         appAudioService.refreshRunningApps()
     }
 
-    func startRecording(title: String, context _: ModelContext) async {
+    func startRecording(title: String, context: ModelContext) async {
         recordingMonitorTask?.cancel()
         recordingMonitorTask = nil
         errorMessage = nil
@@ -236,10 +239,11 @@ final class NewSessionViewModel {
 
             let selectedMicDeviceID = selectedDevice?.id
             var startError: Error?
+            var recordingSessionID: UUID?
             var fallbackMessage: String?
 
             do {
-                try await startRecordingAttempt(
+                recordingSessionID = try await startRecordingAttempt(
                     in: workspace,
                     micDeviceID: selectedMicDeviceID,
                     capturedAppName: selectedCapturedAppName,
@@ -254,7 +258,7 @@ final class NewSessionViewModel {
                 fallbackMessage = "App audio capture unavailable. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording."
 
                 do {
-                    try await startRecordingAttempt(
+                    recordingSessionID = try await startRecordingAttempt(
                         in: workspace,
                         micDeviceID: selectedMicDeviceID,
                         capturedAppName: nil,
@@ -269,7 +273,7 @@ final class NewSessionViewModel {
 
             if startError != nil, selectedMicDeviceID != nil {
                 do {
-                    try await startRecordingAttempt(
+                    recordingSessionID = try await startRecordingAttempt(
                         in: workspace,
                         micDeviceID: nil,
                         capturedAppName: nil,
@@ -288,6 +292,9 @@ final class NewSessionViewModel {
             if let startError {
                 throw startError
             }
+            guard let recordingSessionID else {
+                throw RecordingError.failedToStart("Recording session could not be created.")
+            }
 
             if let selectedDevice {
                 audioDeviceService.incrementUsage(for: selectedDevice.uid)
@@ -305,6 +312,7 @@ final class NewSessionViewModel {
             }
 
             recordingStartedAt = .now
+            activeRecordingSessionID = recordingSessionID
             state = .recording(duration: 0, level: 0)
             liveSegments = []
             
@@ -312,7 +320,7 @@ final class NewSessionViewModel {
             do {
                 let pipelineConfig = settingsViewModel?.pipelineSettings ?? .defaults
                 try await liveTranscriptionService.start(workspace: workspace, config: pipelineConfig)
-                startLiveTranscriptionPipeline()
+                startLiveTranscriptionPipeline(context: context)
             } catch LiveTranscriptionError.initializationFailed {
                 errorMessage = "Live transcription unavailable: Required models are missing. Open Settings → Models to install ASR and Speaker Diarization models."
             } catch {
@@ -352,7 +360,8 @@ final class NewSessionViewModel {
         recordingMonitorTask = nil
 
         let liveFinalSegments = await liveTranscriptionService.stop()
-        let sessionID = await recordingService.stopRecording()
+        let sessionID = await recordingService.stopRecording() ?? activeRecordingSessionID
+        activeRecordingSessionID = nil
         
         var fetchedSession: RecordingSession?
         if let sessionID = sessionID {
@@ -370,15 +379,34 @@ final class NewSessionViewModel {
             return nil
         }
 
-        saveLiveTranscript(liveFinalSegments, to: session)
+        backfillPersistedSegments(liveFinalSegments, to: session, context: context)
+        saveLiveTranscript(to: session)
         try? context.save()
         
         state = .idle
         return session
     }
 
-    private func saveLiveTranscript(_ segments: [TranscriptSegment], to session: RecordingSession) {
-        let finalSegments = segments.filter { $0.isFinal }
+    private func saveLiveTranscript(to session: RecordingSession) {
+        let finalSegments = session.transcriptSegments
+            .filter(\.isFinal)
+            .sorted {
+                if $0.startTime == $1.startTime {
+                    return $0.createdAt < $1.createdAt
+                }
+                return $0.startTime < $1.startTime
+            }
+            .map {
+                TranscriptSegment(
+                    id: $0.id,
+                    speakerId: $0.speakerId,
+                    text: $0.text,
+                    startTime: $0.startTime,
+                    endTime: $0.endTime,
+                    audioSource: $0.audioSource,
+                    isFinal: $0.isFinal
+                )
+            }
         
         if finalSegments.isEmpty {
             let transcript = Transcript(
@@ -452,7 +480,7 @@ final class NewSessionViewModel {
         capturedAppName: String?,
         appProcessID: pid_t?,
         title: String?
-    ) async throws {
+    ) async throws -> UUID {
         try await recordingService.startRecording(
             in: workspace,
             micDeviceID: micDeviceID,
@@ -462,7 +490,7 @@ final class NewSessionViewModel {
         )
     }
 
-    private func startLiveTranscriptionPipeline() {
+    private func startLiveTranscriptionPipeline(context: ModelContext) {
         // Pipeline: buffers -> processor
         Task {
             for await (samples, source, sampleRate) in await recordingService.liveAudioStream() {
@@ -475,9 +503,56 @@ final class NewSessionViewModel {
             for await segment in await liveTranscriptionService.transcriptStream {
                 await MainActor.run {
                     updateLiveSegments(with: segment)
+                    persistLiveTranscriptSegment(segment, context: context)
                 }
             }
         }
+    }
+
+    private func persistLiveTranscriptSegment(_ segment: TranscriptSegment, context: ModelContext) {
+        guard segment.isFinal, let sessionID = activeRecordingSessionID else {
+            return
+        }
+
+        let descriptor = FetchDescriptor<RecordingSession>()
+        guard let sessions = try? context.fetch(descriptor),
+              let session = sessions.first(where: { $0.id == sessionID }),
+              session.status == .recording
+        else {
+            return
+        }
+
+        if session.transcriptSegments.contains(where: { $0.id == segment.id }) {
+            return
+        }
+
+        let persistedSegment = RecordingTranscriptSegment(segment: segment, session: session)
+        context.insert(persistedSegment)
+        try? context.save()
+        appendSegmentToTranscriptMarkdown(persistedSegment, for: session)
+    }
+
+    private func backfillPersistedSegments(
+        _ segments: [TranscriptSegment],
+        to session: RecordingSession,
+        context: ModelContext
+    ) {
+        let existingIDs = Set(session.transcriptSegments.map(\.id))
+        let missingSegments = segments.filter { $0.isFinal && !existingIDs.contains($0.id) }
+
+        for segment in missingSegments {
+            let persistedSegment = RecordingTranscriptSegment(
+                segment: segment,
+                createdAt: Date(),
+                session: session
+            )
+            context.insert(persistedSegment)
+            appendSegmentToTranscriptMarkdown(persistedSegment, for: session)
+        }
+    }
+
+    private func appendSegmentToTranscriptMarkdown(_ segment: RecordingTranscriptSegment, for session: RecordingSession) {
+        appendTranscriptSegmentToMarkdown(segment, for: session, fileManager: fileManager)
     }
 
     private func updateLiveSegments(with segment: TranscriptSegment) {

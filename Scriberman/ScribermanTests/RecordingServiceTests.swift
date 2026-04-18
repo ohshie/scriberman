@@ -13,51 +13,52 @@ final class RecordingServiceTests {
 
     @Test
 
-    func testStartRecordingUsesTmpFolderMicPath() {
+    func testSessionRecordingFileURLsUseNamedFolderAndNotTmp() {
         let workspace = makeWorkspace()
-        let urls = RecordingService.recordingFileURLs(in: workspace)
+        let createdAt = Date(timeIntervalSince1970: 1_743_171_000) // 2025-03-28 14:30 UTC
+        let identifier = "12345678-a3"
+        let urls = RecordingService.recordingFileURLs(
+            in: workspace,
+            createdAt: createdAt,
+            recordingIdentifier: identifier
+        )
+        let folderName = RecordingService.folderName(createdAt: createdAt, recordingIdentifier: identifier)
 
-        #expect(urls.mic.path.hasSuffix("/recordings/tmp/mic.wav"))
-        #expect(urls.app.path.hasSuffix("/recordings/tmp/app.wav"))
+        #expect(urls.mic.path.hasSuffix("/recordings/\(folderName)/mic.wav"))
+        #expect(urls.app.path.hasSuffix("/recordings/\(folderName)/app.wav"))
+        #expect(!urls.mic.path.contains("/recordings/tmp/"))
+        #expect(!urls.app.path.contains("/recordings/tmp/"))
     }
 
     @Test
 
-    func testStopRecordingPromotesTmpFolderToNamedFolderPattern() throws {
+    func testRecordingFolderURLUsesExistingNamedPattern() throws {
         let workspace = makeWorkspace()
         defer { removeWorkspace(at: workspace.rootURL) }
 
-        try FileManager.default.createDirectory(at: workspace.tmpRecordingURL, withIntermediateDirectories: true)
-        let tmpMicURL = workspace.tmpRecordingURL.appendingPathComponent("mic.wav")
-        _ = FileManager.default.createFile(atPath: tmpMicURL.path, contents: Data("mic".utf8))
-
         let createdAt = Date(timeIntervalSince1970: 1_743_171_000) // 2025-03-28 14:30 UTC
-        let result = try RecordingService.promoteTmpRecordingFolder(
+        let folderURL = RecordingService.recordingFolderURL(
             in: workspace,
             createdAt: createdAt,
             recordingIdentifier: "12345678-a3"
         )
+        try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
 
-        let folderName = result.mic.deletingLastPathComponent().lastPathComponent
+        let folderName = folderURL.lastPathComponent
         let expectedPattern = #"^Recording [A-Z][a-z]{2} \d{2} at \d{2}-\d{2} [A-Za-z0-9]{2}$"#
 
-        #expect(!(FileManager.default.fileExists(atPath: workspace.tmpRecordingURL.path)))
-        #expect(FileManager.default.fileExists(atPath: result.mic.path))
+        #expect(FileManager.default.fileExists(atPath: folderURL.path))
         #expect(folderName.range(of: expectedPattern, options: .regularExpression) != nil)
     }
 
     @Test
 
-    func testStopRecordingMicPathUsesNamedFolderNotTmp() throws {
+    func testSessionRecordingFolderPathUsesNamedFolderNotTmp() throws {
         let workspace = makeWorkspace()
         defer { removeWorkspace(at: workspace.rootURL) }
 
-        try FileManager.default.createDirectory(at: workspace.tmpRecordingURL, withIntermediateDirectories: true)
-        let tmpMicURL = workspace.tmpRecordingURL.appendingPathComponent("mic.wav")
-        _ = FileManager.default.createFile(atPath: tmpMicURL.path, contents: Data("mic".utf8))
-
         let createdAt = Date(timeIntervalSince1970: 1_743_171_000)
-        let result = try RecordingService.promoteTmpRecordingFolder(
+        let result = RecordingService.recordingFileURLs(
             in: workspace,
             createdAt: createdAt,
             recordingIdentifier: "abcdef12"
@@ -74,14 +75,8 @@ final class RecordingServiceTests {
         let workspace = makeWorkspace()
         defer { removeWorkspace(at: workspace.rootURL) }
 
-        try FileManager.default.createDirectory(at: workspace.tmpRecordingURL, withIntermediateDirectories: true)
-        let tmpMicURL = workspace.tmpRecordingURL.appendingPathComponent("mic.wav")
-        _ = FileManager.default.createFile(atPath: tmpMicURL.path, contents: Data("mic".utf8))
-        let tmpAppURL = workspace.tmpRecordingURL.appendingPathComponent("app.wav")
-        _ = FileManager.default.createFile(atPath: tmpAppURL.path, contents: Data("app".utf8))
-
         let createdAt = Date(timeIntervalSince1970: 1_743_171_000)
-        let result = try RecordingService.promoteTmpRecordingFolder(
+        let result = RecordingService.recordingFileURLs(
             in: workspace,
             createdAt: createdAt,
             recordingIdentifier: "11111111-a3"
@@ -89,14 +84,14 @@ final class RecordingServiceTests {
         let folderName = RecordingService.folderName(createdAt: createdAt, recordingIdentifier: "11111111-a3")
 
         #expect(result.mic.path == workspace.recordingsURL.appendingPathComponent("\(folderName)/mic.wav").path)
-        #expect(result.app?.path == workspace.recordingsURL.appendingPathComponent("\(folderName)/app.wav").path)
+        #expect(result.app.path == workspace.recordingsURL.appendingPathComponent("\(folderName)/app.wav").path)
     }
 
     @Test
 
     func testMixdownFailureLeavesSessionMixdownURLNilAndStatusUnchanged() async throws {
         let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let workspaceService = MockWorkspaceService()
@@ -146,7 +141,7 @@ final class RecordingServiceTests {
 
     func testStopRecordingWhenNotRecordingReturnsNil() async throws {
         let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let appAudioSettings = await MainActor.run { AppAudioSettings() }
@@ -164,7 +159,7 @@ final class RecordingServiceTests {
 
     func testCaptureHostTimesKeepsFirstObservedValues() async throws {
         let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let appAudioSettings = await MainActor.run { AppAudioSettings() }
@@ -191,7 +186,7 @@ final class RecordingServiceTests {
         defer { removeWorkspace(at: workspace.rootURL) }
 
         let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let workspaceService = MockWorkspaceService()
@@ -205,16 +200,37 @@ final class RecordingServiceTests {
         )
 
         let customTitle = "My Custom Title"
-        try FileManager.default.createDirectory(at: workspace.tmpRecordingURL, withIntermediateDirectories: true)
-        let tmpMicURL = workspace.tmpRecordingURL.appendingPathComponent("mic.wav")
-        _ = FileManager.default.createFile(atPath: tmpMicURL.path, contents: Data("mic".utf8))
+        let recordingCreatedAt = Date(timeIntervalSince1970: 1_743_171_000)
+        let recordingIdentifier = "test-id"
+        let sessionURLs = RecordingService.recordingFileURLs(
+            in: workspace,
+            createdAt: recordingCreatedAt,
+            recordingIdentifier: recordingIdentifier
+        )
+        try FileManager.default.createDirectory(
+            at: sessionURLs.mic.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        _ = FileManager.default.createFile(atPath: sessionURLs.mic.path, contents: Data("mic".utf8))
+        let seededSession = RecordingSession(
+            createdAt: recordingCreatedAt,
+            duration: 0,
+            micAudioURL: sessionURLs.mic.path,
+            title: customTitle,
+            status: .recording
+        )
+        let seedContext = ModelContext(container)
+        seedContext.insert(seededSession)
+        try seedContext.save()
 
         // Fake the recording state
         await service.setRecordingStateForTesting(
             isRecording: true,
-            recordingIdentifier: "test-id",
+            recordingIdentifier: recordingIdentifier,
             recordingWorkspaceRootURL: workspace.rootURL,
-            pendingTitle: customTitle
+            recordingCreatedAt: recordingCreatedAt,
+            pendingTitle: customTitle,
+            currentSessionID: seededSession.id
         )
 
         let sessionID = await service.stopRecording()
@@ -231,7 +247,7 @@ final class RecordingServiceTests {
         defer { removeWorkspace(at: workspace.rootURL) }
 
         let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let appAudioSettings = await MainActor.run { AppAudioSettings() }
@@ -241,15 +257,36 @@ final class RecordingServiceTests {
             appAudioSettings: appAudioSettings
         )
 
-        try FileManager.default.createDirectory(at: workspace.tmpRecordingURL, withIntermediateDirectories: true)
-        let tmpMicURL = workspace.tmpRecordingURL.appendingPathComponent("mic.wav")
-        _ = FileManager.default.createFile(atPath: tmpMicURL.path, contents: Data("mic".utf8))
+        let recordingCreatedAt = Date(timeIntervalSince1970: 1_743_171_000)
+        let recordingIdentifier = "test-id-default"
+        let sessionURLs = RecordingService.recordingFileURLs(
+            in: workspace,
+            createdAt: recordingCreatedAt,
+            recordingIdentifier: recordingIdentifier
+        )
+        try FileManager.default.createDirectory(
+            at: sessionURLs.mic.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        _ = FileManager.default.createFile(atPath: sessionURLs.mic.path, contents: Data("mic".utf8))
+        let seededSession = RecordingSession(
+            createdAt: recordingCreatedAt,
+            duration: 0,
+            micAudioURL: sessionURLs.mic.path,
+            title: "Recording Seed",
+            status: .recording
+        )
+        let seedContext = ModelContext(container)
+        seedContext.insert(seededSession)
+        try seedContext.save()
 
         await service.setRecordingStateForTesting(
             isRecording: true,
-            recordingIdentifier: "test-id-default",
+            recordingIdentifier: recordingIdentifier,
             recordingWorkspaceRootURL: workspace.rootURL,
-            pendingTitle: nil
+            recordingCreatedAt: recordingCreatedAt,
+            pendingTitle: nil,
+            currentSessionID: seededSession.id
         )
 
         let sessionID = await service.stopRecording()
@@ -262,7 +299,7 @@ final class RecordingServiceTests {
     @Test @MainActor
     func testVoiceProcessingSetterCalledWhenEnabled() async throws {
         let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let suiteName = "RecordingServiceTests.vp.\(UUID().uuidString)"
@@ -281,18 +318,18 @@ final class RecordingServiceTests {
             voiceProcessingPropertySetter: { @Sendable [counter] _ in counter.increment() }
         )
 
-        let engine = AVAudioEngine()
-        service.applyVoiceProcessingIfNeeded(to: engine.inputNode, enabled: true)
+        let inputNode = unsafeBitCast(NSObject(), to: AVAudioInputNode.self)
+        service.applyVoiceProcessingIfNeeded(to: inputNode, enabled: true)
         #expect(counter.callCount == 1)
 
-        service.applyVoiceProcessingIfNeeded(to: engine.inputNode, enabled: false)
+        service.applyVoiceProcessingIfNeeded(to: inputNode, enabled: false)
         #expect(counter.callCount == 1) // not called again when disabled
     }
 
     @Test @MainActor
     func testVoiceProcessingSetterNotCalledWhenDisabled() async throws {
         let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let appAudioSettings = AppAudioSettings()
@@ -306,15 +343,15 @@ final class RecordingServiceTests {
             voiceProcessingPropertySetter: { @Sendable [counter] _ in counter.increment() }
         )
 
-        let engine = AVAudioEngine()
-        service.applyVoiceProcessingIfNeeded(to: engine.inputNode, enabled: false)
+        let inputNode = unsafeBitCast(NSObject(), to: AVAudioInputNode.self)
+        service.applyVoiceProcessingIfNeeded(to: inputNode, enabled: false)
         #expect(counter.callCount == 0)
     }
 
     @Test @MainActor
     func testVoiceProcessingSetterErrorDoesNotInterruptFlow() async throws {
         let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self,
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let appAudioSettings = AppAudioSettings()
@@ -327,9 +364,9 @@ final class RecordingServiceTests {
             }
         )
 
-        let engine = AVAudioEngine()
+        let inputNode = unsafeBitCast(NSObject(), to: AVAudioInputNode.self)
         // Should not throw or crash; failure is logged and recording continues
-        service.applyVoiceProcessingIfNeeded(to: engine.inputNode, enabled: true)
+        service.applyVoiceProcessingIfNeeded(to: inputNode, enabled: true)
         // Reaching here means no crash/throw
     }
 

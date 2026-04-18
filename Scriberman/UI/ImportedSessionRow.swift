@@ -54,7 +54,7 @@ struct ImportedSessionRow: View {
     @ViewBuilder
     private var accessory: some View {
         switch session.status {
-        case .recorded:
+        case .recorded, .recording:
             Button("Retry", action: onRetry)
                 .buttonStyle(.bordered)
                 .controlSize(.small)

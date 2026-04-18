@@ -147,6 +147,11 @@ final class AppState {
         _ = await permissionService.verifyScreenRecording()
 
         await settingsViewModel.refresh()
+
+        if workspace != nil {
+            let recovery = backgroundServices.recoveryService
+            Task { await recovery.sweepIncompleteSessions() }
+        }
     }
 
     func selectWorkspace(url: URL) async {
