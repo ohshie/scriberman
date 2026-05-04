@@ -387,7 +387,7 @@ final class RecordingServiceTests {
     }
 
     @Test
-    func testConfigChangeWhileRecordingRecoveryFailureStopsRecordingAndSetsPendingError() async throws {
+    func testConfigChangeWhileRecordingRecoveryFailureKeepsRecordingAndSchedulesRetry() async throws {
         let fixture = try await makeRecoveryFixture()
         fixture.micController.startCaptureError = RecordingError.failedToStart("forced")
         let micURL = fixture.workspace.rootURL.appendingPathComponent("mic.wav")
@@ -399,12 +399,10 @@ final class RecordingServiceTests {
         )
         await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
 
-        #expect(!(await fixture.service.isRecording()))
-        if case .captureInterrupted = await fixture.service.consumePendingError() {
-            // expected
-        } else {
-            Issue.record("Expected .captureInterrupted pending error")
-        }
+        #expect(await fixture.service.isRecording())
+        #expect(await fixture.service.consumePendingError() == nil)
+        let debugState = await fixture.service.recoveryDebugStateForTesting()
+        #expect(debugState.hasRecoveryRetryTask)
     }
 
     @Test
@@ -529,6 +527,33 @@ final class RecordingServiceTests {
         #expect(debugState.desiredMicDeviceUID == "uid-b")
     }
 
+    @Test
+    func testRetargetMicRecoveryFailureSchedulesRetryThatCanRecoverLater() async throws {
+        let fixture = try await makeRecoveryFixture()
+        let micURL = fixture.workspace.rootURL.appendingPathComponent("mic.wav")
+        fixture.hardware.devices = [
+            (id: 11, uid: "uid-a"),
+            (id: 22, uid: "uid-b")
+        ]
+        fixture.micController.startCaptureErrors = [RecordingError.failedToStart("forced once")]
+
+        await fixture.service.setRecordingStateForTesting(isRecording: true)
+        await fixture.service.setMicRecoveryStateForTesting(
+            desiredMicDeviceUID: "uid-a",
+            micFileURL: micURL
+        )
+
+        await fixture.service.retargetMic(desiredDeviceUID: "uid-b")
+        var debugState = await fixture.service.recoveryDebugStateForTesting()
+        #expect(debugState.hasRecoveryRetryTask)
+
+        await fixture.service.performMicRecoveryRetryAttemptForTesting()
+
+        debugState = await fixture.service.recoveryDebugStateForTesting()
+        #expect(!debugState.hasRecoveryRetryTask)
+        #expect(fixture.micController.startCaptureCalls.last?.deviceID == 22)
+    }
+
     private func makeWorkspace() -> Workspace {
         let rootURL = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -578,8 +603,10 @@ private final class MockMicCaptureController: MicCaptureControlling, @unchecked 
     }
 
     var startCaptureError: Error?
+    var startCaptureErrors: [Error] = []
     private(set) var startCaptureCalls: [StartCall] = []
     private(set) var stopCaptureCallCount = 0
+    var isRunning = false
 
     func startCapture(
         deviceID: AudioDeviceID?,
@@ -591,17 +618,26 @@ private final class MockMicCaptureController: MicCaptureControlling, @unchecked 
         onFirstHostTime _: @escaping @Sendable (UInt64) -> Void,
         onBuffer _: @escaping @Sendable ([Float], Double) -> Void
     ) throws {
+        if !startCaptureErrors.isEmpty {
+            throw startCaptureErrors.removeFirst()
+        }
         if let startCaptureError {
             throw startCaptureError
         }
         startCaptureCalls.append(.init(deviceID: deviceID, targetSampleRate: targetFormat.sampleRate))
+        isRunning = true
     }
 
     func stopCapture() {
         stopCaptureCallCount += 1
+        isRunning = false
     }
 
     func retargetDevice(_: AudioDeviceID?) throws {}
+
+    func isCaptureRunning() -> Bool {
+        isRunning
+    }
 }
 
 private final class MockRecoveryAudioDeviceHardware: AudioDeviceHardwareProviding, @unchecked Sendable {

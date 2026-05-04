@@ -47,6 +47,7 @@ protocol MicCaptureControlling: AnyObject {
     ) throws
     func stopCapture()
     func retargetDevice(_ deviceID: AudioDeviceID?) throws
+    func isCaptureRunning() -> Bool
 }
 
 final class AVAudioEngineMicCaptureController: MicCaptureControlling {
@@ -56,7 +57,7 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
     func startCapture(
         deviceID: AudioDeviceID?,
         targetFormat: AVAudioFormat,
-        micFileURL: URL,
+        micFileURL _: URL,
         micStreamer: AudioFileStreamer,
         voiceProcessingEnabled: Bool,
         applyVoiceProcessing: @Sendable (AVAudioInputNode, Bool) -> Void,
@@ -90,8 +91,6 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
             }
             self.converter = converter
         }
-
-        try micStreamer.prepare(url: micFileURL, format: targetFormat)
 
         inputNode.removeTap(onBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, audioTime in
@@ -135,6 +134,10 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
             return
         }
         try setInputDevice(deviceID, on: audioEngine.inputNode)
+    }
+
+    func isCaptureRunning() -> Bool {
+        audioEngine?.isRunning ?? false
     }
 
     private func setInputDevice(_ deviceID: AudioDeviceID?, on inputNode: AVAudioInputNode) throws {
@@ -227,6 +230,7 @@ actor RecordingService: RecordingServiceProtocol {
     private var pendingTitle: String?
     private var appAudioCaptureSession: AppAudioCaptureSession?
     private var pendingError: RecordingError?
+    private var micRecoveryRetryTask: Task<Void, Never>?
     private let liveAudioStreamTuple: (stream: AsyncStream<([Float], AudioSource, Double)>, continuation: AsyncStream<([Float], AudioSource, Double)>.Continuation)
     // nonisolated(unsafe): written once in init on the actor; read only in deinit; lifetime matches the actor
     nonisolated(unsafe) private var engineConfigurationObserver: NSObjectProtocol?
@@ -345,13 +349,20 @@ actor RecordingService: RecordingServiceProtocol {
         micFileURL: URL?,
         isRecoveringMicCapture: Bool = false,
         recorderFallbackActive: Bool = false,
-        currentCaptureDeviceID: AudioDeviceID? = nil
+        currentCaptureDeviceID: AudioDeviceID? = nil,
+        hasRecoveryRetryTask: Bool = false
     ) {
         self.desiredMicDeviceUID = desiredMicDeviceUID
         self.micFileURL = micFileURL
         self.isRecoveringMicCapture = isRecoveringMicCapture
         self.recorderFallbackActiveForTesting = recorderFallbackActive
         self.currentCaptureDeviceID = currentCaptureDeviceID
+        if hasRecoveryRetryTask {
+            self.micRecoveryRetryTask = Task {}
+        } else {
+            self.micRecoveryRetryTask?.cancel()
+            self.micRecoveryRetryTask = nil
+        }
     }
 
     func simulateAudioEngineConfigurationChangeForTesting() async {
@@ -361,9 +372,19 @@ actor RecordingService: RecordingServiceProtocol {
     func recoveryDebugStateForTesting() -> (
         desiredMicDeviceUID: String?,
         currentCaptureDeviceID: AudioDeviceID?,
-        isRecoveringMicCapture: Bool
+        isRecoveringMicCapture: Bool,
+        hasRecoveryRetryTask: Bool
     ) {
-        (desiredMicDeviceUID, currentCaptureDeviceID, isRecoveringMicCapture)
+        (
+            desiredMicDeviceUID,
+            currentCaptureDeviceID,
+            isRecoveringMicCapture,
+            micRecoveryRetryTask != nil
+        )
+    }
+
+    func performMicRecoveryRetryAttemptForTesting() async {
+        _ = await retryMicCaptureFromRetryLoop()
     }
     #endif
 
@@ -435,11 +456,14 @@ actor RecordingService: RecordingServiceProtocol {
             self.micStartHostTime = nil
             self.appStartHostTime = nil
             self.micFileURL = micFileURL
+            micRecoveryRetryTask?.cancel()
+            micRecoveryRetryTask = nil
             if let micDeviceID, micDeviceID != 0 {
                 desiredMicDeviceUID = hardware.deviceUID(deviceID: micDeviceID)
             } else {
                 desiredMicDeviceUID = nil
             }
+            try micStreamer.prepare(url: micFileURL, format: micTargetFormat)
 
             do {
                 try await startMicCapture(
@@ -448,7 +472,28 @@ actor RecordingService: RecordingServiceProtocol {
                     liveContinuation: liveAudioStreamTuple.continuation
                 )
             } catch {
-                try startRecorderFallback(to: micFileURL)
+                // Bluetooth/external devices can fail explicit routing on some setups.
+                // Retry with the default input device so the live stream path stays active.
+                if desiredMicDeviceUID != nil {
+                    logger.warning(
+                        "Mic capture failed for selected device; retrying on default input. error=\(error.localizedDescription, privacy: .public)"
+                    )
+                    desiredMicDeviceUID = nil
+                    do {
+                        try await startMicCapture(
+                            deviceUID: nil,
+                            micFileURL: micFileURL,
+                            liveContinuation: liveAudioStreamTuple.continuation
+                        )
+                    } catch {
+                        logger.warning(
+                            "Default-device mic capture retry failed; falling back to recorder. error=\(error.localizedDescription, privacy: .public)"
+                        )
+                        try startRecorderFallback(to: micFileURL)
+                    }
+                } else {
+                    try startRecorderFallback(to: micFileURL)
+                }
             }
             self.recordingStartedAt = Date()
             self.recordingCreatedAt = recordingCreatedAt
@@ -613,8 +658,14 @@ actor RecordingService: RecordingServiceProtocol {
             return
         }
         isRecoveringMicCapture = true
-        _ = await recoverMicCapture()
+        let didRecover = await recoverMicCapture()
         isRecoveringMicCapture = false
+        if didRecover {
+            micRecoveryRetryTask?.cancel()
+            micRecoveryRetryTask = nil
+            return
+        }
+        scheduleMicRecoveryRetry()
     }
 
     private func ensureMicrophonePermission() async throws(RecordingError) {
@@ -628,6 +679,8 @@ actor RecordingService: RecordingServiceProtocol {
     }
 
     private func cleanupRecordingState() {
+        micRecoveryRetryTask?.cancel()
+        micRecoveryRetryTask = nil
         deregisterMicHardwareListeners()
         stopMicCapture()
         micStreamer.close()
@@ -665,6 +718,10 @@ actor RecordingService: RecordingServiceProtocol {
         guard isRecordingValue else {
             return
         }
+        // Match prior behavior: only react when engine-path capture is interrupted/stopped.
+        guard !micCaptureController.isCaptureRunning() else {
+            return
+        }
         guard !isRecoveringMicCapture else {
             return
         }
@@ -683,18 +740,13 @@ actor RecordingService: RecordingServiceProtocol {
         isRecoveringMicCapture = false
 
         guard !didRecover else {
+            micRecoveryRetryTask?.cancel()
+            micRecoveryRetryTask = nil
             return
         }
-
-        micStreamer.close()
-        audioRecorder?.stop()
-        await appAudioCaptureSession?.stop()
-        appAudioCaptureSession = nil
-        cleanupRecordingState()
-        audioLevelValue = 0
-        isRecordingValue = false
-        pendingError = .captureInterrupted
-        releaseRecordingScopeIfNeeded()
+        // Transient device-route/config transitions can fail an immediate restart.
+        // Keep the session alive and continue retrying in the background.
+        scheduleMicRecoveryRetry()
     }
 
     private func handleHardwareChange() async {
@@ -715,8 +767,14 @@ actor RecordingService: RecordingServiceProtocol {
         }
 
         isRecoveringMicCapture = true
-        _ = await recoverMicCapture()
+        let didRecover = await recoverMicCapture()
         isRecoveringMicCapture = false
+        if didRecover {
+            micRecoveryRetryTask?.cancel()
+            micRecoveryRetryTask = nil
+            return
+        }
+        scheduleMicRecoveryRetry()
     }
 
     private func startRecorderFallback(to fileURL: URL) throws {
@@ -796,6 +854,47 @@ actor RecordingService: RecordingServiceProtocol {
         } catch {
             return false
         }
+    }
+
+    private func scheduleMicRecoveryRetry() {
+        guard isRecordingValue else {
+            return
+        }
+        guard micRecoveryRetryTask == nil else {
+            return
+        }
+        micRecoveryRetryTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(350))
+                guard let self else {
+                    return
+                }
+                let shouldContinue = await self.retryMicCaptureFromRetryLoop()
+                if !shouldContinue {
+                    return
+                }
+            }
+        }
+    }
+
+    private func retryMicCaptureFromRetryLoop() async -> Bool {
+        guard isRecordingValue else {
+            micRecoveryRetryTask?.cancel()
+            micRecoveryRetryTask = nil
+            return false
+        }
+        guard !isRecoveringMicCapture else {
+            return true
+        }
+        isRecoveringMicCapture = true
+        let didRecover = await recoverMicCapture()
+        isRecoveringMicCapture = false
+        if didRecover {
+            micRecoveryRetryTask?.cancel()
+            micRecoveryRetryTask = nil
+            return false
+        }
+        return true
     }
 
     private func resolveDeviceID(for deviceUID: String?) -> AudioDeviceID? {
