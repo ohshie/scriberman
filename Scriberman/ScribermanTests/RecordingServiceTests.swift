@@ -365,6 +365,66 @@ final class RecordingServiceTests {
     }
 
     @Test
+    func testConcurrentScreenCaptureErrorAndStopOnlyStopScreenSessionOnce() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        let micController = MockMicCaptureController()
+        let mixdownCoordinator = MockRecordingMixdownCoordinator()
+        let screenVideoMuxer = MockScreenVideoMuxer()
+        let screenSession = MockScreenCaptureSession()
+        screenSession.videoStartHostTime = 5_000
+        let stopBlocker = MockScreenCaptureStopBlocker()
+        screenSession.blockNextStop(using: stopBlocker)
+        let factoryProbe = ScreenCaptureSessionFactoryProbe(session: screenSession)
+
+        let service = RecordingService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            micCaptureController: micController,
+            mixdownCoordinator: mixdownCoordinator,
+            screenVideoMuxer: screenVideoMuxer,
+            permissionChecker: {},
+            scopedAccessStarter: { _ in true },
+            scopedAccessStopper: { _ in },
+            screenCaptureSessionFactory: { factoryProbe.makeSession() }
+        )
+
+        _ = try await service.startRecording(
+            in: workspace,
+            micDeviceID: nil,
+            captureDisplayID: 42,
+            capturedAppName: nil,
+            appProcessID: nil,
+            title: "Session"
+        )
+
+        let stopTask = Task { await service.stopRecording() }
+        await stopBlocker.waitUntilStopStarts()
+
+        screenSession.emitError(NSError(domain: "RecordingServiceTests", code: 8))
+        await Task.yield()
+        await Task.yield()
+
+        await stopBlocker.release()
+
+        let stoppedID = await stopTask.value
+        #expect(stoppedID != nil)
+        await mixdownCoordinator.waitForCall()
+        #expect(screenSession.stopCallCount == 1)
+        #expect(await screenVideoMuxer.callCount() == 0)
+    }
+
+    @Test
     func testStopRecordingWithDisplayIDButNoVideoFramesSetsScreenCaptureWarning() async throws {
         let workspace = makeWorkspace()
         defer { removeWorkspace(at: workspace.rootURL) }
@@ -902,6 +962,7 @@ private final class MockScreenCaptureSession: ScreenCaptureSessionControlling, @
     var startError: Error?
     private(set) var startedVideoURL: URL?
     private(set) var stopCallCount = 0
+    private var stopBlocker: MockScreenCaptureStopBlocker?
 
     func start(displayID _: CGDirectDisplayID, videoURL: URL) async throws {
         if let startError {
@@ -917,10 +978,64 @@ private final class MockScreenCaptureSession: ScreenCaptureSessionControlling, @
 
     func stop() async {
         stopCallCount += 1
+        if let stopBlocker {
+            self.stopBlocker = nil
+            await stopBlocker.markStopStarted()
+            await stopBlocker.waitUntilReleased()
+        }
     }
 
     func emitError(_ error: Error) {
         onError?(error)
+    }
+
+    func blockNextStop(using blocker: MockScreenCaptureStopBlocker) {
+        stopBlocker = blocker
+    }
+}
+
+private actor MockScreenCaptureStopBlocker {
+    private var didStartStop = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+    private var isReleased = false
+
+    func markStopStarted() {
+        didStartStop = true
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    func waitUntilStopStarts() async {
+        if didStartStop {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
+    }
+
+    func waitUntilReleased() async {
+        if isReleased {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            releaseWaiters.append(continuation)
+        }
+    }
+
+    func release() {
+        isReleased = true
+        let waiters = releaseWaiters
+        releaseWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
     }
 }
 
