@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreGraphics
 import Foundation
 import SwiftData
 import Testing
@@ -15,6 +16,7 @@ final class RecordingServiceTests {
 
     func testSessionRecordingFileURLsUseNamedFolderAndNotTmp() {
         let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
         let createdAt = Date(timeIntervalSince1970: 1_743_171_000) // 2025-03-28 14:30 UTC
         let identifier = "12345678-a3"
         let urls = RecordingService.recordingFileURLs(
@@ -28,6 +30,33 @@ final class RecordingServiceTests {
         #expect(urls.app.path.hasSuffix("/recordings/\(folderName)/app.wav"))
         #expect(!urls.mic.path.contains("/recordings/tmp/"))
         #expect(!urls.app.path.contains("/recordings/tmp/"))
+    }
+
+    @Test
+
+    func testScreenVideoURLsUseNamedFolderAndStableFilenames() {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+
+        let createdAt = Date(timeIntervalSince1970: 1_743_171_000)
+        let identifier = "12345678-a3"
+        let folderName = RecordingService.folderName(createdAt: createdAt, recordingIdentifier: identifier)
+
+        let tmpURL = RecordingFileLayout.screenTmpVideoURL(
+            in: workspace,
+            createdAt: createdAt,
+            recordingIdentifier: identifier
+        )
+        let finalURL = RecordingFileLayout.screenVideoURL(
+            in: workspace,
+            createdAt: createdAt,
+            recordingIdentifier: identifier
+        )
+
+        #expect(tmpURL.path == workspace.recordingsURL.appendingPathComponent("\(folderName)/screen-tmp.mov").path)
+        #expect(finalURL.path == workspace.recordingsURL.appendingPathComponent("\(folderName)/screen.mov").path)
+        #expect(!tmpURL.lastPathComponent.contains(identifier))
+        #expect(!finalURL.lastPathComponent.contains(identifier))
     }
 
     @Test
@@ -177,6 +206,263 @@ final class RecordingServiceTests {
         let hostTimes = await service.capturedHostTimes()
         #expect(hostTimes.mic == 1_000)
         #expect(hostTimes.app == 3_000)
+    }
+
+    @Test
+    func testStartRecordingWithNilDisplayDoesNotCreateScreenSession() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        let micController = MockMicCaptureController()
+        let mixdownCoordinator = MockRecordingMixdownCoordinator()
+        let screenVideoMuxer = MockScreenVideoMuxer()
+        let screenSession = MockScreenCaptureSession()
+        let factoryProbe = ScreenCaptureSessionFactoryProbe(session: screenSession)
+
+        let service = RecordingService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            micCaptureController: micController,
+            mixdownCoordinator: mixdownCoordinator,
+            screenVideoMuxer: screenVideoMuxer,
+            permissionChecker: {},
+            scopedAccessStarter: { _ in true },
+            scopedAccessStopper: { _ in },
+            screenCaptureSessionFactory: { factoryProbe.makeSession() }
+        )
+
+        _ = try await service.startRecording(
+            in: workspace,
+            micDeviceID: nil,
+            captureDisplayID: nil,
+            capturedAppName: nil,
+            appProcessID: nil,
+            title: "Session"
+        )
+
+        #expect(factoryProbe.callCount == 0)
+        _ = await service.stopRecording()
+    }
+
+    @Test
+    func testStopRecordingWithVideoLaunchesMixdownAndMuxTasks() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        let micController = MockMicCaptureController()
+        let mixdownCoordinator = MockRecordingMixdownCoordinator()
+        let screenVideoMuxer = MockScreenVideoMuxer()
+        let screenSession = MockScreenCaptureSession()
+        screenSession.videoStartHostTime = 9_000
+        let factoryProbe = ScreenCaptureSessionFactoryProbe(session: screenSession)
+
+        let service = RecordingService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            micCaptureController: micController,
+            mixdownCoordinator: mixdownCoordinator,
+            screenVideoMuxer: screenVideoMuxer,
+            permissionChecker: {},
+            scopedAccessStarter: { _ in true },
+            scopedAccessStopper: { _ in },
+            screenCaptureSessionFactory: { factoryProbe.makeSession() }
+        )
+
+        _ = try await service.startRecording(
+            in: workspace,
+            micDeviceID: nil,
+            captureDisplayID: 42,
+            capturedAppName: nil,
+            appProcessID: nil,
+            title: "Session"
+        )
+
+        let sessionID = await service.stopRecording()
+        #expect(sessionID != nil)
+
+        await mixdownCoordinator.waitForCall()
+        await screenVideoMuxer.waitForCall()
+
+        #expect(await mixdownCoordinator.callCount() == 1)
+        #expect(await screenVideoMuxer.callCount() == 1)
+
+        let mixdownStart = try #require(await mixdownCoordinator.firstCallStartedAt())
+        let muxStart = try #require(await screenVideoMuxer.firstCallStartedAt())
+        #expect(abs(mixdownStart.timeIntervalSince(muxStart)) < 0.25)
+    }
+
+    @Test
+    func testScreenCaptureErrorKeepsAudioRecordingAndSkipsMux() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        let micController = MockMicCaptureController()
+        let mixdownCoordinator = MockRecordingMixdownCoordinator()
+        let screenVideoMuxer = MockScreenVideoMuxer()
+        let screenSession = MockScreenCaptureSession()
+        screenSession.videoStartHostTime = 5_000
+        let factoryProbe = ScreenCaptureSessionFactoryProbe(session: screenSession)
+
+        let service = RecordingService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            micCaptureController: micController,
+            mixdownCoordinator: mixdownCoordinator,
+            screenVideoMuxer: screenVideoMuxer,
+            permissionChecker: {},
+            scopedAccessStarter: { _ in true },
+            scopedAccessStopper: { _ in },
+            screenCaptureSessionFactory: { factoryProbe.makeSession() }
+        )
+
+        _ = try await service.startRecording(
+            in: workspace,
+            micDeviceID: nil,
+            captureDisplayID: 42,
+            capturedAppName: nil,
+            appProcessID: nil,
+            title: "Session"
+        )
+
+        let tmpURL = try #require(screenSession.startedVideoURL)
+        screenSession.emitError(NSError(domain: "RecordingServiceTests", code: 7))
+        await Task.yield()
+        await Task.yield()
+
+        #expect(await service.isRecording())
+
+        _ = await service.stopRecording()
+        await mixdownCoordinator.waitForCall()
+        #expect(await screenVideoMuxer.callCount() == 0)
+        #expect(!FileManager.default.fileExists(atPath: tmpURL.path))
+    }
+
+    @Test
+    func testStopRecordingWithDisplayIDButNoVideoFramesSetsScreenCaptureWarning() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        let micController = MockMicCaptureController()
+        let mixdownCoordinator = MockRecordingMixdownCoordinator()
+        let screenVideoMuxer = MockScreenVideoMuxer()
+        let screenSession = MockScreenCaptureSession()
+        // videoStartHostTime remains nil — simulates no frames delivered by the stream.
+        let factoryProbe = ScreenCaptureSessionFactoryProbe(session: screenSession)
+
+        let service = RecordingService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            micCaptureController: micController,
+            mixdownCoordinator: mixdownCoordinator,
+            screenVideoMuxer: screenVideoMuxer,
+            permissionChecker: {},
+            scopedAccessStarter: { _ in true },
+            scopedAccessStopper: { _ in },
+            screenCaptureSessionFactory: { factoryProbe.makeSession() }
+        )
+
+        let sessionID = try await service.startRecording(
+            in: workspace,
+            micDeviceID: nil,
+            captureDisplayID: 42,
+            capturedAppName: nil,
+            appProcessID: nil,
+            title: "Session"
+        )
+
+        let stoppedID = await service.stopRecording()
+        #expect(stoppedID != nil)
+        await mixdownCoordinator.waitForCall()
+        #expect(await screenVideoMuxer.callCount() == 0)
+
+        let context = ModelContext(container)
+        let session = try fetchRecordingSession(id: sessionID, from: context)
+        #expect(session.screenCaptureWarning != nil)
+    }
+
+    @Test
+    func testCleanupRecordingStateStopsScreenSession() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        let screenSession = MockScreenCaptureSession()
+        let service = RecordingService(
+            workspaceService: MockWorkspaceService(),
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            permissionChecker: {},
+            scopedAccessStarter: { _ in true },
+            scopedAccessStopper: { _ in }
+        )
+
+        let createdAt = Date(timeIntervalSince1970: 1_743_171_000)
+        let recordingIdentifier = "cleanup-video"
+        let screenTmpURL = RecordingFileLayout.screenTmpVideoURL(
+            in: workspace,
+            createdAt: createdAt,
+            recordingIdentifier: recordingIdentifier
+        )
+        try FileManager.default.createDirectory(
+            at: screenTmpURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        _ = FileManager.default.createFile(atPath: screenTmpURL.path, contents: Data("video".utf8))
+
+        await service.setRecordingStateForTesting(
+            isRecording: true,
+            recordingIdentifier: recordingIdentifier,
+            recordingWorkspaceRootURL: workspace.rootURL,
+            recordingCreatedAt: createdAt,
+            currentSessionID: UUID(),
+            screenCaptureSession: screenSession
+        )
+
+        await service.cleanupRecordingStateForTesting()
+
+        #expect(screenSession.stopCallCount == 1)
+        #expect(!FileManager.default.fileExists(atPath: screenTmpURL.path))
     }
 
     @Test
@@ -594,6 +880,125 @@ final class RecordingServiceTests {
 private final class VPCallCounter: @unchecked Sendable {
     private(set) var callCount = 0
     func increment() { callCount += 1 }
+}
+
+private final class ScreenCaptureSessionFactoryProbe: @unchecked Sendable {
+    private let session: MockScreenCaptureSession
+    private(set) var callCount = 0
+
+    init(session: MockScreenCaptureSession) {
+        self.session = session
+    }
+
+    func makeSession() -> MockScreenCaptureSession {
+        callCount += 1
+        return session
+    }
+}
+
+private final class MockScreenCaptureSession: ScreenCaptureSessionControlling, @unchecked Sendable {
+    var onError: (@Sendable (Error) -> Void)?
+    var videoStartHostTime: UInt64?
+    var startError: Error?
+    private(set) var startedVideoURL: URL?
+    private(set) var stopCallCount = 0
+
+    func start(displayID _: CGDirectDisplayID, videoURL: URL) async throws {
+        if let startError {
+            throw startError
+        }
+        startedVideoURL = videoURL
+        try FileManager.default.createDirectory(
+            at: videoURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        _ = FileManager.default.createFile(atPath: videoURL.path, contents: Data("screen".utf8))
+    }
+
+    func stop() async {
+        stopCallCount += 1
+    }
+
+    func emitError(_ error: Error) {
+        onError?(error)
+    }
+}
+
+private actor MockRecordingMixdownCoordinator: RecordingMixdownCoordinating {
+    private struct Call: Sendable {
+        let startedAt: Date
+    }
+
+    private var calls: [Call] = []
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func runMixdown(
+        sessionID _: UUID,
+        micURL _: URL,
+        appURL _: URL?,
+        mixdownURL _: URL,
+        micStartHostTime _: UInt64,
+        appStartHostTime _: UInt64?
+    ) async {
+        calls.append(Call(startedAt: Date()))
+        let continuations = waiters
+        waiters.removeAll()
+        for continuation in continuations {
+            continuation.resume()
+        }
+    }
+
+    func waitForCall() async {
+        if !calls.isEmpty {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func callCount() -> Int {
+        calls.count
+    }
+
+    func firstCallStartedAt() -> Date? {
+        calls.first?.startedAt
+    }
+}
+
+private actor MockScreenVideoMuxer: ScreenVideoMuxing {
+    private struct Call: Sendable {
+        let startedAt: Date
+    }
+
+    private var calls: [Call] = []
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func runMux(request _: ScreenVideoMuxRequest) async {
+        calls.append(Call(startedAt: Date()))
+        let continuations = waiters
+        waiters.removeAll()
+        for continuation in continuations {
+            continuation.resume()
+        }
+    }
+
+    func waitForCall() async {
+        if !calls.isEmpty {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func callCount() -> Int {
+        calls.count
+    }
+
+    func firstCallStartedAt() -> Date? {
+        calls.first?.startedAt
+    }
 }
 
 private final class MockMicCaptureController: MicCaptureControlling, @unchecked Sendable {

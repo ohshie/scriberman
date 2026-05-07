@@ -1,4 +1,5 @@
 import CoreAudio
+import CoreGraphics
 import Foundation
 @testable import Scriberman
 
@@ -9,7 +10,7 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
     var startThrowSequence: [RecordingError] = []
     var startReturns: UUID = UUID()
     var stopReturns: UUID?
-    var startCalls: [(workspace: Workspace, micDeviceID: AudioDeviceID?, capturedAppName: String?, appProcessID: pid_t?, title: String?)] = []
+    var startCalls: [(workspace: Workspace, micDeviceID: AudioDeviceID?, captureDisplayID: CGDirectDisplayID?, capturedAppName: String?, appProcessID: pid_t?, title: String?)] = []
     var retargetMicCalls: [String?] = []
     var pendingError: RecordingError?
 
@@ -30,6 +31,7 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
     func startRecording(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID?,
+        captureDisplayID: CGDirectDisplayID?,
         capturedAppName: String?,
         appProcessID: pid_t?,
         title: String?
@@ -37,6 +39,7 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
         startCalls.append((
             workspace: workspace,
             micDeviceID: micDeviceID,
+            captureDisplayID: captureDisplayID,
             capturedAppName: capturedAppName,
             appProcessID: appProcessID,
             title: title

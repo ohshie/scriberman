@@ -24,9 +24,9 @@
 	<string>Scriberman needs audio capture access to record selected app audio with your microphone.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Scriberman needs microphone access to record audio for transcription.</string>
-	<key>NSScreenCaptureUsageDescription</key>
-	<string>Scriberman needs screen and system audio recording access to capture audio from selected apps.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Scriberman needs screen and system audio recording access to capture audio from selected apps.</string>
 </dict>
 </plist>

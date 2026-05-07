@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreAudio
+import CoreGraphics
 import Foundation
 import SwiftData
 
@@ -10,6 +11,7 @@ protocol RecordingServiceProtocol: Sendable {
     func startRecording(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID?,
+        captureDisplayID: CGDirectDisplayID?,
         capturedAppName: String?,
         appProcessID: pid_t?,
         title: String?

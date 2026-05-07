@@ -7,6 +7,7 @@ struct MainServiceContainer {
     let aiProviderService: AIProviderService
     let audioDeviceService: AudioDeviceService
     let appAudioService: AppAudioService
+    let screenCaptureService: ScreenCaptureServiceProtocol
     let permissionService: PermissionServiceProtocol
     let transcriptExportService: TranscriptExportService
     let appAudioSettings: AppAudioSettings
@@ -47,6 +48,7 @@ struct ServiceContainer {
                 ),
                 audioDeviceService: AudioDeviceService(),
                 appAudioService: AppAudioService(),
+                screenCaptureService: ScreenCaptureService(),
                 permissionService: PermissionService(),
                 transcriptExportService: TranscriptExportService(),
                 appAudioSettings: appAudioSettings

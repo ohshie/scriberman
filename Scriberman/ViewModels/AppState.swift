@@ -83,6 +83,7 @@ final class AppState {
             recordingService: services.background.recordingService,
             audioDeviceService: services.main.audioDeviceService,
             appAudioService: services.main.appAudioService,
+            screenCaptureService: services.main.screenCaptureService,
             permissionService: services.main.permissionService,
             speakerEmbeddingStore: services.background.speakerEmbeddingStore
         )

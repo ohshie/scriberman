@@ -8,11 +8,13 @@ final class RecordingSession {
     var duration: TimeInterval
     @Attribute(originalName: "audioURL") var micAudioURL: String
     var appAudioURL: String?
+    var screenVideoURL: String?
     @Attribute var mixdownURL: String?
     var title: String
     var capturedAppName: String?
     var statusRawValue: String
     var errorMessage: String?
+    var screenCaptureWarning: String?
     var mixdownAttemptCountValue: Int?
     var transcriptData: Data?
     var retranscriptData: Data?
@@ -71,6 +73,7 @@ final class RecordingSession {
         duration: TimeInterval,
         micAudioURL: String,
         appAudioURL: String? = nil,
+        screenVideoURL: String? = nil,
         mixdownURL: String? = nil,
         title: String,
         capturedAppName: String? = nil,
@@ -86,6 +89,7 @@ final class RecordingSession {
         self.duration = duration
         self.micAudioURL = micAudioURL
         self.appAudioURL = appAudioURL
+        self.screenVideoURL = screenVideoURL
         self.mixdownURL = mixdownURL
         self.title = title
         self.capturedAppName = capturedAppName

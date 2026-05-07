@@ -2,7 +2,18 @@ import Foundation
 import OSLog
 import SwiftData
 
-actor RecordingMixdownCoordinator {
+protocol RecordingMixdownCoordinating: Sendable {
+    func runMixdown(
+        sessionID: UUID,
+        micURL: URL,
+        appURL: URL?,
+        mixdownURL: URL,
+        micStartHostTime: UInt64,
+        appStartHostTime: UInt64?
+    ) async
+}
+
+actor RecordingMixdownCoordinator: RecordingMixdownCoordinating {
     private let workspaceService: WorkspaceServiceProtocol
     private let modelContainer: ModelContainer
     private let mixdownService: AudioMixdownService

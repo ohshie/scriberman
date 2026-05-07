@@ -393,6 +393,7 @@ final class AppStateTests {
                 ),
                 audioDeviceService: AudioDeviceService(),
                 appAudioService: AppAudioService(),
+                screenCaptureService: ScreenCaptureService(displayProvider: { [] }),
                 permissionService: permissionService,
                 transcriptExportService: TranscriptExportService(),
                 appAudioSettings: appAudioSettings

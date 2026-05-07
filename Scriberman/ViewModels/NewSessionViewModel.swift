@@ -1,4 +1,5 @@
 import CoreAudio
+import CoreGraphics
 import Foundation
 import Observation
 import SwiftData
@@ -15,6 +16,7 @@ final class NewSessionViewModel {
     private let recordingService: RecordingServiceProtocol
     private let audioDeviceService: AudioDeviceServiceProtocol
     private let appAudioService: AppAudioServiceProtocol
+    private let screenCaptureService: ScreenCaptureServiceProtocol
     private let permissionService: PermissionServiceProtocol
     private let liveTranscriptionService: LiveTranscriptionService
     private var recordingMonitorTask: Task<Void, Never>?
@@ -50,11 +52,24 @@ final class NewSessionViewModel {
     var runningApps: [CapturedApp] {
         appAudioService.runningApps
     }
+    var availableDisplays: [CaptureDisplay] {
+        screenCaptureService.availableDisplays
+    }
     var selectedApp: CapturedApp? {
         get { appAudioService.selectedApp }
         set {
             appAudioService.selectedApp = newValue
         }
+    }
+    var selectedDisplayID: CGDirectDisplayID? {
+        get { screenCaptureService.selectedDisplayID }
+        set { screenCaptureService.selectedDisplayID = newValue }
+    }
+    var selectedDisplay: CaptureDisplay? {
+        guard let selectedDisplayID else {
+            return nil
+        }
+        return availableDisplays.first(where: { $0.displayID == selectedDisplayID })
     }
     private var screenRecordingStatus: PermissionStatus {
         permissionService.screenRecordingStatus
@@ -76,6 +91,23 @@ final class NewSessionViewModel {
                 restoreLastUsedApp()
             } else {
                 selectedApp = nil
+            }
+        }
+    }
+    var recordScreen: Bool = false {
+        didSet {
+            guard oldValue != recordScreen else {
+                return
+            }
+            if recordScreen {
+                guard screenRecordingPermissionGranted else {
+                    recordScreen = false
+                    requestScreenRecordingPermission()
+                    return
+                }
+                Task { [weak self] in
+                    await self?.refreshAvailableDisplays()
+                }
             }
         }
     }
@@ -110,6 +142,10 @@ final class NewSessionViewModel {
         recordAppAudio && screenRecordingStatus == .granted
     }
 
+    var showDisplayPicker: Bool {
+        recordScreen && screenRecordingStatus == .granted && availableDisplays.count > 1
+    }
+
     var screenRecordingPermissionGranted: Bool {
         screenRecordingStatus == .granted
     }
@@ -120,7 +156,7 @@ final class NewSessionViewModel {
         }
 
         if screenRecordingStatus == .denied {
-            return "Screen Recording permission verification failed. App audio capture may be unavailable until access is re-enabled in System Settings."
+            return "Screen Recording permission verification failed. App audio and screen capture may be unavailable until access is re-enabled in System Settings."
         }
 
         return nil
@@ -131,7 +167,13 @@ final class NewSessionViewModel {
             return false
         }
         if case .idle = state {
-            return !recordAppAudio || selectedApp != nil
+            if recordAppAudio && selectedApp == nil {
+                return false
+            }
+            if recordScreen && effectiveCaptureDisplayID == nil {
+                return false
+            }
+            return true
         }
         return false
     }
@@ -141,6 +183,7 @@ final class NewSessionViewModel {
         recordingService: RecordingServiceProtocol,
         audioDeviceService: AudioDeviceServiceProtocol,
         appAudioService: AppAudioServiceProtocol,
+        screenCaptureService: ScreenCaptureServiceProtocol,
         permissionService: PermissionServiceProtocol,
         speakerEmbeddingStore: SpeakerEmbeddingStore? = nil,
         userDefaults _: UserDefaults = .standard
@@ -150,6 +193,7 @@ final class NewSessionViewModel {
         self.recordingService = recordingService
         self.audioDeviceService = audioDeviceService
         self.appAudioService = appAudioService
+        self.screenCaptureService = screenCaptureService
         self.permissionService = permissionService
         enforceAppAudioSelectionForCurrentPermissions()
     }
@@ -165,6 +209,7 @@ final class NewSessionViewModel {
 
     func refresh() async {
         _ = await workspaceService.currentWorkspace()
+        await refreshAvailableDisplays()
     }
 
     func refreshApps() {
@@ -191,6 +236,9 @@ final class NewSessionViewModel {
         Task {
             await recheckPermissions()
         }
+        Task {
+            await refreshAvailableDisplays()
+        }
         // Pre-warm ASR + diarizer models when a workspace is available.
         Task {
             if let workspace = await workspaceService.currentWorkspace() {
@@ -204,6 +252,9 @@ final class NewSessionViewModel {
         audioDeviceService.refreshDevices()
         Task {
             await recheckPermissions()
+        }
+        Task {
+            await refreshAvailableDisplays()
         }
     }
 
@@ -220,6 +271,7 @@ final class NewSessionViewModel {
         _ = await permissionService.verifyMic()
         _ = await permissionService.verifyScreenRecording()
         enforceAppAudioSelectionForCurrentPermissions()
+        await refreshAvailableDisplays()
     }
 
     func restoreLastUsedApp() {
@@ -238,6 +290,7 @@ final class NewSessionViewModel {
 
             var selectedCapturedAppName: String?
             var selectedAppProcessID: pid_t?
+            let captureDisplayID = effectiveCaptureDisplayID
 
             if recordAppAudio, let selectedApp {
                 selectedCapturedAppName = selectedApp.name
@@ -253,6 +306,7 @@ final class NewSessionViewModel {
                 recordingSessionID = try await startRecordingAttempt(
                     in: workspace,
                     micDeviceID: selectedMicDeviceID,
+                    captureDisplayID: captureDisplayID,
                     capturedAppName: selectedCapturedAppName,
                     appProcessID: selectedAppProcessID,
                     title: title
@@ -268,6 +322,7 @@ final class NewSessionViewModel {
                     recordingSessionID = try await startRecordingAttempt(
                         in: workspace,
                         micDeviceID: selectedMicDeviceID,
+                        captureDisplayID: captureDisplayID,
                         capturedAppName: nil,
                         appProcessID: nil,
                         title: title
@@ -283,6 +338,7 @@ final class NewSessionViewModel {
                     recordingSessionID = try await startRecordingAttempt(
                         in: workspace,
                         micDeviceID: nil,
+                        captureDisplayID: captureDisplayID,
                         capturedAppName: nil,
                         appProcessID: nil,
                         title: title
@@ -364,6 +420,7 @@ final class NewSessionViewModel {
 
         selectedApp = app
         recordAppAudio = app != nil
+        recordScreen = false
 
         return await startRecording(title: title, context: context)
     }
@@ -456,12 +513,20 @@ final class NewSessionViewModel {
     private func enforceAppAudioSelectionForCurrentPermissions() {
         guard screenRecordingStatus == .granted else {
             recordAppAudio = false
+            recordScreen = false
             selectedApp = nil
             appAudioService.selectedApp = nil
             return
         }
 
         recordAppAudio = appAudioService.selectedApp != nil
+    }
+
+    private var effectiveCaptureDisplayID: CGDirectDisplayID? {
+        guard recordScreen else {
+            return nil
+        }
+        return selectedDisplayID
     }
 
     private func startRecordingMonitor() {
@@ -490,6 +555,7 @@ final class NewSessionViewModel {
     private func startRecordingAttempt(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID?,
+        captureDisplayID: CGDirectDisplayID?,
         capturedAppName: String?,
         appProcessID: pid_t?,
         title: String?
@@ -497,10 +563,19 @@ final class NewSessionViewModel {
         try await recordingService.startRecording(
             in: workspace,
             micDeviceID: micDeviceID,
+            captureDisplayID: captureDisplayID,
             capturedAppName: capturedAppName,
             appProcessID: appProcessID,
             title: title
         )
+    }
+
+    private func refreshAvailableDisplays() async {
+        guard screenRecordingPermissionGranted else {
+            recordScreen = false
+            return
+        }
+        await screenCaptureService.refreshAvailableDisplays()
     }
 
     private func retargetRecordingMicIfNeeded(desiredDeviceUID: String?) async {

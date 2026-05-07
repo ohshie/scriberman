@@ -27,6 +27,12 @@ struct RecordingSessionRow: View {
                 Text(JobsViewModel.relativeTimestampText(for: session.createdAt))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if session.screenCaptureWarning != nil {
+                    Label("Screen recording failed", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
 
             Spacer(minLength: 12)

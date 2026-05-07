@@ -34,4 +34,32 @@ enum RecordingFileLayout {
             folderURL.appendingPathComponent("app.wav")
         )
     }
+
+    static func screenTmpVideoURL(
+        in workspace: Workspace,
+        createdAt: Date,
+        recordingIdentifier: String
+    ) -> URL {
+        let folderURL = recordingFolderURL(
+            in: workspace,
+            createdAt: createdAt,
+            recordingIdentifier: recordingIdentifier
+        )
+
+        return folderURL.appendingPathComponent("screen-tmp.mov")
+    }
+
+    static func screenVideoURL(
+        in workspace: Workspace,
+        createdAt: Date,
+        recordingIdentifier: String
+    ) -> URL {
+        let folderURL = recordingFolderURL(
+            in: workspace,
+            createdAt: createdAt,
+            recordingIdentifier: recordingIdentifier
+        )
+
+        return folderURL.appendingPathComponent("screen.mov")
+    }
 }

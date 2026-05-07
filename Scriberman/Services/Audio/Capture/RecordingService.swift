@@ -1,6 +1,7 @@
 import AVFoundation
 import AudioToolbox
 import CoreAudio
+import CoreGraphics
 import Foundation
 import OSLog
 import SwiftData
@@ -192,15 +193,25 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
 }
 
 actor RecordingService: RecordingServiceProtocol {
+    typealias PermissionChecker = @Sendable () async throws(RecordingError) -> Void
+    typealias ScopedAccessStarter = @Sendable (URL) -> Bool
+    typealias ScopedAccessStopper = @Sendable (URL) -> Void
+    typealias ScreenCaptureSessionFactory = @Sendable () -> any ScreenCaptureSessionControlling
+
     private let workspaceService: WorkspaceServiceProtocol
     private let modelContainer: ModelContainer
     private let notificationCenter: NotificationCenter
     private let fileManager = FileManager.default
-    private let mixdownCoordinator: RecordingMixdownCoordinator
+    private let mixdownCoordinator: any RecordingMixdownCoordinating
+    private let screenVideoMuxer: any ScreenVideoMuxing
     private let logger = Logger(subsystem: "Scriberman", category: "RecordingService")
     private let appAudioSettings: AppAudioSettings
     private let hardware: AudioDeviceHardwareProviding
     private let micCaptureController: MicCaptureControlling
+    private let permissionChecker: PermissionChecker
+    private let scopedAccessStarter: ScopedAccessStarter
+    private let scopedAccessStopper: ScopedAccessStopper
+    private let makeScreenCaptureSession: ScreenCaptureSessionFactory
     // Injected for testing; nil uses the real setVoiceProcessingEnabled(_:)
     private let voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)?
 
@@ -214,6 +225,8 @@ actor RecordingService: RecordingServiceProtocol {
     private var appAudioURL: URL?
     private var micStartHostTime: UInt64?
     private var appStartHostTime: UInt64?
+    private var videoStartHostTime: UInt64?
+    private var activeCaptureDisplayID: CGDirectDisplayID?
     private var desiredMicDeviceUID: String?
     private var currentCaptureDeviceID: AudioDeviceID?
     private var micFileURL: URL?
@@ -229,6 +242,8 @@ actor RecordingService: RecordingServiceProtocol {
     private var activeCapturedAppName: String?
     private var pendingTitle: String?
     private var appAudioCaptureSession: AppAudioCaptureSession?
+    private var screenCaptureSession: (any ScreenCaptureSessionControlling)?
+    private var shouldSkipScreenMux = false
     private var pendingError: RecordingError?
     private var micRecoveryRetryTask: Task<Void, Never>?
     private let liveAudioStreamTuple: (stream: AsyncStream<([Float], AudioSource, Double)>, continuation: AsyncStream<([Float], AudioSource, Double)>.Continuation)
@@ -256,6 +271,12 @@ actor RecordingService: RecordingServiceProtocol {
         hardware: AudioDeviceHardwareProviding = CoreAudioDeviceHardware(),
         micCaptureController: MicCaptureControlling? = nil,
         notificationCenter: NotificationCenter = .default,
+        mixdownCoordinator: (any RecordingMixdownCoordinating)? = nil,
+        screenVideoMuxer: (any ScreenVideoMuxing)? = nil,
+        permissionChecker: @escaping PermissionChecker = RecordingPermissionService.ensureMicrophonePermission,
+        scopedAccessStarter: @escaping ScopedAccessStarter = { $0.startAccessingSecurityScopedResource() },
+        scopedAccessStopper: @escaping ScopedAccessStopper = { $0.stopAccessingSecurityScopedResource() },
+        screenCaptureSessionFactory: @escaping ScreenCaptureSessionFactory = { ScreenCaptureSession() },
         voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)? = nil
     ) {
         self.workspaceService = workspaceService
@@ -264,9 +285,17 @@ actor RecordingService: RecordingServiceProtocol {
         self.hardware = hardware
         self.micCaptureController = micCaptureController ?? AVAudioEngineMicCaptureController()
         self.notificationCenter = notificationCenter
+        self.permissionChecker = permissionChecker
+        self.scopedAccessStarter = scopedAccessStarter
+        self.scopedAccessStopper = scopedAccessStopper
+        self.makeScreenCaptureSession = screenCaptureSessionFactory
         self.voiceProcessingPropertySetter = voiceProcessingPropertySetter
         self.hardwareListenerQueue = DispatchQueue(label: "Scriberman.RecordingService.HardwareListeners")
-        self.mixdownCoordinator = RecordingMixdownCoordinator(
+        self.mixdownCoordinator = mixdownCoordinator ?? RecordingMixdownCoordinator(
+            workspaceService: workspaceService,
+            modelContainer: modelContainer
+        )
+        self.screenVideoMuxer = screenVideoMuxer ?? ScreenVideoMuxer(
             workspaceService: workspaceService,
             modelContainer: modelContainer
         )
@@ -334,7 +363,10 @@ actor RecordingService: RecordingServiceProtocol {
         recordingWorkspaceRootURL: URL? = nil,
         recordingCreatedAt: Date? = nil,
         pendingTitle: String? = nil,
-        currentSessionID: UUID? = nil
+        currentSessionID: UUID? = nil,
+        screenCaptureSession: (any ScreenCaptureSessionControlling)? = nil,
+        videoStartHostTime: UInt64? = nil,
+        shouldSkipScreenMux: Bool = false
     ) {
         self.isRecordingValue = isRecording
         self.recordingIdentifier = recordingIdentifier
@@ -342,6 +374,9 @@ actor RecordingService: RecordingServiceProtocol {
         self.recordingCreatedAt = recordingCreatedAt
         self.pendingTitle = pendingTitle
         self.currentSessionID = currentSessionID
+        self.screenCaptureSession = screenCaptureSession
+        self.videoStartHostTime = videoStartHostTime
+        self.shouldSkipScreenMux = shouldSkipScreenMux
     }
 
     func setMicRecoveryStateForTesting(
@@ -386,6 +421,10 @@ actor RecordingService: RecordingServiceProtocol {
     func performMicRecoveryRetryAttemptForTesting() async {
         _ = await retryMicCaptureFromRetryLoop()
     }
+
+    func cleanupRecordingStateForTesting(deleteScreenTmpVideo: Bool = true) async {
+        await cleanupRecordingState(deleteScreenTmpVideo: deleteScreenTmpVideo)
+    }
     #endif
 
     func audioLevel() async -> Float {
@@ -413,6 +452,7 @@ actor RecordingService: RecordingServiceProtocol {
     func startRecording(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID? = nil,
+        captureDisplayID: CGDirectDisplayID? = nil,
         capturedAppName: String? = nil,
         appProcessID: pid_t? = nil,
         title: String? = nil
@@ -426,9 +466,9 @@ actor RecordingService: RecordingServiceProtocol {
         } catch {
             throw RecordingError.invalidWorkspaceAccess
         }
-        try await ensureMicrophonePermission()
+        try await permissionChecker()
 
-        if !workspace.rootURL.startAccessingSecurityScopedResource() {
+        if !scopedAccessStarter(workspace.rootURL) {
             throw RecordingError.invalidWorkspaceAccess
         }
 
@@ -453,8 +493,16 @@ actor RecordingService: RecordingServiceProtocol {
             )
             let micFileURL = fileURLs.mic
             let appFileURL = fileURLs.app
+            let screenTmpVideoURL = RecordingFileLayout.screenTmpVideoURL(
+                in: workspace,
+                createdAt: recordingCreatedAt,
+                recordingIdentifier: recordingIdentifier
+            )
             self.micStartHostTime = nil
             self.appStartHostTime = nil
+            self.videoStartHostTime = nil
+            self.activeCaptureDisplayID = captureDisplayID
+            self.shouldSkipScreenMux = false
             self.micFileURL = micFileURL
             micRecoveryRetryTask?.cancel()
             micRecoveryRetryTask = nil
@@ -523,6 +571,29 @@ actor RecordingService: RecordingServiceProtocol {
                 self.appAudioURL = nil
             }
 
+            if let captureDisplayID {
+                let screenCaptureSession = makeScreenCaptureSession()
+                screenCaptureSession.onError = { [weak self] _ in
+                    Task { [weak self] in
+                        await self?.handleScreenCaptureError()
+                    }
+                }
+                do {
+                    try await screenCaptureSession.start(
+                        displayID: captureDisplayID,
+                        videoURL: screenTmpVideoURL
+                    )
+                    self.screenCaptureSession = screenCaptureSession
+                } catch {
+                    logger.warning(
+                        "Screen capture failed to start; continuing without video. error=\(error.localizedDescription, privacy: .public)"
+                    )
+                    self.screenCaptureSession = nil
+                }
+            } else {
+                self.screenCaptureSession = nil
+            }
+
             let session = RecordingSession(
                 createdAt: recordingCreatedAt,
                 duration: 0,
@@ -542,7 +613,7 @@ actor RecordingService: RecordingServiceProtocol {
             stopMicCapture()
             audioRecorder?.stop()
             await appAudioCaptureSession?.stop()
-            cleanupRecordingState()
+            await cleanupRecordingState()
             releaseRecordingScopeIfNeeded()
             throw RecordingError.failedToStart(error.localizedDescription)
         }
@@ -565,6 +636,10 @@ actor RecordingService: RecordingServiceProtocol {
         micStreamer.close()
         await appAudioCaptureSession?.stop()
         appAudioCaptureSession = nil
+        let activeScreenCaptureSession = screenCaptureSession
+        await activeScreenCaptureSession?.stop()
+        captureVideoStartHostTimeIfNeeded(activeScreenCaptureSession?.videoStartHostTime)
+        screenCaptureSession = nil
 
         let startedAt = recordingStartedAt ?? recordingCreatedAt ?? Date()
         let createdAt = recordingCreatedAt ?? startedAt
@@ -572,7 +647,7 @@ actor RecordingService: RecordingServiceProtocol {
         let duration = max(0, stoppedAt.timeIntervalSince(startedAt))
 
         guard let recordingIdentifier, let recordingWorkspaceRootURL, let sessionID = currentSessionID else {
-            cleanupRecordingState()
+            await cleanupRecordingState()
             return nil
         }
 
@@ -584,12 +659,22 @@ actor RecordingService: RecordingServiceProtocol {
         )
 
         guard fileManager.fileExists(atPath: captureFileURLs.mic.path) else {
-            cleanupRecordingState()
+            await cleanupRecordingState()
             return nil
         }
         let finalRecordingURLs: (mic: URL, app: URL?) = (
             captureFileURLs.mic,
             fileManager.fileExists(atPath: captureFileURLs.app.path) ? captureFileURLs.app : nil
+        )
+        let screenTmpVideoURL = RecordingFileLayout.screenTmpVideoURL(
+            in: workspace,
+            createdAt: createdAt,
+            recordingIdentifier: recordingIdentifier
+        )
+        let finalScreenVideoURL = RecordingFileLayout.screenVideoURL(
+            in: workspace,
+            createdAt: createdAt,
+            recordingIdentifier: recordingIdentifier
         )
 
         logger.info(
@@ -599,7 +684,9 @@ actor RecordingService: RecordingServiceProtocol {
         do {
             let micStartHostTime = self.micStartHostTime ?? self.appStartHostTime ?? 0
             let appStartHostTime = self.appStartHostTime
+            let videoStartHostTime = shouldSkipScreenMux ? nil : self.videoStartHostTime
             let mixdownURL = finalRecordingURLs.mic.deletingLastPathComponent().appendingPathComponent("recording.m4a")
+            let shouldRunScreenMux = videoStartHostTime != nil && fileManager.fileExists(atPath: screenTmpVideoURL.path)
 
             if self.micStartHostTime == nil {
                 logger.warning("Mic start host time missing for session \(sessionID, privacy: .public); using fallback for mixdown alignment.")
@@ -614,17 +701,23 @@ actor RecordingService: RecordingServiceProtocol {
             guard let sessions = try? context.fetch(descriptor),
                   let session = sessions.first(where: { $0.id == sessionID })
             else {
-                cleanupRecordingState()
+                await cleanupRecordingState()
                 return nil
             }
             session.duration = duration
             session.micAudioURL = finalRecordingURLs.mic.path
             session.appAudioURL = finalRecordingURLs.app?.path
             session.status = .recorded
+            if activeCaptureDisplayID != nil && !shouldRunScreenMux {
+                session.screenCaptureWarning = "Screen recording failed — the display may have been off, disconnected, or not capturable."
+                logger.warning(
+                    "Screen capture was requested but produced no video. displayID=\(self.activeCaptureDisplayID ?? 0, privacy: .public) shouldSkipScreenMux=\(self.shouldSkipScreenMux, privacy: .public) videoStartHostTime=\(self.videoStartHostTime != nil ? "set" : "nil", privacy: .public)"
+                )
+            }
             try context.save()
 
             // Release capture writer resources before background mixdown starts.
-            cleanupRecordingState()
+            await cleanupRecordingState(deleteScreenTmpVideo: !shouldRunScreenMux)
 
             Task { [weak self] in
                 await self?.runMixdown(
@@ -637,9 +730,25 @@ actor RecordingService: RecordingServiceProtocol {
                 )
             }
 
+            if let videoStartHostTime, shouldRunScreenMux {
+                let request = ScreenVideoMuxRequest(
+                    sessionID: sessionID,
+                    screenTmpURL: screenTmpVideoURL,
+                    screenVideoURL: finalScreenVideoURL,
+                    micURL: finalRecordingURLs.mic,
+                    appURL: finalRecordingURLs.app,
+                    micStartHostTime: micStartHostTime,
+                    appStartHostTime: appStartHostTime,
+                    videoStartHostTime: videoStartHostTime
+                )
+                Task { [weak self] in
+                    await self?.screenVideoMuxer.runMux(request: request)
+                }
+            }
+
             return sessionID
         } catch {
-            cleanupRecordingState()
+            await cleanupRecordingState()
             return nil
         }
     }
@@ -668,17 +777,14 @@ actor RecordingService: RecordingServiceProtocol {
         scheduleMicRecoveryRetry()
     }
 
-    private func ensureMicrophonePermission() async throws(RecordingError) {
-        try await RecordingPermissionService.ensureMicrophonePermission()
-    }
-
     private func makeSessionTitle(createdAt: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM dd, HH:mm"
         return "Recording \(formatter.string(from: createdAt))"
     }
 
-    private func cleanupRecordingState() {
+    private func cleanupRecordingState(deleteScreenTmpVideo: Bool = true) async {
+        let screenTmpURL = makeCurrentScreenTmpVideoURL()
         micRecoveryRetryTask?.cancel()
         micRecoveryRetryTask = nil
         deregisterMicHardwareListeners()
@@ -686,6 +792,13 @@ actor RecordingService: RecordingServiceProtocol {
         micStreamer.close()
         audioRecorder = nil
         appAudioCaptureSession = nil
+        if let screenCaptureSession {
+            await screenCaptureSession.stop()
+        }
+        self.screenCaptureSession = nil
+        if deleteScreenTmpVideo, let screenTmpURL, fileManager.fileExists(atPath: screenTmpURL.path) {
+            try? fileManager.removeItem(at: screenTmpURL)
+        }
         appAudioURL = nil
         recordingStartedAt = nil
         recordingCreatedAt = nil
@@ -695,6 +808,9 @@ actor RecordingService: RecordingServiceProtocol {
         pendingTitle = nil
         micStartHostTime = nil
         appStartHostTime = nil
+        videoStartHostTime = nil
+        shouldSkipScreenMux = false
+        activeCaptureDisplayID = nil
         desiredMicDeviceUID = nil
         currentCaptureDeviceID = nil
         micFileURL = nil
@@ -709,9 +825,32 @@ actor RecordingService: RecordingServiceProtocol {
             return
         }
 
-        recordingWorkspaceRootURL.stopAccessingSecurityScopedResource()
+        scopedAccessStopper(recordingWorkspaceRootURL)
         hasScopedRecordingAccess = false
         self.recordingWorkspaceRootURL = nil
+    }
+
+    private func handleScreenCaptureError() async {
+        shouldSkipScreenMux = true
+        captureVideoStartHostTimeIfNeeded(screenCaptureSession?.videoStartHostTime)
+        if let screenCaptureSession {
+            await screenCaptureSession.stop()
+        }
+        screenCaptureSession = nil
+    }
+
+    private func makeCurrentScreenTmpVideoURL() -> URL? {
+        guard let recordingWorkspaceRootURL,
+              let recordingCreatedAt,
+              let recordingIdentifier
+        else {
+            return nil
+        }
+        return RecordingFileLayout.screenTmpVideoURL(
+            in: Workspace(rootURL: recordingWorkspaceRootURL),
+            createdAt: recordingCreatedAt,
+            recordingIdentifier: recordingIdentifier
+        )
     }
 
     private func handleAudioEngineConfigurationChange() async {
@@ -994,8 +1133,15 @@ actor RecordingService: RecordingServiceProtocol {
         appStartHostTime = hostTime
     }
 
-    func capturedHostTimes() -> (mic: UInt64?, app: UInt64?) {
-        (micStartHostTime, appStartHostTime)
+    func captureVideoStartHostTimeIfNeeded(_ hostTime: UInt64?) {
+        guard videoStartHostTime == nil, let hostTime else {
+            return
+        }
+        videoStartHostTime = hostTime
+    }
+
+    func capturedHostTimes() -> (mic: UInt64?, app: UInt64?, video: UInt64?) {
+        (micStartHostTime, appStartHostTime, videoStartHostTime)
     }
 
     nonisolated func applyVoiceProcessingIfNeeded(to inputNode: AVAudioInputNode, enabled: Bool) {

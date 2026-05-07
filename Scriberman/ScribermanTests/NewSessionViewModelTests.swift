@@ -1,5 +1,6 @@
 import Foundation
 import CoreAudio
+import CoreGraphics
 import SwiftData
 import Testing
 @testable import Scriberman
@@ -20,12 +21,17 @@ struct NewSessionViewModelTests {
 
     private func makeFixture(
         screenRecordingStatus: PermissionStatus = .notDetermined,
-        initialSelectedApp: CapturedApp? = nil
+        initialSelectedApp: CapturedApp? = nil,
+        availableDisplays: [CaptureDisplay] = [],
+        selectedDisplayID: CGDirectDisplayID? = nil
     ) -> Fixture {
         let workspaceService = MockWorkspaceService()
         let recordingService = MockRecordingService()
         let audioDeviceService = MockAudioDeviceService()
         let appAudioService = MockNewSessionAppAudioService()
+        let screenCaptureService = MockScreenCaptureService()
+        screenCaptureService.availableDisplays = availableDisplays
+        screenCaptureService.selectedDisplayID = selectedDisplayID
         let permissionService = MockPermissionService()
         permissionService.screenRecordingStatus = screenRecordingStatus
         appAudioService.selectedApp = initialSelectedApp
@@ -45,6 +51,7 @@ struct NewSessionViewModelTests {
             recordingService: recordingService,
             audioDeviceService: audioDeviceService,
             appAudioService: appAudioService,
+            screenCaptureService: screenCaptureService,
             permissionService: permissionService,
             userDefaults: userDefaults
         )
@@ -211,6 +218,26 @@ struct NewSessionViewModelTests {
     }
 
     @Test
+    func testStartRecordingPassesSelectedDisplayIDWhenScreenRecordingEnabled() async {
+        let display = CaptureDisplay(displayID: 77, name: "Display 1", width: 1728, height: 1117)
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture(
+            screenRecordingStatus: .granted,
+            availableDisplays: [display],
+            selectedDisplayID: display.displayID
+        )
+        defer { cleanup() }
+        _ = (workspaceService, audioDeviceService, appAudioService, permissionService, menuBarSettings, context)
+
+        permissionService.micStatus = .granted
+        viewModel.recordScreen = true
+
+        await viewModel.startRecording(title: "Screen Session", context: context)
+
+        #expect(recordingService.startCalls.count == 1)
+        #expect(recordingService.startCalls.first?.captureDisplayID == 77)
+    }
+
+    @Test
     func testResetReturnsIdleFromRecordingState() {
         let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
         defer { cleanup() }
@@ -282,6 +309,25 @@ struct NewSessionViewModelTests {
     }
 
     @Test
+    func testCanRecordRequiresSelectedDisplayWhenScreenRecordingEnabled() {
+        let display = CaptureDisplay(displayID: 55, name: "Display 1", width: 1512, height: 982)
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture(
+            screenRecordingStatus: .granted,
+            availableDisplays: [display],
+            selectedDisplayID: display.displayID
+        )
+        defer { cleanup() }
+        _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
+
+        permissionService.micStatus = .granted
+        viewModel.recordScreen = true
+        #expect(viewModel.canRecord)
+
+        viewModel.selectedDisplayID = nil
+        #expect(!viewModel.canRecord)
+    }
+
+    @Test
     func testRecordAppAudioToggleRequestsScreenPermissionWhenNotGranted() {
         let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
         defer { cleanup() }
@@ -293,6 +339,20 @@ struct NewSessionViewModelTests {
 
         #expect(permissionService.requestScreenRecordingCalls == 1)
         #expect(!(viewModel.recordAppAudio))
+    }
+
+    @Test
+    func testRecordScreenToggleRequestsScreenPermissionWhenNotGranted() {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+        _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
+
+        permissionService.screenRecordingStatus = .notDetermined
+
+        viewModel.recordScreen = true
+
+        #expect(permissionService.requestScreenRecordingCalls == 1)
+        #expect(!viewModel.recordScreen)
     }
 
     @Test
@@ -406,6 +466,42 @@ struct NewSessionViewModelTests {
 
         viewModel.requestScreenRecordingPermission()
         #expect(permissionService.requestScreenRecordingCalls == 1)
+    }
+
+    @Test
+    func testSingleAvailableDisplayCanBeUsedWithoutPicker() {
+        let display = CaptureDisplay(displayID: 19, name: "Display 1", width: 2560, height: 1440)
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture(
+            screenRecordingStatus: .granted,
+            availableDisplays: [display],
+            selectedDisplayID: display.displayID
+        )
+        defer { cleanup() }
+        _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
+
+        viewModel.recordScreen = true
+
+        #expect(viewModel.selectedDisplayID == display.displayID)
+        #expect(!viewModel.showDisplayPicker)
+    }
+
+    @Test
+    func testMultipleDisplaysShowPickerWhenScreenRecordingEnabled() {
+        let displays = [
+            CaptureDisplay(displayID: 1, name: "Display 1", width: 2560, height: 1440),
+            CaptureDisplay(displayID: 2, name: "Display 2", width: 1920, height: 1080)
+        ]
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture(
+            screenRecordingStatus: .granted,
+            availableDisplays: displays,
+            selectedDisplayID: displays[0].displayID
+        )
+        defer { cleanup() }
+        _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
+
+        viewModel.recordScreen = true
+
+        #expect(viewModel.showDisplayPicker)
     }
 
     @Test
@@ -550,6 +646,15 @@ struct NewSessionViewModelTests {
     }
 
     @Test
+    func testNewSessionPanelShowsRecordScreenControls() throws {
+        let source = try newSessionPanelSource()
+        #expect(source.contains("Text(\"Record app audio\")"))
+        #expect(source.contains("Text(\"Record screen\")"))
+        #expect(source.contains("viewModel.showDisplayPicker"))
+        #expect(source.contains("Select display"))
+    }
+
+    @Test
     func testRefreshAudioDevicesOnAppearPreparesLiveTranscriptionWithWorkspace() throws {
         let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
         defer { cleanup() }
@@ -621,6 +726,17 @@ private final class MockNewSessionAppAudioService: AppAudioServiceProtocol {
     }
 
     func refreshRunningApps() {
+        refreshCalls += 1
+    }
+}
+
+@MainActor
+private final class MockScreenCaptureService: ScreenCaptureServiceProtocol {
+    var availableDisplays: [CaptureDisplay] = []
+    var selectedDisplayID: CGDirectDisplayID?
+    var refreshCalls = 0
+
+    func refreshAvailableDisplays() async {
         refreshCalls += 1
     }
 }

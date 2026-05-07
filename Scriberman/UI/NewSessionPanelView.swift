@@ -138,8 +138,27 @@ struct NewSessionPanelView: View {
 
             Divider()
 
-            appAudioMenu
+            appAudioToggleRow
                 .disabled(!isInteractive)
+
+            if viewModel.showAppPicker {
+                Divider()
+
+                appAudioMenu
+                    .disabled(!isInteractive)
+            }
+
+            Divider()
+
+            screenRecordingToggleRow
+                .disabled(!isInteractive)
+
+            if viewModel.showDisplayPicker {
+                Divider()
+
+                displayMenu
+                .disabled(!isInteractive)
+            }
         }
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -240,6 +259,89 @@ struct NewSessionPanelView: View {
         .buttonStyle(.plain)
         .simultaneousGesture(TapGesture().onEnded {
             viewModel.refreshApps()
+        })
+    }
+
+    private var appAudioToggleRow: some View {
+        HStack(spacing: 12) {
+            Toggle(isOn: Binding(
+                get: { viewModel.recordAppAudio },
+                set: { viewModel.recordAppAudio = $0 }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Record app audio")
+                    if viewModel.recordAppAudio {
+                        Text(viewModel.selectedApp?.name ?? "Choose an app below")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .toggleStyle(.switch)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    private var screenRecordingToggleRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle(isOn: Binding(
+                get: { viewModel.recordScreen },
+                set: { viewModel.recordScreen = $0 }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Record screen")
+                    if viewModel.recordScreen, let selectedDisplay = viewModel.selectedDisplay {
+                        Text("\(selectedDisplay.name) • \(selectedDisplay.resolutionLabel)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if !viewModel.screenRecordingPermissionGranted {
+                        Text("Screen Recording permission required")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .toggleStyle(.switch)
+            .disabled(!viewModel.screenRecordingPermissionGranted)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    private var displayMenu: some View {
+        Menu {
+            ForEach(viewModel.availableDisplays) { display in
+                Button {
+                    viewModel.selectedDisplayID = display.displayID
+                } label: {
+                    if viewModel.selectedDisplayID == display.displayID {
+                        Label("\(display.name) • \(display.resolutionLabel)", systemImage: "checkmark")
+                    } else {
+                        Text("\(display.name) • \(display.resolutionLabel)")
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Label(
+                    viewModel.selectedDisplay.map { "\($0.name) • \($0.resolutionLabel)" } ?? "Select display",
+                    systemImage: "display"
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(TapGesture().onEnded {
+            Task {
+                await viewModel.recheckPermissions()
+            }
         })
     }
 
