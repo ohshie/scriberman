@@ -219,7 +219,8 @@ struct TranscriptionPassRunner: @unchecked Sendable {
 
             return PassEngines(
                 transcribeChunk: { chunkSamples, _ in
-                    let result = try await asrManager.transcribe(chunkSamples, source: .system)
+                    var decoderState = try TdtDecoderState()
+                    let result = try await asrManager.transcribe(chunkSamples, decoderState: &decoderState)
                     return PassASRResult(
                         text: result.text,
                         tokenTimings: result.tokenTimings ?? []

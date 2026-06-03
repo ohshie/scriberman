@@ -436,7 +436,7 @@ struct NewSessionViewModelTests {
         permissionService.screenRecordingStatus = .denied
         #expect(
             viewModel.permissionStatusWarningText
-                == "Screen Recording permission verification failed. App audio capture may be unavailable until access is re-enabled in System Settings."
+                == "Screen Recording permission verification failed. App audio and screen capture may be unavailable until access is re-enabled in System Settings."
         )
 
         permissionService.screenRecordingStatus = .granted
