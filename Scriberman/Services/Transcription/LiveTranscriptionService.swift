@@ -437,17 +437,17 @@ actor LiveTranscriptionService {
 
             logger.info("🎤 Transcribing \(source.rawValue) chunk (\(samples.count) samples = \(String(format: "%.1f", chunkDuration))s, max amplitude: \(String(format: "%.6f", maxAmplitude)))...")
 
-            // task 2.2: pass correct ASR source based on audio origin
-            // (.microphone for mic, .system for app — inferred as FluidAudio.AudioSource from call-site)
             #if DEBUG
             let asrResult: ASRResult
             if let asrTranscribeHookForTesting {
                 asrResult = try await asrTranscribeHookForTesting(samples, source)
             } else {
-                asrResult = try await asrManager.transcribe(samples, source: source == .mic ? .microphone : .system)
+                var decoderState = try TdtDecoderState()
+                asrResult = try await asrManager.transcribe(samples, decoderState: &decoderState)
             }
             #else
-            let asrResult = try await asrManager.transcribe(samples, source: source == .mic ? .microphone : .system)
+            var decoderState = try TdtDecoderState()
+            let asrResult = try await asrManager.transcribe(samples, decoderState: &decoderState)
             #endif
 
             let confidenceGate = storedConfig.asrConfidenceGate
