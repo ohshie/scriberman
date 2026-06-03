@@ -193,7 +193,7 @@ actor ModelInstallService: ModelInstallServicing {
     ) async throws {
         switch group {
         case .asrParakeetV3:
-            try await DownloadUtils.downloadRepo(.parakeet, to: directory, progressHandler: progressHandler)
+            try await DownloadUtils.downloadRepo(.parakeetV3, to: directory, progressHandler: progressHandler)
 
         case .vadSilero:
             try await DownloadUtils.downloadRepo(.vad, to: directory, progressHandler: progressHandler)
@@ -216,7 +216,7 @@ actor ModelInstallService: ModelInstallServicing {
         switch group {
         case .asrParakeetV3:
             let modelFilesPresent = requiredFilesExist(in: repoURL, required: ModelNames.ASR.requiredModels)
-            let vocabName = ModelNames.ASR.vocabulary(for: .parakeet)
+            let vocabName = ModelNames.ASR.vocabulary(for: .parakeetV3)
             let vocabPresent = fileManager.fileExists(
                 atPath: repoURL.appendingPathComponent(vocabName, isDirectory: false).path
             )
