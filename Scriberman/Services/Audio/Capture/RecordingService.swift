@@ -637,9 +637,9 @@ actor RecordingService: RecordingServiceProtocol {
         await appAudioCaptureSession?.stop()
         appAudioCaptureSession = nil
         let activeScreenCaptureSession = screenCaptureSession
+        screenCaptureSession = nil
         await activeScreenCaptureSession?.stop()
         captureVideoStartHostTimeIfNeeded(activeScreenCaptureSession?.videoStartHostTime)
-        screenCaptureSession = nil
 
         let startedAt = recordingStartedAt ?? recordingCreatedAt ?? Date()
         let createdAt = recordingCreatedAt ?? startedAt
@@ -832,11 +832,12 @@ actor RecordingService: RecordingServiceProtocol {
 
     private func handleScreenCaptureError() async {
         shouldSkipScreenMux = true
-        captureVideoStartHostTimeIfNeeded(screenCaptureSession?.videoStartHostTime)
-        if let screenCaptureSession {
-            await screenCaptureSession.stop()
-        }
+        let activeScreenCaptureSession = screenCaptureSession
         screenCaptureSession = nil
+        captureVideoStartHostTimeIfNeeded(activeScreenCaptureSession?.videoStartHostTime)
+        if let activeScreenCaptureSession {
+            await activeScreenCaptureSession.stop()
+        }
     }
 
     private func makeCurrentScreenTmpVideoURL() -> URL? {
