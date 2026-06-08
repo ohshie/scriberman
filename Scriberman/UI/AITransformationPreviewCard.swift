@@ -4,13 +4,26 @@ import SwiftUI
 struct AITransformationPreviewCard: View {
     let transformation: AITransformation
     let onTap: () -> Void
+    let onCopy: () -> Void
 
     @State private var isHovering = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(transformation.promptName)
-                .font(.title3.weight(.semibold))
+            HStack(alignment: .top, spacing: 12) {
+                Text(transformation.promptName)
+                    .font(.title3.weight(.semibold))
+
+                Spacer(minLength: 0)
+
+                Button {
+                    onCopy()
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.plain)
+                .labelStyle(.iconOnly)
+            }
 
             Markdown(transformation.resultText)
                 .frame(maxWidth: .infinity, alignment: .leading)

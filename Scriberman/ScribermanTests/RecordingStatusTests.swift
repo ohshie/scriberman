@@ -388,6 +388,20 @@ struct RecordingSessionTests {
         #expect(source.contains("SkeletonView()"))
         #expect(source.contains("Add prompts in Settings to enable transformations."))
         #expect(source.contains("40,000"))
+        #expect(source.contains("NSPasteboard.general"))
+        #expect(source.contains("latestTransformation.resultText"))
+    }
+
+    
+    
+    @Test
+    func testAITransformationPreviewCardIncludesCopyButtonContract() throws {
+        let source = try sourceForFile(named: "AITransformationPreviewCard.swift")
+
+        #expect(source.contains("let onCopy: () -> Void"))
+        #expect(source.contains("Label(\"Copy\", systemImage: \"doc.on.doc\")"))
+        #expect(source.contains(".buttonStyle(.plain)"))
+        #expect(source.contains(".labelStyle(.iconOnly)"))
     }
 
     

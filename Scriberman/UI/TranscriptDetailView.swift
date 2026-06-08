@@ -168,10 +168,18 @@ struct TranscriptDetailView: View {
                 SkeletonView()
                     .frame(height: 180)
             } else if let latestTransformation {
-                AITransformationPreviewCard(transformation: latestTransformation) {
-                    guard viewModel.availableTransformations.isEmpty == false else { return }
-                    onOpenTransformation?(latestTransformation.id)
-                }
+                AITransformationPreviewCard(
+                    transformation: latestTransformation,
+                    onTap: {
+                        guard viewModel.availableTransformations.isEmpty == false else { return }
+                        onOpenTransformation?(latestTransformation.id)
+                    },
+                    onCopy: {
+                        let pasteboard = NSPasteboard.general
+                        pasteboard.clearContents()
+                        pasteboard.setString(latestTransformation.resultText, forType: .string)
+                    }
+                )
             }
         }
     }
