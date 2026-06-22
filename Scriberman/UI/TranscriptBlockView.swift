@@ -3,6 +3,8 @@ import SwiftUI
 struct TranscriptBlockView: View {
     let block: TranscriptBlock
     let isActive: Bool
+    let searchRanges: [Range<String.Index>]
+    let activeSearchRange: Range<String.Index>?
     let onTap: () -> Void
     var onSpeakerRename: ((String) -> Void)? = nil
 
@@ -12,11 +14,15 @@ struct TranscriptBlockView: View {
     init(
         block: TranscriptBlock,
         isActive: Bool = false,
+        searchRanges: [Range<String.Index>] = [],
+        activeSearchRange: Range<String.Index>? = nil,
         onTap: @escaping () -> Void = {},
         onSpeakerRename: ((String) -> Void)? = nil
     ) {
         self.block = block
         self.isActive = isActive
+        self.searchRanges = searchRanges
+        self.activeSearchRange = activeSearchRange
         self.onTap = onTap
         self.onSpeakerRename = onSpeakerRename
     }
@@ -59,11 +65,19 @@ struct TranscriptBlockView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text(block.text)
-                .font(.body)
-                .foregroundStyle(.primary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if searchRanges.isEmpty {
+                Text(block.text)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(highlightedText())
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -86,6 +100,29 @@ struct TranscriptBlockView: View {
 
     private var speakerColor: Color {
         Color(hex: block.speaker.colorHex) ?? .accentColor
+    }
+
+    private func highlightedText() -> AttributedString {
+        var attributedText = AttributedString(block.text)
+
+        for range in searchRanges {
+            guard
+                let lowerBound = AttributedString.Index(range.lowerBound, within: attributedText),
+                let upperBound = AttributedString.Index(range.upperBound, within: attributedText)
+            else {
+                continue
+            }
+
+            attributedText[lowerBound..<upperBound].backgroundColor = .yellow.opacity(0.25)
+        }
+
+        if let activeSearchRange,
+           let lowerBound = AttributedString.Index(activeSearchRange.lowerBound, within: attributedText),
+           let upperBound = AttributedString.Index(activeSearchRange.upperBound, within: attributedText) {
+            attributedText[lowerBound..<upperBound].backgroundColor = .orange.opacity(0.45)
+        }
+
+        return attributedText
     }
 
     private func commitRename() {

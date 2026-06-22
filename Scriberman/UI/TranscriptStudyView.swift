@@ -17,6 +17,8 @@ struct TranscriptStudyView: View {
     let showRawMarkdownToggle: Bool
 
     @State private var showRawMarkdown = false
+    @State private var isSearchVisible = false
+    @State private var searchState = TranscriptSearchState()
     @State private var scrollTargetID: UUID?
 
     private let markdownRenderer = MarkdownRenderer()
@@ -56,6 +58,8 @@ struct TranscriptStudyView: View {
                             TranscriptBlockView(
                                 block: block,
                                 isActive: activeBlock?.id == block.id,
+                                searchRanges: searchState.ranges(in: block),
+                                activeSearchRange: searchState.activeRange(in: block),
                                 onTap: {
                                     Self.seekAndPlay(block: block, player: audioPlayerViewModel)
                                 },
@@ -77,6 +81,20 @@ struct TranscriptStudyView: View {
             }
             scrollTargetID = activeBlock?.id
         }
+        .onChange(of: searchState.query) {
+            searchState.update(blocks: blocks)
+        }
+        .onChange(of: searchState.currentMatch?.blockID) {
+            scrollTargetID = searchState.currentMatch?.blockID
+        }
+        .onChange(of: isSearchVisible) {
+            if isSearchVisible {
+                autoScrollEnabled = false
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .transcriptSearchRequested)) { _ in
+            presentSearch()
+        }
         .onScrollPhaseChange { _, newPhase in
             if newPhase == .interacting {
                 autoScrollEnabled = false
@@ -93,6 +111,26 @@ struct TranscriptStudyView: View {
                 .padding(.vertical, 10)
                 .background(.bar)
             }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if isSearchVisible {
+                TranscriptFindBar(searchState: searchState) {
+                    dismissSearch()
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .overlay {
+            Button("Find") {
+                presentSearch()
+            }
+            .keyboardShortcut("f", modifiers: .command)
+            .frame(width: 0, height: 0)
+            .opacity(0.001)
+            .accessibilityHidden(true)
         }
     }
 
@@ -152,7 +190,8 @@ struct TranscriptStudyView: View {
     @ToolbarContentBuilder
     static func toolbarActions(
         onCopy: @escaping () -> Void,
-        onExport: @escaping () -> Void
+        onExport: @escaping () -> Void,
+        onFind: @escaping () -> Void
     ) -> some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
@@ -166,6 +205,30 @@ struct TranscriptStudyView: View {
             } label: {
                 Label("Export", systemImage: "square.and.arrow.up")
             }
+
+            Button {
+                onFind()
+            } label: {
+                Label("Find", systemImage: "magnifyingglass")
+            }
         }
     }
+
+    private func presentSearch() {
+        withAnimation {
+            isSearchVisible = true
+        }
+    }
+
+    private func dismissSearch() {
+        searchState.query = ""
+        searchState.update(blocks: blocks)
+        withAnimation {
+            isSearchVisible = false
+        }
+    }
+}
+
+extension Notification.Name {
+    static let transcriptSearchRequested = Notification.Name("Scriberman.TranscriptSearchRequested")
 }
