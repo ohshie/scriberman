@@ -88,6 +88,18 @@ struct AppShellView: View {
         } message: {
             Text(studyActionErrorMessage ?? "Unknown error.")
         }
+        .sheet(isPresented: Binding(
+            get: { appState.sessionToTrim != nil },
+            set: { if !$0 { appState.sessionToTrim = nil } }
+        )) {
+            if let session = appState.sessionToTrim {
+                TrimEditorView(
+                    viewModel: TrimEditorViewModel(session: session, audioPlayer: audioPlayerViewModel),
+                    onDismiss: { appState.sessionToTrim = nil }
+                )
+            }
+        }
+        .focusedValue(\.trimTargetSession, selectedRecordingSession)
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else {
                 return
@@ -403,6 +415,11 @@ struct AppShellView: View {
                 }
             )
         }
+    }
+
+    private var selectedRecordingSession: RecordingSession? {
+        guard case .recording(let session) = selectedSession else { return nil }
+        return session
     }
 
     private var selectedTranscribableSession: (any TranscribableSession)? {

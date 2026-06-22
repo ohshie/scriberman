@@ -20,6 +20,13 @@ final class RecordingSession {
     var retranscriptData: Data?
     var aiTransformationsData: Data?
     var transcriptSegments: [RecordingTranscriptSegment] = []
+    var originalMixdownURL: String?
+    var originalScreenVideoURL: String?
+    var originalTranscriptData: Data?
+    var originalRetranscriptData: Data?
+    var trimEnd: Double?
+
+    var isTrimmed: Bool { originalMixdownURL != nil }
 
     var status: RecordingStatus {
         get { RecordingStatus(persistedValue: statusRawValue, errorMessage: errorMessage) }

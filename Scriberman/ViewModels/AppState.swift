@@ -23,6 +23,7 @@ final class AppState {
     private let setWorkspaceHandler: (URL) async throws -> Workspace
 
     var pendingSession: PendingSession?
+    var sessionToTrim: RecordingSession?
     private var shouldFocusPendingSessionFromMenuBar = false
     private(set) var workspace: Workspace?
     private(set) var workspaceErrorMessage: String?
