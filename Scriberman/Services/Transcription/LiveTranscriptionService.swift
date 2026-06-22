@@ -128,7 +128,7 @@ actor LiveTranscriptionService {
                 let asrConfig = ASRConfig()
                 let asr = AsrManager(config: asrConfig)
                 let asrDirectory = try ModelPathResolver().modelDirectory(for: .asrParakeetV3, in: workspace)
-                let asrModels = try await AsrModels.load(from: asrDirectory)
+                let asrModels = try await AsrModels.load(from: asrDirectory, encoderComputeUnits: .cpuAndGPU)
                 try await asr.loadModels(asrModels)
                 return asr
             },
