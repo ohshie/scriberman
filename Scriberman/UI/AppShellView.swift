@@ -374,6 +374,9 @@ struct AppShellView: View {
                 },
                 onExport: {
                     exportTranscript(for: session)
+                },
+                onFind: {
+                    NotificationCenter.default.post(name: .transcriptSearchRequested, object: nil)
                 }
             )
         }
