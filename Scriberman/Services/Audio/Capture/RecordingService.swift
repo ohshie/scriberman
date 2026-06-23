@@ -513,6 +513,25 @@ actor RecordingService: RecordingServiceProtocol {
             }
             try micStreamer.prepare(url: micFileURL, format: micTargetFormat)
 
+            if let appProcessID {
+                let appSession = AppAudioCaptureSession(
+                    fileURL: appFileURL,
+                    processID: appProcessID,
+                    onFirstBufferHostTime: { [weak self] hostTime in
+                        Task { [weak self] in
+                            await self?.captureAppStartHostTimeIfNeeded(hostTime)
+                        }
+                    },
+                    liveAudioContinuation: liveAudioStreamTuple.continuation
+                )
+                try await appSession.start()
+                self.appAudioCaptureSession = appSession
+                self.appAudioURL = appFileURL
+            } else {
+                self.appAudioCaptureSession = nil
+                self.appAudioURL = nil
+            }
+
             do {
                 try await startMicCapture(
                     deviceUID: desiredMicDeviceUID,
@@ -551,25 +570,6 @@ actor RecordingService: RecordingServiceProtocol {
             self.pendingError = nil
             self.activeCapturedAppName = capturedAppName
             self.pendingTitle = title
-
-            if let appProcessID {
-                let session = AppAudioCaptureSession(
-                    fileURL: appFileURL,
-                    processID: appProcessID,
-                    onFirstBufferHostTime: { [weak self] hostTime in
-                        Task { [weak self] in
-                            await self?.captureAppStartHostTimeIfNeeded(hostTime)
-                        }
-                    },
-                    liveAudioContinuation: liveAudioStreamTuple.continuation
-                )
-                try await session.start()
-                self.appAudioCaptureSession = session
-                self.appAudioURL = appFileURL
-            } else {
-                self.appAudioCaptureSession = nil
-                self.appAudioURL = nil
-            }
 
             if let captureDisplayID {
                 let screenCaptureSession = makeScreenCaptureSession()
