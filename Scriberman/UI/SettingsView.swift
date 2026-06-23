@@ -5,11 +5,8 @@ struct SettingsView: View {
         case general
         case menuBar
         case prompts
+        case ai
         case advanced
-    }
-
-    private enum Field: Hashable {
-        case apiKey
     }
 
     var viewModel: SettingsViewModel
@@ -17,15 +14,11 @@ struct SettingsView: View {
     @Environment(AIProviderService.self) private var aiProviderService
     @State private var selectedTab: SettingsTab = .general
     @State private var isModelsExpanded = false
-    @State private var apiKeyDraft = ""
-    @State private var lastCommittedAPIKeyDraft = ""
     @State private var promptVM = PromptManagementViewModel()
     @State private var showResetAllConfirmation = false
-    @FocusState private var focusedField: Field?
 
     var body: some View {
         @Bindable var bindableViewModel = viewModel
-        @Bindable var aiProvider = aiProviderService
 
         NavigationStack {
             TabView(selection: $selectedTab) {
@@ -69,51 +62,6 @@ struct SettingsView: View {
                                         isModelsExpanded.toggle()
                                     }
                                 }
-                        }
-                    }
-
-                    Section("AI Integration") {
-                        Toggle("Enable AI Integration", isOn: $aiProvider.isEnabled)
-
-                        Picker("Provider", selection: $aiProvider.selectedProvider) {
-                            ForEach(AIProvider.allCases, id: \.self) { provider in
-                                Text(provider.displayName).tag(provider)
-                            }
-                        }
-
-                        LabeledContent("API Key") {
-                            SecureField("sk-...", text: $apiKeyDraft)
-                                .focused($focusedField, equals: .apiKey)
-                                .onSubmit {
-                                    commitAPIKeyIfNeeded()
-                                }
-                                .onChange(of: focusedField) { _, newValue in
-                                    if newValue != .apiKey {
-                                        commitAPIKeyIfNeeded()
-                                    }
-                                }
-                        }
-
-                        Picker("Model", selection: $aiProvider.selectedModelID) {
-                            if aiProvider.availableModels.isEmpty {
-                                Text("Loading models…").tag(nil as String?)
-                            } else {
-                                ForEach(aiProvider.availableModels, id: \.self) { modelID in
-                                    Text(modelID).tag(Optional(modelID))
-                                }
-                            }
-                        }
-                        .disabled(!aiProvider.isConfigured || aiProvider.availableModels.isEmpty)
-
-                        HStack {
-                            Button("Test Connection") {
-                                Task {
-                                    await aiProvider.testConnection()
-                                }
-                            }
-                            .disabled(!aiProvider.isConfigured || aiProvider.connectionStatus == .testing)
-
-                            ConnectionStatusBadge(status: aiProvider.connectionStatus)
                         }
                     }
 
@@ -192,6 +140,12 @@ struct SettingsView: View {
                     Label("Prompts", systemImage: "text.bubble")
                 }
                 .tag(SettingsTab.prompts)
+
+                AISettingsView()
+                    .tabItem {
+                        Label("AI", systemImage: "sparkles")
+                    }
+                    .tag(SettingsTab.ai)
 
                 Form {
                     Section("Audio Processing") {
@@ -374,9 +328,9 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
         }
-        .task(id: aiProvider.isConfigured) {
-            if aiProvider.isConfigured && aiProvider.availableModels.isEmpty {
-                await aiProvider.fetchModels()
+        .task(id: aiProviderService.isConfigured) {
+            if aiProviderService.isConfigured && aiProviderService.availableModels.isEmpty {
+                await aiProviderService.fetchModels()
             }
         }
         .task {
@@ -403,15 +357,6 @@ struct SettingsView: View {
             await appState.selectWorkspace(url: url)
             await viewModel.refresh()
         }
-    }
-
-    private func commitAPIKeyIfNeeded() {
-        let normalized = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard normalized != lastCommittedAPIKeyDraft else {
-            return
-        }
-        aiProviderService.saveAPIKey(normalized)
-        lastCommittedAPIKeyDraft = normalized
     }
 
     private var promptEditorTitle: String {
