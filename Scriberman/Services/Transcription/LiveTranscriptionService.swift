@@ -384,6 +384,13 @@ actor LiveTranscriptionService {
                 }
 
                 if result.eventKind == LiveVADEventKind.speechEnd {
+                    // When VAD transitions triggered→false before the accumulation block above,
+                    // this final chunk was never added to the buffer. Include it now.
+                    if !result.isTriggered {
+                        var speechBuffer = speechAccumulationBuffers[source] ?? []
+                        speechBuffer.append(contentsOf: chunk)
+                        speechAccumulationBuffers[source] = speechBuffer
+                    }
                     if let buffer = speechAccumulationBuffers[source], !buffer.isEmpty {
                         await flushSpeechBuffer(for: source)
                     }
@@ -416,9 +423,16 @@ actor LiveTranscriptionService {
             }
         }
 
-        let startOffset = speechStartOffsets[source]
+        let capturedSamples = samples
+        let capturedOffset = speechStartOffsets[source]
             ?? max(0, currentSessionOffset(for: source) - Float(samples.count) / Self.SAMPLE_RATE)
-        await processChunk(samples: samples, source: source, currentOffset: startOffset)
+
+        // Clear before awaiting so a reentrant stop() call sees an empty buffer
+        // and does not transcribe the same audio a second time.
+        speechAccumulationBuffers[source] = []
+        speechStartOffsets[source] = nil
+
+        await processChunk(samples: capturedSamples, source: source, currentOffset: capturedOffset)
     }
 
     private func processChunk(samples: [Float], source: AudioSource, currentOffset: Float) async {
