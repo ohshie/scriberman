@@ -5,18 +5,21 @@ struct AIProviderStore {
         static let isEnabled = "aiProvider.isEnabled"
         static let selectedProvider = "aiProvider.selectedProvider"
         static let selectedModelID = "aiProvider.selectedModelID"
+        static let customModels = "aiProvider.customModels"
     }
 
     private let defaults: UserDefaults
     private(set) var isEnabled: Bool
     private(set) var selectedProvider: AIProvider
     private(set) var selectedModelID: String?
+    private(set) var customModels: [String]
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.isEnabled = defaults.object(forKey: Keys.isEnabled) as? Bool ?? false
-        self.selectedProvider = AIProvider(rawValue: defaults.string(forKey: Keys.selectedProvider) ?? "") ?? .openAI
+        self.selectedProvider = AIProvider(rawValue: defaults.string(forKey: Keys.selectedProvider) ?? "") ?? .openRouter
         self.selectedModelID = defaults.string(forKey: Keys.selectedModelID)
+        self.customModels = defaults.stringArray(forKey: Keys.customModels) ?? []
     }
 
     mutating func setIsEnabled(_ value: Bool) {
@@ -32,5 +35,10 @@ struct AIProviderStore {
     mutating func setSelectedModelID(_ value: String?) {
         selectedModelID = value
         defaults.set(value, forKey: Keys.selectedModelID)
+    }
+
+    mutating func setCustomModels(_ value: [String]) {
+        customModels = value
+        defaults.set(value, forKey: Keys.customModels)
     }
 }

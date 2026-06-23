@@ -12,7 +12,7 @@ final class AIProviderService: AIProviderServiceProtocol {
         case emptyTranscript
         case emptyPrompt
         case noOutput
-        case providerFailure
+        case providerFailure(String)
         var errorDescription: String? {
             switch self {
             case .noAPIKeyConfigured:
@@ -25,16 +25,21 @@ final class AIProviderService: AIProviderServiceProtocol {
                 return "Prompt is empty. Add prompt content before running transformation."
             case .noOutput:
                 return "The AI response did not contain text output. Try another prompt."
-            case .providerFailure:
-                return "Could not transform transcript right now. Check your key/network and try again."
+            case .providerFailure(let message):
+                return message
             }
         }
     }
 
     private enum Constants {
         static let keychainKey = "aiProvider.openAI.apiKey"
-        static let fallbackModels = ["gpt-5.2"]
+        static let predefinedModels = [
+            "openai/gpt-5.4",
+            "google/gemini-flash-latest",
+            "anthropic/claude-sonnet-latest"
+        ]
         static let transcriptWarningThreshold = 40_000
+        static let transformationFailureMessage = "Could not transform transcript right now. Check your key/network and try again."
     }
 
     var isEnabled: Bool {
@@ -58,6 +63,7 @@ final class AIProviderService: AIProviderServiceProtocol {
     }
 
     private(set) var availableModels: [String] = []
+    private(set) var customModels: [String]
     private(set) var connectionStatus: ConnectionStatus = .unknown
 
     private let keychainStore: KeychainStore
@@ -70,7 +76,9 @@ final class AIProviderService: AIProviderServiceProtocol {
     init(
         keychainStore: KeychainStore,
         store: AIProviderStore,
-        clientFactory: @escaping (String) -> OpenAI = { OpenAI(apiToken: $0) },
+        clientFactory: @escaping (String) -> OpenAI = {
+            OpenAI(configuration: .init(token: $0, host: "openrouter.ai", basePath: "/api/v1"))
+        },
         modelsFetcher: @escaping (OpenAI) async throws -> ModelsResult = { try await $0.models() },
         responseCreator: @escaping (OpenAI, CreateModelResponseQuery) async throws -> ResponseObject = {
             try await $0.responses.createResponse(query: $1)
@@ -84,6 +92,7 @@ final class AIProviderService: AIProviderServiceProtocol {
         self.isEnabled = store.isEnabled
         self.selectedProvider = store.selectedProvider
         self.selectedModelID = store.selectedModelID
+        self.customModels = store.customModels
         self.isConfigured = Self.isValidAPIKey(store: keychainStore.read(key: Constants.keychainKey))
     }
 
@@ -106,7 +115,54 @@ final class AIProviderService: AIProviderServiceProtocol {
         }
     }
 
-    func makeClient() -> OpenAI? {
+    func addCustomModel(_ modelID: String) async throws {
+        let normalizedModelID = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalizedModelID.isEmpty == false else {
+            throw AITransformationError.providerFailure("Enter a model ID.")
+        }
+        guard customModels.contains(normalizedModelID) == false else {
+            return
+        }
+        guard let client = makeClient() else {
+            connectionStatus = .failed("No API key configured")
+            throw AITransformationError.noAPIKeyConfigured
+        }
+
+        connectionStatus = .testing
+        do {
+            let query = CreateModelResponseQuery(
+                input: .textInput("Hi"),
+                model: normalizedModelID
+            )
+            _ = try await responseCreator(client, query)
+
+            customModels.append(normalizedModelID)
+            store.setCustomModels(customModels)
+            refreshAvailableModels()
+            selectedModelID = normalizedModelID
+            connectionStatus = .connected(Date())
+        } catch let error as AITransformationError {
+            connectionStatus = .failed(error.localizedDescription)
+            throw error
+        } catch {
+            let message = error.localizedDescription
+            connectionStatus = .failed(message)
+            throw AITransformationError.providerFailure(message)
+        }
+    }
+
+    func removeCustomModel(_ modelID: String) {
+        let removedSelectedModel = selectedModelID == modelID
+        customModels.removeAll { $0 == modelID }
+        store.setCustomModels(customModels)
+        refreshAvailableModels()
+
+        if removedSelectedModel {
+            selectedModelID = availableModels.first
+        }
+    }
+
+    private func makeClient() -> OpenAI? {
         guard let key = keychainStore.read(key: Constants.keychainKey), !key.isEmpty else {
             return nil
         }
@@ -127,7 +183,7 @@ final class AIProviderService: AIProviderServiceProtocol {
         do {
             let query = CreateModelResponseQuery(
                 input: .textInput("Hi"),
-                model: .gpt4_1_nano
+                model: "openai/gpt-5.4"
             )
             _ = try await responseCreator(client, query)
             connectionStatus = .connected(Date())
@@ -137,10 +193,8 @@ final class AIProviderService: AIProviderServiceProtocol {
     }
 
     func fetchModels() async {
-        availableModels = Constants.fallbackModels
-        if selectedModelID == nil || !(availableModels.contains(selectedModelID ?? "")) {
-            selectedModelID = availableModels.first
-        }
+        customModels = store.customModels
+        refreshAvailableModels()
     }
 
     func performTransformation(transcript: String, systemPrompt: String) async throws -> String {
@@ -185,7 +239,7 @@ final class AIProviderService: AIProviderServiceProtocol {
             throw error
         } catch {
             logger.error("AI transformation request error: \(error.localizedDescription, privacy: .public)")
-            throw AITransformationError.providerFailure
+            throw AITransformationError.providerFailure(Constants.transformationFailureMessage)
         }
     }
 
@@ -195,6 +249,13 @@ final class AIProviderService: AIProviderServiceProtocol {
 
     private func refreshConfigurationState() {
         isConfigured = Self.isValidAPIKey(store: keychainStore.read(key: Constants.keychainKey))
+    }
+
+    private func refreshAvailableModels() {
+        availableModels = Constants.predefinedModels + customModels
+        if selectedModelID == nil || !(availableModels.contains(selectedModelID ?? "")) {
+            selectedModelID = availableModels.first
+        }
     }
 
     private static func extractOutputText(from response: ResponseObject) -> String? {
