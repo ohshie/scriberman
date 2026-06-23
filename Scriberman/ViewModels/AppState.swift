@@ -1,3 +1,4 @@
+import CoreAudio
 import Foundation
 import Observation
 
@@ -21,6 +22,10 @@ final class AppState {
     let appAudioSettings: AppAudioSettings
     private let restoreWorkspaceHandler: () async throws -> Workspace
     private let setWorkspaceHandler: (URL) async throws -> Workspace
+
+    let dictationService: DictationService
+    let hotkeyRegistrar = HotkeyRegistrar()
+    let dictationHotkeySettings = DictationHotkeySettings()
 
     var pendingSession: PendingSession?
     var sessionToTrim: RecordingSession?
@@ -103,6 +108,7 @@ final class AppState {
         )
         self.menuBarSettings = MenuBarSettings()
         self.appAudioSettings = services.main.appAudioSettings
+        self.dictationService = DictationService(recordingService: services.background.recordingService)
         self.newSessionViewModel.menuBarSettings = self.menuBarSettings
         self.newSessionViewModel.settingsViewModel = self.settingsViewModel
     }
@@ -157,6 +163,30 @@ final class AppState {
             let recovery = backgroundServices.recoveryService
             Task { await recovery.sweepIncompleteSessions() }
         }
+
+        if requiredOnboardingStep == nil, let workspace {
+            await dictationService.prewarm(workspace: workspace)
+            wireHotkeyRegistrar()
+        }
+    }
+
+    private func wireHotkeyRegistrar() {
+        hotkeyRegistrar.onKeyDown = { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let deviceID = audioDeviceService.availableDevices.first {
+                    $0.uid == menuBarSettings.lastUsedMicUID
+                }?.id
+                await dictationService.start(deviceID: deviceID)
+            }
+        }
+        hotkeyRegistrar.onKeyUp = { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await dictationService.stop()
+            }
+        }
+        hotkeyRegistrar.register(combo: dictationHotkeySettings.combo)
     }
 
     func selectWorkspace(url: URL) async {

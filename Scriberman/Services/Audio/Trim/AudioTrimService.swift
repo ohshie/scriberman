@@ -1,7 +1,7 @@
 import AVFoundation
 import Foundation
 
-enum AudioTrimError: LocalizedError {
+enum AudioTrimError: LocalizedError, Equatable {
     case alreadyTrimmed
     case trimEndExceedsDuration
     case insufficientDiskSpace

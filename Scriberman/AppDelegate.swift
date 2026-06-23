@@ -196,6 +196,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
     }
 
+    func refreshStatusItemIcon() {
+        guard statusItem != nil else { return }
+        ensureStatusItemVisible()
+    }
+
     private func syncStatusItemVisibilityFromSettings() {
         guard let appState else {
             return
@@ -221,7 +226,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
 
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "Scriberman")
+            let isDictating = appState?.dictationService.state == .listening
+            let symbolName = isDictating ? "mic.fill" : "circle.fill"
+            let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Scriberman")
+            if isDictating {
+                image?.isTemplate = false
+                button.contentTintColor = .systemRed
+            } else {
+                image?.isTemplate = true
+                button.contentTintColor = nil
+            }
+            button.image = image
             button.imagePosition = .imageOnly
             button.appearsDisabled = false
         }
