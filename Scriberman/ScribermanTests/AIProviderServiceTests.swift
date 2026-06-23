@@ -431,12 +431,29 @@ final class AIPromptStoreTests {
 
 final class SettingsViewSourceTests {
     @Test
-    func testSettingsViewUsesTabViewWithGeneralAndPromptsTabs() throws {
+    func testSettingsViewUsesDedicatedAITab() throws {
         let source = try settingsSource()
 
         #expect(source.contains("TabView(selection: $selectedTab)"))
         #expect(source.contains("Label(\"General\", systemImage: \"gearshape\")"))
         #expect(source.contains("Label(\"Prompts\", systemImage: \"text.bubble\")"))
+        #expect(source.contains("Label(\"AI\", systemImage: \"sparkles\")"))
+        #expect(source.contains("AISettingsView()"))
+        #expect(!source.contains("Section(\"AI Integration\")"))
+    }
+
+    @Test
+    func testAISettingsViewContainsModelAndCustomModelControls() throws {
+        let source = try aiSettingsSource()
+
+        #expect(source.contains("Toggle(\"Enable AI\""))
+        #expect(source.contains("SecureField(\"sk-or-...\""))
+        #expect(source.contains("Button(\"Test Connection\")"))
+        #expect(source.contains("ConnectionStatusBadge(status: aiProvider.connectionStatus)"))
+        #expect(source.contains("Section(\"Custom Models\")"))
+        #expect(source.contains("TextField(\"provider/model-name\""))
+        #expect(source.contains("Button(\"Add Model\")"))
+        #expect(!source.contains("Picker(\"Provider\""))
     }
 
     @Test
@@ -466,6 +483,12 @@ final class SettingsViewSourceTests {
     private func promptManagementViewModelSource() throws -> String {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let fileURL = testsDirectory.appendingPathComponent("../ViewModels/PromptManagementViewModel.swift")
+        return try String(contentsOf: fileURL, encoding: .utf8)
+    }
+
+    private func aiSettingsSource() throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let fileURL = testsDirectory.appendingPathComponent("../UI/AISettingsView.swift")
         return try String(contentsOf: fileURL, encoding: .utf8)
     }
 }
