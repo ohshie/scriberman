@@ -6,6 +6,7 @@ struct SettingsView: View {
         case menuBar
         case prompts
         case ai
+        case hotkeys
         case advanced
     }
 
@@ -325,6 +326,12 @@ struct SettingsView: View {
                     Label("Advanced", systemImage: "slider.horizontal.3")
                 }
                 .tag(SettingsTab.advanced)
+
+                HotkeySettingsView()
+                    .tabItem {
+                        Label("Hotkeys", systemImage: "keyboard")
+                    }
+                    .tag(SettingsTab.hotkeys)
             }
             .navigationTitle("Settings")
         }

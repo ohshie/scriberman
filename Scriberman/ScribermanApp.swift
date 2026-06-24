@@ -30,6 +30,9 @@ struct ScribermanApp: App {
                     appDelegate.modelContext = modelContainer.mainContext
                     await appState.bootstrapWorkspace()
                 }
+                .onChange(of: appState.dictationService.state) { _, _ in
+                    appDelegate.refreshStatusItemIcon()
+                }
         }
         .modelContainer(modelContainer)
         .commands {
