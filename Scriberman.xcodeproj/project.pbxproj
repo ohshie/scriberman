@@ -38,6 +38,8 @@
 		6C07E0AE252F7D34AF16F2C2 /* BookmarkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27994768D463D730435539F3 /* BookmarkStore.swift */; };
 		71945CF7DD78D3B6644C4EC7 /* WorkspaceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DED532C3817A6E0B1536EE8C /* WorkspaceService.swift */; };
 		72E17286721922EFD739F74A /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 95199C39E12ED82DCA4C4932 /* Cocoa.framework */; };
+		790FDA9B2FEB201B006EE999 /* MockAIProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 790FDA9A2FEB201B006EE999 /* MockAIProviderService.swift */; };
+		790FDA9D2FEB2135006EE999 /* AISettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 790FDA9C2FEB2135006EE999 /* AISettingsView.swift */; };
 		7910094F2F78031A00225294 /* RecordingServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7910094E2F78031A00225294 /* RecordingServiceTests.swift */; };
 		791009512F78184900225294 /* AudioMixdownService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009502F78184900225294 /* AudioMixdownService.swift */; };
 		791009532F78184E00225294 /* AudioMixdownServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009522F78184E00225294 /* AudioMixdownServiceTests.swift */; };
@@ -233,6 +235,8 @@
 		63F7B7CE8A7FE4E0F6C5539F /* JobsViewModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JobsViewModelTests.swift; sourceTree = "<group>"; };
 		6A0DE555D53428ABBBCE123E /* TranscriptAligner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TranscriptAligner.swift; sourceTree = "<group>"; };
 		7732237A107EB96EA5FFD11B /* AudioTrimService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AudioTrimService.swift; sourceTree = "<group>"; };
+		790FDA9A2FEB201B006EE999 /* MockAIProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockAIProviderService.swift; sourceTree = "<group>"; };
+		790FDA9C2FEB2135006EE999 /* AISettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISettingsView.swift; sourceTree = "<group>"; };
 		7910094E2F78031A00225294 /* RecordingServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingServiceTests.swift; sourceTree = "<group>"; };
 		791009502F78184900225294 /* AudioMixdownService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioMixdownService.swift; sourceTree = "<group>"; };
 		791009522F78184E00225294 /* AudioMixdownServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioMixdownServiceTests.swift; sourceTree = "<group>"; };
@@ -505,6 +509,7 @@
 				533164BEA51E4E4A0EA33B0E /* MockTranscriptionService.swift */,
 				79E005DB2F76777E00D3EAD9 /* MockAudioDeviceService.swift */,
 				79DCE4242F77D0A10024DC26 /* MockPermissionService.swift */,
+				790FDA9A2FEB201B006EE999 /* MockAIProviderService.swift */,
 			);
 			path = Mocks;
 			sourceTree = "<group>";
@@ -569,6 +574,7 @@
 				79C201922F7FB6AE002A1163 /* MenuBarSettingsView.swift */,
 				B6D3426D4147C8FFE524865F /* TrimEditorView.swift */,
 				FE66D533306023D68A010DCE /* TrimFocusedValues.swift */,
+				790FDA9C2FEB2135006EE999 /* AISettingsView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -755,7 +761,6 @@
 			children = (
 				7732237A107EB96EA5FFD11B /* AudioTrimService.swift */,
 			);
-			name = Trim;
 			path = Trim;
 			sourceTree = "<group>";
 		};
@@ -1044,6 +1049,7 @@
 				593A5B1DA131934EE90B4F7D /* SettingsView.swift in Sources */,
 				7987326F2F7D8EB100570A03 /* AudioFileProber.swift in Sources */,
 				C2B2C3D4E5F60718293A4B5C /* NewSessionPanelView.swift in Sources */,
+				790FDA9D2FEB2135006EE999 /* AISettingsView.swift in Sources */,
 				A0313B452C3199D5A6118FB9 /* AppShellView.swift in Sources */,
 				79C2AA012F93E10000AA1101 /* ActiveRecordingDetailView.swift in Sources */,
 				79BE35252F7E6EF700DB542F /* TranscriptDetailViewModel.swift in Sources */,
@@ -1120,6 +1126,7 @@
 				79DCE4252F77D0A10024DC26 /* MockPermissionService.swift in Sources */,
 				C4EC45D56DEE48C672BEE45A /* TimeFormatterTests.swift in Sources */,
 				79DCE41A2F77BC3D0024DC26 /* TranscriptionServiceTests.swift in Sources */,
+				790FDA9B2FEB201B006EE999 /* MockAIProviderService.swift in Sources */,
 				79BE35292F7E741E00DB542F /* TranscriptDetailViewModelTests.swift in Sources */,
 				798732862F7DA2F900570A03 /* AudioResamplerTests.swift in Sources */,
 				791009532F78184E00225294 /* AudioMixdownServiceTests.swift in Sources */,

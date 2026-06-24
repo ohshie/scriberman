@@ -9,6 +9,8 @@ final class AIProviderServiceTests {
         case expectedFailure
     }
 
+    private static let validAPIKey = "sk-12345678901234567890"
+
     @Test
 
     func testIsConfiguredTransitionsForValidInvalidAndDeletedKey() {
@@ -62,33 +64,187 @@ final class AIProviderServiceTests {
     }
 
     @Test
-
-    func testFetchModelsFallsBackWhenFetchingThrows() async {
+    func testConnectionUsesOpenRouterConfiguredClientAndDefaultModel() async throws {
         let keychainStore = MockKeychainStore()
-        try? keychainStore.save(key: "aiProvider.openAI.apiKey", value: "sk-12345678901234567890")
+        try keychainStore.save(key: "aiProvider.openAI.apiKey", value: Self.validAPIKey)
+        var capturedConfiguration: OpenAI.Configuration?
+        var capturedQuery: CreateModelResponseQuery?
 
         let service = makeService(
             keychainStore: keychainStore,
-            modelsFetcher: { _ in throw TestError.expectedFailure }
+            responseCreator: { client, query in
+                capturedConfiguration = client.configuration
+                capturedQuery = query
+                return Self.makeResponseObject(text: "ok")
+            }
         )
 
-        await service.fetchModels()
+        await service.testConnection()
 
-        #expect(service.availableModels == ["gpt-5.2"])
+        #expect(capturedConfiguration?.host == "openrouter.ai")
+        #expect(capturedConfiguration?.basePath == "/api/v1")
+        #expect(capturedQuery?.model == "openai/gpt-5.4")
+        #expect({
+            if case .connected = service.connectionStatus { return true }
+            return false
+        }())
     }
 
     @Test
 
-    func testMakeClientReturnsNilWhenNoKeyStored() {
-        let service = makeService()
-        #expect(service.makeClient() == nil)
+    func testFetchModelsCombinesPredefinedAndCustomModelsAndResetsStaleSelection() async {
+        let defaults = makeUserDefaults(suffix: "fetchModels")
+        var store = AIProviderStore(defaults: defaults)
+        store.setCustomModels(["openai/gpt-5-mini"])
+        store.setSelectedModelID("gpt-5.2")
+
+        let service = makeService(defaults: defaults)
+
+        await service.fetchModels()
+
+        #expect(service.customModels == ["openai/gpt-5-mini"])
+        #expect(
+            service.availableModels == [
+                "openai/gpt-5.4",
+                "google/gemini-flash-latest",
+                "anthropic/claude-sonnet-latest",
+                "openai/gpt-5-mini"
+            ]
+        )
+        #expect(service.selectedModelID == "openai/gpt-5.4")
+        defaults.removePersistentDomain(forName: "AIProviderServiceTests.fetchModels")
+    }
+
+    @Test
+    func testAddCustomModelSuccessPersistsModelAndSelectsIt() async throws {
+        let defaults = makeUserDefaults(suffix: "addCustomModelSuccess")
+        let keychainStore = MockKeychainStore()
+        try keychainStore.save(key: "aiProvider.openAI.apiKey", value: Self.validAPIKey)
+        var capturedQuery: CreateModelResponseQuery?
+
+        let service = makeService(
+            keychainStore: keychainStore,
+            defaults: defaults,
+            responseCreator: { _, query in
+                capturedQuery = query
+                return Self.makeResponseObject(text: "ok")
+            }
+        )
+
+        await service.fetchModels()
+        try await service.addCustomModel("openai/gpt-5-mini")
+
+        #expect(capturedQuery?.model == "openai/gpt-5-mini")
+        #expect(service.customModels == ["openai/gpt-5-mini"])
+        #expect(service.availableModels.last == "openai/gpt-5-mini")
+        #expect(service.selectedModelID == "openai/gpt-5-mini")
+        #expect(AIProviderStore(defaults: defaults).customModels == ["openai/gpt-5-mini"])
+        defaults.removePersistentDomain(forName: "AIProviderServiceTests.addCustomModelSuccess")
+    }
+
+    @Test
+    func testAddCustomModelFailureSurfacesProviderMessageAndDoesNotPersist() async throws {
+        let defaults = makeUserDefaults(suffix: "addCustomModelFailure")
+        let keychainStore = MockKeychainStore()
+        try keychainStore.save(key: "aiProvider.openAI.apiKey", value: Self.validAPIKey)
+
+        let service = makeService(
+            keychainStore: keychainStore,
+            defaults: defaults,
+            responseCreator: { _, _ in
+                throw TestError.expectedFailure
+            }
+        )
+
+        await service.fetchModels()
+
+        do {
+            try await service.addCustomModel("openai/gpt-5-mini")
+            Issue.record("Expected addCustomModel to fail")
+        } catch {
+            #expect(error.localizedDescription == TestError.expectedFailure.localizedDescription)
+        }
+
+        #expect(service.customModels.isEmpty)
+        #expect(AIProviderStore(defaults: defaults).customModels.isEmpty)
+        #expect(service.connectionStatus == .failed(TestError.expectedFailure.localizedDescription))
+        defaults.removePersistentDomain(forName: "AIProviderServiceTests.addCustomModelFailure")
+    }
+
+    @Test
+    func testAddCustomModelDuplicateDoesNotInvokeValidationTwice() async throws {
+        let defaults = makeUserDefaults(suffix: "addCustomModelDuplicate")
+        let keychainStore = MockKeychainStore()
+        try keychainStore.save(key: "aiProvider.openAI.apiKey", value: Self.validAPIKey)
+        var responseCalls = 0
+
+        let service = makeService(
+            keychainStore: keychainStore,
+            defaults: defaults,
+            responseCreator: { _, _ in
+                responseCalls += 1
+                return Self.makeResponseObject(text: "ok")
+            }
+        )
+
+        await service.fetchModels()
+        try await service.addCustomModel("openai/gpt-5-mini")
+        try await service.addCustomModel("openai/gpt-5-mini")
+
+        #expect(responseCalls == 1)
+        #expect(service.customModels == ["openai/gpt-5-mini"])
+        defaults.removePersistentDomain(forName: "AIProviderServiceTests.addCustomModelDuplicate")
+    }
+
+    @Test
+    func testRemoveCustomModelRemovesNonSelectedModel() async {
+        let defaults = makeUserDefaults(suffix: "removeCustomModel")
+        var store = AIProviderStore(defaults: defaults)
+        store.setCustomModels(["openai/gpt-5-mini", "anthropic/claude-haiku-latest"])
+        store.setSelectedModelID("openai/gpt-5.4")
+
+        let service = makeService(defaults: defaults)
+        await service.fetchModels()
+        service.removeCustomModel("anthropic/claude-haiku-latest")
+
+        #expect(service.customModels == ["openai/gpt-5-mini"])
+        #expect(service.availableModels.contains("anthropic/claude-haiku-latest") == false)
+        #expect(service.selectedModelID == "openai/gpt-5.4")
+        defaults.removePersistentDomain(forName: "AIProviderServiceTests.removeCustomModel")
+    }
+
+    @Test
+    func testRemoveCustomModelResetsSelectedModelWhenRemovedModelWasSelected() async {
+        let defaults = makeUserDefaults(suffix: "removeSelectedCustomModel")
+        var store = AIProviderStore(defaults: defaults)
+        store.setCustomModels(["openai/gpt-5-mini"])
+        store.setSelectedModelID("openai/gpt-5-mini")
+
+        let service = makeService(defaults: defaults)
+        await service.fetchModels()
+        service.removeCustomModel("openai/gpt-5-mini")
+
+        #expect(service.customModels.isEmpty)
+        #expect(service.selectedModelID == "openai/gpt-5.4")
+        defaults.removePersistentDomain(forName: "AIProviderServiceTests.removeSelectedCustomModel")
+    }
+
+    @Test
+    func testAIProviderStoreMigratesLegacyOpenAIProviderValueToOpenRouter() {
+        let defaults = makeUserDefaults(suffix: "legacyProviderMigration")
+        defaults.set("openAI", forKey: "aiProvider.selectedProvider")
+
+        let store = AIProviderStore(defaults: defaults)
+
+        #expect(store.selectedProvider == .openRouter)
+        defaults.removePersistentDomain(forName: "AIProviderServiceTests.legacyProviderMigration")
     }
 
     @Test
 
     func testPerformTransformationBuildsExpectedRequestStructure() async {
         let keychainStore = MockKeychainStore()
-        try? keychainStore.save(key: "aiProvider.openAI.apiKey", value: "sk-12345678901234567890")
+        try? keychainStore.save(key: "aiProvider.openAI.apiKey", value: Self.validAPIKey)
         var capturedQuery: CreateModelResponseQuery?
 
         let service = makeService(
@@ -134,7 +290,9 @@ final class AIProviderServiceTests {
     private func makeService(
         keychainStore: MockKeychainStore = MockKeychainStore(),
         defaults: UserDefaults? = nil,
-        clientFactory: @escaping (String) -> OpenAI = { OpenAI(apiToken: $0) },
+        clientFactory: @escaping (String) -> OpenAI = {
+            OpenAI(configuration: .init(token: $0, host: "openrouter.ai", basePath: "/api/v1"))
+        },
         modelsFetcher: @escaping (OpenAI) async throws -> ModelsResult = { try await $0.models() },
         responseCreator: @escaping (OpenAI, CreateModelResponseQuery) async throws -> ResponseObject = {
             try await $0.responses.createResponse(query: $1)
@@ -156,6 +314,57 @@ final class AIProviderServiceTests {
         let defaults = UserDefaults(suiteName: suiteName) ?? .standard
         defaults.removePersistentDomain(forName: suiteName)
         return defaults
+    }
+
+    private static func makeResponseObject(text: String) -> ResponseObject {
+        let json = """
+        {
+          "created_at": 0,
+          "error": null,
+          "id": "resp_test",
+          "incomplete_details": null,
+          "instructions": null,
+          "max_output_tokens": null,
+          "metadata": {},
+          "model": "openai/gpt-5.4",
+          "object": "response",
+          "output": [
+            {
+              "id": "msg_test",
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "\(text)",
+                  "annotations": [],
+                  "logprobs": []
+                }
+              ],
+              "status": "completed"
+            }
+          ],
+          "parallel_tool_calls": true,
+          "previous_response_id": null,
+          "reasoning": null,
+          "status": "completed",
+          "temperature": null,
+          "text": {
+            "format": {
+              "type": "text"
+            }
+          },
+          "tool_choice": "auto",
+          "tools": [],
+          "top_p": 1.0,
+          "truncation": "disabled",
+          "usage": null,
+          "user": null
+        }
+        """
+
+        let data = Data(json.utf8)
+        return try! JSONDecoder().decode(ResponseObject.self, from: data)
     }
 }
 
@@ -222,12 +431,29 @@ final class AIPromptStoreTests {
 
 final class SettingsViewSourceTests {
     @Test
-    func testSettingsViewUsesTabViewWithGeneralAndPromptsTabs() throws {
+    func testSettingsViewUsesDedicatedAITab() throws {
         let source = try settingsSource()
 
         #expect(source.contains("TabView(selection: $selectedTab)"))
         #expect(source.contains("Label(\"General\", systemImage: \"gearshape\")"))
         #expect(source.contains("Label(\"Prompts\", systemImage: \"text.bubble\")"))
+        #expect(source.contains("Label(\"AI\", systemImage: \"sparkles\")"))
+        #expect(source.contains("AISettingsView()"))
+        #expect(!source.contains("Section(\"AI Integration\")"))
+    }
+
+    @Test
+    func testAISettingsViewContainsModelAndCustomModelControls() throws {
+        let source = try aiSettingsSource()
+
+        #expect(source.contains("Toggle(\"Enable AI\""))
+        #expect(source.contains("SecureField(\"sk-or-...\""))
+        #expect(source.contains("Button(\"Test Connection\")"))
+        #expect(source.contains("ConnectionStatusBadge(status: aiProvider.connectionStatus)"))
+        #expect(source.contains("Section(\"Custom Models\")"))
+        #expect(source.contains("TextField(\"provider/model-name\""))
+        #expect(source.contains("Button(\"Add Model\")"))
+        #expect(!source.contains("Picker(\"Provider\""))
     }
 
     @Test
@@ -257,6 +483,12 @@ final class SettingsViewSourceTests {
     private func promptManagementViewModelSource() throws -> String {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let fileURL = testsDirectory.appendingPathComponent("../ViewModels/PromptManagementViewModel.swift")
+        return try String(contentsOf: fileURL, encoding: .utf8)
+    }
+
+    private func aiSettingsSource() throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let fileURL = testsDirectory.appendingPathComponent("../UI/AISettingsView.swift")
         return try String(contentsOf: fileURL, encoding: .utf8)
     }
 }

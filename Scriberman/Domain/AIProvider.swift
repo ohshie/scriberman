@@ -1,12 +1,12 @@
 import Foundation
 
 enum AIProvider: String, CaseIterable, Equatable {
-    case openAI
+    case openRouter
 
     var displayName: String {
         switch self {
-        case .openAI:
-            return "ChatGPT"
+        case .openRouter:
+            return "OpenRouter"
         }
     }
 }
