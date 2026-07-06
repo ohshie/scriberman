@@ -88,9 +88,11 @@ actor LiveTranscriptionService {
     private var vadInputRemainders: [AudioSource: [Float]] = [:]
     private var totalSamplesProcessed: [AudioSource: Int] = [:]
     private var lastFinalSegmentEndOffsets: [AudioSource: Float] = [:]
+    private var decoderStates: [AudioSource: TdtDecoderState] = [:]
 #if DEBUG
     private var processChunkHookForTesting: (@Sendable ([Float], AudioSource, Float) async -> Void)?
-    private var asrTranscribeHookForTesting: (@Sendable ([Float], AudioSource) async throws -> ASRResult)?
+    private var asrTranscribeHookForTesting: (@Sendable ([Float], AudioSource, inout TdtDecoderState) async throws -> ASRResult)?
+    private var decoderStateFactoryForTesting: (@Sendable (AsrManager) async throws -> TdtDecoderState)?
 #endif
 
     // Authoritative record of all final segments accumulated this session
@@ -241,6 +243,7 @@ actor LiveTranscriptionService {
         vadInputRemainders.removeAll()
         totalSamplesProcessed.removeAll()
         lastFinalSegmentEndOffsets.removeAll()
+        decoderStates.removeAll()
         collectedFinalSegments.removeAll()
         sessionSpeakers.removeAll()
 
@@ -322,6 +325,7 @@ actor LiveTranscriptionService {
         vadInputRemainders.removeAll()
         totalSamplesProcessed.removeAll()
         lastFinalSegmentEndOffsets.removeAll()
+        decoderStates.removeAll()
         asrManager = nil
         diarizer = nil
         vadManager = nil
@@ -482,18 +486,26 @@ actor LiveTranscriptionService {
 
             logger.info("🎤 Transcribing \(source.rawValue) chunk (\(samples.count) samples = \(String(format: "%.1f", chunkDuration))s, max amplitude: \(String(format: "%.6f", maxAmplitude)))...")
 
-            #if DEBUG
+            var decoderState: TdtDecoderState
+            do {
+                decoderState = try await decoderStateForSource(source, asrManager: asrManager)
+            } catch {
+                logger.error("Failed to create/reuse decoder state for \(source.rawValue): \(error). Falling back to fresh state for this chunk.")
+                decoderStates[source] = nil
+                decoderState = try TdtDecoderState()
+            }
+
+#if DEBUG
             let asrResult: ASRResult
             if let asrTranscribeHookForTesting {
-                asrResult = try await asrTranscribeHookForTesting(samples, source)
+                asrResult = try await asrTranscribeHookForTesting(samples, source, &decoderState)
             } else {
-                var decoderState = try TdtDecoderState()
                 asrResult = try await asrManager.transcribe(samples, decoderState: &decoderState)
             }
-            #else
-            var decoderState = try TdtDecoderState()
+#else
             let asrResult = try await asrManager.transcribe(samples, decoderState: &decoderState)
-            #endif
+#endif
+            decoderStates[source] = decoderState
 
             let confidenceGate = storedConfig.asrConfidenceGate
             if confidenceGate > 0.0, asrResult.confidence < Float(confidenceGate) {
@@ -568,6 +580,21 @@ actor LiveTranscriptionService {
         }
     }
 
+    private func decoderStateForSource(_ source: AudioSource, asrManager: AsrManager) async throws -> TdtDecoderState {
+        if let decoderState = decoderStates[source] {
+            return decoderState
+        }
+
+#if DEBUG
+        if let decoderStateFactoryForTesting {
+            return try await decoderStateFactoryForTesting(asrManager)
+        }
+#endif
+
+        let decoderLayers = await asrManager.decoderLayerCount
+        return try TdtDecoderState(decoderLayers: decoderLayers)
+    }
+
     private func findLongestSpeaker(from result: DiarizationResult) -> TimedSpeakerSegment? {
         var longestSegment: TimedSpeakerSegment?
         var maxDuration: Float = 0
@@ -637,8 +664,12 @@ extension LiveTranscriptionService {
         self.asrManager = manager
     }
 
-    func setAsrTranscribeHookForTesting(_ hook: @escaping @Sendable ([Float], AudioSource) async throws -> ASRResult) {
+    func setAsrTranscribeHookForTesting(_ hook: @escaping @Sendable ([Float], AudioSource, inout TdtDecoderState) async throws -> ASRResult) {
         self.asrTranscribeHookForTesting = hook
+    }
+
+    func setDecoderStateFactoryForTesting(_ factory: @escaping @Sendable (AsrManager) async throws -> TdtDecoderState) {
+        self.decoderStateFactoryForTesting = factory
     }
 }
 #endif

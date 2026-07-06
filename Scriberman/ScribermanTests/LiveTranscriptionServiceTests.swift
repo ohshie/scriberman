@@ -1,3 +1,4 @@
+import CoreML
 import Foundation
 import FluidAudio
 import SwiftData
@@ -262,7 +263,7 @@ struct LiveTranscriptionServiceTests {
     func adjustedPreRollOffsetClampsToPreviousSegmentEnd() async throws {
         let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
         await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
-        await service.setAsrTranscribeHookForTesting { _, _ in
+        await service.setAsrTranscribeHookForTesting { _, _, _ in
             ASRResult(text: "hello", confidence: 1.0, duration: 0.1, processingTime: 0.01)
         }
 
@@ -328,6 +329,116 @@ struct LiveTranscriptionServiceTests {
         #expect(await flushProbe.callCount() == 1)
     }
 
+    @Test
+    func consecutiveSegmentsFromOneSourceReuseMutatedDecoderState() async throws {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+
+        let observedLayers = DecoderStateProbe()
+        await service.setAsrTranscribeHookForTesting { _, _, state in
+            observedLayers.record(layerCount: decoderLayerCount(in: state))
+            state = try TdtDecoderState(decoderLayers: 1)
+            return ASRResult(text: "hello", confidence: 1.0, duration: 0.1, processingTime: 0.01)
+        }
+
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        await service.process(samples: makeChunks([0.10, 0.20, 0.30, 0.40]), source: .mic, sampleRate: 16_000)
+
+        #expect(observedLayers.values() == [2, 1])
+    }
+
+    @Test
+    func decoderStatesAreIndependentAcrossSources() async throws {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+
+        let observed = DecoderStateBySourceProbe()
+        await service.setAsrTranscribeHookForTesting { _, source, state in
+            observed.record(source: source, layerCount: decoderLayerCount(in: state))
+            if source == .mic {
+                state = try TdtDecoderState(decoderLayers: 1)
+            }
+            return ASRResult(text: "hello", confidence: 1.0, duration: 0.1, processingTime: 0.01)
+        }
+
+        let micProcessor = MockVADProcessor()
+        await micProcessor.enqueue(triggered: true, event: .speechStart)
+        await micProcessor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(micProcessor)
+        await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
+
+        let appProcessor = MockVADProcessor()
+        await appProcessor.enqueue(triggered: true, event: .speechStart)
+        await appProcessor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(appProcessor)
+        await service.process(samples: makeChunks([0.30, 0.40]), source: .app, sampleRate: 16_000)
+
+        let calls = observed.calls()
+        #expect(calls == [
+            DecoderStateSourceCall(source: .mic, layerCount: 2),
+            DecoderStateSourceCall(source: .app, layerCount: 2)
+        ])
+    }
+
+    @Test
+    func decoderStatesResetAfterStop() async throws {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+
+        let observedLayers = DecoderStateProbe()
+        await service.setAsrTranscribeHookForTesting { _, _, state in
+            observedLayers.record(layerCount: decoderLayerCount(in: state))
+            state = try TdtDecoderState(decoderLayers: 1)
+            return ASRResult(text: "hello", confidence: 1.0, duration: 0.1, processingTime: 0.01)
+        }
+
+        let firstProcessor = MockVADProcessor()
+        await firstProcessor.enqueue(triggered: true, event: .speechStart)
+        await firstProcessor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(firstProcessor)
+        await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
+        _ = await service.stop()
+
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+        let secondProcessor = MockVADProcessor()
+        await secondProcessor.enqueue(triggered: true, event: .speechStart)
+        await secondProcessor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(secondProcessor)
+        await service.process(samples: makeChunks([0.30, 0.40]), source: .mic, sampleRate: 16_000)
+
+        #expect(observedLayers.values() == [2, 2])
+    }
+
+    @Test
+    func decoderStateCreationFailureFallsBackToFreshState() async throws {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+        await service.setDecoderStateFactoryForTesting { _ in
+            throw TestError.decoderStateCreationFailed
+        }
+
+        let observedLayers = DecoderStateProbe()
+        await service.setAsrTranscribeHookForTesting { _, _, state in
+            observedLayers.record(layerCount: decoderLayerCount(in: state))
+            return ASRResult(text: "hello", confidence: 1.0, duration: 0.1, processingTime: 0.01)
+        }
+
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
+
+        #expect(observedLayers.values() == [2])
+    }
+
     // MARK: - Confidence Gate Tests (task 3.2)
 
     @Test
@@ -337,7 +448,7 @@ struct LiveTranscriptionServiceTests {
         config.asrConfidenceGate = 0.30
         await service.setStoredConfigForTesting(config)
         await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
-        await service.setAsrTranscribeHookForTesting { _, _ in
+        await service.setAsrTranscribeHookForTesting { _, _, _ in
             ASRResult(text: "hello world", confidence: 0.15, duration: 1.0, processingTime: 0.1)
         }
 
@@ -367,7 +478,7 @@ struct LiveTranscriptionServiceTests {
         // Default gate is 0.0 — all results pass
         await service.setStoredConfigForTesting(.defaults)
         await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
-        await service.setAsrTranscribeHookForTesting { _, _ in
+        await service.setAsrTranscribeHookForTesting { _, _, _ in
             ASRResult(text: "hello world", confidence: 0.05, duration: 1.0, processingTime: 0.1)
         }
 
@@ -398,7 +509,7 @@ struct LiveTranscriptionServiceTests {
         config.asrConfidenceGate = 0.30
         await service.setStoredConfigForTesting(config)
         await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
-        await service.setAsrTranscribeHookForTesting { _, _ in
+        await service.setAsrTranscribeHookForTesting { _, _, _ in
             ASRResult(text: "hello world", confidence: 0.55, duration: 1.0, processingTime: 0.1)
         }
 
@@ -508,11 +619,12 @@ extension LiveTranscriptionService {
 
 private enum TestError: Error {
     case vadInitializationFailed
+    case decoderStateCreationFailed
 }
 
 private actor FlushProbe {
     private var calls = 0
-    private var lastSamples: Int?
+    private var lastSampleCount: Int?
     private var lastSampleValues: [Float]?
     private var sampleValues: [[Float]] = []
     private var lastSourceValue: Scriberman.AudioSource?
@@ -523,10 +635,10 @@ private actor FlushProbe {
         if let samples {
             lastSampleValues = samples
             sampleValues.append(samples)
-            lastSamples = samples.count
+            lastSampleCount = samples.count
         }
         if let samplesCount {
-            lastSamples = samplesCount
+            lastSampleCount = samplesCount
         }
         if let source {
             lastSourceValue = source
@@ -537,7 +649,7 @@ private actor FlushProbe {
     }
 
     func callCount() -> Int { calls }
-    func lastSamplesCount() -> Int? { lastSamples }
+    func lastSamplesCount() -> Int? { lastSampleCount }
     func lastSamples() -> [Float]? { lastSampleValues }
     func allSamples() -> [[Float]] { sampleValues }
     func lastSource() -> Scriberman.AudioSource? { lastSourceValue }
@@ -546,6 +658,55 @@ private actor FlushProbe {
 
 private func makeChunks(_ values: [Float]) -> [Float] {
     values.flatMap { Array(repeating: $0, count: 4096) }
+}
+
+private struct DecoderStateSourceCall: Equatable {
+    let source: Scriberman.AudioSource
+    let layerCount: Int?
+}
+
+private final class DecoderStateProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var layerCounts: [Int?] = []
+
+    func record(layerCount: Int?) {
+        lock.lock()
+        defer { lock.unlock() }
+        layerCounts.append(layerCount)
+    }
+
+    func values() -> [Int?] {
+        lock.lock()
+        defer { lock.unlock() }
+        return layerCounts
+    }
+}
+
+private final class DecoderStateBySourceProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedCalls: [DecoderStateSourceCall] = []
+
+    func record(source: Scriberman.AudioSource, layerCount: Int?) {
+        lock.lock()
+        defer { lock.unlock() }
+        recordedCalls.append(DecoderStateSourceCall(source: source, layerCount: layerCount))
+    }
+
+    func calls() -> [DecoderStateSourceCall] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedCalls
+    }
+}
+
+private func decoderLayerCount(in state: TdtDecoderState) -> Int? {
+    let mirror = Mirror(reflecting: state)
+    guard let hiddenState = mirror.children.first(where: { $0.label == "hiddenState" })?.value as? MLMultiArray,
+          let firstDimension = hiddenState.shape.first
+    else {
+        return nil
+    }
+    return firstDimension.intValue
 }
 
 private actor MockVADProcessor: LiveVADStreamingProcessing {
