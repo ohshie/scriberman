@@ -177,9 +177,121 @@ struct LiveTranscriptionServiceTests {
         await service.process(samples: Array(repeating: 0.1, count: 8192), source: .mic, sampleRate: 16_000)
 
         #expect(await flushProbe.callCount() == 1)
-        #expect(await flushProbe.lastSamplesCount() == 4096)
+        #expect(await flushProbe.lastSamplesCount() == 8192)
         #expect(await flushProbe.lastOffset() == 0)
         #expect(await flushProbe.lastSource() == .mic)
+    }
+
+    @Test
+    func preRollAudioIsIncludedAtSpeechStart() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: false, event: nil)
+        await processor.enqueue(triggered: false, event: nil)
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        let flushProbe = FlushProbe()
+        await service.setProcessChunkHookForTesting { samples, source, offset in
+            await flushProbe.recordCall(samples: samples, source: source, offset: offset)
+        }
+
+        let samples = makeChunks([0.01, 0.02, 0.30, 0.40])
+        await service.process(samples: samples, source: .mic, sampleRate: 16_000)
+
+        let flushedSamples = await flushProbe.lastSamples()
+        #expect(await flushProbe.callCount() == 1)
+        #expect(flushedSamples?.count == 16_384)
+        #expect(flushedSamples?.first == 0.01)
+        #expect(flushedSamples?[4096] == 0.02)
+        #expect(flushedSamples?[8192] == 0.30)
+        #expect(await flushProbe.lastOffset() == 0)
+    }
+
+    @Test
+    func partialPreRollAtSessionStartIsClampedToZero() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: false, event: nil)
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        let flushProbe = FlushProbe()
+        await service.setProcessChunkHookForTesting { samples, source, offset in
+            await flushProbe.recordCall(samples: samples, source: source, offset: offset)
+        }
+
+        await service.process(samples: makeChunks([0.10, 0.20, 0.30]), source: .mic, sampleRate: 16_000)
+
+        #expect(await flushProbe.callCount() == 1)
+        #expect(await flushProbe.lastSamplesCount() == 12_288)
+        #expect(await flushProbe.lastOffset() == 0)
+    }
+
+    @Test
+    func preRollBufferResetsBetweenUtterances() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: false, event: nil)
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await processor.enqueue(triggered: false, event: nil)
+        await processor.enqueue(triggered: false, event: nil)
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        let flushProbe = FlushProbe()
+        await service.setProcessChunkHookForTesting { samples, _, _ in
+            await flushProbe.recordCall(samples: samples)
+        }
+
+        await service.process(samples: makeChunks([0.01, 0.11, 0.12, 0.21, 0.22, 0.31, 0.32]), source: .mic, sampleRate: 16_000)
+
+        let allSamples = await flushProbe.allSamples()
+        #expect(allSamples.count == 2)
+        #expect(allSamples.last?.count == 16_384)
+        #expect(allSamples.last?.first == 0.21)
+        #expect(allSamples.last?[4096] == 0.22)
+        #expect(allSamples.last?[8192] == 0.31)
+    }
+
+    @Test
+    func adjustedPreRollOffsetClampsToPreviousSegmentEnd() async throws {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+        await service.setAsrTranscribeHookForTesting { _, _ in
+            ASRResult(text: "hello", confidence: 1.0, duration: 0.1, processingTime: 0.01)
+        }
+
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await processor.enqueue(triggered: false, event: nil)
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        var receivedSegments: [TranscriptSegment] = []
+        let collectTask = Task {
+            for await segment in await service.transcriptStream {
+                receivedSegments.append(segment)
+                if receivedSegments.count == 2 {
+                    break
+                }
+            }
+        }
+
+        await service.process(samples: makeChunks([0.10, 0.11, 0.20, 0.30, 0.31]), source: .mic, sampleRate: 16_000)
+        try? await Task.sleep(for: .milliseconds(50))
+        collectTask.cancel()
+
+        let first = try #require(receivedSegments.first)
+        let second = try #require(receivedSegments.dropFirst().first)
+        #expect(abs(first.endTime - 0.512) < 0.001)
+        #expect(abs(second.startTime - first.endTime) < 0.001)
     }
 
     @Test
@@ -401,11 +513,18 @@ private enum TestError: Error {
 private actor FlushProbe {
     private var calls = 0
     private var lastSamples: Int?
+    private var lastSampleValues: [Float]?
+    private var sampleValues: [[Float]] = []
     private var lastSourceValue: Scriberman.AudioSource?
     private var lastOffsetValue: Float?
 
-    func recordCall(samplesCount: Int? = nil, source: Scriberman.AudioSource? = nil, offset: Float? = nil) {
+    func recordCall(samples: [Float]? = nil, samplesCount: Int? = nil, source: Scriberman.AudioSource? = nil, offset: Float? = nil) {
         calls += 1
+        if let samples {
+            lastSampleValues = samples
+            sampleValues.append(samples)
+            lastSamples = samples.count
+        }
         if let samplesCount {
             lastSamples = samplesCount
         }
@@ -419,8 +538,14 @@ private actor FlushProbe {
 
     func callCount() -> Int { calls }
     func lastSamplesCount() -> Int? { lastSamples }
+    func lastSamples() -> [Float]? { lastSampleValues }
+    func allSamples() -> [[Float]] { sampleValues }
     func lastSource() -> Scriberman.AudioSource? { lastSourceValue }
     func lastOffset() -> Float? { lastOffsetValue }
+}
+
+private func makeChunks(_ values: [Float]) -> [Float] {
+    values.flatMap { Array(repeating: $0, count: 4096) }
 }
 
 private actor MockVADProcessor: LiveVADStreamingProcessing {

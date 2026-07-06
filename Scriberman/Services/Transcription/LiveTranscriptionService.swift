@@ -73,6 +73,7 @@ actor LiveTranscriptionService {
     // Audio processing constants (task 2.1: 5.0 → 10.0)
     private static let SAMPLE_RATE: Float = 16000
     private static let VAD_CHUNK_SIZE = 4096
+    private static let PRE_ROLL_CHUNK_COUNT = 2
     private static let MAX_SPEECH_SAMPLES = 480_000
 
     // Pipeline configuration (set at start() time, used throughout session)
@@ -83,8 +84,10 @@ actor LiveTranscriptionService {
     private var vadStreamStates: [AudioSource: VadStreamState] = [:]
     private var speechAccumulationBuffers: [AudioSource: [Float]] = [:]
     private var speechStartOffsets: [AudioSource: Float] = [:]
+    private var recentPreRollChunks: [AudioSource: [[Float]]] = [:]
     private var vadInputRemainders: [AudioSource: [Float]] = [:]
     private var totalSamplesProcessed: [AudioSource: Int] = [:]
+    private var lastFinalSegmentEndOffsets: [AudioSource: Float] = [:]
 #if DEBUG
     private var processChunkHookForTesting: (@Sendable ([Float], AudioSource, Float) async -> Void)?
     private var asrTranscribeHookForTesting: (@Sendable ([Float], AudioSource) async throws -> ASRResult)?
@@ -234,8 +237,10 @@ actor LiveTranscriptionService {
         vadStreamStates.removeAll()
         speechAccumulationBuffers.removeAll()
         speechStartOffsets.removeAll()
+        recentPreRollChunks.removeAll()
         vadInputRemainders.removeAll()
         totalSamplesProcessed.removeAll()
+        lastFinalSegmentEndOffsets.removeAll()
         collectedFinalSegments.removeAll()
         sessionSpeakers.removeAll()
 
@@ -273,6 +278,7 @@ actor LiveTranscriptionService {
             await flushSpeechBuffer(for: source)
             speechAccumulationBuffers[source] = []
             speechStartOffsets[source] = nil
+            recentPreRollChunks[source] = []
         }
 
         // tasks 3.5, 3.6: Speaker enrollment at session end
@@ -312,8 +318,10 @@ actor LiveTranscriptionService {
         vadStreamStates.removeAll()
         speechAccumulationBuffers.removeAll()
         speechStartOffsets.removeAll()
+        recentPreRollChunks.removeAll()
         vadInputRemainders.removeAll()
         totalSamplesProcessed.removeAll()
+        lastFinalSegmentEndOffsets.removeAll()
         asrManager = nil
         diarizer = nil
         vadManager = nil
@@ -365,10 +373,17 @@ actor LiveTranscriptionService {
                 vadStreamStates[source] = result.state
 
                 if result.eventKind == LiveVADEventKind.speechStart {
-                    speechStartOffsets[source] = Float(currentChunkStartSamples) / Self.SAMPLE_RATE
-                    if speechAccumulationBuffers[source] == nil {
-                        speechAccumulationBuffers[source] = []
-                    }
+                    let preRollChunks = recentPreRollChunks[source] ?? []
+                    let preRollSamples = preRollChunks.flatMap { $0 }
+                    let prependedSampleCount = preRollSamples.count
+                    let triggerOffset = Float(currentChunkStartSamples) / Self.SAMPLE_RATE
+                    let adjustedOffset = max(
+                        lastFinalSegmentEndOffsets[source] ?? 0,
+                        max(0, triggerOffset - Float(prependedSampleCount) / Self.SAMPLE_RATE)
+                    )
+                    speechStartOffsets[source] = adjustedOffset
+                    speechAccumulationBuffers[source] = preRollSamples
+                    recentPreRollChunks[source] = []
                 }
 
                 if result.isTriggered {
@@ -380,6 +395,7 @@ actor LiveTranscriptionService {
                         await flushSpeechBuffer(for: source)
                         speechAccumulationBuffers[source] = []
                         speechStartOffsets[source] = nil
+                        recentPreRollChunks[source] = []
                     }
                 }
 
@@ -396,6 +412,11 @@ actor LiveTranscriptionService {
                     }
                     speechAccumulationBuffers[source] = []
                     speechStartOffsets[source] = nil
+                    recentPreRollChunks[source] = []
+                }
+
+                if !result.isTriggered && result.eventKind != LiveVADEventKind.speechEnd {
+                    appendPreRollChunk(chunk, for: source)
                 }
 
                 currentChunkStartSamples += chunkSize
@@ -431,8 +452,18 @@ actor LiveTranscriptionService {
         // and does not transcribe the same audio a second time.
         speechAccumulationBuffers[source] = []
         speechStartOffsets[source] = nil
+        recentPreRollChunks[source] = []
 
         await processChunk(samples: capturedSamples, source: source, currentOffset: capturedOffset)
+    }
+
+    private func appendPreRollChunk(_ chunk: [Float], for source: AudioSource) {
+        var chunks = recentPreRollChunks[source] ?? []
+        chunks.append(chunk)
+        if chunks.count > Self.PRE_ROLL_CHUNK_COUNT {
+            chunks.removeFirst(chunks.count - Self.PRE_ROLL_CHUNK_COUNT)
+        }
+        recentPreRollChunks[source] = chunks
     }
 
     private func processChunk(samples: [Float], source: AudioSource, currentOffset: Float) async {
@@ -529,6 +560,7 @@ actor LiveTranscriptionService {
             )
 
             collectedFinalSegments.append(segment)
+            lastFinalSegmentEndOffsets[source] = segment.endTime
             resultsTuple.continuation.yield(segment)
 
         } catch {
