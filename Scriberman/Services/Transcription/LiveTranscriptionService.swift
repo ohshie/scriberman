@@ -344,7 +344,7 @@ actor LiveTranscriptionService {
         // Finalize LS-EEND sessions first so tentative timeline segments are
         // flushed before the pending speech buffers below query them for
         // final speaker attribution.
-        for (source, lseendDiarizer) in lseendDiarizers {
+        for (source, lseendDiarizer) in lseendDiarizers where lseendDiarizer.isAvailable {
             do {
                 try lseendDiarizer.finalizeSession()
             } catch {
@@ -553,7 +553,7 @@ actor LiveTranscriptionService {
     // MARK: - Streaming Turn Diarization (LS-EEND)
 
     private func feedTurnDiarizer(_ samples: [Float], for source: AudioSource) {
-        guard let lseendDiarizer = lseendDiarizers[source] else { return }
+        guard let lseendDiarizer = lseendDiarizers[source], lseendDiarizer.isAvailable else { return }
         // Once desynchronized there is no way to realign the timeline with
         // the sample clock mid-session; stop paying for inference.
         guard lseendUnreliableFromOffsets[source] == nil else { return }
