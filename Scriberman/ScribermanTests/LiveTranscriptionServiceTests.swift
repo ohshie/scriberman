@@ -604,6 +604,330 @@ struct LiveTranscriptionServiceTests {
 
         #expect(await flushProbe.callCount() == 1)
     }
+
+    // MARK: - LS-EEND Turn Attribution (task 5.1)
+
+    /// Timeline built from raw frame predictions (0.1s frames, pass-through
+    /// thresholding) — the same structure a live LS-EEND session produces.
+    private func makeTurnTimeline(frameSpeakers: [Int?], numSpeakers: Int) throws -> DiarizerTimeline {
+        var predictions: [Float] = []
+        for active in frameSpeakers {
+            for speaker in 0..<numSpeakers {
+                predictions.append(speaker == active ? 1.0 : 0.0)
+            }
+        }
+        return try DiarizerTimeline(
+            allPredictions: predictions,
+            config: .default(numSpeakers: numSpeakers, frameDurationSeconds: 0.1)
+        )
+    }
+
+    private func makeAttributionService(
+        text: String,
+        timeline: DiarizerTimeline?
+    ) async -> LiveTranscriptionService {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        await service.setStoredConfigForTesting(.defaults)
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+        await service.setAsrTranscribeHookForTesting { samples, _, _ in
+            ASRResult(
+                text: text,
+                confidence: 1.0,
+                duration: TimeInterval(samples.count) / 16_000,
+                processingTime: 0.1
+            )
+        }
+
+        let lseend = LSEENDDiarizer()
+        if let timeline {
+            lseend.timeline = timeline
+        }
+        await service.setLSEENDDiarizersForTesting([.mic: lseend])
+        return service
+    }
+
+    private func collectSegments(
+        from service: LiveTranscriptionService,
+        samples: [Float],
+        vadStates: [(Bool, LiveVADEventKind?)]
+    ) async -> [TranscriptSegment] {
+        let processor = MockVADProcessor()
+        for (triggered, event) in vadStates {
+            await processor.enqueue(triggered: triggered, event: event)
+        }
+        await service.setVADProcessorForTesting(processor)
+
+        var receivedSegments: [TranscriptSegment] = []
+        let collectTask = Task {
+            for await segment in await service.transcriptStream {
+                receivedSegments.append(segment)
+            }
+        }
+
+        await service.process(samples: samples, source: .mic, sampleRate: 16_000)
+        try? await Task.sleep(for: .milliseconds(50))
+        collectTask.cancel()
+        return receivedSegments
+    }
+
+    @Test
+    func emptyTimelineFallsBackToSingleEmbeddingAttributedSegment() async {
+        let service = await makeAttributionService(text: "hello world", timeline: nil)
+
+        let segments = await collectSegments(
+            from: service,
+            samples: Array(repeating: Float(0.1), count: 8192),
+            vadStates: [(true, .speechStart), (false, .speechEnd)]
+        )
+
+        #expect(segments.count == 1)
+        #expect(segments.first?.speakerId == "unknown")
+        #expect(segments.first?.text == "hello world")
+        #expect(segments.first?.startTime == 0)
+    }
+
+    @Test
+    func speakerTurnInsideBufferSplitsSegmentsAtRunBoundary() async throws {
+        // 26 frames of 0.1s: speaker 0 for 1.3s, then speaker 1 for 1.3s.
+        let timeline = try makeTurnTimeline(
+            frameSpeakers: Array(repeating: 0, count: 13) + Array(repeating: 1, count: 13),
+            numSpeakers: 2
+        )
+        let service = await makeAttributionService(text: "one two three four", timeline: timeline)
+
+        // 10 VAD chunks of 4096 samples => one flushed 2.56s buffer at offset 0.
+        var vadStates: [(Bool, LiveVADEventKind?)] = [(true, .speechStart)]
+        vadStates.append(contentsOf: Array(repeating: (true, nil), count: 8))
+        vadStates.append((false, .speechEnd))
+
+        let segments = await collectSegments(
+            from: service,
+            samples: Array(repeating: Float(0.1), count: 40_960),
+            vadStates: vadStates
+        )
+
+        #expect(segments.count == 2)
+        let first = try #require(segments.first)
+        let second = try #require(segments.last)
+
+        #expect(first.speakerId == "speaker_mic_0")
+        #expect(first.text == "one two")
+        #expect(abs(first.startTime - 0) < 0.01)
+        #expect(abs(first.endTime - 1.3) < 0.05)
+
+        #expect(second.speakerId == "speaker_mic_1")
+        #expect(second.text == "three four")
+        #expect(second.startTime == first.endTime)
+        #expect(abs(second.endTime - 2.56) < 0.01)
+    }
+
+    @Test
+    func subSecondInterjectionDoesNotSplitSegment() async throws {
+        // Speaker 0 holds 2.1s; speaker 1 interjects for the final 0.5s only.
+        let timeline = try makeTurnTimeline(
+            frameSpeakers: Array(repeating: 0, count: 21) + Array(repeating: 1, count: 5),
+            numSpeakers: 2
+        )
+        let service = await makeAttributionService(text: "one two three four", timeline: timeline)
+
+        var vadStates: [(Bool, LiveVADEventKind?)] = [(true, .speechStart)]
+        vadStates.append(contentsOf: Array(repeating: (true, nil), count: 8))
+        vadStates.append((false, .speechEnd))
+
+        let segments = await collectSegments(
+            from: service,
+            samples: Array(repeating: Float(0.1), count: 40_960),
+            vadStates: vadStates
+        )
+
+        #expect(segments.count == 1)
+        #expect(segments.first?.speakerId == "speaker_mic_0")
+        #expect(segments.first?.text == "one two three four")
+    }
+
+    @Test
+    func boundIdentityRecordLabelsSegmentsWithProfileName() async throws {
+        let timeline = try makeTurnTimeline(
+            frameSpeakers: Array(repeating: 0, count: 26),
+            numSpeakers: 2
+        )
+        let service = await makeAttributionService(text: "hello there", timeline: timeline)
+
+        var identity = SessionSpeakerIdentity()
+        identity.boundProfileID = UUID()
+        identity.boundProfileName = "Alice"
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: identity)
+
+        var vadStates: [(Bool, LiveVADEventKind?)] = [(true, .speechStart)]
+        vadStates.append(contentsOf: Array(repeating: (true, nil), count: 8))
+        vadStates.append((false, .speechEnd))
+
+        let segments = await collectSegments(
+            from: service,
+            samples: Array(repeating: Float(0.1), count: 40_960),
+            vadStates: vadStates
+        )
+
+        #expect(segments.count == 1)
+        #expect(segments.first?.speakerId == "Alice")
+    }
+}
+
+@Suite
+struct LiveSpeakerTimelineTests {
+    /// 0.125s frames: exactly representable in Float, so times on the
+    /// 0.125 grid survive the segment's frame quantization untouched.
+    private func segment(_ speaker: Int, _ start: Float, _ end: Float) -> DiarizerSegment {
+        DiarizerSegment(speakerIndex: speaker, startTime: start, endTime: end, frameDurationSeconds: 0.125)
+    }
+
+    @Test
+    func speakerRunsClipsToRangeAndOrdersByTime() {
+        let runs = LiveSpeakerTimeline.speakerRuns(
+            in: [segment(1, 3.0, 6.0), segment(0, 0.0, 2.0)],
+            start: 1.0,
+            end: 5.0
+        )
+        #expect(runs == [
+            SpeakerRun(speakerIndex: 0, start: 1.0, end: 2.0),
+            SpeakerRun(speakerIndex: 1, start: 3.0, end: 5.0)
+        ])
+    }
+
+    @Test
+    func speakerRunsMergesSameSpeakerAcrossFrameGap() {
+        let runs = LiveSpeakerTimeline.speakerRuns(
+            in: [segment(0, 0.0, 1.0), segment(0, 1.125, 2.0)],
+            start: 0.0,
+            end: 2.0
+        )
+        #expect(runs == [SpeakerRun(speakerIndex: 0, start: 0.0, end: 2.0)])
+    }
+
+    @Test
+    func speakerRunsIgnoresSegmentsOutsideRange() {
+        let runs = LiveSpeakerTimeline.speakerRuns(
+            in: [segment(0, 5.0, 6.0)],
+            start: 0.0,
+            end: 2.0
+        )
+        #expect(runs.isEmpty)
+    }
+
+    @Test
+    func dominantSpeakerPicksLongestTotalOverlap() {
+        let segments = [segment(0, 0.0, 1.0), segment(1, 1.0, 3.0), segment(0, 3.0, 3.5)]
+        #expect(LiveSpeakerTimeline.dominantSpeaker(in: segments, start: 0.0, end: 3.5) == 1)
+        #expect(LiveSpeakerTimeline.dominantSpeaker(in: [], start: 0.0, end: 3.5) == nil)
+    }
+
+    @Test
+    func planPartsReturnsEmptyForEmptyRuns() {
+        #expect(LiveSegmentSplitter.planParts(runs: [], start: 0.0, end: 2.0).isEmpty)
+    }
+
+    @Test
+    func planPartsSingleSpeakerCoversWholeBuffer() {
+        let parts = LiveSegmentSplitter.planParts(
+            runs: [SpeakerRun(speakerIndex: 2, start: 0.5, end: 1.75)],
+            start: 0.0,
+            end: 2.0
+        )
+        #expect(parts == [SegmentPart(speakerIndex: 2, start: 0.0, end: 2.0)])
+    }
+
+    @Test
+    func planPartsSplitsAtGapMidpointAndTilesBuffer() {
+        let parts = LiveSegmentSplitter.planParts(
+            runs: [
+                SpeakerRun(speakerIndex: 0, start: 0.0, end: 1.25),
+                SpeakerRun(speakerIndex: 1, start: 1.5, end: 3.0)
+            ],
+            start: 0.0,
+            end: 3.0
+        )
+        #expect(parts == [
+            SegmentPart(speakerIndex: 0, start: 0.0, end: 1.375),
+            SegmentPart(speakerIndex: 1, start: 1.375, end: 3.0)
+        ])
+    }
+
+    @Test
+    func planPartsMergesSubSecondRunIntoDominant() {
+        let parts = LiveSegmentSplitter.planParts(
+            runs: [
+                SpeakerRun(speakerIndex: 0, start: 0.0, end: 2.0),
+                SpeakerRun(speakerIndex: 1, start: 2.0, end: 2.5)
+            ],
+            start: 0.0,
+            end: 2.5
+        )
+        #expect(parts == [SegmentPart(speakerIndex: 0, start: 0.0, end: 2.5)])
+    }
+
+    @Test
+    func planPartsCollapsesConsecutiveSameSpeakerRuns() {
+        let parts = LiveSegmentSplitter.planParts(
+            runs: [
+                SpeakerRun(speakerIndex: 0, start: 0.0, end: 1.25),
+                SpeakerRun(speakerIndex: 0, start: 1.5, end: 2.5),
+                SpeakerRun(speakerIndex: 1, start: 2.5, end: 4.0)
+            ],
+            start: 0.0,
+            end: 4.0
+        )
+        #expect(parts == [
+            SegmentPart(speakerIndex: 0, start: 0.0, end: 2.5),
+            SegmentPart(speakerIndex: 1, start: 2.5, end: 4.0)
+        ])
+    }
+
+    @Test
+    func apportionTextSplitsWordsProportionallyWithoutTimings() {
+        let parts = [
+            SegmentPart(speakerIndex: 0, start: 0.0, end: 2.0),
+            SegmentPart(speakerIndex: 1, start: 2.0, end: 4.0)
+        ]
+        let texts = LiveSegmentSplitter.apportionText(
+            "one two three four",
+            parts: parts,
+            bufferStart: 0.0,
+            tokenTimings: nil
+        )
+        #expect(texts == ["one two", "three four"])
+    }
+
+    @Test
+    func apportionTextUsesTokenTimingsWhenAvailable() {
+        // Proportional split would put 3 words in the first part (boundary at
+        // 75% of the buffer); token timings say only 2 tokens precede it.
+        let parts = [
+            SegmentPart(speakerIndex: 0, start: 0.0, end: 3.0),
+            SegmentPart(speakerIndex: 1, start: 3.0, end: 4.0)
+        ]
+        let timings = [
+            TokenTiming(token: "one", tokenId: 1, startTime: 0.0, endTime: 1.0, confidence: 1.0),
+            TokenTiming(token: "two", tokenId: 2, startTime: 1.0, endTime: 2.0, confidence: 1.0),
+            TokenTiming(token: "three", tokenId: 3, startTime: 3.1, endTime: 3.4, confidence: 1.0),
+            TokenTiming(token: "four", tokenId: 4, startTime: 3.4, endTime: 3.9, confidence: 1.0)
+        ]
+        let texts = LiveSegmentSplitter.apportionText(
+            "one two three four",
+            parts: parts,
+            bufferStart: 0.0,
+            tokenTimings: timings
+        )
+        #expect(texts == ["one two", "three four"])
+    }
+
+    @Test
+    func apportionTextSinglePartReturnsWholeText() {
+        let parts = [SegmentPart(speakerIndex: 0, start: 0.0, end: 2.0)]
+        #expect(
+            LiveSegmentSplitter.apportionText("hello world", parts: parts, bufferStart: 0.0, tokenTimings: nil)
+                == ["hello world"]
+        )
+    }
 }
 
 extension LiveTranscriptionService {
