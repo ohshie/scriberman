@@ -86,6 +86,10 @@ actor ModelInstallService: ModelInstallServicing {
                 let mlConfig = MLModelConfiguration()
                 mlConfig.computeUnits = .cpuAndNeuralEngine
                 _ = try await MLModel.load(contentsOf: vadModelURL, configuration: mlConfig)
+            },
+            warmUpLSEEND: {
+                let modelURL = try self.modelPathResolver.lseendModelURL(in: workspace)
+                _ = try LSEENDModel(modelURL: modelURL)
             }
         )
     }
@@ -93,7 +97,8 @@ actor ModelInstallService: ModelInstallServicing {
     private func warmUpModelsInternal(
         warmUpASR: () async throws -> Void,
         warmUpDiarizer: () async throws -> Void,
-        warmUpVAD: () async throws -> Void
+        warmUpVAD: () async throws -> Void,
+        warmUpLSEEND: () async throws -> Void
     ) async {
         do {
             try await warmUpASR()
@@ -103,6 +108,12 @@ actor ModelInstallService: ModelInstallServicing {
                 try await warmUpVAD()
             } catch {
                 NSLog("[ModelInstallService] VAD CoreML warm-up failed (non-fatal): %@", String(describing: error))
+            }
+
+            do {
+                try await warmUpLSEEND()
+            } catch {
+                NSLog("[ModelInstallService] LS-EEND CoreML warm-up failed (non-fatal): %@", String(describing: error))
             }
         } catch {
             NSLog("[ModelInstallService] CoreML warm-up failed (non-fatal): %@", String(describing: error))
@@ -201,6 +212,16 @@ actor ModelInstallService: ModelInstallServicing {
         case .offlineDiarization:
             try await DownloadUtils.downloadRepo(.diarizer, to: directory, progressHandler: progressHandler)
             try await DownloadUtils.downloadRepo(.diarizer, to: directory, variant: "offline")
+
+        case .lseendDiarization:
+            // Only the pinned variant/step is installed; downloadRepo would
+            // pull every LS-EEND variant × step size in the repo.
+            try await DownloadUtils.downloadSubdirectory(
+                .lseendDihard3,
+                subdirectory: ModelPathResolver.lseendModelRelativePath,
+                to: directory.appendingPathComponent(ModelGroup.lseendDiarization.repoFolderName, isDirectory: true),
+                progressHandler: progressHandler
+            )
         }
     }
 
@@ -231,6 +252,9 @@ actor ModelInstallService: ModelInstallServicing {
         case .offlineDiarization:
             return requiredFilesExist(in: repoURL, required: ModelNames.Diarizer.requiredModels)
                 && requiredFilesExist(in: repoURL, required: ModelNames.OfflineDiarizer.requiredModels)
+
+        case .lseendDiarization:
+            return requiredFilesExist(in: repoURL, required: [ModelPathResolver.lseendModelRelativePath])
         }
     }
 
@@ -252,12 +276,14 @@ extension ModelInstallService {
     func warmUpModelsForTesting(
         warmUpASR: () async throws -> Void,
         warmUpDiarizer: () async throws -> Void,
-        warmUpVAD: () async throws -> Void
+        warmUpVAD: () async throws -> Void,
+        warmUpLSEEND: () async throws -> Void
     ) async {
         await warmUpModelsInternal(
             warmUpASR: warmUpASR,
             warmUpDiarizer: warmUpDiarizer,
-            warmUpVAD: warmUpVAD
+            warmUpVAD: warmUpVAD,
+            warmUpLSEEND: warmUpLSEEND
         )
     }
 }

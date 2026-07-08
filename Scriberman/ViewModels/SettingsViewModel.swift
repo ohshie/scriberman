@@ -146,10 +146,11 @@ final class SettingsViewModel {
 
         let groupsInOrder: [(group: ModelGroup, label: String, start: Double)] = [
             (.asrParakeetV3, "Downloading ASR…", 0.0),
-            (.vadSilero, "Downloading VAD…", 0.8 / 3.0),
-            (.offlineDiarization, "Downloading Diarizer…", (0.8 / 3.0) * 2.0)
+            (.vadSilero, "Downloading VAD…", 0.2),
+            (.offlineDiarization, "Downloading Diarizer…", 0.4),
+            (.lseendDiarization, "Downloading Turn Diarizer…", 0.6)
         ]
-        let segmentWidth = 0.8 / 3.0
+        let segmentWidth = 0.2
         var activeGroup: ModelGroup?
 
         do {
