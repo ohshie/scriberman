@@ -1,3 +1,4 @@
+import FluidAudio
 import Foundation
 
 /// Resolves model file paths from the workspace for all FluidAudio services.
@@ -24,4 +25,33 @@ struct ModelPathResolver {
         return url
     }
 
+    // MARK: - LS-EEND
+
+    /// LS-EEND variant/step installed by `ModelInstallService` and loaded by
+    /// live transcription. Only this one variant is downloaded; the HF repo
+    /// carries 4 variants × 5 step sizes.
+    static let lseendVariant: LSEENDVariant = .dihard3
+    static let lseendStepSize: LSEENDStepSize = .step100ms
+
+    /// Path of the LS-EEND `.mlmodelc` relative to the group's repo folder,
+    /// mirroring the layout `LSEENDModel.loadFromHuggingFace` uses.
+    static var lseendModelRelativePath: String {
+        let relative = lseendVariant.fileName(forStep: lseendStepSize)
+        guard let subPath = Repo.lseendDihard3.subPath else {
+            return relative
+        }
+        return "\(subPath)/\(relative)"
+    }
+
+    /// Returns the validated LS-EEND `.mlmodelc` URL within `workspace`.
+    ///
+    /// - Throws: `TranscriptionError.missingWorkspaceModels` if the model is not installed.
+    func lseendModelURL(in workspace: Workspace) throws -> URL {
+        let directory = try modelDirectory(for: .lseendDiarization, in: workspace)
+        let url = directory.appendingPathComponent(Self.lseendModelRelativePath, isDirectory: true)
+        guard fileManager.fileExists(atPath: url.path) else {
+            throw TranscriptionError.missingWorkspaceModels([ModelGroup.lseendDiarization.repoFolderName])
+        }
+        return url
+    }
 }

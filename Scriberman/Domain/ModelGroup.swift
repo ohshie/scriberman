@@ -4,6 +4,7 @@ enum ModelGroup: String, CaseIterable, Identifiable {
     case asrParakeetV3
     case vadSilero
     case offlineDiarization
+    case lseendDiarization
 
     var id: String { rawValue }
 
@@ -15,6 +16,8 @@ enum ModelGroup: String, CaseIterable, Identifiable {
             return "VAD (Silero CoreML)"
         case .offlineDiarization:
             return "Diarization (Global Offline)"
+        case .lseendDiarization:
+            return "Turn Diarization (LS-EEND)"
         }
     }
 
@@ -26,6 +29,10 @@ enum ModelGroup: String, CaseIterable, Identifiable {
             return "silero-vad"
         case .offlineDiarization:
             return "speaker-diarization"
+        case .lseendDiarization:
+            // Matches FluidAudio's Repo.lseendDihard3.folderName so workspace
+            // layout mirrors LSEENDModel.loadFromHuggingFace's cache layout.
+            return "ls-eend/dih3"
         }
     }
 }

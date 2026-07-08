@@ -75,6 +75,32 @@ final class ModelInstallServiceTests {
     }
 
     @Test
+    func testValidateInstalledRepoLSEENDAcceptsInstalledModelFile() async throws {
+        let service = makeService()
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let repoURL = tempRoot.appendingPathComponent(ModelGroup.lseendDiarization.repoFolderName, isDirectory: true)
+        try createRequiredFiles([ModelPathResolver.lseendModelRelativePath], in: repoURL)
+
+        let isValid = try await service.validateInstalledRepoForTesting(for: .lseendDiarization, at: repoURL)
+        #expect(isValid)
+    }
+
+    @Test
+    func testValidateInstalledRepoLSEENDRejectsEmptyFolder() async throws {
+        let service = makeService()
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let repoURL = tempRoot.appendingPathComponent(ModelGroup.lseendDiarization.repoFolderName, isDirectory: true)
+        try FileManager.default.createDirectory(at: repoURL, withIntermediateDirectories: true)
+
+        let isValid = try await service.validateInstalledRepoForTesting(for: .lseendDiarization, at: repoURL)
+        #expect(!isValid)
+    }
+
+    @Test
 
     func testWarmUpModelsCompletesWithoutThrowWhenModelDirectoriesExist() async throws {
         let service = makeService()
@@ -89,16 +115,21 @@ final class ModelInstallServiceTests {
             },
             warmUpVAD: {
                 await probe.markVADAttempted()
+            },
+            warmUpLSEEND: {
+                await probe.markLSEENDAttempted()
             }
         )
 
         let didRunASR = await probe.didRunASR()
         let didRunDiarizer = await probe.didRunDiarizer()
         let didAttemptVAD = await probe.didAttemptVAD()
+        let didAttemptLSEEND = await probe.didAttemptLSEEND()
 
         #expect(didRunASR)
         #expect(didRunDiarizer)
         #expect(didAttemptVAD)
+        #expect(didAttemptLSEEND)
     }
 
     @Test
@@ -117,16 +148,54 @@ final class ModelInstallServiceTests {
             warmUpVAD: {
                 await probe.markVADAttempted()
                 throw TestWarmUpError.vadFailed
+            },
+            warmUpLSEEND: {
+                await probe.markLSEENDAttempted()
             }
         )
 
         let didRunASR = await probe.didRunASR()
         let didRunDiarizer = await probe.didRunDiarizer()
         let didAttemptVAD = await probe.didAttemptVAD()
+        let didAttemptLSEEND = await probe.didAttemptLSEEND()
 
         #expect(didRunASR)
         #expect(didRunDiarizer)
         #expect(didAttemptVAD)
+        #expect(didAttemptLSEEND)
+    }
+
+    @Test
+
+    func testWarmUpModelsLSEENDFailureIsNonFatal() async {
+        let service = makeService()
+        let probe = WarmUpProbe()
+
+        await service.warmUpModelsForTesting(
+            warmUpASR: {
+                await probe.markASR()
+            },
+            warmUpDiarizer: {
+                await probe.markDiarizer()
+            },
+            warmUpVAD: {
+                await probe.markVADAttempted()
+            },
+            warmUpLSEEND: {
+                await probe.markLSEENDAttempted()
+                throw TestWarmUpError.lseendFailed
+            }
+        )
+
+        let didRunASR = await probe.didRunASR()
+        let didRunDiarizer = await probe.didRunDiarizer()
+        let didAttemptVAD = await probe.didAttemptVAD()
+        let didAttemptLSEEND = await probe.didAttemptLSEEND()
+
+        #expect(didRunASR)
+        #expect(didRunDiarizer)
+        #expect(didAttemptVAD)
+        #expect(didAttemptLSEEND)
     }
 
     private func makeService() -> ModelInstallService {
@@ -162,17 +231,21 @@ private struct InMemoryBookmarkStore: BookmarkStore {
 
 private enum TestWarmUpError: Error {
     case vadFailed
+    case lseendFailed
 }
 
 private actor WarmUpProbe {
     private var asr = false
     private var diarizer = false
     private var vad = false
+    private var lseend = false
 
     func markASR() { asr = true }
     func markDiarizer() { diarizer = true }
     func markVADAttempted() { vad = true }
+    func markLSEENDAttempted() { lseend = true }
     func didRunASR() -> Bool { asr }
     func didRunDiarizer() -> Bool { diarizer }
     func didAttemptVAD() -> Bool { vad }
+    func didAttemptLSEEND() -> Bool { lseend }
 }
