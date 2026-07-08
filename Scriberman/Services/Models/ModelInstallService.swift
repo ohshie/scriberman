@@ -215,7 +215,10 @@ actor ModelInstallService: ModelInstallServicing {
     private func validateInstalledRepo(for group: ModelGroup, at repoURL: URL) throws -> Bool {
         switch group {
         case .asrParakeetV3:
-            let modelFilesPresent = requiredFilesExist(in: repoURL, required: ModelNames.ASR.requiredModels)
+            let modelFilesPresent = requiredFilesExist(
+                in: repoURL,
+                required: ModelNames.ASR.requiredModelsV3(precision: .int8)
+            )
             let vocabName = ModelNames.ASR.vocabulary(for: .parakeetV3)
             let vocabPresent = fileManager.fileExists(
                 atPath: repoURL.appendingPathComponent(vocabName, isDirectory: false).path

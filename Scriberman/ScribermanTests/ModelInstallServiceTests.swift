@@ -5,6 +5,34 @@ import Testing
 
 final class ModelInstallServiceTests {
     @Test
+    func testValidateInstalledRepoASRParakeetV3UsesV3RequiredModels() async throws {
+        let service = makeService()
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let repoURL = tempRoot.appendingPathComponent(ModelGroup.asrParakeetV3.repoFolderName, isDirectory: true)
+        try createRequiredFiles(ModelNames.ASR.requiredModelsV3(precision: .int8), in: repoURL)
+        try createFile(ModelNames.ASR.vocabulary(for: .parakeetV3), in: repoURL)
+
+        let isValid = try await service.validateInstalledRepoForTesting(for: .asrParakeetV3, at: repoURL)
+        #expect(isValid)
+    }
+
+    @Test
+    func testValidateInstalledRepoASRParakeetV3RejectsLegacyJointModelSet() async throws {
+        let service = makeService()
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let repoURL = tempRoot.appendingPathComponent(ModelGroup.asrParakeetV3.repoFolderName, isDirectory: true)
+        try createRequiredFiles(ModelNames.ASR.requiredModels, in: repoURL)
+        try createFile(ModelNames.ASR.vocabulary(for: .parakeetV3), in: repoURL)
+
+        let isValid = try await service.validateInstalledRepoForTesting(for: .asrParakeetV3, at: repoURL)
+        #expect(!isValid)
+    }
+
+    @Test
     func testValidateInstalledRepoOfflineDiarizationReturnsFalseWhenOnlyStreamingFilesPresent() async throws {
         let service = makeService()
         let tempRoot = try makeTempRoot()
@@ -50,20 +78,27 @@ final class ModelInstallServiceTests {
 
     func testWarmUpModelsCompletesWithoutThrowWhenModelDirectoriesExist() async throws {
         let service = makeService()
-        let tempRoot = try makeTempRoot()
-        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let probe = WarmUpProbe()
 
-        let workspace = Workspace(rootURL: tempRoot)
-        try FileManager.default.createDirectory(
-            at: workspace.modelsURL.appendingPathComponent(ModelGroup.asrParakeetV3.repoFolderName, isDirectory: true),
-            withIntermediateDirectories: true
-        )
-        try FileManager.default.createDirectory(
-            at: workspace.modelsURL.appendingPathComponent(ModelGroup.offlineDiarization.repoFolderName, isDirectory: true),
-            withIntermediateDirectories: true
+        await service.warmUpModelsForTesting(
+            warmUpASR: {
+                await probe.markASR()
+            },
+            warmUpDiarizer: {
+                await probe.markDiarizer()
+            },
+            warmUpVAD: {
+                await probe.markVADAttempted()
+            }
         )
 
-        await service.warmUpModels(workspace: workspace)
+        let didRunASR = await probe.didRunASR()
+        let didRunDiarizer = await probe.didRunDiarizer()
+        let didAttemptVAD = await probe.didAttemptVAD()
+
+        #expect(didRunASR)
+        #expect(didRunDiarizer)
+        #expect(didAttemptVAD)
     }
 
     @Test
@@ -109,10 +144,14 @@ final class ModelInstallServiceTests {
         try fileManager.createDirectory(at: repoURL, withIntermediateDirectories: true)
 
         for relativePath in required {
-            let fileURL = repoURL.appendingPathComponent(relativePath, isDirectory: false)
-            try fileManager.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            fileManager.createFile(atPath: fileURL.path, contents: Data())
+            try createFile(relativePath, in: repoURL)
         }
+    }
+
+    private func createFile(_ relativePath: String, in repoURL: URL) throws {
+        let fileURL = repoURL.appendingPathComponent(relativePath, isDirectory: false)
+        try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        _ = FileManager.default.createFile(atPath: fileURL.path, contents: Data())
     }
 }
 

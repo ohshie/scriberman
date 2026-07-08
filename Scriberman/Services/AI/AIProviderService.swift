@@ -268,12 +268,12 @@ final class AIProviderService: AIProviderServiceProtocol {
 
             for contentItem in message.content {
                 switch contentItem {
-                case let .OutputTextContent(textContent):
+                case let .outputTextContent(textContent):
                     let text = textContent.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     if text.isEmpty == false {
                         chunks.append(text)
                     }
-                case .RefusalContent:
+                case .refusalContent:
                     continue
                 }
             }
