@@ -35,8 +35,8 @@ final class AIProviderService: AIProviderServiceProtocol {
         static let keychainKey = "aiProvider.openAI.apiKey"
         static let predefinedModels = [
             "openai/gpt-5.4",
-            "google/gemini-flash-latest",
-            "anthropic/claude-sonnet-latest"
+            "~google/gemini-flash-latest",
+            "~anthropic/claude-sonnet-latest"
         ]
         static let transcriptWarningThreshold = 40_000
         static let transformationFailureMessage = "Could not transform transcript right now. Check your key/network and try again."
