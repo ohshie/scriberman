@@ -106,8 +106,8 @@ final class AIProviderServiceTests {
         #expect(
             service.availableModels == [
                 "openai/gpt-5.4",
-                "google/gemini-flash-latest",
-                "anthropic/claude-sonnet-latest",
+                "~google/gemini-flash-latest",
+                "~anthropic/claude-sonnet-latest",
                 "openai/gpt-5-mini"
             ]
         )
