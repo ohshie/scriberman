@@ -63,6 +63,15 @@ actor LiveTranscriptionService {
     private var vadManager: VadManager?
     private var vadStreamProcessor: (any LiveVADStreamingProcessing)?
 
+    // Streaming turn diarization: one session-long LS-EEND diarizer per source
+    // (sources have independent sample clocks; a shared instance would
+    // interleave unrelated audio and corrupt its timeline).
+    private var lseendDiarizers: [AudioSource: LSEENDDiarizer] = [:]
+    // Session offset (seconds) from which a source's LS-EEND timeline is
+    // desynchronized after a feed failure; queries at or past this point
+    // return no runs so attribution falls back to embeddings.
+    private var lseendUnreliableFromOffsets: [AudioSource: Float] = [:]
+
     // Dependencies
     private let speakerEmbeddingStore: SpeakerEmbeddingStore?
     private let speakerMatcher = SpeakerMatcher()
@@ -169,6 +178,18 @@ actor LiveTranscriptionService {
                 let mlModel = try await MLModel.load(contentsOf: vadModelURL, configuration: mlConfig)
                 let manager = VadManager(config: VadConfig(defaultThreshold: Float(config.vadThreshold)), vadModel: mlModel)
                 return (manager, VadManagerStreamProcessor(manager: manager))
+            },
+            initializeLSEEND: { workspace in
+                // One LSEENDModel (MLModel access is lock-serialized inside
+                // FluidAudio) shared by per-source diarizers, each of which
+                // owns its own streaming session and timeline.
+                let modelURL = try ModelPathResolver().lseendModelURL(in: workspace)
+                let model = try LSEENDModel(modelURL: modelURL)
+                var diarizers: [AudioSource: LSEENDDiarizer] = [:]
+                for source in AudioSource.allCases {
+                    diarizers[source] = try LSEENDDiarizer(model: model)
+                }
+                return diarizers
             }
         )
     }
@@ -178,7 +199,8 @@ actor LiveTranscriptionService {
         config: LiveTranscriptionPipelineSettings,
         initializeAsr: @Sendable (Workspace) async throws -> AsrManager,
         initializeDiarizer: @Sendable (Workspace, LiveTranscriptionPipelineSettings) async throws -> DiarizerManager,
-        initializeVad: @Sendable (Workspace, LiveTranscriptionPipelineSettings) async throws -> (VadManager, any LiveVADStreamingProcessing)
+        initializeVad: @Sendable (Workspace, LiveTranscriptionPipelineSettings) async throws -> (VadManager, any LiveVADStreamingProcessing),
+        initializeLSEEND: @Sendable (Workspace) async throws -> [AudioSource: LSEENDDiarizer]
     ) async {
         storedConfig = config
 
@@ -226,6 +248,20 @@ actor LiveTranscriptionService {
             return
         }
 
+        // 4. Initialize LS-EEND turn diarizers (one per audio source)
+        do {
+            self.lseendDiarizers = try await initializeLSEEND(workspace)
+            logger.info("LS-EEND diarizers initialized from workspace models (\(self.lseendDiarizers.count) sources)")
+        } catch {
+            logger.error("LS-EEND initialization failed during prepare(): \(error). Live transcription unavailable.")
+            asrManager = nil
+            diarizer = nil
+            vadManager = nil
+            vadStreamProcessor = nil
+            lseendDiarizers.removeAll()
+            return
+        }
+
         isInitialized = true
         logger.info("LiveTranscriptionService pre-warming complete (diarizer available: \(self.diarizer != nil))")
     }
@@ -246,6 +282,10 @@ actor LiveTranscriptionService {
         decoderStates.removeAll()
         collectedFinalSegments.removeAll()
         sessionSpeakers.removeAll()
+        lseendUnreliableFromOffsets.removeAll()
+        for lseendDiarizer in lseendDiarizers.values {
+            lseendDiarizer.reset()
+        }
 
         storedConfig = config
 
@@ -263,6 +303,17 @@ actor LiveTranscriptionService {
 
     func stop() async -> [TranscriptSegment] {
         logger.info("Stopping live transcription service")
+
+        // Finalize LS-EEND sessions first so tentative timeline segments are
+        // flushed before the pending speech buffers below query them for
+        // final speaker attribution.
+        for (source, lseendDiarizer) in lseendDiarizers {
+            do {
+                try lseendDiarizer.finalizeSession()
+            } catch {
+                logger.error("LS-EEND finalize failed for \(source.rawValue) (non-fatal): \(error)")
+            }
+        }
 
         // Flush pending speech buffers before speaker enrollment.
         for source in speechAccumulationBuffers.keys {
@@ -330,6 +381,8 @@ actor LiveTranscriptionService {
         diarizer = nil
         vadManager = nil
         vadStreamProcessor = nil
+        lseendDiarizers.removeAll()
+        lseendUnreliableFromOffsets.removeAll()
         isInitialized = false
 
         return segments
@@ -345,6 +398,11 @@ actor LiveTranscriptionService {
             let resampled = try audioConverters[source]!.resample(samples, from: sampleRate)
             guard !resampled.isEmpty else { return }
             totalSamplesProcessed[source] = (totalSamplesProcessed[source] ?? 0) + resampled.count
+
+            // Feed every resampled sample (silence included, before VAD
+            // gating) so the LS-EEND timeline stays aligned with the session
+            // sample clock used for TranscriptSegment offsets.
+            feedTurnDiarizer(resampled, for: source)
 
             var combinedSamples = vadInputRemainders[source] ?? []
             combinedSamples.append(contentsOf: resampled)
@@ -432,6 +490,58 @@ actor LiveTranscriptionService {
 
     private func currentSessionOffset(for source: AudioSource) -> Float {
         Float(totalSamplesProcessed[source] ?? 0) / Self.SAMPLE_RATE
+    }
+
+    // MARK: - Streaming Turn Diarization (LS-EEND)
+
+    private func feedTurnDiarizer(_ samples: [Float], for source: AudioSource) {
+        guard let lseendDiarizer = lseendDiarizers[source] else { return }
+        // Once desynchronized there is no way to realign the timeline with
+        // the sample clock mid-session; stop paying for inference.
+        guard lseendUnreliableFromOffsets[source] == nil else { return }
+
+        do {
+            try lseendDiarizer.addAudio(samples)
+            _ = try lseendDiarizer.process()
+        } catch {
+            let failureOffset = Float((totalSamplesProcessed[source] ?? 0) - samples.count) / Self.SAMPLE_RATE
+            lseendUnreliableFromOffsets[source] = failureOffset
+            logger.error("LS-EEND feed failed for \(source.rawValue) at \(String(format: "%.1f", failureOffset))s; attribution falls back to embeddings from here: \(error)")
+        }
+    }
+
+    /// Speaker runs (finalized + tentative) from the source's LS-EEND
+    /// timeline overlapping `[start, end]` session seconds. Empty when the
+    /// diarizer is unavailable or its timeline is unreliable for the range —
+    /// callers fall back to embedding-based attribution.
+    func turnSpeakerRuns(for source: AudioSource, start: Float, end: Float) -> [SpeakerRun] {
+        guard let lseendDiarizer = lseendDiarizers[source] else { return [] }
+        if let unreliableFrom = lseendUnreliableFromOffsets[source], end > unreliableFrom {
+            return []
+        }
+        return LiveSpeakerTimeline.speakerRuns(
+            in: Self.allTimelineSegments(lseendDiarizer.timeline),
+            start: start,
+            end: end
+        )
+    }
+
+    /// Dominant LS-EEND speaker index for `[start, end]`, or nil when the
+    /// timeline has no reliable data for the range.
+    func dominantTurnSpeaker(for source: AudioSource, start: Float, end: Float) -> Int? {
+        guard let lseendDiarizer = lseendDiarizers[source] else { return nil }
+        if let unreliableFrom = lseendUnreliableFromOffsets[source], end > unreliableFrom {
+            return nil
+        }
+        return LiveSpeakerTimeline.dominantSpeaker(
+            in: Self.allTimelineSegments(lseendDiarizer.timeline),
+            start: start,
+            end: end
+        )
+    }
+
+    private static func allTimelineSegments(_ timeline: DiarizerTimeline) -> [DiarizerSegment] {
+        timeline.speakers.values.flatMap { $0.finalizedSegments + $0.tentativeSegments }
     }
 
     private func flushSpeechBuffer(for source: AudioSource) async {
@@ -637,15 +747,25 @@ extension LiveTranscriptionService {
         config: LiveTranscriptionPipelineSettings = .defaults,
         initializeAsr: @Sendable (Workspace) async throws -> AsrManager,
         initializeDiarizer: @Sendable (Workspace, LiveTranscriptionPipelineSettings) async throws -> DiarizerManager,
-        initializeVad: @Sendable (Workspace, LiveTranscriptionPipelineSettings) async throws -> (VadManager, any LiveVADStreamingProcessing)
+        initializeVad: @Sendable (Workspace, LiveTranscriptionPipelineSettings) async throws -> (VadManager, any LiveVADStreamingProcessing),
+        initializeLSEEND: @Sendable (Workspace) async throws -> [AudioSource: LSEENDDiarizer] = { _ in [:] }
     ) async {
         await prepare(
             workspace: workspace,
             config: config,
             initializeAsr: initializeAsr,
             initializeDiarizer: initializeDiarizer,
-            initializeVad: initializeVad
+            initializeVad: initializeVad,
+            initializeLSEEND: initializeLSEEND
         )
+    }
+
+    func setLSEENDDiarizersForTesting(_ diarizers: [AudioSource: LSEENDDiarizer]) {
+        self.lseendDiarizers = diarizers
+    }
+
+    func markLSEENDUnreliableForTesting(source: AudioSource, fromOffset: Float) {
+        self.lseendUnreliableFromOffsets[source] = fromOffset
     }
 
     func setVADProcessorForTesting(_ processor: any LiveVADStreamingProcessing) {

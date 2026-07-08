@@ -1,6 +1,6 @@
 import Foundation
 
-enum AudioSource: String, Codable, Equatable {
+enum AudioSource: String, Codable, Equatable, CaseIterable {
     case mic
     case app
 }
