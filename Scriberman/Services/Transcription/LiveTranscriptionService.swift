@@ -798,9 +798,15 @@ actor LiveTranscriptionService {
             logger.info("🧹 Dropped punctuation-only segment [\(source.rawValue)]: \"\(text)\"")
             return
         }
+        // User cleanup rules run after built-in sanitization (design D4);
+        // a segment emptied by the rules is dropped the same way.
+        guard let cleanedText = TranscriptCleanupEngine.apply(storedConfig.cleanupRules, to: sanitizedText) else {
+            logger.info("🧹 Dropped segment emptied by cleanup rules [\(source.rawValue)]: \"\(sanitizedText)\"")
+            return
+        }
         let segment = TranscriptSegment(
             speakerId: speakerId,
-            text: sanitizedText,
+            text: cleanedText,
             startTime: start,
             endTime: end,
             audioSource: source,

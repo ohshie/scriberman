@@ -622,6 +622,129 @@ struct LiveTranscriptionServiceTests {
         #expect(await service.lastFinalSegmentEndOffsetForTesting(source: .mic) == offsetAfterCleanSegment)
     }
 
+    // MARK: - Cleanup Rules Tests
+
+    @Test
+    func cleanupRuleRemovesWordFromEmittedSegment() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        var config = LiveTranscriptionPipelineSettings.defaults
+        config.cleanupRules = [TranscriptCleanupRule(pattern: "huh", position: .anywhere, wholeWord: true)]
+        await service.setStoredConfigForTesting(config)
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+        await service.setAsrTranscribeHookForTesting { _, _, _ in
+            ASRResult(text: "That's it, huh.", confidence: 1.0, duration: 1.0, processingTime: 0.1)
+        }
+
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        var receivedSegments: [TranscriptSegment] = []
+        let collectTask = Task {
+            for await segment in await service.transcriptStream {
+                receivedSegments.append(segment)
+            }
+        }
+
+        await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
+        try? await Task.sleep(for: .milliseconds(50))
+        collectTask.cancel()
+
+        #expect(receivedSegments.count == 1)
+        #expect(receivedSegments.first?.text == "That's it.")
+    }
+
+    @Test
+    func cleanupRuleDropsSingleWordSegment() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        var config = LiveTranscriptionPipelineSettings.defaults
+        config.cleanupRules = [TranscriptCleanupRule(pattern: "huh", position: .anywhere, wholeWord: true)]
+        await service.setStoredConfigForTesting(config)
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+        await service.setAsrTranscribeHookForTesting { _, _, _ in
+            ASRResult(text: "huh", confidence: 1.0, duration: 1.0, processingTime: 0.1)
+        }
+
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        var receivedSegments: [TranscriptSegment] = []
+        let collectTask = Task {
+            for await segment in await service.transcriptStream {
+                receivedSegments.append(segment)
+            }
+        }
+
+        await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
+        try? await Task.sleep(for: .milliseconds(50))
+        collectTask.cancel()
+
+        #expect(receivedSegments.isEmpty)
+        #expect(await service.lastFinalSegmentEndOffsetForTesting(source: .mic) == nil)
+    }
+
+    @Test
+    func cleanupRulesRunAfterBuiltInSanitizer() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        var config = LiveTranscriptionPipelineSettings.defaults
+        config.cleanupRules = [TranscriptCleanupRule(pattern: "huh", position: .anywhere, wholeWord: true)]
+        await service.setStoredConfigForTesting(config)
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+        await service.setAsrTranscribeHookForTesting { _, _, _ in
+            ASRResult(text: ". huh", confidence: 1.0, duration: 1.0, processingTime: 0.1)
+        }
+
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        var receivedSegments: [TranscriptSegment] = []
+        let collectTask = Task {
+            for await segment in await service.transcriptStream {
+                receivedSegments.append(segment)
+            }
+        }
+
+        await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
+        try? await Task.sleep(for: .milliseconds(50))
+        collectTask.cancel()
+
+        #expect(receivedSegments.isEmpty)
+    }
+
+    @Test
+    func emptyCleanupRulesLeaveEmissionUnchanged() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        await service.setStoredConfigForTesting(.defaults)
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+        await service.setAsrTranscribeHookForTesting { _, _, _ in
+            ASRResult(text: "huh, that's fine", confidence: 1.0, duration: 1.0, processingTime: 0.1)
+        }
+
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        var receivedSegments: [TranscriptSegment] = []
+        let collectTask = Task {
+            for await segment in await service.transcriptStream {
+                receivedSegments.append(segment)
+            }
+        }
+
+        await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
+        try? await Task.sleep(for: .milliseconds(50))
+        collectTask.cancel()
+
+        #expect(receivedSegments.count == 1)
+        #expect(receivedSegments.first?.text == "huh, that's fine")
+    }
+
     // MARK: - Amplitude Gate Tests (task 4.2)
 
     @Test
