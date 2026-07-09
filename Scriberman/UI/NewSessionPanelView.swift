@@ -267,7 +267,8 @@ struct NewSessionPanelView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 12)
+            .padding(.leading, 28)
+            .padding(.trailing, 12)
             .padding(.vertical, 10)
             .contentShape(Rectangle())
         }
@@ -279,45 +280,40 @@ struct NewSessionPanelView: View {
 
     private var appAudioToggleRow: some View {
         HStack(spacing: 12) {
-            Toggle(isOn: Binding(
+            Text("Record app audio")
+
+            Spacer()
+
+            Toggle("Record app audio", isOn: Binding(
                 get: { viewModel.recordAppAudio },
                 set: { viewModel.recordAppAudio = $0 }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Record app audio")
-                    if viewModel.recordAppAudio {
-                        Text(viewModel.selectedApp?.name ?? "Choose an app below")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
+            ))
             .toggleStyle(.switch)
+            .labelsHidden()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
     }
 
     private var screenRecordingToggleRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Toggle(isOn: Binding(
-                get: { viewModel.recordScreen },
-                set: { viewModel.recordScreen = $0 }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Record screen")
-                    if viewModel.recordScreen, let selectedDisplay = viewModel.selectedDisplay {
-                        Text("\(selectedDisplay.name) • \(selectedDisplay.resolutionLabel)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else if !viewModel.screenRecordingPermissionGranted {
-                        Text("Screen Recording permission required")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Record screen")
+                if !viewModel.screenRecordingPermissionGranted {
+                    Text("Screen Recording permission required")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
+
+            Spacer()
+
+            Toggle("Record screen", isOn: Binding(
+                get: { viewModel.recordScreen },
+                set: { viewModel.recordScreen = $0 }
+            ))
             .toggleStyle(.switch)
+            .labelsHidden()
             .disabled(!viewModel.screenRecordingPermissionGranted)
         }
         .padding(.horizontal, 12)
@@ -348,7 +344,8 @@ struct NewSessionPanelView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 12)
+            .padding(.leading, 28)
+            .padding(.trailing, 12)
             .padding(.vertical, 10)
             .contentShape(Rectangle())
         }
