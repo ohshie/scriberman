@@ -52,9 +52,9 @@ struct StatusTagViewTests {
     }
 
     @Test
-    func modelGroupsListContainsExactlyThreeRequiredRows() {
-        #expect(ModelGroup.allCases.count == 3)
-        #expect(ModelGroup.allCases == [.asrParakeetV3, .vadSilero, .offlineDiarization])
+    func modelGroupsListContainsExactlyFourRequiredRows() {
+        #expect(ModelGroup.allCases.count == 4)
+        #expect(ModelGroup.allCases == [.asrParakeetV3, .vadSilero, .offlineDiarization, .lseendDiarization])
     }
 
     @Test
@@ -62,6 +62,7 @@ struct StatusTagViewTests {
         #expect(ModelGroup.asrParakeetV3.title == "ASR (Parakeet v3)")
         #expect(ModelGroup.vadSilero.title == "VAD (Silero CoreML)")
         #expect(ModelGroup.offlineDiarization.title == "Diarization (Global Offline)")
+        #expect(ModelGroup.lseendDiarization.title == "Turn Diarization (LS-EEND)")
     }
 
     private func statusTagViewSource() throws -> String {
