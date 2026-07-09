@@ -243,7 +243,8 @@ struct TranscriptDetailViewModelTests {
                 {
                   "type": "output_text",
                   "text": "\(text)",
-                  "annotations": []
+                  "annotations": [],
+                  "logprobs": []
                 }
               ],
               "status": "completed"
