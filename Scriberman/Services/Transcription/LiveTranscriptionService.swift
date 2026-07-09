@@ -792,9 +792,15 @@ actor LiveTranscriptionService {
     }
 
     private func emitFinalSegment(speakerId: String, text: String, start: Float, end: Float, source: AudioSource) {
+        // Sanitize at the choke point so every emit path (turn-split parts,
+        // single-part, embedding fallback, stop() flush) is covered (design D1).
+        guard let sanitizedText = LiveSegmentSanitizer.sanitize(text) else {
+            logger.info("🧹 Dropped punctuation-only segment [\(source.rawValue)]: \"\(text)\"")
+            return
+        }
         let segment = TranscriptSegment(
             speakerId: speakerId,
-            text: text,
+            text: sanitizedText,
             startTime: start,
             endTime: end,
             audioSource: source,
@@ -889,6 +895,10 @@ extension LiveTranscriptionService {
 
     func markLSEENDUnreliableForTesting(source: AudioSource, fromOffset: Float) {
         self.lseendUnreliableFromOffsets[source] = fromOffset
+    }
+
+    func lastFinalSegmentEndOffsetForTesting(source: AudioSource) -> Float? {
+        lastFinalSegmentEndOffsets[source]
     }
 
     func setVADProcessorForTesting(_ processor: any LiveVADStreamingProcessing) {

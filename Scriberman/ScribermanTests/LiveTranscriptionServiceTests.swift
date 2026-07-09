@@ -533,6 +533,95 @@ struct LiveTranscriptionServiceTests {
         #expect(receivedSegments.count == 1)
     }
 
+    // MARK: - Segment Sanitizer Tests
+
+    @Test
+    func punctuationOnlyResultEmitsNoSegment() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        await service.setStoredConfigForTesting(.defaults)
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+        await service.setAsrTranscribeHookForTesting { _, _, _ in
+            ASRResult(text: ". ", confidence: 1.0, duration: 1.0, processingTime: 0.1)
+        }
+
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        var receivedSegments: [TranscriptSegment] = []
+        let collectTask = Task {
+            for await segment in await service.transcriptStream {
+                receivedSegments.append(segment)
+            }
+        }
+
+        await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
+        try? await Task.sleep(for: .milliseconds(50))
+        collectTask.cancel()
+
+        #expect(receivedSegments.isEmpty)
+        #expect(await service.lastFinalSegmentEndOffsetForTesting(source: .mic) == nil)
+    }
+
+    @Test
+    func leadingPunctuationStrippedBeforeEmission() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        await service.setStoredConfigForTesting(.defaults)
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+        await service.setAsrTranscribeHookForTesting { _, _, _ in
+            ASRResult(text: ". Yeah and then we should go", confidence: 1.0, duration: 1.0, processingTime: 0.1)
+        }
+
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        var receivedSegments: [TranscriptSegment] = []
+        let collectTask = Task {
+            for await segment in await service.transcriptStream {
+                receivedSegments.append(segment)
+            }
+        }
+
+        await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
+        try? await Task.sleep(for: .milliseconds(50))
+        collectTask.cancel()
+
+        #expect(receivedSegments.count == 1)
+        #expect(receivedSegments.first?.text == "Yeah and then we should go")
+    }
+
+    @Test
+    func droppedSegmentKeepsPreviousEndOffset() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        await service.setStoredConfigForTesting(.defaults)
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+
+        let texts = TextSequenceProbe(["hello there", "."])
+        await service.setAsrTranscribeHookForTesting { _, _, _ in
+            ASRResult(text: texts.next(), confidence: 1.0, duration: 1.0, processingTime: 0.1)
+        }
+
+        let firstProcessor = MockVADProcessor()
+        await firstProcessor.enqueue(triggered: true, event: .speechStart)
+        await firstProcessor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(firstProcessor)
+        await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
+
+        let offsetAfterCleanSegment = await service.lastFinalSegmentEndOffsetForTesting(source: .mic)
+        #expect(offsetAfterCleanSegment != nil)
+
+        let secondProcessor = MockVADProcessor()
+        await secondProcessor.enqueue(triggered: true, event: .speechStart)
+        await secondProcessor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(secondProcessor)
+        await service.process(samples: makeChunks([0.30, 0.40]), source: .mic, sampleRate: 16_000)
+
+        #expect(await service.lastFinalSegmentEndOffsetForTesting(source: .mic) == offsetAfterCleanSegment)
+    }
+
     // MARK: - Amplitude Gate Tests (task 4.2)
 
     @Test
@@ -987,6 +1076,21 @@ private func makeChunks(_ values: [Float]) -> [Float] {
 private struct DecoderStateSourceCall: Equatable {
     let source: Scriberman.AudioSource
     let layerCount: Int?
+}
+
+private final class TextSequenceProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var texts: [String]
+
+    init(_ texts: [String]) {
+        self.texts = texts
+    }
+
+    func next() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return texts.isEmpty ? "" : texts.removeFirst()
+    }
 }
 
 private final class DecoderStateProbe: @unchecked Sendable {
