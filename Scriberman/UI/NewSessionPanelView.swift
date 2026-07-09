@@ -327,11 +327,23 @@ struct NewSessionPanelView: View {
                         .labelStyle(.iconOnly)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.tint)
+                        .padding(.trailing, 12)
                         .transition(.opacity)
                 }
             }
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .opacity(isNameCardHovering ? 1 : 0)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(.tint.opacity(isNameCardHovering ? 0.35 : 0), lineWidth: 1.5)
+            }
+            .scaleEffect(isNameCardHovering ? 1.02 : 1.0)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .onHover { hovering in
                 isNameCardHovering = hovering
             }
