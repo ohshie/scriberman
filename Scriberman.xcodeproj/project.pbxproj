@@ -86,6 +86,7 @@
 		A7F3E1D2C4B5968700113356 /* LiveSpeakerTimeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7F3E1D2C4B5968700113355 /* LiveSpeakerTimeline.swift */; };
 		B3C4D5E6F7A8091B2C3D4E02 /* LiveSegmentSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3C4D5E6F7A8091B2C3D4E01 /* LiveSegmentSanitizer.swift */; };
 		B3C4D5E6F7A8091B2C3D4E04 /* LiveSegmentSanitizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3C4D5E6F7A8091B2C3D4E03 /* LiveSegmentSanitizerTests.swift */; };
+		D1C7A710B2C3D4E5F6A80002 /* DictationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1C7A710B2C3D4E5F6A80001 /* DictationServiceTests.swift */; };
 		7987325E2F7C191B00570A03 /* ModelPathResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987325D2F7C191B00570A03 /* ModelPathResolver.swift */; };
 		798732672F7D8B9B00570A03 /* AudioDeviceUsageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798732662F7D8B9B00570A03 /* AudioDeviceUsageStore.swift */; };
 		798732692F7D8BC600570A03 /* AudioDeviceUsageStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798732682F7D8BC600570A03 /* AudioDeviceUsageStoreTests.swift */; };
@@ -295,6 +296,7 @@
 		A7F3E1D2C4B5968700113355 /* LiveSpeakerTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSpeakerTimeline.swift; sourceTree = "<group>"; };
 		B3C4D5E6F7A8091B2C3D4E01 /* LiveSegmentSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSegmentSanitizer.swift; sourceTree = "<group>"; };
 		B3C4D5E6F7A8091B2C3D4E03 /* LiveSegmentSanitizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSegmentSanitizerTests.swift; sourceTree = "<group>"; };
+		D1C7A710B2C3D4E5F6A80001 /* DictationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationServiceTests.swift; sourceTree = "<group>"; };
 		7987325D2F7C191B00570A03 /* ModelPathResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelPathResolver.swift; sourceTree = "<group>"; };
 		798732662F7D8B9B00570A03 /* AudioDeviceUsageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDeviceUsageStore.swift; sourceTree = "<group>"; };
 		798732682F7D8BC600570A03 /* AudioDeviceUsageStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDeviceUsageStoreTests.swift; sourceTree = "<group>"; };
@@ -491,6 +493,7 @@
 				7975717F2F7A400D006AEFB6 /* SpeakerRecognitionTests.swift */,
 				C42E7AD216AF405CB255E7F1 /* LiveTranscriptionServiceTests.swift */,
 				B3C4D5E6F7A8091B2C3D4E03 /* LiveSegmentSanitizerTests.swift */,
+				D1C7A710B2C3D4E5F6A80001 /* DictationServiceTests.swift */,
 				C0DE4A11B2C3D4E5F6A70005 /* TranscriptCleanupEngineTests.swift */,
 				798732682F7D8BC600570A03 /* AudioDeviceUsageStoreTests.swift */,
 				7987326C2F7D8D6F00570A03 /* AudioSampleReaderTests.swift */,
@@ -1192,6 +1195,7 @@
 				7975717C2F79CC6C006AEFB6 /* SpeakerEmbeddingStoreTests.swift in Sources */,
 				45F958AA2B0B410EABA60D86 /* LiveTranscriptionServiceTests.swift in Sources */,
 				B3C4D5E6F7A8091B2C3D4E04 /* LiveSegmentSanitizerTests.swift in Sources */,
+				D1C7A710B2C3D4E5F6A80002 /* DictationServiceTests.swift in Sources */,
 				C0DE4A11B2C3D4E5F6A70006 /* TranscriptCleanupEngineTests.swift in Sources */,
 				79AF5DCA2F92DCD30075AA88 /* RecordingTranscriptPersistenceTests.swift in Sources */,
 				0779163432BE273DD07FC2E9 /* TranscriptAlignerTests.swift in Sources */,

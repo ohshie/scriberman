@@ -4,6 +4,13 @@ import Carbon
 import Foundation
 import OSLog
 
+enum InsertionOutcome: Equatable {
+    case insertedDirectly
+    case typedOut
+    case copiedToClipboard
+    case failed
+}
+
 struct TextInjector {
     private let logger = Logger(subsystem: "Scriberman", category: "TextInjector")
 
@@ -11,14 +18,21 @@ struct TextInjector {
         AXIsProcessTrusted()
     }
 
-    // Appends text to the currently focused element via AX, falling back to the clipboard.
-    func inject(_ text: String) {
-        guard !text.isEmpty else { return }
-        logger.info("Dictation injection starting (accessibility trusted: \(self.isAccessibilityGranted, privacy: .public))")
+    // Inserts text into the focused app, reporting what actually happened.
+    // Synthetic input is impossible without Accessibility trust, so the
+    // untrusted path goes straight to the disclosed clipboard fallback.
+    func insert(_ text: String) -> InsertionOutcome {
+        guard !text.isEmpty else { return .failed }
+        logger.info("Dictation insertion starting (accessibility trusted: \(self.isAccessibilityGranted, privacy: .public))")
+        guard isAccessibilityGranted else {
+            writeToClipboard(text)
+            return .copiedToClipboard
+        }
         if injectViaSimulatedPaste(text) {
-            return
+            return .insertedDirectly
         }
         writeToClipboard(text)
+        return .copiedToClipboard
     }
 
     @discardableResult
