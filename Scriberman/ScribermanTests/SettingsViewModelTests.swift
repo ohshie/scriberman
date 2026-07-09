@@ -53,7 +53,7 @@ final class SettingsViewModelTests {
         #expect(viewModel.bundlePhase == .allReady)
 
         let installOrder = await mockService.installOrder()
-        #expect(installOrder == [.asrParakeetV3, .vadSilero, .offlineDiarization])
+        #expect(installOrder == [.asrParakeetV3, .vadSilero, .offlineDiarization, .lseendDiarization])
         let warmedUp = await mockService.didWarmUp()
         #expect(warmedUp)
     }
@@ -95,9 +95,9 @@ final class SettingsViewModelTests {
         let workspaceService = MockWorkspaceService()
         let mockService = MockModelInstallService()
         await mockService.setCanInstallModels(true)
-        await mockService.setState(.ready, for: .asrParakeetV3)
-        await mockService.setState(.ready, for: .vadSilero)
-        await mockService.setState(.ready, for: .offlineDiarization)
+        for group in ModelGroup.allCases {
+            await mockService.setState(.ready, for: group)
+        }
 
         let viewModel = SettingsViewModel(
             workspaceService: workspaceService,
@@ -111,6 +111,28 @@ final class SettingsViewModelTests {
         await mockService.setState(.missing, for: .vadSilero)
         await viewModel.refresh()
         #expect(viewModel.bundlePhase == .idle)
+    }
+
+    @Test
+    func testRefreshReportsLSEENDMissingAfterLegacyThreeGroupInstall() async throws {
+        let workspaceService = MockWorkspaceService()
+        let mockService = MockModelInstallService()
+        await mockService.setCanInstallModels(true)
+        await mockService.setState(.ready, for: .asrParakeetV3)
+        await mockService.setState(.ready, for: .vadSilero)
+        await mockService.setState(.ready, for: .offlineDiarization)
+        await mockService.setState(.missing, for: .lseendDiarization)
+
+        let viewModel = SettingsViewModel(
+            workspaceService: workspaceService,
+            modelInstallService: mockService,
+            speakerEmbeddingStore: try makeSpeakerEmbeddingStore()
+        )
+
+        await viewModel.refresh()
+
+        #expect(viewModel.bundlePhase == .idle)
+        #expect(viewModel.modelStates[.lseendDiarization] == .missing)
     }
 
     private func makeTempRoot() throws -> URL {
