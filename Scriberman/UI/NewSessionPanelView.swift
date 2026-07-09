@@ -13,54 +13,6 @@ struct NewSessionPanelView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if let permissionStatusWarningText = viewModel.permissionStatusWarningText {
-                VStack(alignment: .leading, spacing: 10) {
-                    Label(permissionStatusWarningText, systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.yellow)
-
-                    HStack(spacing: 8) {
-                        Button("Re-check Permissions") {
-                            Task {
-                                await viewModel.recheckPermissions()
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-
-                        if !viewModel.microphonePermissionGranted {
-                            Button("Grant Mic Access") {
-                                Task {
-                                    await viewModel.requestMicrophonePermission()
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-
-                        if !viewModel.screenRecordingPermissionGranted {
-                            Button("Request Screen Access") {
-                                viewModel.requestScreenRecordingPermission()
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-
-                        Button("Open Privacy Settings") {
-                            openPrivacySettings()
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(.yellow.opacity(0.16))
-                )
-            }
-
             if let errorMessage = viewModel.errorMessage {
                 VStack(alignment: .leading, spacing: 10) {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
@@ -78,6 +30,8 @@ struct NewSessionPanelView: View {
             idleState
             Spacer(minLength: 0)
         }
+        .frame(maxWidth: 420)
+        .frame(maxWidth: .infinity)
         .padding(20)
         .onAppear {
             viewModel.refreshAudioDevicesOnAppear()
@@ -85,49 +39,47 @@ struct NewSessionPanelView: View {
     }
 
     private var idleState: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            sessionNameEditorCard
+        VStack(spacing: 20) {
+            sessionNameEditor
 
-            FlowingWaveView(level: 0, showAppWave: false, isRecording: false)
-                .frame(height: 110)
+            recordHeroButton
 
             controlsSection(isInteractive: true)
 
-            if viewModel.shouldShowMicrophonePermissionPrompt {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(viewModel.microphonePermissionPromptText)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-
-                    Button("Grant Microphone Access") {
-                        Task {
-                            await viewModel.requestMicrophonePermission()
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-            }
-
-            HStack {
-                Spacer()
-                Button {
-                    Task {
-                        if let session = await viewModel.startRecording(title: pendingSession.title, context: modelContext) {
-                            onRecordingStarted(session)
-                        }
-                    }
-                } label: {
-                    Label("Record", systemImage: "record.circle")
-                }
-                .buttonStyle(.glassProminent)
-                .disabled(!viewModel.canRecord)
-                Spacer()
-            }
-
-            Button("or Import File") {
+            Button("Import File…") {
                 onImportFile()
             }
             .buttonStyle(.borderless)
+        }
+    }
+
+    private var recordHeroButton: some View {
+        VStack(spacing: 8) {
+            Button {
+                Task {
+                    if let session = await viewModel.startRecording(title: pendingSession.title, context: modelContext) {
+                        onRecordingStarted(session)
+                    }
+                }
+            } label: {
+                ZStack {
+                    Circle()
+                        .strokeBorder(.tint.opacity(0.5), lineWidth: 1.5)
+                        .frame(width: 62, height: 62)
+                    Circle()
+                        .fill(.tint)
+                        .frame(width: 46, height: 46)
+                }
+                .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!viewModel.canRecord)
+            .opacity(viewModel.canRecord ? 1 : 0.4)
+            .accessibilityLabel("Record")
+
+            Text("Record")
+                .font(.callout.weight(.medium))
+                .foregroundStyle(viewModel.canRecord ? .primary : .secondary)
         }
     }
 
@@ -169,6 +121,25 @@ struct NewSessionPanelView: View {
     }
 
     private var microphoneMenu: some View {
+        HStack(spacing: 0) {
+            microphoneDeviceMenu
+
+            if let warning = viewModel.micPermissionWarningText {
+                permissionWarningButton(reason: warning) {
+                    if viewModel.micPermissionDenied {
+                        openPrivacySettings(pane: "Privacy_Microphone")
+                    } else {
+                        Task {
+                            await viewModel.requestMicrophonePermission()
+                        }
+                    }
+                }
+                .padding(.trailing, 12)
+            }
+        }
+    }
+
+    private var microphoneDeviceMenu: some View {
         Menu {
             ForEach(viewModel.availableDevices) { device in
                 Button {
@@ -252,7 +223,8 @@ struct NewSessionPanelView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 12)
+            .padding(.leading, 28)
+            .padding(.trailing, 12)
             .padding(.vertical, 10)
             .contentShape(Rectangle())
         }
@@ -264,45 +236,43 @@ struct NewSessionPanelView: View {
 
     private var appAudioToggleRow: some View {
         HStack(spacing: 12) {
-            Toggle(isOn: Binding(
+            Text("Record app audio")
+
+            Spacer()
+
+            Toggle("Record app audio", isOn: Binding(
                 get: { viewModel.recordAppAudio },
                 set: { viewModel.recordAppAudio = $0 }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Record app audio")
-                    if viewModel.recordAppAudio {
-                        Text(viewModel.selectedApp?.name ?? "Choose an app below")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
+            ))
             .toggleStyle(.switch)
+            .labelsHidden()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
     }
 
     private var screenRecordingToggleRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Toggle(isOn: Binding(
-                get: { viewModel.recordScreen },
-                set: { viewModel.recordScreen = $0 }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Record screen")
-                    if viewModel.recordScreen, let selectedDisplay = viewModel.selectedDisplay {
-                        Text("\(selectedDisplay.name) • \(selectedDisplay.resolutionLabel)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else if !viewModel.screenRecordingPermissionGranted {
-                        Text("Screen Recording permission required")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+        HStack(spacing: 12) {
+            Text("Record screen")
+
+            Spacer()
+
+            if let warning = viewModel.screenPermissionWarningText {
+                permissionWarningButton(reason: warning) {
+                    if viewModel.screenPermissionDenied {
+                        openPrivacySettings(pane: "Privacy_ScreenCapture")
+                    } else {
+                        viewModel.requestScreenRecordingPermission()
                     }
                 }
             }
+
+            Toggle("Record screen", isOn: Binding(
+                get: { viewModel.recordScreen },
+                set: { viewModel.recordScreen = $0 }
+            ))
             .toggleStyle(.switch)
+            .labelsHidden()
             .disabled(!viewModel.screenRecordingPermissionGranted)
         }
         .padding(.horizontal, 12)
@@ -333,7 +303,8 @@ struct NewSessionPanelView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 12)
+            .padding(.leading, 28)
+            .padding(.trailing, 12)
             .padding(.vertical, 10)
             .contentShape(Rectangle())
         }
@@ -345,44 +316,53 @@ struct NewSessionPanelView: View {
         })
     }
 
-    private var sessionNameEditorCard: some View {
-        HStack(spacing: 10) {
-            TextField("Untitled Session", text: $pendingSession.title)
-                .textFieldStyle(.plain)
-                .font(.title2.weight(.semibold))
-
-            if isNameCardHovering {
-                Label("Edit", systemImage: "pencil")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tint)
-                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+    private var sessionNameEditor: some View {
+        TextField("Untitled Session", text: $pendingSession.title)
+            .textFieldStyle(.plain)
+            .font(.title2.weight(.semibold))
+            .multilineTextAlignment(.center)
+            .overlay(alignment: .trailing) {
+                if isNameCardHovering {
+                    Label("Edit", systemImage: "pencil")
+                        .labelStyle(.iconOnly)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tint)
+                        .padding(.trailing, 12)
+                        .transition(.opacity)
+                }
             }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .onHover { hovering in
-            isNameCardHovering = hovering
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay {
-            if isNameCardHovering {
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(.tint.opacity(0.35), lineWidth: 1.5)
+                    .fill(.ultraThinMaterial)
+                    .opacity(isNameCardHovering ? 1 : 0)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(.tint.opacity(isNameCardHovering ? 0.35 : 0), lineWidth: 1.5)
             }
-        }
-        .animation(.easeInOut(duration: 0.15), value: isNameCardHovering)
+            .scaleEffect(isNameCardHovering ? 1.02 : 1.0)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onHover { hovering in
+                isNameCardHovering = hovering
+            }
+            .animation(.easeInOut(duration: 0.15), value: isNameCardHovering)
     }
 
-    private func openPrivacySettings() {
-        if let micURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
-            NSWorkspace.shared.open(micURL)
+    private func permissionWarningButton(reason: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.yellow)
         }
-        if let screenURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-            NSWorkspace.shared.open(screenURL)
+        .buttonStyle(.plain)
+        .help(reason)
+        .accessibilityLabel(reason)
+    }
+
+    private func openPrivacySettings(pane: String) {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
+            NSWorkspace.shared.open(url)
         }
     }
 }

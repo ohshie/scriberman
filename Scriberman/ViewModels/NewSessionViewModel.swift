@@ -120,22 +120,38 @@ final class NewSessionViewModel {
         micStatus == .granted
     }
 
-    var shouldShowMicrophonePermissionPrompt: Bool {
-        if case .idle = state {
-            return !microphonePermissionGranted
+    /// Reason shown on the microphone row's warning indicator; nil when access
+    /// is granted (design D5).
+    var micPermissionWarningText: String? {
+        switch micStatus {
+        case .granted:
+            return nil
+        case .notDetermined:
+            return "Microphone access needed to record. Click to allow."
+        case .denied:
+            return "Microphone access is disabled. Click to open Privacy Settings."
         }
-        return false
     }
 
-    var microphonePermissionPromptText: String {
-        switch micStatus {
-        case .notDetermined:
-            return "Allow microphone access to start recording."
-        case .denied:
-            return "Microphone access is disabled. Allow access in System Settings to start recording."
+    var micPermissionDenied: Bool {
+        micStatus == .denied
+    }
+
+    /// Reason shown on the screen row's warning indicator; nil when screen
+    /// recording permission is granted (design D5).
+    var screenPermissionWarningText: String? {
+        switch screenRecordingStatus {
         case .granted:
-            return ""
+            return nil
+        case .notDetermined:
+            return "Screen Recording permission needed for app audio and screen capture. Click to allow."
+        case .denied:
+            return "Screen Recording is disabled. Click to open Privacy Settings."
         }
+    }
+
+    var screenPermissionDenied: Bool {
+        screenRecordingStatus == .denied
     }
 
     var showAppPicker: Bool {
@@ -148,18 +164,6 @@ final class NewSessionViewModel {
 
     var screenRecordingPermissionGranted: Bool {
         screenRecordingStatus == .granted
-    }
-
-    var permissionStatusWarningText: String? {
-        if micStatus != .granted {
-            return "Microphone permission is not verified. Recording is unavailable until access is granted."
-        }
-
-        if screenRecordingStatus == .denied {
-            return "Screen Recording permission verification failed. App audio and screen capture may be unavailable until access is re-enabled in System Settings."
-        }
-
-        return nil
     }
 
     var canRecord: Bool {
