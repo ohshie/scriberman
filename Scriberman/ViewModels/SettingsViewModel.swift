@@ -43,6 +43,14 @@ final class SettingsViewModel {
     var minSilenceGap: Double {
         didSet { userDefaults.set(minSilenceGap, forKey: "minSilenceGap") }
     }
+    var cleanupRules: [TranscriptCleanupRule] {
+        didSet {
+            guard let data = try? JSONEncoder().encode(cleanupRules) else { return }
+            userDefaults.set(data, forKey: Self.cleanupRulesKey)
+        }
+    }
+
+    private static let cleanupRulesKey = "transcriptCleanupRules"
 
     var pipelineSettings: LiveTranscriptionPipelineSettings {
         LiveTranscriptionPipelineSettings(
@@ -51,7 +59,8 @@ final class SettingsViewModel {
             asrConfidenceGate: asrConfidenceGate,
             asrAmplitudeGate: asrAmplitudeGate,
             speakerSimilarityThreshold: speakerThreshold,
-            minSilenceGap: minSilenceGap
+            minSilenceGap: minSilenceGap,
+            cleanupRules: cleanupRules
         )
     }
 
@@ -87,6 +96,14 @@ final class SettingsViewModel {
 
         let gap = userDefaults.double(forKey: "minSilenceGap")
         self.minSilenceGap = gap == 0 ? LiveTranscriptionPipelineSettings.defaults.minSilenceGap : gap
+
+        // Absent key or undecodable data falls back to no rules (design D5).
+        if let rulesData = userDefaults.data(forKey: Self.cleanupRulesKey),
+           let decodedRules = try? JSONDecoder().decode([TranscriptCleanupRule].self, from: rulesData) {
+            self.cleanupRules = decodedRules
+        } else {
+            self.cleanupRules = []
+        }
 
         ModelGroup.allCases.forEach { group in
             modelStates[group] = .missing

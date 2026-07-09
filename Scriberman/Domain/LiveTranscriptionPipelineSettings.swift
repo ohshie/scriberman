@@ -7,6 +7,7 @@ struct LiveTranscriptionPipelineSettings: Sendable {
     var asrAmplitudeGate: Double
     var speakerSimilarityThreshold: Double
     var minSilenceGap: Double
+    var cleanupRules: [TranscriptCleanupRule] = []
 
     static let defaults = LiveTranscriptionPipelineSettings(
         vadThreshold: 0.85,
