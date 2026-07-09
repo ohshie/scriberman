@@ -78,6 +78,8 @@ struct NewSessionPanelView: View {
             idleState
             Spacer(minLength: 0)
         }
+        .frame(maxWidth: 420)
+        .frame(maxWidth: .infinity)
         .padding(20)
         .onAppear {
             viewModel.refreshAudioDevicesOnAppear()
@@ -85,11 +87,10 @@ struct NewSessionPanelView: View {
     }
 
     private var idleState: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            sessionNameEditorCard
+        VStack(spacing: 20) {
+            sessionNameEditor
 
-            FlowingWaveView(level: 0, showAppWave: false, isRecording: false)
-                .frame(height: 110)
+            recordHeroButton
 
             controlsSection(isInteractive: true)
 
@@ -108,26 +109,40 @@ struct NewSessionPanelView: View {
                 }
             }
 
-            HStack {
-                Spacer()
-                Button {
-                    Task {
-                        if let session = await viewModel.startRecording(title: pendingSession.title, context: modelContext) {
-                            onRecordingStarted(session)
-                        }
-                    }
-                } label: {
-                    Label("Record", systemImage: "record.circle")
-                }
-                .buttonStyle(.glassProminent)
-                .disabled(!viewModel.canRecord)
-                Spacer()
-            }
-
-            Button("or Import File") {
+            Button("Import File…") {
                 onImportFile()
             }
             .buttonStyle(.borderless)
+        }
+    }
+
+    private var recordHeroButton: some View {
+        VStack(spacing: 8) {
+            Button {
+                Task {
+                    if let session = await viewModel.startRecording(title: pendingSession.title, context: modelContext) {
+                        onRecordingStarted(session)
+                    }
+                }
+            } label: {
+                ZStack {
+                    Circle()
+                        .strokeBorder(.tint.opacity(0.5), lineWidth: 1.5)
+                        .frame(width: 62, height: 62)
+                    Circle()
+                        .fill(.tint)
+                        .frame(width: 46, height: 46)
+                }
+                .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!viewModel.canRecord)
+            .opacity(viewModel.canRecord ? 1 : 0.4)
+            .accessibilityLabel("Record")
+
+            Text("Record")
+                .font(.callout.weight(.medium))
+                .foregroundStyle(viewModel.canRecord ? .primary : .secondary)
         }
     }
 
@@ -345,36 +360,26 @@ struct NewSessionPanelView: View {
         })
     }
 
-    private var sessionNameEditorCard: some View {
-        HStack(spacing: 10) {
-            TextField("Untitled Session", text: $pendingSession.title)
-                .textFieldStyle(.plain)
-                .font(.title2.weight(.semibold))
-
-            if isNameCardHovering {
-                Label("Edit", systemImage: "pencil")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tint)
-                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+    private var sessionNameEditor: some View {
+        TextField("Untitled Session", text: $pendingSession.title)
+            .textFieldStyle(.plain)
+            .font(.title2.weight(.semibold))
+            .multilineTextAlignment(.center)
+            .overlay(alignment: .trailing) {
+                if isNameCardHovering {
+                    Label("Edit", systemImage: "pencil")
+                        .labelStyle(.iconOnly)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tint)
+                        .transition(.opacity)
+                }
             }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .onHover { hovering in
-            isNameCardHovering = hovering
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay {
-            if isNameCardHovering {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(.tint.opacity(0.35), lineWidth: 1.5)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                isNameCardHovering = hovering
             }
-        }
-        .animation(.easeInOut(duration: 0.15), value: isNameCardHovering)
+            .animation(.easeInOut(duration: 0.15), value: isNameCardHovering)
     }
 
     private func openPrivacySettings() {
