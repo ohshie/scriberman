@@ -32,6 +32,11 @@ final class SettingsViewModelTests {
         viewModel.canDownloadModels = true
 
         let probe = BundlePhaseProbe()
+        // A polling observer alone can miss the brief .warmingUp window under
+        // parallel test load; capture the phase at the warm-up call itself.
+        await mockService.setWarmUpHook { [viewModel] in
+            await probe.record(viewModel.bundlePhase)
+        }
         let observer = Task {
             while !Task.isCancelled {
                 await probe.record(viewModel.bundlePhase)
@@ -166,6 +171,7 @@ private actor MockModelInstallService: ModelInstallServicing {
     private var groupsInstalled: [ModelGroup] = []
     private var failGroup: ModelGroup?
     private var warmedUp = false
+    private var warmUpHook: (@Sendable () async -> Void)?
 
     init() {
         for group in ModelGroup.allCases {
@@ -183,6 +189,10 @@ private actor MockModelInstallService: ModelInstallServicing {
 
     func setFailureGroup(_ group: ModelGroup?) {
         failGroup = group
+    }
+
+    func setWarmUpHook(_ hook: @escaping @Sendable () async -> Void) {
+        warmUpHook = hook
     }
 
     func installOrder() -> [ModelGroup] {
@@ -226,6 +236,7 @@ private actor MockModelInstallService: ModelInstallServicing {
     }
 
     func warmUpModels(workspace: Workspace) async {
+        await warmUpHook?()
         warmedUp = true
         await Task.yield()
     }
