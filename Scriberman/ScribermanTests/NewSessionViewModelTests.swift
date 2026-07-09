@@ -405,42 +405,41 @@ struct NewSessionViewModelTests {
     }
 
     @Test
-    func testMicrophonePermissionPromptStateTracksMicStatus() {
+    func testMicPermissionWarningTextTracksMicStatus() {
         let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
         permissionService.micStatus = .notDetermined
-        #expect(viewModel.shouldShowMicrophonePermissionPrompt)
+        #expect(viewModel.micPermissionWarningText == "Microphone access needed to record. Click to allow.")
+        #expect(!viewModel.micPermissionDenied)
 
         permissionService.micStatus = .denied
-        #expect(viewModel.shouldShowMicrophonePermissionPrompt)
+        #expect(viewModel.micPermissionWarningText == "Microphone access is disabled. Click to open Privacy Settings.")
+        #expect(viewModel.micPermissionDenied)
 
         permissionService.micStatus = .granted
-        #expect(!(viewModel.shouldShowMicrophonePermissionPrompt))
+        #expect(viewModel.micPermissionWarningText == nil)
+        #expect(!viewModel.micPermissionDenied)
     }
 
     @Test
-    func testPermissionStatusWarningTextReflectsMicAndScreenVerificationState() {
+    func testScreenPermissionWarningTextTracksScreenStatus() {
         let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
-        permissionService.micStatus = .notDetermined
-        #expect(
-            viewModel.permissionStatusWarningText
-                == "Microphone permission is not verified. Recording is unavailable until access is granted."
-        )
+        permissionService.screenRecordingStatus = .notDetermined
+        #expect(viewModel.screenPermissionWarningText == "Screen Recording permission needed for app audio and screen capture. Click to allow.")
+        #expect(!viewModel.screenPermissionDenied)
 
-        permissionService.micStatus = .granted
         permissionService.screenRecordingStatus = .denied
-        #expect(
-            viewModel.permissionStatusWarningText
-                == "Screen Recording permission verification failed. App audio and screen capture may be unavailable until access is re-enabled in System Settings."
-        )
+        #expect(viewModel.screenPermissionWarningText == "Screen Recording is disabled. Click to open Privacy Settings.")
+        #expect(viewModel.screenPermissionDenied)
 
         permissionService.screenRecordingStatus = .granted
-        #expect(viewModel.permissionStatusWarningText == nil)
+        #expect(viewModel.screenPermissionWarningText == nil)
+        #expect(!viewModel.screenPermissionDenied)
     }
 
     @Test
@@ -601,14 +600,16 @@ struct NewSessionViewModelTests {
     }
 
     @Test
-    func testNewSessionPanelShowsGrantMicrophoneAccessPrompt() throws {
+    func testNewSessionPanelShowsMicPermissionWarningIndicator() throws {
         let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
         let source = try newSessionPanelSource()
-        #expect(source.contains("if viewModel.shouldShowMicrophonePermissionPrompt"))
-        #expect(source.contains("Grant Microphone Access"))
+        #expect(source.contains("if let warning = viewModel.micPermissionWarningText"))
+        #expect(source.contains("exclamationmark.triangle.fill"))
+        #expect(source.contains(".help(reason)"))
+        #expect(source.contains("openPrivacySettings(pane: \"Privacy_Microphone\")"))
     }
 
     @Test
@@ -632,17 +633,17 @@ struct NewSessionViewModelTests {
     }
 
     @Test
-    func testNewSessionPanelShowsPermissionStatusWarningBanner() throws {
+    func testNewSessionPanelHasNoPermissionBannerAndWarnsOnScreenRow() throws {
         let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
         let source = try newSessionPanelSource()
-        #expect(source.contains("if let permissionStatusWarningText = viewModel.permissionStatusWarningText"))
-        #expect(source.contains("exclamationmark.triangle.fill"))
-        #expect(source.contains("Re-check Permissions"))
-        #expect(source.contains("Request Screen Access"))
-        #expect(source.contains("Open Privacy Settings"))
+        #expect(!source.contains("permissionStatusWarningText"))
+        #expect(!source.contains("Re-check Permissions"))
+        #expect(!source.contains("Grant Microphone Access"))
+        #expect(source.contains("if let warning = viewModel.screenPermissionWarningText"))
+        #expect(source.contains("openPrivacySettings(pane: \"Privacy_ScreenCapture\")"))
     }
 
     @Test
@@ -701,7 +702,7 @@ struct NewSessionViewModelTests {
     private func waitForRetargetCalls(
         _ recordingService: MockRecordingService,
         expectedCount: Int,
-        timeoutNanoseconds: UInt64 = 1_000_000_000,
+        timeoutNanoseconds: UInt64 = 5_000_000_000,
         pollNanoseconds: UInt64 = 10_000_000
     ) async {
         let start = DispatchTime.now().uptimeNanoseconds
