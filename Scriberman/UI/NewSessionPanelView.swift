@@ -13,54 +13,6 @@ struct NewSessionPanelView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if let permissionStatusWarningText = viewModel.permissionStatusWarningText {
-                VStack(alignment: .leading, spacing: 10) {
-                    Label(permissionStatusWarningText, systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.yellow)
-
-                    HStack(spacing: 8) {
-                        Button("Re-check Permissions") {
-                            Task {
-                                await viewModel.recheckPermissions()
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-
-                        if !viewModel.microphonePermissionGranted {
-                            Button("Grant Mic Access") {
-                                Task {
-                                    await viewModel.requestMicrophonePermission()
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-
-                        if !viewModel.screenRecordingPermissionGranted {
-                            Button("Request Screen Access") {
-                                viewModel.requestScreenRecordingPermission()
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-
-                        Button("Open Privacy Settings") {
-                            openPrivacySettings()
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(.yellow.opacity(0.16))
-                )
-            }
-
             if let errorMessage = viewModel.errorMessage {
                 VStack(alignment: .leading, spacing: 10) {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
@@ -93,21 +45,6 @@ struct NewSessionPanelView: View {
             recordHeroButton
 
             controlsSection(isInteractive: true)
-
-            if viewModel.shouldShowMicrophonePermissionPrompt {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(viewModel.microphonePermissionPromptText)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-
-                    Button("Grant Microphone Access") {
-                        Task {
-                            await viewModel.requestMicrophonePermission()
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-            }
 
             Button("Import File…") {
                 onImportFile()
@@ -184,6 +121,25 @@ struct NewSessionPanelView: View {
     }
 
     private var microphoneMenu: some View {
+        HStack(spacing: 0) {
+            microphoneDeviceMenu
+
+            if let warning = viewModel.micPermissionWarningText {
+                permissionWarningButton(reason: warning) {
+                    if viewModel.micPermissionDenied {
+                        openPrivacySettings(pane: "Privacy_Microphone")
+                    } else {
+                        Task {
+                            await viewModel.requestMicrophonePermission()
+                        }
+                    }
+                }
+                .padding(.trailing, 12)
+            }
+        }
+    }
+
+    private var microphoneDeviceMenu: some View {
         Menu {
             ForEach(viewModel.availableDevices) { device in
                 Button {
@@ -297,16 +253,19 @@ struct NewSessionPanelView: View {
 
     private var screenRecordingToggleRow: some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Record screen")
-                if !viewModel.screenRecordingPermissionGranted {
-                    Text("Screen Recording permission required")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            Text("Record screen")
 
             Spacer()
+
+            if let warning = viewModel.screenPermissionWarningText {
+                permissionWarningButton(reason: warning) {
+                    if viewModel.screenPermissionDenied {
+                        openPrivacySettings(pane: "Privacy_ScreenCapture")
+                    } else {
+                        viewModel.requestScreenRecordingPermission()
+                    }
+                }
+            }
 
             Toggle("Record screen", isOn: Binding(
                 get: { viewModel.recordScreen },
@@ -379,12 +338,19 @@ struct NewSessionPanelView: View {
             .animation(.easeInOut(duration: 0.15), value: isNameCardHovering)
     }
 
-    private func openPrivacySettings() {
-        if let micURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
-            NSWorkspace.shared.open(micURL)
+    private func permissionWarningButton(reason: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.yellow)
         }
-        if let screenURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-            NSWorkspace.shared.open(screenURL)
+        .buttonStyle(.plain)
+        .help(reason)
+        .accessibilityLabel(reason)
+    }
+
+    private func openPrivacySettings(pane: String) {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
+            NSWorkspace.shared.open(url)
         }
     }
 }
