@@ -139,6 +139,48 @@ struct LiveTranscriptionPipelineSettingsTests {
         #expect(audioUD.bool(forKey: "audio.voiceProcessingEnabled") == false)
     }
 
+    @Test
+    func cleanupRulesPersistRoundTrip() {
+        let suiteName = "LiveTranscriptionPipelineSettingsTests.rules.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let vm = makeViewModel(userDefaults: userDefaults)
+        #expect(vm.cleanupRules.isEmpty)
+
+        let rule = TranscriptCleanupRule(pattern: "huh", position: .end, wholeWord: true)
+        vm.cleanupRules = [rule]
+
+        let vm2 = makeViewModel(userDefaults: userDefaults)
+        #expect(vm2.cleanupRules == [rule])
+    }
+
+    @Test
+    func cleanupRulesCorruptDataFallsBackToEmpty() {
+        let suiteName = "LiveTranscriptionPipelineSettingsTests.rulesCorrupt.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        userDefaults.set(Data("not json".utf8), forKey: "transcriptCleanupRules")
+
+        let vm = makeViewModel(userDefaults: userDefaults)
+        #expect(vm.cleanupRules.isEmpty)
+    }
+
+    @Test
+    func pipelineSettingsCarriesCleanupRules() {
+        let suiteName = "LiveTranscriptionPipelineSettingsTests.rulesCarry.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let vm = makeViewModel(userDefaults: userDefaults)
+        let rule = TranscriptCleanupRule(pattern: "damn", position: .anywhere, wholeWord: false)
+        vm.cleanupRules = [rule]
+
+        #expect(vm.pipelineSettings.cleanupRules == [rule])
+        #expect(LiveTranscriptionPipelineSettings.defaults.cleanupRules.isEmpty)
+    }
+
     private func makeViewModel(userDefaults: UserDefaults, appAudioSettings: AppAudioSettings = AppAudioSettings()) -> SettingsViewModel {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try! ModelContainer(for: SpeakerProfile.self, configurations: config)
