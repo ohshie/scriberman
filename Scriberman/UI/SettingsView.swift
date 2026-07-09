@@ -302,6 +302,45 @@ struct SettingsView: View {
                         }
                     }
 
+                    Section("Transcript Cleanup") {
+                        ForEach($bindableViewModel.cleanupRules) { $rule in
+                            HStack {
+                                TextField("Text to remove", text: $rule.pattern)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(minWidth: 140)
+                                if rule.pattern.trimmingCharacters(in: .whitespaces).isEmpty {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundStyle(.yellow)
+                                        .help("Empty rules are ignored")
+                                        .accessibilityLabel("Empty rule is ignored")
+                                }
+                                Picker("Position", selection: $rule.position) {
+                                    Text("At start").tag(TranscriptCleanupRule.Position.start)
+                                    Text("At end").tag(TranscriptCleanupRule.Position.end)
+                                    Text("Anywhere").tag(TranscriptCleanupRule.Position.anywhere)
+                                }
+                                .labelsHidden()
+                                .fixedSize()
+                                Toggle("Whole words only", isOn: $rule.wholeWord)
+                                Button {
+                                    viewModel.cleanupRules.removeAll { $0.id == rule.id }
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Delete rule")
+                            }
+                        }
+                        Button {
+                            viewModel.cleanupRules.append(TranscriptCleanupRule())
+                        } label: {
+                            Label("Add Rule", systemImage: "plus")
+                        }
+                        Text("Removes matching text from live transcripts; a segment left empty is dropped entirely. Rules apply to new recording sessions.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     Section {
                         Button("Reset All Pipeline Settings to Defaults", role: .destructive) {
                             showResetAllConfirmation = true
