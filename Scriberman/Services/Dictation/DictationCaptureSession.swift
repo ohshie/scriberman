@@ -103,8 +103,14 @@ actor DictationCaptureSession: DictationCapturing {
         teardownEngine()
 
         let engine = AVAudioEngine()
+        // Accessing inputNode attaches it to the engine graph. prepare() on an
+        // engine with an empty graph raises an uncaught ObjC exception
+        // ("inputNode != nullptr || outputNode != nullptr") and kills the app,
+        // so the node MUST be touched before the first prepare() — including
+        // on the default-device path where setInputDevice is skipped.
+        let inputNode = engine.inputNode
         if let deviceID {
-            try setInputDevice(deviceID, on: engine.inputNode)
+            try setInputDevice(deviceID, on: inputNode)
         }
         engine.prepare()
         audioEngine = engine
