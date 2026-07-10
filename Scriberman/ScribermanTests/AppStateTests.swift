@@ -293,6 +293,51 @@ final class AppStateTests {
     }
 
     @Test
+    func testWakeCleanupWaitsForInFlightPreSleepStop() async {
+        let delegate = AppDelegate()
+        delegate.modelContext = modelContainer.mainContext
+        delegate.isRecordingForLifecycleHandler = { true }
+
+        var stopCompleted = false
+        var stopWasCompleteAtCleanup: Bool?
+        delegate.stopRecordingForLifecycleHandler = {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            stopCompleted = true
+        }
+        delegate.wakeCleanupHandler = {
+            stopWasCompleteAtCleanup = stopCompleted
+        }
+
+        delegate.handleWillSleep()
+        delegate.handleDidWake()
+
+        await assertEventuallyTrue(
+            "Expected wake cleanup to run after the stop completed",
+            timeoutNanoseconds: 5_000_000_000
+        ) {
+            stopWasCompleteAtCleanup != nil
+        }
+        #expect(stopWasCompleteAtCleanup == true)
+    }
+
+    @Test
+    func testWakeCleanupRunsImmediatelyWithNoPendingStop() async {
+        let delegate = AppDelegate()
+        delegate.modelContext = modelContainer.mainContext
+
+        var cleanupRan = false
+        delegate.wakeCleanupHandler = {
+            cleanupRan = true
+        }
+
+        delegate.handleDidWake()
+
+        await assertEventuallyTrue("Expected wake cleanup to run") {
+            cleanupRan
+        }
+    }
+
+    @Test
     func testApplicationShouldTerminateReturnsTerminateNowWhenModelContextIsNil() {
         let delegate = AppDelegate()
         delegate.modelContext = nil
