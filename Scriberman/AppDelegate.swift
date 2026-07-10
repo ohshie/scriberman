@@ -18,6 +18,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     // Test seams for lifecycle behavior.
     var isRecordingForLifecycleHandler: (() -> Bool)?
     var stopRecordingForLifecycleHandler: (() async -> Void)?
+    var wakeCleanupHandler: (() -> Void)?
+    // In-flight pre-sleep stop; didWake awaits it so wake cleanup can never
+    // race the stop (design D3).
+    private(set) var lifecycleStopTask: Task<Void, Never>?
     var terminationReplyHandler: (Bool) -> Void = { shouldTerminate in
         NSApp.reply(toApplicationShouldTerminate: shouldTerminate)
     }
@@ -506,17 +510,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 return
             }
 
-            guard self.modelContext != nil, self.isRecordingForLifecycle() else {
-                return
-            }
-
-            Task { @MainActor [weak self] in
-                guard let self else {
-                    return
-                }
-
-                await self.stopRecordingForLifecycle()
-            }
+            self.handleWillSleep()
         }
 
         let didWakeToken = workspaceNotificationCenter.addObserver(
@@ -528,16 +522,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 return
             }
 
-            guard let appState = self.appState else {
-                return
-            }
-
-            if case .recording = appState.newSessionViewModel.state {
-                appState.newSessionViewModel.reset()
-            }
+            self.handleDidWake()
         }
 
         lifecycleObserverTokens = [willSleepToken, didWakeToken]
+    }
+
+    func handleWillSleep() {
+        guard modelContext != nil, isRecordingForLifecycle() else {
+            return
+        }
+
+        lifecycleStopTask = Task { @MainActor [weak self] in
+            await self?.stopRecordingForLifecycle()
+        }
+    }
+
+    func handleDidWake() {
+        Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            // Settle the pre-sleep stop before examining state (design D3).
+            await self.lifecycleStopTask?.value
+            self.lifecycleStopTask = nil
+            self.performWakeCleanup()
+        }
+    }
+
+    private func performWakeCleanup() {
+        if let wakeCleanupHandler {
+            wakeCleanupHandler()
+            return
+        }
+
+        guard let appState else {
+            return
+        }
+
+        if case .recording = appState.newSessionViewModel.state {
+            appState.newSessionViewModel.reset()
+        }
     }
 
     private func isRecordingForLifecycle() -> Bool {
