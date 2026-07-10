@@ -94,6 +94,9 @@ struct DictationHUDView: View {
         case .failed(.emptyTranscript):
             Label("Nothing heard", systemImage: "mic.slash")
                 .foregroundStyle(.secondary)
+        case .failed(.tooShort):
+            Label("Too short — hold the hotkey while speaking", systemImage: "hand.tap")
+                .foregroundStyle(.secondary)
         case .failed(.captureFailed):
             Label("Microphone unavailable", systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.yellow)

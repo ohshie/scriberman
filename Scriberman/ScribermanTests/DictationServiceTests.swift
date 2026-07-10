@@ -135,6 +135,21 @@ struct DictationServiceTests {
     }
 
     @Test
+    func releaseBeforeFirstBufferIsTooShortNotCaptureFailure() async {
+        let capture = MockDictationCapture()
+        // No samplesOnStop: the stream finishes without ever yielding audio,
+        // as happens when the hotkey is released within milliseconds.
+        let service = makeService(capture: capture)
+        service.transcribeHookForTesting = { _ in "should never run" }
+
+        await service.start(deviceID: nil)
+        await service.stop()
+
+        #expect(service.lastOutcome == .failed(.tooShort))
+        #expect(service.state == .idle)
+    }
+
+    @Test
     func dictationBlockedWhileRecordingIsActive() async {
         let capture = MockDictationCapture()
         let recording = MockRecordingService()

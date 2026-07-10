@@ -18,6 +18,9 @@ enum DictationFailureReason: Equatable {
     case captureFailed
     case emptyTranscript
     case insertionFailed
+    /// Hotkey released before the first audio buffer arrived — the capture
+    /// system is fine, the hold was just shorter than buffer delivery.
+    case tooShort
 }
 
 enum DictationOutcome: Equatable {
@@ -178,8 +181,8 @@ final class DictationService {
         }
 
         guard !samples.isEmpty else {
-            logger.info("Dictation session ended with no captured audio")
-            lastOutcome = .failed(.captureFailed)
+            logger.info("Dictation session ended before any audio arrived (too-short hold)")
+            lastOutcome = .failed(.tooShort)
             return
         }
 
