@@ -135,6 +135,10 @@ final class DictationService {
             return
         }
 
+        // Fresh session: the HUD must not show the previous session's outcome.
+        lastOutcome = nil
+        inputLevel = 0
+
         if !levelHandlerInstalled {
             levelHandlerInstalled = true
             await captureSession.setLevelHandler { [weak self] level in
