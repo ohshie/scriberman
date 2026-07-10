@@ -26,6 +26,7 @@ final class AppState {
     let dictationService: DictationService
     let hotkeyRegistrar = HotkeyRegistrar()
     let dictationHotkeySettings = DictationHotkeySettings()
+    @ObservationIgnored let dictationHUD = DictationHUDController()
 
     var pendingSession: PendingSession?
     var sessionToTrim: RecordingSession?
@@ -174,6 +175,7 @@ final class AppState {
         hotkeyRegistrar.onKeyDown = { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                dictationHUD.show(for: dictationService)
                 let deviceID = audioDeviceService.availableDevices.first {
                     $0.uid == menuBarSettings.lastUsedMicUID
                 }?.id
