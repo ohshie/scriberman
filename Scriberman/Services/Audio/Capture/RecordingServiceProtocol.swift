@@ -8,6 +8,7 @@ protocol RecordingServiceProtocol: Sendable {
     func liveAudioStream() async -> AsyncStream<([Float], AudioSource, Double)>
     func isRecording() async -> Bool
     func audioLevel() async -> Float
+    func audioLevels() async -> (mic: Float, app: Float)
     func startRecording(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID?,

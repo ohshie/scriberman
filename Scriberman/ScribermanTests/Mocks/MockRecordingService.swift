@@ -25,7 +25,13 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
     }
 
     func audioLevel() async -> Float {
-        audioLevelOverride
+        max(audioLevelsOverride.mic, max(audioLevelsOverride.app, audioLevelOverride))
+    }
+
+    var audioLevelsOverride: (mic: Float, app: Float) = (0, 0)
+
+    func audioLevels() async -> (mic: Float, app: Float) {
+        (max(audioLevelsOverride.mic, audioLevelOverride), audioLevelsOverride.app)
     }
 
     func startRecording(
