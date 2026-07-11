@@ -10,17 +10,22 @@ actor RecordingRecoveryService {
     private let modelContainer: ModelContainer
     private let fileManager: FileManager
     private let performMixdown: MixdownHandler
+    // No capture survives a process boundary: a .recording session created
+    // before this instant is crash-interrupted by definition (design D1).
+    private let launchedAt: Date
     private let logger = Logger(subsystem: "Scriberman", category: "RecordingRecoveryService")
 
     init(
         workspaceService: WorkspaceServiceProtocol,
         modelContainer: ModelContainer,
         fileManager: FileManager = .default,
+        launchedAt: Date = .now,
         performMixdown: MixdownHandler? = nil
     ) {
         self.workspaceService = workspaceService
         self.modelContainer = modelContainer
         self.fileManager = fileManager
+        self.launchedAt = launchedAt
         if let performMixdown {
             self.performMixdown = performMixdown
         } else {
@@ -59,7 +64,10 @@ actor RecordingRecoveryService {
             return
         }
 
-        // 4.3: Exclude .recording sessions (capture still in progress)
+        normalizeCrashInterruptedSessions(sessions, context: context)
+
+        // Exclude .recording sessions (capture still in progress — only
+        // post-launch sessions can still carry this status after normalization)
         let eligible = sessions.filter { session in
             guard session.mixdownURL == nil else { return false }
             if case .recording = session.status { return false }
@@ -69,6 +77,38 @@ actor RecordingRecoveryService {
         logger.info("Recovery sweep: \(eligible.count, privacy: .public) eligible session(s)")
         for session in eligible {
             await recoverSession(session, context: context)
+        }
+    }
+
+    private func repairWavIfNeeded(at url: URL) {
+        guard fileManager.fileExists(atPath: url.path) else { return }
+        do {
+            if try WavHeaderRepairer.repairIfNeeded(at: url) {
+                logger.info("Repaired crash-stale WAV header: \(url.lastPathComponent, privacy: .public)")
+            }
+        } catch {
+            logger.warning("WAV header repair skipped for \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Flips sessions stranded in `.recording` by a crash or power loss so
+    /// they become eligible for mixdown recovery. Sessions created after this
+    /// process launched are never touched — they may be genuinely recording.
+    private func normalizeCrashInterruptedSessions(_ sessions: [RecordingSession], context: ModelContext) {
+        var normalizedCount = 0
+        for session in sessions {
+            guard case .recording = session.status, session.createdAt < launchedAt else { continue }
+            if fileManager.fileExists(atPath: session.micAudioURL) {
+                session.status = .recorded
+                logger.info("Normalized crash-interrupted session \(session.id, privacy: .public) to .recorded")
+            } else {
+                session.status = .error("Recording was interrupted before audio was saved.")
+                logger.info("Crash-interrupted session \(session.id, privacy: .public) has no audio on disk; marked as error")
+            }
+            normalizedCount += 1
+        }
+        if normalizedCount > 0 {
+            try? context.save()
         }
     }
 
@@ -89,6 +129,14 @@ actor RecordingRecoveryService {
 
         session.status = .converting
         try? context.save()
+
+        // Crash-stale WAV headers make the data unreadable; repair before
+        // mixdown (design D2). Failures are non-fatal — the mixdown attempt
+        // below flows into the bounded-retry machinery either way.
+        repairWavIfNeeded(at: micURL)
+        if let appURL {
+            repairWavIfNeeded(at: appURL)
+        }
 
         do {
             try await performMixdown(micURL, appURL, outputURL)
