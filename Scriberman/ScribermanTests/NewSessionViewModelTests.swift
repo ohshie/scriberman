@@ -122,6 +122,58 @@ struct NewSessionViewModelTests {
     }
 
     @Test
+    func testMonitorPublishesSeparateMicAndAppLevels() async {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+        _ = (workspaceService, audioDeviceService, appAudioService, menuBarSettings)
+
+        permissionService.micStatus = .granted
+        recordingService.isRecordingOverride = true
+        recordingService.audioLevelsOverride = (mic: 0.3, app: 0.7)
+
+        await viewModel.startRecording(title: "Session", context: context)
+
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline, viewModel.appAudioLevel != 0.7 {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.micAudioLevel == 0.3)
+        #expect(viewModel.appAudioLevel == 0.7)
+        if case .recording(_, let level) = viewModel.state {
+            #expect(level == 0.7)
+        } else {
+            Issue.record("Expected recording state, got \(viewModel.state)")
+        }
+
+        viewModel.reset()
+        #expect(viewModel.micAudioLevel == 0)
+        #expect(viewModel.appAudioLevel == 0)
+    }
+
+    @Test
+    func testAppLevelStaysZeroWithoutAppCapture() async {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        defer { cleanup() }
+        _ = (workspaceService, audioDeviceService, appAudioService, menuBarSettings)
+
+        permissionService.micStatus = .granted
+        recordingService.isRecordingOverride = true
+        recordingService.audioLevelsOverride = (mic: 0.5, app: 0)
+
+        await viewModel.startRecording(title: "Session", context: context)
+
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline, viewModel.micAudioLevel != 0.5 {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.micAudioLevel == 0.5)
+        #expect(viewModel.appAudioLevel == 0)
+        viewModel.reset()
+    }
+
+    @Test
     func testStartRecordingIncrementsUsageForSelectedApp() async {
         let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
         defer { cleanup() }

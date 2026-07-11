@@ -27,6 +27,10 @@ final class NewSessionViewModel {
     var settingsViewModel: SettingsViewModel?
 
     var state: State = .idle
+    // Separate wave inputs (design D4): the mic wave must not bounce when
+    // only app audio is loud, so views get each source's level individually.
+    private(set) var micAudioLevel: Float = 0
+    private(set) var appAudioLevel: Float = 0
     var isIdle: Bool {
         if case .idle = state {
             return true
@@ -208,6 +212,8 @@ final class NewSessionViewModel {
         recordingStartedAt = nil
         activeRecordingSessionID = nil
         errorMessage = nil
+        micAudioLevel = 0
+        appAudioLevel = 0
         state = .idle
     }
 
@@ -546,10 +552,12 @@ final class NewSessionViewModel {
                     break
                 }
 
-                let level = await recordingService.audioLevel()
+                let levels = await recordingService.audioLevels()
+                micAudioLevel = levels.mic
+                appAudioLevel = levels.app
                 let startedAt = recordingStartedAt ?? .now
                 let duration = Date().timeIntervalSince(startedAt)
-                state = .recording(duration: duration, level: level)
+                state = .recording(duration: duration, level: max(levels.mic, levels.app))
 
                 try? await Task.sleep(for: .milliseconds(50))
             }
