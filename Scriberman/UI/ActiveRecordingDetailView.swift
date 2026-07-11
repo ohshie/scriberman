@@ -25,7 +25,12 @@ struct ActiveRecordingDetailView: View {
                         titleFocused = false
                     }
 
-                FlowingWaveView(level: currentLevel, showAppWave: viewModel.recordAppAudio, isRecording: true)
+                FlowingWaveView(
+                    level: viewModel.micAudioLevel,
+                    appLevel: viewModel.appAudioLevel,
+                    showAppWave: viewModel.recordAppAudio,
+                    isRecording: true
+                )
                     .frame(height: 110)
 
                 Text(durationText(currentDuration))
@@ -103,14 +108,6 @@ struct ActiveRecordingDetailView: View {
                 titleFocused = false
             }
         }
-    }
-
-    private var currentLevel: Float {
-        if case let .recording(_, level) = viewModel.state {
-            return level
-        }
-
-        return 0
     }
 
     private var currentDuration: TimeInterval {

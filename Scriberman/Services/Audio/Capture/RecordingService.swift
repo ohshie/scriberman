@@ -428,25 +428,27 @@ actor RecordingService: RecordingServiceProtocol {
     #endif
 
     func audioLevel() async -> Float {
-        var currentMax: Float = 0
-        
-        if let appAudioCaptureSession {
-            currentMax = max(currentMax, appAudioCaptureSession.audioLevel)
-        }
-        
+        let levels = await audioLevels()
+        return max(levels.mic, levels.app)
+    }
+
+    func audioLevels() async -> (mic: Float, app: Float) {
+        var micLevel: Float = 0
+
         if let audioRecorder {
             audioRecorder.updateMeters()
             let averagePower = audioRecorder.averagePower(forChannel: 0)
             if averagePower.isFinite {
                 let normalized = powf(10, averagePower / 20)
-                currentMax = max(currentMax, min(max(normalized, 0), 1))
+                micLevel = max(micLevel, min(max(normalized, 0), 1))
             }
         }
-        
-        currentMax = max(currentMax, micStreamer.audioLevel)
-        
-        audioLevelValue = currentMax
-        return currentMax
+
+        micLevel = max(micLevel, micStreamer.audioLevel)
+        let appLevel = appAudioCaptureSession?.audioLevel ?? 0
+
+        audioLevelValue = max(micLevel, appLevel)
+        return (micLevel, appLevel)
     }
 
     func startRecording(
