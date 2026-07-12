@@ -12,10 +12,13 @@
     <true/>
     <key>com.apple.security.device.audio-input</key>
     <true/>
+    <!-- Sparkle sandbox services. Literal names, not $(PRODUCT_BUNDLE_IDENTIFIER):
+         build-dmg.sh passes this file straight to codesign, which performs no
+         build-variable expansion (only Xcode's own signing step does). -->
     <key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
     <array>
-        <string>$(PRODUCT_BUNDLE_IDENTIFIER)-spks</string>
-        <string>$(PRODUCT_BUNDLE_IDENTIFIER)-spki</string>
+        <string>com.ohshie.scriberman.app-spks</string>
+        <string>com.ohshie.scriberman.app-spki</string>
     </array>
     <key>com.apple.security.accessibility</key>
     <true/>
