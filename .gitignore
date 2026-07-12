@@ -1,0 +1,7 @@
+*.xcuserstate
+xcuserdata/
+Scriberman.xcodeproj/project.xcworkspace/xcuserdata/
+openspec/
+dist/
+/scripts/
+/Scriberman/ScribermanTests/ReleaseValidationTests.swift

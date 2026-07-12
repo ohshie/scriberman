@@ -181,7 +181,6 @@
 		A1F001111111111111111111 /* TranscriptSearchState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F001111111111111111211 /* TranscriptSearchState.swift */; };
 		A1F001111111111111111112 /* TranscriptFindBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F001111111111111111212 /* TranscriptFindBar.swift */; };
 		A1F001111111111111111113 /* TranscriptSearchStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F001111111111111111213 /* TranscriptSearchStateTests.swift */; };
-		A9D1E2F3A4B5C6D7E8F90001 /* ReleaseValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9D1E2F3A4B5C6D7E8F90002 /* ReleaseValidationTests.swift */; };
 		A9D1E2F3A4B5C6D7E8FA1001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A9D1E2F3A4B5C6D7E8FA1003 /* Sparkle */; };
 		A9D1E2F3A4B5C6D7E8FB1001 /* UpdateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9D1E2F3A4B5C6D7E8FB1002 /* UpdateService.swift */; };
 		A9D1E2F3A4B5C6D7E8FB1003 /* UpdateServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9D1E2F3A4B5C6D7E8FB1004 /* UpdateServiceTests.swift */; };
@@ -404,7 +403,6 @@
 		A1F001111111111111111211 /* TranscriptSearchState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSearchState.swift; sourceTree = "<group>"; };
 		A1F001111111111111111212 /* TranscriptFindBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptFindBar.swift; sourceTree = "<group>"; };
 		A1F001111111111111111213 /* TranscriptSearchStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSearchStateTests.swift; sourceTree = "<group>"; };
-		A9D1E2F3A4B5C6D7E8F90002 /* ReleaseValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReleaseValidationTests.swift; sourceTree = "<group>"; };
 		A9D1E2F3A4B5C6D7E8FB1002 /* UpdateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateService.swift; sourceTree = "<group>"; };
 		A9D1E2F3A4B5C6D7E8FB1004 /* UpdateServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateServiceTests.swift; sourceTree = "<group>"; };
 		A52CE181E590B26D3C4E9A5D /* RecordingServiceProtocol.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RecordingServiceProtocol.swift; sourceTree = "<group>"; };
@@ -535,7 +533,6 @@
 				79BE352A2F7E742100DB542F /* PromptManagementViewModelTests.swift */,
 				79BE353A2F7EA92C00DB542F /* AudioPlayerViewModelTests.swift */,
 				A1F001111111111111111213 /* TranscriptSearchStateTests.swift */,
-				A9D1E2F3A4B5C6D7E8F90002 /* ReleaseValidationTests.swift */,
 				79BE353E2F7ED91100DB542F /* AppAudioUsageStoreTests.swift */,
 				79C2018B2F7FAE7D002A1163 /* MenuBarSettingsTests.swift */,
 				79155F242F84188C0082157E /* LiveTranscriptionPipelineSettingsTests.swift */,
@@ -1223,7 +1220,6 @@
 				A2E8F18069EB9CB0F14A58BA /* RecordingStatusTests.swift in Sources */,
 				79BE353B2F7EA92C00DB542F /* AudioPlayerViewModelTests.swift in Sources */,
 				A1F001111111111111111113 /* TranscriptSearchStateTests.swift in Sources */,
-				A9D1E2F3A4B5C6D7E8F90001 /* ReleaseValidationTests.swift in Sources */,
 				79155F252F84188C0082157E /* LiveTranscriptionPipelineSettingsTests.swift in Sources */,
 				79DCE4252F77D0A10024DC26 /* MockPermissionService.swift in Sources */,
 				C4EC45D56DEE48C672BEE45A /* TimeFormatterTests.swift in Sources */,
