@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scriberman — private, on-device transcription for macOS</title>
+<meta name="description" content="Scriberman records your mic and system audio and transcribes it locally on your Mac — no audio ever leaves your machine.">
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #5c5c66;
+    --card: #f6f6f8; --border: #e4e4ea; --accent: #2f6bff; --accent-fg: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --fg: #f2f3f5; --muted: #9aa0ab;
+      --card: #171a21; --border: #262b35; --accent: #4d82ff; --accent-fg: #0f1115;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    display: flex; flex-direction: column; min-height: 100vh;
+  }
+  main { flex: 1; width: 100%; max-width: 680px; margin: 0 auto; padding: 12vh 24px 8vh; }
+  h1 { font-size: clamp(2.2rem, 6vw, 3rem); letter-spacing: -0.02em; margin: 0 0 .4em; }
+  .lede { font-size: 1.2rem; color: var(--muted); margin: 0 0 2.2em; max-width: 34ch; }
+  ul { list-style: none; padding: 0; margin: 0 0 2.6em; display: grid; gap: .55em; }
+  li { padding-left: 1.5em; position: relative; color: var(--fg); }
+  li::before { content: ""; position: absolute; left: 0; top: .62em;
+    width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  a.btn {
+    display: inline-block; background: var(--accent); color: var(--accent-fg);
+    text-decoration: none; font-weight: 600; padding: .7em 1.4em; border-radius: 10px;
+    transition: opacity .15s ease;
+  }
+  a.btn:hover { opacity: .88; }
+  a.ghost {
+    color: var(--fg); text-decoration: none; font-weight: 500;
+    padding: .7em 1.1em; border-radius: 10px; border: 1px solid var(--border);
+  }
+  a.ghost:hover { border-color: var(--accent); }
+  .note { color: var(--muted); font-size: .92rem; margin-top: 1.4em; }
+  footer { color: var(--muted); font-size: .85rem; text-align: center; padding: 2em 24px; border-top: 1px solid var(--border); }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+  <main>
+    <h1>Scriberman</h1>
+    <p class="lede">Private, on-device meeting transcription for macOS.</p>
+    <ul>
+      <li>Records microphone and system audio into per-session files.</li>
+      <li>Live, on-device speech-to-text with speaker diarization.</li>
+      <li>Re-run higher-quality offline transcription anytime.</li>
+      <li>Speaker memory, system-wide voice dictation, transcript tools.</li>
+      <li>No audio ever leaves your Mac for transcription.</li>
+    </ul>
+    <div class="cta">
+      <a class="btn" href="https://github.com/ohshie/scriberman/releases/latest">Download for macOS</a>
+      <a class="ghost" href="https://github.com/ohshie/scriberman">View on GitHub</a>
+    </div>
+    <p class="note">Requires macOS 26 or later on Apple silicon.</p>
+  </main>
+  <footer>
+    Made by <a href="https://github.com/ohshie">ohshie</a> · updates delivered via <a href="appcast.xml">Sparkle</a>
+  </footer>
+</body>
+</html>

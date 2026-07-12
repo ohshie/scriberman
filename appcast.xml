@@ -1,0 +1,18 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Scriberman</title>
+        <item>
+            <title>1.0.1</title>
+            <pubDate>Sun, 12 Jul 2026 17:38:42 +0200</pubDate>
+            <sparkle:version>2</sparkle:version>
+            <sparkle:shortVersionString>1.0.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description><![CDATA[<h2>Scriberman 1.0.1</h2>
+<p>Scriberman 1.0.1 release.</p>
+]]></description>
+            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.0.1/Scriberman-1.0.1-2-arm64.dmg" length="7370194" type="application/octet-stream" sparkle:edSignature="f57V0MCXxuIx/7NscS7f0VE0FOuwr545586P3/Wcuf1QTc54bJHZaqi30vQtAsd8Dg0Ol8ezzw3eSOD66Fg+CQ=="/>
+        </item>
+    </channel>
+</rss>
