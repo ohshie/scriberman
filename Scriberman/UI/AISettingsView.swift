@@ -7,6 +7,7 @@ struct AISettingsView: View {
     }
 
     @Environment(AIProviderService.self) private var aiProviderService
+    var promptVM: PromptManagementViewModel
     @State private var apiKeyDraft = ""
     @State private var lastCommittedAPIKeyDraft = ""
     @State private var customModelDraft = ""
@@ -103,8 +104,44 @@ struct AISettingsView: View {
                         .foregroundStyle(.red)
                 }
             }
+
+            Section("Saved Prompts") {
+                if promptVM.prompts.isEmpty {
+                    Text("No prompts yet. Add a prompt to enable AI transformations.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(promptVM.prompts) { prompt in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(prompt.name)
+                                .font(.headline)
+                            Text(prompt.content)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(3)
+
+                            HStack {
+                                Button("Edit") {
+                                    promptVM.presentEditor(for: prompt)
+                                }
+
+                                Button("Delete", role: .destructive) {
+                                    promptVM.deletePrompt(prompt)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 6)
+                    }
+                }
+
+                Button("Add Prompt") {
+                    promptVM.presentEditor(for: nil)
+                }
+            }
         }
         .formStyle(.grouped)
+        .task {
+            promptVM.loadPrompts()
+        }
     }
 
     private var normalizedCustomModelDraft: String {
