@@ -83,7 +83,7 @@ final class AudioImportServiceTests {
                 try FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
                 FileManager.default.createFile(atPath: outputURL.path, contents: Data("aac".utf8))
             },
-            retranscribe: { sessionID, modelContainer, _ in
+            retranscribe: { sessionID, modelContainer, _, _ in
                 Self.updateImportedSession(id: sessionID, in: modelContainer) { session in
                     session.status = .done
                 }
@@ -130,7 +130,7 @@ final class AudioImportServiceTests {
                 try FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
                 FileManager.default.createFile(atPath: outputURL.path, contents: Data("aac".utf8))
             },
-            retranscribe: { _, _, _ in
+            retranscribe: { _, _, _, _ in
             }
         )
 
@@ -238,7 +238,7 @@ final class AudioImportServiceTests {
                 )
                 FileManager.default.createFile(atPath: outputURL.path, contents: Data("aac".utf8))
             },
-            retranscribe: { sessionID, modelContainer, _ in
+            retranscribe: { sessionID, modelContainer, _, _ in
                 Self.updateImportedSession(id: sessionID, in: modelContainer) { session in
                     session.status = .done
                 }
