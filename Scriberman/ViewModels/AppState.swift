@@ -18,6 +18,7 @@ final class AppState {
     let newSessionViewModel: NewSessionViewModel
     let jobsViewModel: JobsViewModel
     let settingsViewModel: SettingsViewModel
+    let updateService: UpdateService
     let menuBarSettings: MenuBarSettings
     let appAudioSettings: AppAudioSettings
     private let restoreWorkspaceHandler: () async throws -> Workspace
@@ -73,12 +74,14 @@ final class AppState {
 
     init(
         services: ServiceContainer,
+        updateService: UpdateService? = nil,
         restoreWorkspaceHandler: (() async throws -> Workspace)? = nil,
         setWorkspaceHandler: ((URL) async throws -> Workspace)? = nil
     ) {
         self.mainServices = services.main
         self.backgroundServices = services.background
         self.permissionService = services.main.permissionService
+        self.updateService = updateService ?? .live()
         self.restoreWorkspaceHandler = restoreWorkspaceHandler ?? {
             try await services.background.workspaceService.restoreWorkspaceIfPossible()
         }
