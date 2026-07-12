@@ -182,6 +182,9 @@
 		A1F001111111111111111112 /* TranscriptFindBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F001111111111111111212 /* TranscriptFindBar.swift */; };
 		A1F001111111111111111113 /* TranscriptSearchStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F001111111111111111213 /* TranscriptSearchStateTests.swift */; };
 		A9D1E2F3A4B5C6D7E8F90001 /* ReleaseValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9D1E2F3A4B5C6D7E8F90002 /* ReleaseValidationTests.swift */; };
+		A9D1E2F3A4B5C6D7E8FA1001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A9D1E2F3A4B5C6D7E8FA1003 /* Sparkle */; };
+		A9D1E2F3A4B5C6D7E8FB1001 /* UpdateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9D1E2F3A4B5C6D7E8FB1002 /* UpdateService.swift */; };
+		A9D1E2F3A4B5C6D7E8FB1003 /* UpdateServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9D1E2F3A4B5C6D7E8FB1004 /* UpdateServiceTests.swift */; };
 		A22A22A22A22A22A22A22A22 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22B22B22B22B22B22B22B22 /* KeychainStore.swift */; };
 		A2E8F18069EB9CB0F14A58BA /* RecordingStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E2E0F5F51DABC96146DE26B /* RecordingStatusTests.swift */; };
 		A33A33A33A33A33A33A33A33 /* AIProviderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B33B33B33B33B33B33B33B33 /* AIProviderStore.swift */; };
@@ -402,6 +405,8 @@
 		A1F001111111111111111212 /* TranscriptFindBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptFindBar.swift; sourceTree = "<group>"; };
 		A1F001111111111111111213 /* TranscriptSearchStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSearchStateTests.swift; sourceTree = "<group>"; };
 		A9D1E2F3A4B5C6D7E8F90002 /* ReleaseValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReleaseValidationTests.swift; sourceTree = "<group>"; };
+		A9D1E2F3A4B5C6D7E8FB1002 /* UpdateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateService.swift; sourceTree = "<group>"; };
+		A9D1E2F3A4B5C6D7E8FB1004 /* UpdateServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateServiceTests.swift; sourceTree = "<group>"; };
 		A52CE181E590B26D3C4E9A5D /* RecordingServiceProtocol.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RecordingServiceProtocol.swift; sourceTree = "<group>"; };
 		A7C1BF32211A4FE21342466B /* Scriberman.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = Scriberman.entitlements; sourceTree = "<group>"; };
 		A8F3DE0F4D65F9DD94E5DEFC /* SettingsViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
@@ -467,6 +472,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				72E17286721922EFD739F74A /* Cocoa.framework in Frameworks */,
+				A9D1E2F3A4B5C6D7E8FA1001 /* Sparkle in Frameworks */,
 				A55A55A55A55A55A55A55A55 /* OpenAI in Frameworks */,
 				C3EE37FB3F5E384076FF1B4E /* FluidAudio in Frameworks */,
 				E3E3E3E3E3E3E3E3E3E3E3E3 /* MarkdownUI in Frameworks */,
@@ -479,6 +485,7 @@
 		07313C70AD2DAFE0C7770C81 /* ScribermanTests */ = {
 			isa = PBXGroup;
 			children = (
+				A9D1E2F3A4B5C6D7E8FB1004 /* UpdateServiceTests.swift */,
 				B77B77B77B77B77B77B77B77 /* AIProviderServiceTests.swift */,
 				B88B88B88B88B88B88B88B88 /* ConnectionStatusTests.swift */,
 				B5871E10D502FAEB70EDC99F /* MarkdownRendererTests.swift */,
@@ -771,6 +778,7 @@
 			isa = PBXGroup;
 			children = (
 				ADD6117B43940D993554EB33 /* ServiceContainer.swift */,
+				A9D1E2F3A4B5C6D7E8FB1002 /* UpdateService.swift */,
 				7987325F2F7D819800570A03 /* Audio */,
 				F0A1B2C3D4E5F60718293C46 /* AI */,
 				F0A1B2C3D4E5F60718293C47 /* Permissions */,
@@ -966,6 +974,7 @@
 				DDA5336F2945D8E09B308BC2 /* FluidAudio */,
 				D11D11D11D11D11D11D11D11 /* OpenAI */,
 				E2E2E2E2E2E2E2E2E2E2E2E2 /* MarkdownUI */,
+				A9D1E2F3A4B5C6D7E8FA1003 /* Sparkle */,
 			);
 			productName = Scriberman;
 			productReference = 5542239A238BB9A1883C5B5A /* Scriberman.app */;
@@ -1016,6 +1025,7 @@
 				C9C9D7C4E41BA2318ED6E595 /* XCRemoteSwiftPackageReference "FluidAudio" */,
 				C11C11C11C11C11C11C11C11 /* XCRemoteSwiftPackageReference "OpenAI" */,
 				E1E1E1E1E1E1E1E1E1E1E1E1 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
+				A9D1E2F3A4B5C6D7E8FA1002 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			productRefGroup = 43993D81DB3C75CD2DC1BB1F /* Products */;
 			projectDirPath = "";
@@ -1051,6 +1061,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				9B0A47F88ECCCF249F0581C9 /* ScribermanApp.swift in Sources */,
+				A9D1E2F3A4B5C6D7E8FB1001 /* UpdateService.swift in Sources */,
 				4540437FF944A6BA6E754CE5 /* ContentView.swift in Sources */,
 				79A11C1D2F856CE40084F195 /* AppAudioSettings.swift in Sources */,
 				7987325E2F7C191B00570A03 /* ModelPathResolver.swift in Sources */,
@@ -1201,6 +1212,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A9D1E2F3A4B5C6D7E8FB1003 /* UpdateServiceTests.swift in Sources */,
 				A77A77A77A77A77A77A77A77 /* AIProviderServiceTests.swift in Sources */,
 				7987328C2F7DB47F00570A03 /* ModelInstallServiceTests.swift in Sources */,
 				798732752F7D8EEA00570A03 /* AudioChannelReaderTests.swift in Sources */,
@@ -1391,6 +1403,8 @@
 				PRODUCT_NAME = Scriberman;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
+				SPARKLE_FEED_URL = "";
+				SPARKLE_PUBLIC_ED_KEY = "";
 				SUPPORTED_PLATFORMS = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_STRICT_CONCURRENCY = complete;
@@ -1515,6 +1529,8 @@
 				PRODUCT_NAME = Scriberman;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
+				SPARKLE_FEED_URL = "https://ohshie.github.io/scriberman/appcast.xml";
+				SPARKLE_PUBLIC_ED_KEY = "";
 				SUPPORTED_PLATFORMS = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_STRICT_CONCURRENCY = complete;
@@ -1555,6 +1571,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		A9D1E2F3A4B5C6D7E8FA1002 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.9.2;
+			};
+		};
 		C11C11C11C11C11C11C11C11 /* XCRemoteSwiftPackageReference "OpenAI" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/MacPaw/OpenAI.git";
@@ -1582,6 +1606,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		A9D1E2F3A4B5C6D7E8FA1003 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A9D1E2F3A4B5C6D7E8FA1002 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
 		D11D11D11D11D11D11D11D11 /* OpenAI */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = C11C11C11C11C11C11C11C11 /* XCRemoteSwiftPackageReference "OpenAI" */;

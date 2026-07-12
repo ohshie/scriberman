@@ -11,6 +11,7 @@ struct SettingsView: View {
     }
 
     var viewModel: SettingsViewModel
+    var updateService: UpdateService
     @Environment(AppState.self) private var appState
     @Environment(AIProviderService.self) private var aiProviderService
     @State private var selectedTab: SettingsTab = .general
@@ -69,6 +70,36 @@ struct SettingsView: View {
                     if !viewModel.canDownloadModels {
                         Section {
                             Text("Downloads are disabled until workspace access is configured and active.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Section("Updates") {
+                        LabeledContent("Current version") {
+                            Text(updateService.currentVersionText)
+                        }
+
+                        Toggle(
+                            "Automatically check for updates",
+                            isOn: Binding(
+                                get: { updateService.automaticallyChecksForUpdates },
+                                set: { updateService.automaticallyChecksForUpdates = $0 }
+                            )
+                        )
+                        .disabled(!updateService.isConfigured)
+
+                        Button("Check for Updates…") {
+                            updateService.checkForUpdates()
+                        }
+                        .disabled(!updateService.canCheckForUpdates)
+
+                        if let updateErrorMessage = updateService.errorMessage {
+                            Text(updateErrorMessage)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                        } else if !updateService.isConfigured {
+                            Text("Update checks are available in production releases.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
