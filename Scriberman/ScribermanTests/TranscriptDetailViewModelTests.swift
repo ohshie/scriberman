@@ -168,6 +168,96 @@ struct TranscriptDetailViewModelTests {
         #expect(viewModel.isReprocessed)
     }
 
+    @Test
+    @MainActor
+    func testSourcesTextForMicOnlyRecording() {
+        let (defaults, suiteName) = makeDefaults()
+        defer { cleanupDefaults(named: suiteName) }
+
+        let viewModel = TranscriptDetailViewModel(
+            session: makeRecordingSession(capturedAppName: nil),
+            aiProviderService: makeService(defaults: defaults)
+        )
+
+        #expect(viewModel.sourcesText == "Mic")
+    }
+
+    @Test
+    @MainActor
+    func testSourcesTextForCombinedCapture() {
+        let (defaults, suiteName) = makeDefaults()
+        defer { cleanupDefaults(named: suiteName) }
+
+        let viewModel = TranscriptDetailViewModel(
+            session: makeRecordingSession(capturedAppName: "Chromium"),
+            aiProviderService: makeService(defaults: defaults)
+        )
+
+        #expect(viewModel.sourcesText == "Mic + Chromium")
+    }
+
+    @Test
+    @MainActor
+    func testSourcesTextForImportedSession() {
+        let (defaults, suiteName) = makeDefaults()
+        defer { cleanupDefaults(named: suiteName) }
+
+        let imported = ImportedSession(
+            duration: 30,
+            title: "Imported",
+            originalFileName: "meeting.m4a",
+            originalFormat: "m4a"
+        )
+        let viewModel = TranscriptDetailViewModel(
+            session: imported,
+            aiProviderService: makeService(defaults: defaults)
+        )
+
+        #expect(viewModel.sourcesText == "Imported")
+    }
+
+    @Test
+    @MainActor
+    func testWordCountReflectsDisplayedTranscript() {
+        let (defaults, suiteName) = makeDefaults()
+        defer { cleanupDefaults(named: suiteName) }
+
+        let viewModel = TranscriptDetailViewModel(
+            session: makeRecordingSession(transcriptText: "one two  three\nfour five"),
+            aiProviderService: makeService(defaults: defaults)
+        )
+
+        #expect(viewModel.wordCount == 5)
+    }
+
+    @Test
+    @MainActor
+    func testWordCountIsZeroWithoutTranscript() {
+        let (defaults, suiteName) = makeDefaults()
+        defer { cleanupDefaults(named: suiteName) }
+
+        let viewModel = TranscriptDetailViewModel(
+            session: makeRecordingSession(transcriptText: nil),
+            aiProviderService: makeService(defaults: defaults)
+        )
+
+        #expect(viewModel.wordCount == 0)
+    }
+
+    @Test
+    @MainActor
+    func testDurationTextFormatsSessionDuration() {
+        let (defaults, suiteName) = makeDefaults()
+        defer { cleanupDefaults(named: suiteName) }
+
+        let viewModel = TranscriptDetailViewModel(
+            session: makeRecordingSession(),
+            aiProviderService: makeService(defaults: defaults)
+        )
+
+        #expect(viewModel.durationText == TimeFormatter.format(seconds: 10))
+    }
+
     @MainActor
     private func makeService(
         defaults: UserDefaults,

@@ -38,8 +38,6 @@ struct TranscriptDetailView: View {
                 header
                 aiTransformationSection
                 transcriptBody
-                metadataGrid
-                deleteButton
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(28)
@@ -70,6 +68,14 @@ struct TranscriptDetailView: View {
                     copyTranscript()
                 } label: {
                     Label("Copy", systemImage: "doc.on.doc")
+                }
+
+                transformMenu
+
+                Button(role: .destructive) {
+                    showingDeleteConfirmation = true
+                } label: {
+                    Label("Delete Entry", systemImage: "trash")
                 }
             }
         }
@@ -103,10 +109,44 @@ struct TranscriptDetailView: View {
                     }
                 }
 
-            Text(formattedDate)
+            Text(headerFactsLine)
                 .font(.headline)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private var headerFactsLine: String {
+        var facts = [formattedDate, viewModel.durationText, viewModel.sourcesText]
+        if viewModel.wordCount > 0 {
+            facts.append("\(viewModel.wordCount) words")
+        }
+        return facts.joined(separator: " · ")
+    }
+
+    private var transformMenu: some View {
+        Menu {
+            if viewModel.prompts.isEmpty {
+                Button("Add prompts in Settings") {}
+                    .disabled(true)
+            } else {
+                if viewModel.shouldWarnAboutTranscriptLength {
+                    Section {
+                        Label("Long transcript — the model may hit context limits", systemImage: "exclamationmark.triangle")
+                    }
+                }
+                ForEach(viewModel.prompts) { prompt in
+                    Button(prompt.name) {
+                        viewModel.selectedPromptID = prompt.id
+                        Task {
+                            await viewModel.runTransformation()
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label("Transform", systemImage: "sparkles")
+        }
+        .disabled(viewModel.isRunningTransformation || viewModel.finalTranscriptText.isEmpty)
     }
 
     private var transcriptBody: some View {
@@ -125,39 +165,6 @@ struct TranscriptDetailView: View {
 
     private var aiTransformationSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if latestTransformation == nil {
-                HStack(spacing: 12) {
-                    Picker("Prompt", selection: $viewModel.selectedPromptID) {
-                        ForEach(viewModel.prompts) { prompt in
-                            Text(prompt.name).tag(Optional(prompt.id))
-                        }
-                    }
-                    .disabled(viewModel.prompts.isEmpty || viewModel.isRunningTransformation)
-                    .frame(maxWidth: 320)
-
-                    Button(viewModel.runButtonTitle) {
-                        Task {
-                            await viewModel.runTransformation()
-                        }
-                    }
-                    .disabled(viewModel.canRunTransformation == false)
-
-                    Spacer(minLength: 0)
-                }
-
-                if viewModel.prompts.isEmpty {
-                    Text("Add prompts in Settings to enable transformations.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                if viewModel.shouldWarnAboutTranscriptLength {
-                    Text("Transcript is longer than 40,000 characters. The model may fail due to context limits.")
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
-                }
-            }
-
             if let transformationErrorMessage = viewModel.transformationErrorMessage {
                 Text(transformationErrorMessage)
                     .font(.footnote)
@@ -186,38 +193,6 @@ struct TranscriptDetailView: View {
 
     private var latestTransformation: AITransformation? {
         viewModel.availableTransformations.last
-    }
-
-    private var metadataGrid: some View {
-        LazyVGrid(columns: [
-            GridItem(.flexible(), alignment: .leading),
-            GridItem(.flexible(), alignment: .leading)
-        ], alignment: .leading, spacing: 16) {
-            MetadataCell(
-                title: "Application",
-                value: viewModel.applicationName ?? "—",
-                systemImage: viewModel.applicationName == nil ? "mic.fill" : "app.fill"
-            )
-            MetadataCell(
-                title: "Window",
-                value: "—",
-                systemImage: "macwindow"
-            )
-            MetadataCell(
-                title: "Duration",
-                value: TimeFormatter.format(seconds: Float(session.duration)),
-                systemImage: "clock"
-            )
-        }
-    }
-
-    private var deleteButton: some View {
-        Button(role: .destructive) {
-            showingDeleteConfirmation = true
-        } label: {
-            Label("Delete Entry", systemImage: "trash")
-        }
-        .buttonStyle(.bordered)
     }
 
     private var formattedDate: String {

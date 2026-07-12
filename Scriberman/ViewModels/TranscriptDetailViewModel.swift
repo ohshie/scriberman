@@ -44,6 +44,28 @@ final class TranscriptDetailViewModel {
         return nil
     }
 
+    // MARK: - Header facts (design D2)
+
+    var durationText: String {
+        TimeFormatter.format(seconds: Float(session.duration))
+    }
+
+    var sourcesText: String {
+        if session is ImportedSession {
+            return "Imported"
+        }
+        if let applicationName {
+            return "Mic + \(applicationName)"
+        }
+        return "Mic"
+    }
+
+    var wordCount: Int {
+        finalTranscriptText
+            .split(whereSeparator: \.isWhitespace)
+            .count
+    }
+
     var availableTransformations: [AITransformation] {
         session.aiTransformations.sorted(by: { $0.createdAt < $1.createdAt })
     }
