@@ -353,17 +353,33 @@ struct AppShellView: View {
         }
     }
 
+    /// The New Session (+) button is redundant while the New Session panel or an
+    /// in-progress recording is on screen, so it is hidden in those contexts.
+    private var hideNewSessionButton: Bool {
+        guard let selectedSession else { return false }
+        switch selectedSession {
+        case .pending:
+            return true
+        case .recording(let session):
+            return session.status == .recording
+        case .imported:
+            return false
+        }
+    }
+
     @ToolbarContentBuilder
     private var jobsToolbar: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            Button {
-                appState.selectPendingSession()
-                appState.newSessionViewModel.refreshAudioDevicesOnPanelExpanded()
-                if let pendingSession = appState.pendingSession {
-                    selectedSession = .pending(pendingSession)
+        if !hideNewSessionButton {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    appState.selectPendingSession()
+                    appState.newSessionViewModel.refreshAudioDevicesOnPanelExpanded()
+                    if let pendingSession = appState.pendingSession {
+                        selectedSession = .pending(pendingSession)
+                    }
+                } label: {
+                    Label("New Session", systemImage: "plus")
                 }
-            } label: {
-                Label("New Session", systemImage: "plus")
             }
         }
     }

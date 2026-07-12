@@ -46,40 +46,27 @@ struct NewSessionPanelView: View {
 
             controlsSection(isInteractive: true)
 
-            Button("Import File…") {
+            Button {
                 onImportFile()
+            } label: {
+                Label("Import File…", systemImage: "square.and.arrow.down")
             }
             .buttonStyle(.borderless)
         }
     }
 
     private var recordHeroButton: some View {
-        VStack(spacing: 8) {
-            Button {
-                Task {
-                    if let session = await viewModel.startRecording(title: pendingSession.title, context: modelContext) {
-                        onRecordingStarted(session)
-                    }
+        HeroCircleButton(
+            innerShape: .circle,
+            tint: .accentColor,
+            caption: "Record",
+            isEnabled: viewModel.canRecord
+        ) {
+            Task {
+                if let session = await viewModel.startRecording(title: pendingSession.title, context: modelContext) {
+                    onRecordingStarted(session)
                 }
-            } label: {
-                ZStack {
-                    Circle()
-                        .strokeBorder(.tint.opacity(0.5), lineWidth: 1.5)
-                        .frame(width: 62, height: 62)
-                    Circle()
-                        .fill(.tint)
-                        .frame(width: 46, height: 46)
-                }
-                .contentShape(Circle())
             }
-            .buttonStyle(.plain)
-            .disabled(!viewModel.canRecord)
-            .opacity(viewModel.canRecord ? 1 : 0.4)
-            .accessibilityLabel("Record")
-
-            Text("Record")
-                .font(.callout.weight(.medium))
-                .foregroundStyle(viewModel.canRecord ? .primary : .secondary)
         }
     }
 
@@ -321,33 +308,7 @@ struct NewSessionPanelView: View {
             .textFieldStyle(.plain)
             .font(.title2.weight(.semibold))
             .multilineTextAlignment(.center)
-            .overlay(alignment: .trailing) {
-                if isNameCardHovering {
-                    Label("Edit", systemImage: "pencil")
-                        .labelStyle(.iconOnly)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tint)
-                        .padding(.trailing, 12)
-                        .transition(.opacity)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .opacity(isNameCardHovering ? 1 : 0)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(.tint.opacity(isNameCardHovering ? 0.35 : 0), lineWidth: 1.5)
-            }
-            .scaleEffect(isNameCardHovering ? 1.02 : 1.0)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .onHover { hovering in
-                isNameCardHovering = hovering
-            }
-            .animation(.easeInOut(duration: 0.15), value: isNameCardHovering)
+            .editableTitleHover(isHovering: $isNameCardHovering)
     }
 
     private func permissionWarningButton(reason: String, action: @escaping () -> Void) -> some View {
