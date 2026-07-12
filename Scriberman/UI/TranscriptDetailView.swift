@@ -71,9 +71,7 @@ struct TranscriptDetailView: View {
                 }
 
                 transformMenu
-            }
 
-            ToolbarItem(placement: .destructiveAction) {
                 Button(role: .destructive) {
                     showingDeleteConfirmation = true
                 } label: {
