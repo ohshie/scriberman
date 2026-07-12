@@ -22,19 +22,41 @@ struct TranscriptAligner {
         let mappedSegments: [TranscriptSegment]
 
         if !cleanedWords.isEmpty {
-            mappedSegments = sortedDiarized.compactMap { segment in
-                let words = cleanedWords.filter {
-                    $0.end > segment.startTimeSeconds && $0.start < segment.endTimeSeconds
+            if sortedDiarized.isEmpty {
+                // ASR produced words but the diarizer produced nothing:
+                // emit everything as a single-speaker segment spanning the words.
+                let text = tokenStitcher.stitchTokens(cleanedWords.map(\.text))
+                mappedSegments = text.isEmpty
+                    ? []
+                    : [
+                        TranscriptSegment(
+                            speakerId: "S1",
+                            text: text,
+                            startTime: cleanedWords[0].start,
+                            endTime: cleanedWords[cleanedWords.count - 1].end,
+                            audioSource: source
+                        )
+                    ]
+            } else {
+                // Each word lands in exactly one diarized segment: the one
+                // containing its midpoint, else the largest-overlap segment,
+                // else (diarization gap) the nearest segment by time distance.
+                // Insertion order preserves ASR token order within a bucket.
+                var buckets: [[TimedWord]] = Array(repeating: [], count: sortedDiarized.count)
+                for word in cleanedWords {
+                    buckets[bucketIndex(for: word, in: sortedDiarized)].append(word)
                 }
-                let text = tokenStitcher.stitchTokens(words.map(\.text))
-                guard !text.isEmpty else { return nil }
-                return TranscriptSegment(
-                    speakerId: segment.speakerId,
-                    text: text,
-                    startTime: segment.startTimeSeconds,
-                    endTime: segment.endTimeSeconds,
-                    audioSource: source
-                )
+                mappedSegments = zip(sortedDiarized, buckets).compactMap { segment, words in
+                    let text = tokenStitcher.stitchTokens(words.map(\.text))
+                    guard !text.isEmpty else { return nil }
+                    return TranscriptSegment(
+                        speakerId: segment.speakerId,
+                        text: text,
+                        startTime: segment.startTimeSeconds,
+                        endTime: segment.endTimeSeconds,
+                        audioSource: source
+                    )
+                }
             }
         } else {
             logger.warning("tokenTimings is empty — falling back to coarse alignment")
@@ -87,6 +109,39 @@ struct TranscriptAligner {
             segments: mappedSegments,
             speakers: speakers
         )
+    }
+
+    /// The single diarized segment a word belongs to. `segments` must be
+    /// non-empty and sorted by start time.
+    private func bucketIndex(for word: TimedWord, in segments: [TimedSpeakerSegment]) -> Int {
+        let midpoint = (word.start + word.end) / 2
+
+        if let index = segments.firstIndex(where: {
+            midpoint >= $0.startTimeSeconds && midpoint < $0.endTimeSeconds
+        }) {
+            return index
+        }
+
+        var bestOverlap: (index: Int, duration: Float)?
+        for (index, segment) in segments.enumerated() {
+            let overlap = min(word.end, segment.endTimeSeconds) - max(word.start, segment.startTimeSeconds)
+            if overlap > 0, overlap > (bestOverlap?.duration ?? 0) {
+                bestOverlap = (index, overlap)
+            }
+        }
+        if let bestOverlap {
+            return bestOverlap.index
+        }
+
+        // Diarization gap: nearest segment by midpoint distance, earlier on ties.
+        var nearest = (index: 0, distance: Float.greatestFiniteMagnitude)
+        for (index, segment) in segments.enumerated() {
+            let distance = max(segment.startTimeSeconds - midpoint, midpoint - segment.endTimeSeconds, 0)
+            if distance < nearest.distance {
+                nearest = (index, distance)
+            }
+        }
+        return nearest.index
     }
 
     func speakerColorHex(at index: Int) -> String {
