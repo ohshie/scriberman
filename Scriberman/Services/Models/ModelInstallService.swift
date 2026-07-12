@@ -1,6 +1,7 @@
 import FluidAudio
 import Foundation
 import CoreML
+import os
 
 enum ModelInstallError: LocalizedError {
     case workspaceNotWritable
@@ -153,6 +154,12 @@ actor ModelInstallService: ModelInstallServicing {
     }
 
     private func mapDownloadError(_ error: Error, for group: ModelGroup) -> Error {
+        // ModelHub wraps HTTP-status failures; transport errors (DNS,
+        // connectivity) still surface as raw URLErrors.
+        if case DownloadError.downloadFailed(_, let underlying) = error {
+            return mapDownloadError(underlying, for: group)
+        }
+
         let nsError = error as NSError
 
         if nsError.domain == NSURLErrorDomain {
@@ -181,42 +188,48 @@ actor ModelInstallService: ModelInstallServicing {
 
     // MARK: - Download (FluidAudio helpers)
 
-    static func normalizedDownloadProgress(from fractionCompleted: Double) -> Double {
-        min(fractionCompleted * 2.0, 1.0)
-    }
-
     static func makeDownloadProgressHandler(
         downloadProgress: (@Sendable (Double) -> Void)?
-    ) -> DownloadUtils.ProgressHandler? {
+    ) -> ProgressHandler? {
         guard let downloadProgress else {
             return nil
         }
 
+        // ModelHub reports byte-weighted progress spanning [0, 1] across the
+        // listing/downloading/compiling phases. Clamp to a running maximum so
+        // per-group progress never regresses across sub-downloads or phase
+        // transitions.
+        let maxFraction = OSAllocatedUnfairLock(initialState: 0.0)
         return { progress in
-            downloadProgress(normalizedDownloadProgress(from: progress.fractionCompleted))
+            let clamped = min(max(progress.fractionCompleted, 0.0), 1.0)
+            let monotonic = maxFraction.withLock { state -> Double in
+                state = max(state, clamped)
+                return state
+            }
+            downloadProgress(monotonic)
         }
     }
 
     private func downloadDirectly(
         for group: ModelGroup,
         to directory: URL,
-        progressHandler: DownloadUtils.ProgressHandler?
+        progressHandler: ProgressHandler?
     ) async throws {
         switch group {
         case .asrParakeetV3:
-            try await DownloadUtils.downloadRepo(.parakeetV3, to: directory, progressHandler: progressHandler)
+            try await ModelHub.download(.parakeetV3, to: directory, progressHandler: progressHandler)
 
         case .vadSilero:
-            try await DownloadUtils.downloadRepo(.vad, to: directory, progressHandler: progressHandler)
+            try await ModelHub.download(.vad, to: directory, progressHandler: progressHandler)
 
         case .offlineDiarization:
-            try await DownloadUtils.downloadRepo(.diarizer, to: directory, progressHandler: progressHandler)
-            try await DownloadUtils.downloadRepo(.diarizer, to: directory, variant: "offline")
+            try await ModelHub.download(.diarizer, to: directory, progressHandler: progressHandler)
+            try await ModelHub.download(.diarizer, to: directory, variant: "offline")
 
         case .lseendDiarization:
-            // Only the pinned variant/step is installed; downloadRepo would
-            // pull every LS-EEND variant × step size in the repo.
-            try await DownloadUtils.downloadSubdirectory(
+            // Only the pinned variant/step is installed; a full repo download
+            // would pull every LS-EEND variant × step size in the repo.
+            try await ModelHub.download(
                 .lseendDihard3,
                 subdirectory: ModelPathResolver.lseendModelRelativePath,
                 to: directory.appendingPathComponent(ModelGroup.lseendDiarization.repoFolderName, isDirectory: true),
