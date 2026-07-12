@@ -7,6 +7,7 @@ struct ActiveRecordingDetailView: View {
     let modelContext: ModelContext
 
     @FocusState private var titleFocused: Bool
+    @State private var isTitleHovering = false
 
     init(session: RecordingSession, viewModel: NewSessionViewModel, modelContext: ModelContext) {
         self.session = session
@@ -24,6 +25,7 @@ struct ActiveRecordingDetailView: View {
                     .onSubmit {
                         titleFocused = false
                     }
+                    .editableTitleHover(isHovering: $isTitleHovering)
 
                 FlowingWaveView(
                     level: viewModel.micAudioLevel,
@@ -70,15 +72,15 @@ struct ActiveRecordingDetailView: View {
 
                 HStack {
                     Spacer()
-                    Button {
+                    HeroCircleButton(
+                        innerShape: .roundedSquare,
+                        tint: .red,
+                        caption: "Stop"
+                    ) {
                         Task {
                             _ = await viewModel.stopRecording(context: modelContext)
                         }
-                    } label: {
-                        Label("Stop", systemImage: "stop.circle.fill")
                     }
-                    .buttonStyle(.glassProminent)
-                    .tint(.red)
                     Spacer()
                 }
 
