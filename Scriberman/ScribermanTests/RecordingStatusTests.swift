@@ -383,13 +383,16 @@ struct RecordingSessionTests {
     func testTranscriptDetailViewIncludesAITransformationUIElements() throws {
         let source = try transcriptDetailSource()
 
-        #expect(source.contains("Picker(\"Prompt\""))
+        #expect(source.contains("Label(\"Transform\", systemImage: \"sparkles\")"))
+        #expect(source.contains("await viewModel.runTransformation()"))
         #expect(source.contains("AITransformationPreviewCard("))
         #expect(source.contains("SkeletonView()"))
-        #expect(source.contains("Add prompts in Settings to enable transformations."))
-        #expect(source.contains("40,000"))
+        #expect(source.contains("Add prompts in Settings"))
+        #expect(source.contains("shouldWarnAboutTranscriptLength"))
         #expect(source.contains("NSPasteboard.general"))
         #expect(source.contains("latestTransformation.resultText"))
+        #expect(!source.contains("Picker(\"Prompt\""))
+        #expect(!source.contains("MetadataCell("))
     }
 
     
