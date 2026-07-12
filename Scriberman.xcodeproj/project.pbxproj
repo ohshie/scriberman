@@ -1526,7 +1526,7 @@
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
 				SPARKLE_FEED_URL = "https://ohshie.github.io/scriberman/appcast.xml";
-				SPARKLE_PUBLIC_ED_KEY = "";
+				SPARKLE_PUBLIC_ED_KEY = "XqiIVLU4EjWSXxYCn1l75CSp4HwP0Vxfm7q616qNt48=";
 				SUPPORTED_PLATFORMS = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_STRICT_CONCURRENCY = complete;
