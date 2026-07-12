@@ -112,6 +112,7 @@ final class AppState {
         self.dictationService = DictationService(recordingService: services.background.recordingService)
         self.newSessionViewModel.menuBarSettings = self.menuBarSettings
         self.newSessionViewModel.settingsViewModel = self.settingsViewModel
+        self.jobsViewModel.settingsViewModel = self.settingsViewModel
     }
 
     func selectPendingSession() {

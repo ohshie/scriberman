@@ -2,16 +2,17 @@ import FluidAudio
 import Foundation
 import SwiftData
 import Testing
+import os
 @testable import Scriberman
 
 struct TranscriptionPassRunnerTests {
     @Test
     func runReturnsEmptyWhenVADProducesNoSpeech() async throws {
-        var engineCreated = false
+        let engineCreated = OSAllocatedUnfairLock(initialState: false)
         let runner = TranscriptionPassRunner(
             segmentSpeech: { _ in [] },
             makePassEngines: { _ in
-                engineCreated = true
+                engineCreated.withLock { $0 = true }
                 return TranscriptionPassRunner.PassEngines(
                     transcribeChunk: { _, _ in
                         TranscriptionPassRunner.PassASRResult(text: "", tokenTimings: [])
@@ -28,7 +29,67 @@ struct TranscriptionPassRunnerTests {
 
         #expect(segments.isEmpty)
         #expect(embeddings.isEmpty)
-        #expect(!engineCreated)
+        #expect(!engineCreated.withLock { $0 })
+    }
+
+    @Test
+    func sharedPassEnginesLoadsFactoryExactlyOnceAcrossConcurrentPasses() async throws {
+        let factoryCalls = OSAllocatedUnfairLock(initialState: 0)
+        let service = TranscriptionService(
+            segmentSpeech: { _ in [VadSegment(startTime: 0, endTime: 1)] },
+            makePassEngines: { _ in
+                factoryCalls.withLock { $0 += 1 }
+                return TranscriptionPassRunner.PassEngines(
+                    transcribeChunk: { _, _ in
+                        TranscriptionPassRunner.PassASRResult(text: "hello", tokenTimings: [])
+                    },
+                    diarize: { _ in
+                        TranscriptionPassRunner.PassDiarizationResult(segments: [], speakerDatabase: nil)
+                    }
+                )
+            }
+        )
+
+        let workspace = try makeWorkspace()
+        let samples = Array(repeating: Float(0.1), count: 16_000)
+        let sharedEngines = await service.makeSharedPassEngines()
+
+        async let mic = service.transcribePassFromSamples(
+            samples: samples, source: .mic, workspace: workspace, engines: sharedEngines
+        )
+        async let app = service.transcribePassFromSamples(
+            samples: samples, source: .app, workspace: workspace, engines: sharedEngines
+        )
+        _ = try await (mic, app)
+
+        #expect(factoryCalls.withLock { $0 } == 1)
+    }
+
+    @Test
+    func passesWithoutSharedEnginesLoadIndependently() async throws {
+        let factoryCalls = OSAllocatedUnfairLock(initialState: 0)
+        let service = TranscriptionService(
+            segmentSpeech: { _ in [VadSegment(startTime: 0, endTime: 1)] },
+            makePassEngines: { _ in
+                factoryCalls.withLock { $0 += 1 }
+                return TranscriptionPassRunner.PassEngines(
+                    transcribeChunk: { _, _ in
+                        TranscriptionPassRunner.PassASRResult(text: "hello", tokenTimings: [])
+                    },
+                    diarize: { _ in
+                        TranscriptionPassRunner.PassDiarizationResult(segments: [], speakerDatabase: nil)
+                    }
+                )
+            }
+        )
+
+        let workspace = try makeWorkspace()
+        let samples = Array(repeating: Float(0.1), count: 16_000)
+
+        _ = try await service.transcribePassFromSamples(samples: samples, source: .mic, workspace: workspace)
+        _ = try await service.transcribePassFromSamples(samples: samples, source: .mic, workspace: workspace)
+
+        #expect(factoryCalls.withLock { $0 } == 2)
     }
 
     @Test
@@ -145,6 +206,141 @@ struct TranscriptionPassRunnerTests {
         #expect(segments.count == 1)
         #expect(segments[0].speakerId == "Alice")
         #expect(embeddings["Alice"] != nil)
+    }
+
+    @Test
+    func makeVadConfigurationDerivesFromPipelineSettings() {
+        var settings = LiveTranscriptionPipelineSettings.defaults
+        settings.vadThreshold = 0.92
+        settings.vadMinSpeechDuration = 0.45
+
+        let (config, segmentation) = TranscriptionPassRunner.makeVadConfiguration(settings: settings)
+
+        #expect(abs(config.defaultThreshold - 0.92) < 0.0001)
+        #expect(abs(segmentation.minSpeechDuration - 0.45) < 0.0001)
+        // FluidAudio defaults preserved, including the encoder-window cap.
+        #expect(segmentation.maxSpeechDuration == VadSegmentationConfig.default.maxSpeechDuration)
+    }
+
+    @Test
+    func confidenceGateDiscardsLowConfidenceSegments() async throws {
+        var settings = LiveTranscriptionPipelineSettings.defaults
+        settings.asrConfidenceGate = 0.5
+
+        let runner = TranscriptionPassRunner(
+            pipelineSettings: settings,
+            segmentSpeech: { _ in
+                [
+                    TranscriptionPassRunner.SpeechSegment(startTime: 0, endTime: 1),
+                    TranscriptionPassRunner.SpeechSegment(startTime: 2, endTime: 3)
+                ]
+            },
+            makePassEngines: { _ in
+                TranscriptionPassRunner.PassEngines(
+                    transcribeChunk: { _, _ in
+                        TranscriptionPassRunner.PassASRResult(
+                            text: "thank you",
+                            tokenTimings: [],
+                            confidence: 0.2
+                        )
+                    },
+                    diarize: { _ in
+                        TranscriptionPassRunner.PassDiarizationResult(segments: [], speakerDatabase: nil)
+                    }
+                )
+            },
+            alignTranscript: { fullText, _, _, source in
+                Transcript(
+                    fullText: fullText,
+                    segments: fullText.isEmpty
+                        ? []
+                        : [TranscriptSegment(speakerId: "S1", text: fullText, startTime: 0, endTime: 1, audioSource: source)],
+                    speakers: []
+                )
+            }
+        )
+
+        let workspace = try makeWorkspace()
+        let (segments, _) = try await runner.run(samples: Array(repeating: 0.1, count: 48_000), source: .mic, workspace: workspace)
+
+        #expect(segments.isEmpty)
+    }
+
+    @Test
+    func confidenceGateAtZeroKeepsAllSegments() async throws {
+        let runner = TranscriptionPassRunner(
+            pipelineSettings: .defaults,  // gate 0.0 = disabled
+            segmentSpeech: { _ in
+                [TranscriptionPassRunner.SpeechSegment(startTime: 0, endTime: 1)]
+            },
+            makePassEngines: { _ in
+                TranscriptionPassRunner.PassEngines(
+                    transcribeChunk: { _, _ in
+                        TranscriptionPassRunner.PassASRResult(text: "hello", tokenTimings: [], confidence: 0.01)
+                    },
+                    diarize: { _ in
+                        TranscriptionPassRunner.PassDiarizationResult(segments: [], speakerDatabase: nil)
+                    }
+                )
+            },
+            alignTranscript: { fullText, _, _, source in
+                Transcript(
+                    fullText: fullText,
+                    segments: [TranscriptSegment(speakerId: "S1", text: fullText, startTime: 0, endTime: 1, audioSource: source)],
+                    speakers: []
+                )
+            }
+        )
+
+        let workspace = try makeWorkspace()
+        let (segments, _) = try await runner.run(samples: Array(repeating: 0.1, count: 16_000), source: .mic, workspace: workspace)
+
+        #expect(segments.count == 1)
+        #expect(segments[0].text == "hello")
+    }
+
+    @Test
+    func emitGauntletSanitizesLeadingPunctuationAndAppliesCleanupRules() async throws {
+        var settings = LiveTranscriptionPipelineSettings.defaults
+        settings.cleanupRules = [
+            TranscriptCleanupRule(pattern: "um", position: .anywhere, wholeWord: true)
+        ]
+
+        let runner = TranscriptionPassRunner(
+            pipelineSettings: settings,
+            segmentSpeech: { _ in
+                [TranscriptionPassRunner.SpeechSegment(startTime: 0, endTime: 1)]
+            },
+            makePassEngines: { _ in
+                TranscriptionPassRunner.PassEngines(
+                    transcribeChunk: { _, _ in
+                        TranscriptionPassRunner.PassASRResult(text: "raw", tokenTimings: [])
+                    },
+                    diarize: { _ in
+                        TranscriptionPassRunner.PassDiarizationResult(segments: [], speakerDatabase: nil)
+                    }
+                )
+            },
+            alignTranscript: { _, _, _, source in
+                Transcript(
+                    fullText: "irrelevant",
+                    segments: [
+                        TranscriptSegment(speakerId: "S1", text: ". um hello there", startTime: 0, endTime: 1, audioSource: source),
+                        TranscriptSegment(speakerId: "S1", text: "...", startTime: 1, endTime: 2, audioSource: source),
+                        TranscriptSegment(speakerId: "S1", text: "um", startTime: 2, endTime: 3, audioSource: source)
+                    ],
+                    speakers: []
+                )
+            }
+        )
+
+        let workspace = try makeWorkspace()
+        let (segments, _) = try await runner.run(samples: Array(repeating: 0.1, count: 16_000), source: .mic, workspace: workspace)
+
+        // ". um hello there" → sanitized to "um hello there" → rule strips "um".
+        // "..." is dropped by the sanitizer; "um" is emptied by the rule.
+        #expect(segments.count == 1)
+        #expect(segments[0].text == "hello there")
     }
 
     private func makeWorkspace() throws -> Workspace {

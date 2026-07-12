@@ -8,7 +8,9 @@ import Foundation
 /// providing a single source of truth for where models live and producing clear
 /// `TranscriptionError.missingWorkspaceModels` errors when a model hasn't been
 /// downloaded yet (directing the user to Settings → Models).
-struct ModelPathResolver {
+// @unchecked: the only stored property is FileManager.default, which is
+// documented thread-safe.
+struct ModelPathResolver: @unchecked Sendable {
     private let fileManager = FileManager.default
 
     // MARK: - General

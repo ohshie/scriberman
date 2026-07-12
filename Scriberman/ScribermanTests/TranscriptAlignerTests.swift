@@ -138,6 +138,95 @@ struct TranscriptAlignerTests {
     }
 
     @Test
+    func boundaryStraddlingWordAppearsExactlyOnce() {
+        // "cross" straddles the S1/S2 boundary at 0.5; midpoint 0.5 lands in S2.
+        let transcript = aligner.alignTranscript(
+            fullText: "hello cross world",
+            tokenTimings: [
+                token("▁hello", start: 0.0, end: 0.3),
+                token("▁cross", start: 0.4, end: 0.6),
+                token("▁world", start: 0.7, end: 1.0)
+            ],
+            diarizedSegments: [
+                segment("S1", start: 0.0, end: 0.5),
+                segment("S2", start: 0.5, end: 1.1)
+            ],
+            source: .mic
+        )
+
+        #expect(transcript.segments.count == 2)
+        #expect(transcript.segments[0].text == "hello")
+        #expect(transcript.segments[1].text == "cross world")
+        #expect(transcript.fullText == "hello cross world")
+    }
+
+    @Test
+    func midpointDecidesBucketWhenWordOverlapsTwoSegments() {
+        // Word 0.30-0.60 overlaps S1 by 0.15s and S2 by 0.15s; its midpoint
+        // 0.45 sits in S2 [0.45, 1.0), so S2 wins regardless of overlap split.
+        let transcript = aligner.alignTranscript(
+            fullText: "a b",
+            tokenTimings: [
+                token("▁a", start: 0.0, end: 0.2),
+                token("▁b", start: 0.30, end: 0.60)
+            ],
+            diarizedSegments: [
+                segment("S1", start: 0.0, end: 0.45),
+                segment("S2", start: 0.45, end: 1.0)
+            ],
+            source: .mic
+        )
+
+        #expect(transcript.segments.count == 2)
+        #expect(transcript.segments[0].text == "a")
+        #expect(transcript.segments[1].text == "b")
+    }
+
+    @Test
+    func gapWordsAreRoutedToNearestSegmentInsteadOfDropped() {
+        // Diarizer left a gap between 1.0 and 3.0. "early" (midpoint 1.3) is
+        // nearer S1; "late" (midpoint 2.85) is nearer S2. Nothing is lost.
+        let transcript = aligner.alignTranscript(
+            fullText: "hello early late world",
+            tokenTimings: [
+                token("▁hello", start: 0.2, end: 0.8),
+                token("▁early", start: 1.2, end: 1.4),
+                token("▁late", start: 2.8, end: 2.9),
+                token("▁world", start: 3.2, end: 3.8)
+            ],
+            diarizedSegments: [
+                segment("S1", start: 0.0, end: 1.0),
+                segment("S2", start: 3.0, end: 4.0)
+            ],
+            source: .mic
+        )
+
+        #expect(transcript.segments.count == 2)
+        #expect(transcript.segments[0].text == "hello early")
+        #expect(transcript.segments[1].text == "late world")
+        #expect(transcript.fullText == "hello early late world")
+    }
+
+    @Test
+    func wordsWithoutAnyDiarizedSegmentsEmitSingleSpeakerSegment() {
+        let transcript = aligner.alignTranscript(
+            fullText: "lonely words",
+            tokenTimings: [
+                token("▁lonely", start: 1.0, end: 1.5),
+                token("▁words", start: 1.6, end: 2.0)
+            ],
+            diarizedSegments: [],
+            source: .mic
+        )
+
+        #expect(transcript.segments.count == 1)
+        #expect(transcript.segments[0].speakerId == "S1")
+        #expect(transcript.segments[0].text == "lonely words")
+        #expect(transcript.segments[0].startTime == 1.0)
+        #expect(transcript.segments[0].endTime == 2.0)
+    }
+
+    @Test
     func speakerColorPaletteMethod() {
         #expect(aligner.speakerColorHex(at: 0) == "#4F46E5")
         #expect(aligner.speakerColorHex(at: 1) == "#16A34A")

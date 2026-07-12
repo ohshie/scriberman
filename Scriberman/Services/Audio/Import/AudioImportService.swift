@@ -14,7 +14,7 @@ actor AudioImportService {
     typealias CreateDirectory = @Sendable (URL) throws -> Void
     typealias WriteMonoAAC = @Sendable ([Float], URL) async throws -> Void
     typealias MixToMonoM4A = @Sendable (URL, URL) async throws -> Void
-    typealias Retranscribe = @Sendable (UUID, ModelContainer, Workspace) async -> Void
+    typealias Retranscribe = @Sendable (UUID, ModelContainer, Workspace, LiveTranscriptionPipelineSettings) async -> Void
     typealias SaveContext = @Sendable (ModelContext) throws -> Void
 
     private let probeAudio: ProbeAudio
@@ -60,15 +60,25 @@ actor AudioImportService {
                 deleteSourceFiles: false
             )
         }
-        self.retranscribe = retranscribe ?? { sessionID, modelContainer, workspace in
-            await retranscriptionService.retranscribe(sessionID: sessionID, modelContainer: modelContainer, workspace: workspace)
+        self.retranscribe = retranscribe ?? { sessionID, modelContainer, workspace, pipelineSettings in
+            await retranscriptionService.retranscribe(
+                sessionID: sessionID,
+                modelContainer: modelContainer,
+                workspace: workspace,
+                pipelineSettings: pipelineSettings
+            )
         }
         self.saveContext = saveContext ?? { context in
             try context.save()
         }
     }
 
-    func importAudio(from url: URL, workspace: Workspace, modelContainer: ModelContainer) async {
+    func importAudio(
+        from url: URL,
+        workspace: Workspace,
+        modelContainer: ModelContainer,
+        pipelineSettings: LiveTranscriptionPipelineSettings = .defaults
+    ) async {
         let context = ModelContext(modelContainer)
         let fallbackTitle = Self.defaultTitle(from: url)
         let fallbackFileName = url.lastPathComponent
@@ -130,7 +140,7 @@ actor AudioImportService {
             session.status = .transcribing
             try? saveContext(context)
 
-            await retranscribe(sessionID, modelContainer, workspace)
+            await retranscribe(sessionID, modelContainer, workspace, pipelineSettings)
         } catch {
             session.status = .error(error.localizedDescription)
             try? saveContext(context)

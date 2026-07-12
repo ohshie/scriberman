@@ -10,6 +10,13 @@ struct TranscriptionPassRunner: @unchecked Sendable {
     struct PassASRResult {
         let text: String
         let tokenTimings: [TokenTiming]
+        let confidence: Float
+
+        init(text: String, tokenTimings: [TokenTiming], confidence: Float = 1.0) {
+            self.text = text
+            self.tokenTimings = tokenTimings
+            self.confidence = confidence
+        }
     }
 
     struct PassDiarizationResult {
@@ -17,42 +24,89 @@ struct TranscriptionPassRunner: @unchecked Sendable {
         let speakerDatabase: [String: [Float]]?
     }
 
-    struct PassEngines {
+    // @unchecked: the closures capture FluidAudio managers (AsrManager is an
+    // actor; OfflineDiarizerManager is serialized by the diarize gate) so one
+    // engines instance can be shared across the concurrent mic/app passes.
+    struct PassEngines: @unchecked Sendable {
         let transcribeChunk: ([Float], AudioSource) async throws -> PassASRResult
         let diarize: ([Float]) async throws -> PassDiarizationResult
     }
 
+    /// Memoizes the first `MakePassEngines` call so the concurrent mic/app
+    /// passes of one transcription request share a single model load, while
+    /// keeping the load lazy (no models load when VAD finds no speech).
+    final class SharedPassEngines: @unchecked Sendable {
+        private let lock = NSLock()
+        private let factory: MakePassEngines
+        private var task: Task<PassEngines, Error>?
+
+        init(factory: @escaping MakePassEngines) {
+            self.factory = factory
+        }
+
+        func engines(for workspace: Workspace) async throws -> PassEngines {
+            let task = lock.withLock {
+                if let task = self.task { return task }
+                let factory = self.factory
+                let created = Task { try await factory(workspace) }
+                self.task = created
+                return created
+            }
+            return try await task.value
+        }
+    }
+
     typealias SegmentSpeech = ([Float]) async throws -> [SpeechSegment]
-    typealias MakePassEngines = (Workspace) async throws -> PassEngines
+    typealias MakePassEngines = @Sendable (Workspace) async throws -> PassEngines
     typealias AlignTranscript = (String, [TokenTiming], [TimedSpeakerSegment], AudioSource) -> Transcript
 
     private let speakerEmbeddingStore: SpeakerEmbeddingStore?
     private let minimumChunkSamples: Int
+    private let pipelineSettings: LiveTranscriptionPipelineSettings
     private let speakerMatcher: SpeakerMatcher
     private let segmentSpeech: SegmentSpeech
     private let makePassEngines: MakePassEngines
     private let alignTranscript: AlignTranscript
 
-    private static func defaultSegmentSpeech(samples: [Float]) async throws -> [SpeechSegment] {
-        let vadManager = try await VadManager(config: VadConfig(defaultThreshold: 0.75))
-        let segments = try await vadManager.segmentSpeech(samples, config: VadSegmentationConfig.default)
-        return segments.map { segment in
-            SpeechSegment(startTime: segment.startTime, endTime: segment.endTime)
+    /// VAD configuration derived from user pipeline settings; every field not
+    /// covered by settings keeps the FluidAudio default (including the 14s
+    /// max-speech cap that keeps segments inside the 15s encoder window).
+    static func makeVadConfiguration(
+        settings: LiveTranscriptionPipelineSettings
+    ) -> (config: VadConfig, segmentation: VadSegmentationConfig) {
+        let config = VadConfig(defaultThreshold: Float(settings.vadThreshold))
+        var segmentation = VadSegmentationConfig.default
+        segmentation.minSpeechDuration = settings.vadMinSpeechDuration
+        return (config, segmentation)
+    }
+
+    private static func makeDefaultSegmentSpeech(
+        settings: LiveTranscriptionPipelineSettings
+    ) -> SegmentSpeech {
+        { samples in
+            let (config, segmentation) = makeVadConfiguration(settings: settings)
+            let vadManager = try await VadManager(config: config)
+            let segments = try await vadManager.segmentSpeech(samples, config: segmentation)
+            return segments.map { segment in
+                SpeechSegment(startTime: segment.startTime, endTime: segment.endTime)
+            }
         }
     }
 
     init(
         speakerEmbeddingStore: SpeakerEmbeddingStore? = nil,
         minimumChunkSamples: Int = 16_000,
+        pipelineSettings: LiveTranscriptionPipelineSettings = .defaults,
         speakerMatcher: SpeakerMatcher = SpeakerMatcher(),
-        segmentSpeech: @escaping SegmentSpeech = Self.defaultSegmentSpeech,
+        segmentSpeech: SegmentSpeech? = nil,
         makePassEngines: MakePassEngines? = nil,
         alignTranscript: AlignTranscript? = nil
     ) {
         self.speakerEmbeddingStore = speakerEmbeddingStore
         self.minimumChunkSamples = minimumChunkSamples
+        self.pipelineSettings = pipelineSettings
         self.speakerMatcher = speakerMatcher
-        self.segmentSpeech = segmentSpeech
+        self.segmentSpeech = segmentSpeech ?? Self.makeDefaultSegmentSpeech(settings: pipelineSettings)
         self.makePassEngines = makePassEngines ?? Self.defaultMakePassEngines(modelPathResolver: ModelPathResolver())
         let transcriptAligner = TranscriptAligner()
         self.alignTranscript = alignTranscript ?? { fullText, tokenTimings, diarizedSegments, source in
@@ -109,6 +163,13 @@ struct TranscriptionPassRunner: @unchecked Sendable {
                 throw TranscriptionError.failedToTranscribe("\(passName) pass: ASR failed - \(error.localizedDescription)")
             }
 
+            // Same gate as live: 0 disables; below-gate results (typically
+            // hallucinations from near-silence segments) are discarded whole.
+            let confidenceGate = Float(pipelineSettings.asrConfidenceGate)
+            if confidenceGate > 0, asrResult.confidence < confidenceGate {
+                continue
+            }
+
             let trimmedText = asrResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedText.isEmpty {
                 allASRTexts.append(trimmedText)
@@ -144,7 +205,15 @@ struct TranscriptionPassRunner: @unchecked Sendable {
             source
         )
 
-        let finalSegments = alignedTranscript.segments.map { segment in
+        let finalSegments = alignedTranscript.segments.compactMap { segment -> TranscriptSegment? in
+            // Same emit gauntlet as live's emitFinalSegment: sanitize, then
+            // user cleanup rules; a segment emptied by either step is dropped.
+            guard let sanitizedText = LiveSegmentSanitizer.sanitize(segment.text),
+                  let cleanedText = TranscriptCleanupEngine.apply(pipelineSettings.cleanupRules, to: sanitizedText)
+            else {
+                return nil
+            }
+
             let baseId = segment.speakerId
             let mappedName = speakerMapping[baseId]
             let finalSpeakerId = mappedName ?? baseId
@@ -157,7 +226,7 @@ struct TranscriptionPassRunner: @unchecked Sendable {
             }
             return TranscriptSegment(
                 speakerId: speakerId,
-                text: segment.text,
+                text: cleanedText,
                 startTime: segment.startTime,
                 endTime: segment.endTime,
                 audioSource: source
@@ -205,7 +274,7 @@ struct TranscriptionPassRunner: @unchecked Sendable {
         return speakerMapping
     }
 
-    private static func defaultMakePassEngines(modelPathResolver: ModelPathResolver) -> MakePassEngines {
+    static func defaultMakePassEngines(modelPathResolver: ModelPathResolver) -> MakePassEngines {
         { workspace in
             let asrManager = AsrManager(config: .default)
             let offlineDiarizerManager = OfflineDiarizerManager(config: .default)
@@ -217,16 +286,24 @@ struct TranscriptionPassRunner: @unchecked Sendable {
             let diarizerModels = try await OfflineDiarizerModels.load(from: workspace.modelsURL)
             offlineDiarizerManager.initialize(models: diarizerModels)
 
+            // OfflineDiarizerManager is a plain class; when one engines
+            // instance is shared across concurrent passes, its process calls
+            // must not interleave.
+            let diarizeGate = SerialAsyncGate()
+
             return PassEngines(
                 transcribeChunk: { chunkSamples, _ in
                     var decoderState = try TdtDecoderState()
                     let result = try await asrManager.transcribe(chunkSamples, decoderState: &decoderState)
                     return PassASRResult(
                         text: result.text,
-                        tokenTimings: result.tokenTimings ?? []
+                        tokenTimings: result.tokenTimings ?? [],
+                        confidence: result.confidence
                     )
                 },
                 diarize: { inputSamples in
+                    await diarizeGate.wait()
+                    defer { diarizeGate.signal() }
                     let result = try await offlineDiarizerManager.process(audio: inputSamples)
                     return PassDiarizationResult(
                         segments: result.segments,
@@ -235,5 +312,48 @@ struct TranscriptionPassRunner: @unchecked Sendable {
                 }
             )
         }
+    }
+}
+
+/// Minimal FIFO mutex for async code: `wait()` suspends until the gate is
+/// free, `signal()` hands it to the next waiter. Unlike an actor, held
+/// isolation spans the awaited work between wait and signal.
+final class SerialAsyncGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isBusy = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        let acquired = lock.withLock { () -> Bool in
+            if !isBusy {
+                isBusy = true
+                return true
+            }
+            return false
+        }
+        if acquired { return }
+
+        await withCheckedContinuation { continuation in
+            let acquiredNow = lock.withLock { () -> Bool in
+                if !isBusy {
+                    isBusy = true
+                    return true
+                }
+                waiters.append(continuation)
+                return false
+            }
+            if acquiredNow { continuation.resume() }
+        }
+    }
+
+    func signal() {
+        let next = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+            if waiters.isEmpty {
+                isBusy = false
+                return nil
+            }
+            return waiters.removeFirst()
+        }
+        next?.resume()
     }
 }
