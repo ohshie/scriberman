@@ -85,6 +85,14 @@ final class JobsViewModel {
     private let savePanelPresenter: @MainActor (_ suggestedName: String) -> URL?
     private let logger = Logger(subsystem: "Scriberman", category: "JobsViewModel")
 
+    // Injected post-init by AppState (same pattern as NewSessionViewModel);
+    // offline passes fall back to defaults when unset.
+    var settingsViewModel: SettingsViewModel?
+
+    private var currentPipelineSettings: LiveTranscriptionPipelineSettings {
+        settingsViewModel?.pipelineSettings ?? .defaults
+    }
+
     init(
         workspaceService: WorkspaceServiceProtocol,
         transcriptionService: TranscriptionServiceProtocol,
@@ -227,6 +235,7 @@ final class JobsViewModel {
 
         let sessionID = session.id
         let modelContainer = context.container
+        let pipelineSettings = currentPipelineSettings
 
         Task {
             do {
@@ -234,7 +243,8 @@ final class JobsViewModel {
                 let transcript = try await transcriptionService.transcribe(
                     sessionID: sessionID,
                     modelContainer: modelContainer,
-                    workspace: workspace
+                    workspace: workspace,
+                    pipelineSettings: pipelineSettings
                 )
                 
                 // Update session on MainActor since JobsViewModel is @MainActor
@@ -279,11 +289,13 @@ final class JobsViewModel {
         do {
             let workspace = try await workspaceService.requireWritableWorkspace()
             let modelContainer = context.container
+            let pipelineSettings = currentPipelineSettings
             for audioURL in audioURLs {
                 await audioImportService.importAudio(
                     from: audioURL,
                     workspace: workspace,
-                    modelContainer: modelContainer
+                    modelContainer: modelContainer,
+                    pipelineSettings: pipelineSettings
                 )
             }
         } catch {
@@ -301,6 +313,7 @@ final class JobsViewModel {
 
         let sessionID = session.id
         let modelContainer = context.container
+        let pipelineSettings = currentPipelineSettings
 
         Task {
             do {
@@ -308,7 +321,8 @@ final class JobsViewModel {
                 await retranscriptionService.retranscribe(
                     sessionID: sessionID,
                     modelContainer: modelContainer,
-                    workspace: workspace
+                    workspace: workspace,
+                    pipelineSettings: pipelineSettings
                 )
             } catch {
                 session.status = .error(error.localizedDescription)
@@ -332,6 +346,7 @@ final class JobsViewModel {
 
         let sessionID = session.id
         let modelContainer = context.container
+        let pipelineSettings = currentPipelineSettings
 
         Task {
             do {
@@ -339,7 +354,8 @@ final class JobsViewModel {
                 await retranscriptionService.retranscribe(
                     sessionID: sessionID,
                     modelContainer: modelContainer,
-                    workspace: workspace
+                    workspace: workspace,
+                    pipelineSettings: pipelineSettings
                 )
             } catch {
                 session.status = .error(error.localizedDescription)

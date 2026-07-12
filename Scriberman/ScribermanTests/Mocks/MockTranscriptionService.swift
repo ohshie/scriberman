@@ -4,9 +4,16 @@ import SwiftData
 
 final class MockTranscriptionService: TranscriptionServiceProtocol, @unchecked Sendable {
     var transcribeResult: Result<Transcript, Error> = .failure(MockTranscriptionServiceError.notConfigured)
+    var lastPipelineSettings: LiveTranscriptionPipelineSettings?
 
-    func transcribe(sessionID: UUID, modelContainer: ModelContainer, workspace: Workspace) async throws -> Transcript {
-        try transcribeResult.get()
+    func transcribe(
+        sessionID: UUID,
+        modelContainer: ModelContainer,
+        workspace: Workspace,
+        pipelineSettings: LiveTranscriptionPipelineSettings
+    ) async throws -> Transcript {
+        lastPipelineSettings = pipelineSettings
+        return try transcribeResult.get()
     }
 }
 

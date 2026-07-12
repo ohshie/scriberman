@@ -10,6 +10,13 @@ struct TranscriptionPassRunner: @unchecked Sendable {
     struct PassASRResult {
         let text: String
         let tokenTimings: [TokenTiming]
+        let confidence: Float
+
+        init(text: String, tokenTimings: [TokenTiming], confidence: Float = 1.0) {
+            self.text = text
+            self.tokenTimings = tokenTimings
+            self.confidence = confidence
+        }
     }
 
     struct PassDiarizationResult {
@@ -28,31 +35,51 @@ struct TranscriptionPassRunner: @unchecked Sendable {
 
     private let speakerEmbeddingStore: SpeakerEmbeddingStore?
     private let minimumChunkSamples: Int
+    private let pipelineSettings: LiveTranscriptionPipelineSettings
     private let speakerMatcher: SpeakerMatcher
     private let segmentSpeech: SegmentSpeech
     private let makePassEngines: MakePassEngines
     private let alignTranscript: AlignTranscript
 
-    private static func defaultSegmentSpeech(samples: [Float]) async throws -> [SpeechSegment] {
-        let vadManager = try await VadManager(config: VadConfig(defaultThreshold: 0.75))
-        let segments = try await vadManager.segmentSpeech(samples, config: VadSegmentationConfig.default)
-        return segments.map { segment in
-            SpeechSegment(startTime: segment.startTime, endTime: segment.endTime)
+    /// VAD configuration derived from user pipeline settings; every field not
+    /// covered by settings keeps the FluidAudio default (including the 14s
+    /// max-speech cap that keeps segments inside the 15s encoder window).
+    static func makeVadConfiguration(
+        settings: LiveTranscriptionPipelineSettings
+    ) -> (config: VadConfig, segmentation: VadSegmentationConfig) {
+        let config = VadConfig(defaultThreshold: Float(settings.vadThreshold))
+        var segmentation = VadSegmentationConfig.default
+        segmentation.minSpeechDuration = settings.vadMinSpeechDuration
+        return (config, segmentation)
+    }
+
+    private static func makeDefaultSegmentSpeech(
+        settings: LiveTranscriptionPipelineSettings
+    ) -> SegmentSpeech {
+        { samples in
+            let (config, segmentation) = makeVadConfiguration(settings: settings)
+            let vadManager = try await VadManager(config: config)
+            let segments = try await vadManager.segmentSpeech(samples, config: segmentation)
+            return segments.map { segment in
+                SpeechSegment(startTime: segment.startTime, endTime: segment.endTime)
+            }
         }
     }
 
     init(
         speakerEmbeddingStore: SpeakerEmbeddingStore? = nil,
         minimumChunkSamples: Int = 16_000,
+        pipelineSettings: LiveTranscriptionPipelineSettings = .defaults,
         speakerMatcher: SpeakerMatcher = SpeakerMatcher(),
-        segmentSpeech: @escaping SegmentSpeech = Self.defaultSegmentSpeech,
+        segmentSpeech: SegmentSpeech? = nil,
         makePassEngines: MakePassEngines? = nil,
         alignTranscript: AlignTranscript? = nil
     ) {
         self.speakerEmbeddingStore = speakerEmbeddingStore
         self.minimumChunkSamples = minimumChunkSamples
+        self.pipelineSettings = pipelineSettings
         self.speakerMatcher = speakerMatcher
-        self.segmentSpeech = segmentSpeech
+        self.segmentSpeech = segmentSpeech ?? Self.makeDefaultSegmentSpeech(settings: pipelineSettings)
         self.makePassEngines = makePassEngines ?? Self.defaultMakePassEngines(modelPathResolver: ModelPathResolver())
         let transcriptAligner = TranscriptAligner()
         self.alignTranscript = alignTranscript ?? { fullText, tokenTimings, diarizedSegments, source in
@@ -109,6 +136,13 @@ struct TranscriptionPassRunner: @unchecked Sendable {
                 throw TranscriptionError.failedToTranscribe("\(passName) pass: ASR failed - \(error.localizedDescription)")
             }
 
+            // Same gate as live: 0 disables; below-gate results (typically
+            // hallucinations from near-silence segments) are discarded whole.
+            let confidenceGate = Float(pipelineSettings.asrConfidenceGate)
+            if confidenceGate > 0, asrResult.confidence < confidenceGate {
+                continue
+            }
+
             let trimmedText = asrResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedText.isEmpty {
                 allASRTexts.append(trimmedText)
@@ -144,7 +178,15 @@ struct TranscriptionPassRunner: @unchecked Sendable {
             source
         )
 
-        let finalSegments = alignedTranscript.segments.map { segment in
+        let finalSegments = alignedTranscript.segments.compactMap { segment -> TranscriptSegment? in
+            // Same emit gauntlet as live's emitFinalSegment: sanitize, then
+            // user cleanup rules; a segment emptied by either step is dropped.
+            guard let sanitizedText = LiveSegmentSanitizer.sanitize(segment.text),
+                  let cleanedText = TranscriptCleanupEngine.apply(pipelineSettings.cleanupRules, to: sanitizedText)
+            else {
+                return nil
+            }
+
             let baseId = segment.speakerId
             let mappedName = speakerMapping[baseId]
             let finalSpeakerId = mappedName ?? baseId
@@ -157,7 +199,7 @@ struct TranscriptionPassRunner: @unchecked Sendable {
             }
             return TranscriptSegment(
                 speakerId: speakerId,
-                text: segment.text,
+                text: cleanedText,
                 startTime: segment.startTime,
                 endTime: segment.endTime,
                 audioSource: source
@@ -223,7 +265,8 @@ struct TranscriptionPassRunner: @unchecked Sendable {
                     let result = try await asrManager.transcribe(chunkSamples, decoderState: &decoderState)
                     return PassASRResult(
                         text: result.text,
-                        tokenTimings: result.tokenTimings ?? []
+                        tokenTimings: result.tokenTimings ?? [],
+                        confidence: result.confidence
                     )
                 },
                 diarize: { inputSamples in

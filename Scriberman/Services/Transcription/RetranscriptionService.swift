@@ -4,7 +4,7 @@ import SwiftData
 actor RetranscriptionService {
     typealias ExtractSamples = @Sendable (URL, Bool) throws -> (mic: [Float], app: [Float]?)
     typealias PrepareModels = @Sendable (Workspace) async throws -> Void
-    typealias TranscribePassFromSamples = @Sendable ([Float], AudioSource, Workspace) async throws -> ([TranscriptSegment], [String: [Float]])
+    typealias TranscribePassFromSamples = @Sendable ([Float], AudioSource, Workspace, LiveTranscriptionPipelineSettings) async throws -> ([TranscriptSegment], [String: [Float]])
     typealias SaveContext = @Sendable (ModelContext) throws -> Void
 
     private let transcriptionService: TranscriptionService
@@ -28,11 +28,12 @@ actor RetranscriptionService {
         self.prepareModelsHandler = prepareModelsHandler ?? { workspace in
             try await transcriptionService.prepareModels(workspace: workspace)
         }
-        self.transcribePassFromSamplesHandler = transcribePassFromSamplesHandler ?? { samples, source, workspace in
+        self.transcribePassFromSamplesHandler = transcribePassFromSamplesHandler ?? { samples, source, workspace, pipelineSettings in
             try await transcriptionService.transcribePassFromSamples(
                 samples: samples,
                 source: source,
-                workspace: workspace
+                workspace: workspace,
+                pipelineSettings: pipelineSettings
             )
         }
         self.saveContext = saveContext ?? { context in
@@ -40,7 +41,12 @@ actor RetranscriptionService {
         }
     }
 
-    func retranscribe(sessionID: UUID, modelContainer: ModelContainer, workspace: Workspace) async {
+    func retranscribe(
+        sessionID: UUID,
+        modelContainer: ModelContainer,
+        workspace: Workspace,
+        pipelineSettings: LiveTranscriptionPipelineSettings = .defaults
+    ) async {
         let context = ModelContext(modelContainer)
         
         var session: (any TranscribableSession)?
@@ -87,10 +93,10 @@ actor RetranscriptionService {
             let extracted = try extractSamples(mixdownURL, isStereo)
             try await prepareModelsHandler(workspace)
 
-            async let micResult = transcribePassFromSamplesHandler(extracted.mic, .mic, workspace)
+            async let micResult = transcribePassFromSamplesHandler(extracted.mic, .mic, workspace, pipelineSettings)
             async let appResult: ([TranscriptSegment], [String: [Float]]) = {
                 guard let appSamples = extracted.app else { return ([], [:]) }
-                return try await transcribePassFromSamplesHandler(appSamples, .app, workspace)
+                return try await transcribePassFromSamplesHandler(appSamples, .app, workspace, pipelineSettings)
             }()
 
             let (micSegments, micEmbeddings) = try await micResult
