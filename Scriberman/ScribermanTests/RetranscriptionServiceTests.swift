@@ -57,7 +57,7 @@ struct RetranscriptionServiceTests {
                 (mic: [0.1, 0.2], app: [0.3, 0.4])
             },
             prepareModelsHandler: { _ in },
-            transcribePassFromSamplesHandler: { _, source, _, _ in
+            transcribePassFromSamplesHandler: { _, source, _, _, _ in
                 switch source {
                 case .mic:
                     return ([
@@ -128,7 +128,7 @@ struct RetranscriptionServiceTests {
                 (mic: [0.1, 0.2], app: nil)
             },
             prepareModelsHandler: { _ in },
-            transcribePassFromSamplesHandler: { _, source, _, _ in
+            transcribePassFromSamplesHandler: { _, source, _, _, _ in
                 #expect(source == .mic)
                 return ([
                     TranscriptSegment(
@@ -206,7 +206,7 @@ struct RetranscriptionServiceTests {
             prepareModelsHandler: { _ in
                 Issue.record("prepareModels should not be called when extraction fails")
             },
-            transcribePassFromSamplesHandler: { _, _, _, _ in
+            transcribePassFromSamplesHandler: { _, _, _, _, _ in
                 Issue.record("transcribePassFromSamples should not be called when extraction fails")
                 return ([], [:])
             }
@@ -249,7 +249,7 @@ struct RetranscriptionServiceTests {
                 return (mic: [0.1, 0.2], app: nil)
             },
             prepareModelsHandler: { _ in },
-            transcribePassFromSamplesHandler: { _, source, _, _ in
+            transcribePassFromSamplesHandler: { _, source, _, _, _ in
                 #expect(source == .mic)
                 return ([
                     TranscriptSegment(

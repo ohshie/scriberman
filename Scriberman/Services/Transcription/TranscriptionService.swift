@@ -42,6 +42,7 @@ actor TranscriptionService: TranscriptionServiceProtocol {
     private let speakerEmbeddingStore: SpeakerEmbeddingStore?
     private let minimumChunkSamples = 16_000
     private let modelPathResolver = ModelPathResolver()
+    private let passEnginesFactory: TranscriptionPassRunner.MakePassEngines
 
     init(
         speakerEmbeddingStore: SpeakerEmbeddingStore? = nil,
@@ -52,13 +53,22 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         extractSamples: @escaping ExtractSamples = { url, isStereo in
             try M4AChannelExtractor().extract(url: url, isStereo: isStereo)
         },
-        prepareModelsHandler: PrepareModelsHandler? = nil
+        prepareModelsHandler: PrepareModelsHandler? = nil,
+        makePassEngines: TranscriptionPassRunner.MakePassEngines? = nil
     ) {
         self.speakerEmbeddingStore = speakerEmbeddingStore
         self.resampleAudioFile = resampleAudioFile
         self.segmentSpeechOverride = segmentSpeech
         self.extractSamples = extractSamples
         self.prepareModelsHandler = prepareModelsHandler
+        self.passEnginesFactory = makePassEngines
+            ?? TranscriptionPassRunner.defaultMakePassEngines(modelPathResolver: ModelPathResolver())
+    }
+
+    /// One memoized model load to share across the passes of a single
+    /// transcription or retranscription request.
+    func makeSharedPassEngines() -> TranscriptionPassRunner.SharedPassEngines {
+        TranscriptionPassRunner.SharedPassEngines(factory: passEnginesFactory)
     }
 
     func prepareModels(workspace: Workspace) async throws {
@@ -121,11 +131,13 @@ actor TranscriptionService: TranscriptionServiceProtocol {
             throw TranscriptionError.failedToTranscribe("M4A extraction failed - \(error.localizedDescription)")
         }
 
+        let sharedEngines = makeSharedPassEngines()
         async let micResult = transcribePassFromSamples(
             samples: extractedSamples.mic,
             source: .mic,
             workspace: workspace,
-            pipelineSettings: pipelineSettings
+            pipelineSettings: pipelineSettings,
+            engines: sharedEngines
         )
         async let appResult: ([TranscriptSegment], [String: [Float]]) = {
             guard let appSamples = extractedSamples.app else { return ([], [:]) }
@@ -133,7 +145,8 @@ actor TranscriptionService: TranscriptionServiceProtocol {
                 samples: appSamples,
                 source: .app,
                 workspace: workspace,
-                pipelineSettings: pipelineSettings
+                pipelineSettings: pipelineSettings,
+                engines: sharedEngines
             )
         }()
 
@@ -186,9 +199,10 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         samples: [Float],
         source: AudioSource,
         workspace: Workspace,
-        pipelineSettings: LiveTranscriptionPipelineSettings = .defaults
+        pipelineSettings: LiveTranscriptionPipelineSettings = .defaults,
+        engines: TranscriptionPassRunner.SharedPassEngines? = nil
     ) async throws -> ([TranscriptSegment], [String: [Float]]) {
-        let passRunner = makeTranscriptionPassRunner(pipelineSettings: pipelineSettings)
+        let passRunner = makeTranscriptionPassRunner(pipelineSettings: pipelineSettings, engines: engines)
         return try await passRunner.run(
             samples: samples,
             source: source,
@@ -218,7 +232,8 @@ actor TranscriptionService: TranscriptionServiceProtocol {
     }
 
     func makeTranscriptionPassRunner(
-        pipelineSettings: LiveTranscriptionPipelineSettings = .defaults
+        pipelineSettings: LiveTranscriptionPipelineSettings = .defaults,
+        engines: TranscriptionPassRunner.SharedPassEngines? = nil
     ) -> TranscriptionPassRunner {
         let wrappedSegmentSpeech: TranscriptionPassRunner.SegmentSpeech?
         if let segmentSpeechOverride {
@@ -235,11 +250,18 @@ actor TranscriptionService: TranscriptionServiceProtocol {
             // Runner builds its own VAD from the pipeline settings.
             wrappedSegmentSpeech = nil
         }
+        let makePassEngines: TranscriptionPassRunner.MakePassEngines
+        if let engines {
+            makePassEngines = { workspace in try await engines.engines(for: workspace) }
+        } else {
+            makePassEngines = passEnginesFactory
+        }
         return TranscriptionPassRunner(
             speakerEmbeddingStore: speakerEmbeddingStore,
             minimumChunkSamples: minimumChunkSamples,
             pipelineSettings: pipelineSettings,
-            segmentSpeech: wrappedSegmentSpeech
+            segmentSpeech: wrappedSegmentSpeech,
+            makePassEngines: makePassEngines
         )
     }
 }

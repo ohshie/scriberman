@@ -24,13 +24,40 @@ struct TranscriptionPassRunner: @unchecked Sendable {
         let speakerDatabase: [String: [Float]]?
     }
 
-    struct PassEngines {
+    // @unchecked: the closures capture FluidAudio managers (AsrManager is an
+    // actor; OfflineDiarizerManager is serialized by the diarize gate) so one
+    // engines instance can be shared across the concurrent mic/app passes.
+    struct PassEngines: @unchecked Sendable {
         let transcribeChunk: ([Float], AudioSource) async throws -> PassASRResult
         let diarize: ([Float]) async throws -> PassDiarizationResult
     }
 
+    /// Memoizes the first `MakePassEngines` call so the concurrent mic/app
+    /// passes of one transcription request share a single model load, while
+    /// keeping the load lazy (no models load when VAD finds no speech).
+    final class SharedPassEngines: @unchecked Sendable {
+        private let lock = NSLock()
+        private let factory: MakePassEngines
+        private var task: Task<PassEngines, Error>?
+
+        init(factory: @escaping MakePassEngines) {
+            self.factory = factory
+        }
+
+        func engines(for workspace: Workspace) async throws -> PassEngines {
+            let task = lock.withLock {
+                if let task = self.task { return task }
+                let factory = self.factory
+                let created = Task { try await factory(workspace) }
+                self.task = created
+                return created
+            }
+            return try await task.value
+        }
+    }
+
     typealias SegmentSpeech = ([Float]) async throws -> [SpeechSegment]
-    typealias MakePassEngines = (Workspace) async throws -> PassEngines
+    typealias MakePassEngines = @Sendable (Workspace) async throws -> PassEngines
     typealias AlignTranscript = (String, [TokenTiming], [TimedSpeakerSegment], AudioSource) -> Transcript
 
     private let speakerEmbeddingStore: SpeakerEmbeddingStore?
@@ -247,7 +274,7 @@ struct TranscriptionPassRunner: @unchecked Sendable {
         return speakerMapping
     }
 
-    private static func defaultMakePassEngines(modelPathResolver: ModelPathResolver) -> MakePassEngines {
+    static func defaultMakePassEngines(modelPathResolver: ModelPathResolver) -> MakePassEngines {
         { workspace in
             let asrManager = AsrManager(config: .default)
             let offlineDiarizerManager = OfflineDiarizerManager(config: .default)
@@ -258,6 +285,11 @@ struct TranscriptionPassRunner: @unchecked Sendable {
 
             let diarizerModels = try await OfflineDiarizerModels.load(from: workspace.modelsURL)
             offlineDiarizerManager.initialize(models: diarizerModels)
+
+            // OfflineDiarizerManager is a plain class; when one engines
+            // instance is shared across concurrent passes, its process calls
+            // must not interleave.
+            let diarizeGate = SerialAsyncGate()
 
             return PassEngines(
                 transcribeChunk: { chunkSamples, _ in
@@ -270,6 +302,8 @@ struct TranscriptionPassRunner: @unchecked Sendable {
                     )
                 },
                 diarize: { inputSamples in
+                    await diarizeGate.wait()
+                    defer { diarizeGate.signal() }
                     let result = try await offlineDiarizerManager.process(audio: inputSamples)
                     return PassDiarizationResult(
                         segments: result.segments,
@@ -278,5 +312,48 @@ struct TranscriptionPassRunner: @unchecked Sendable {
                 }
             )
         }
+    }
+}
+
+/// Minimal FIFO mutex for async code: `wait()` suspends until the gate is
+/// free, `signal()` hands it to the next waiter. Unlike an actor, held
+/// isolation spans the awaited work between wait and signal.
+final class SerialAsyncGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isBusy = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        let acquired = lock.withLock { () -> Bool in
+            if !isBusy {
+                isBusy = true
+                return true
+            }
+            return false
+        }
+        if acquired { return }
+
+        await withCheckedContinuation { continuation in
+            let acquiredNow = lock.withLock { () -> Bool in
+                if !isBusy {
+                    isBusy = true
+                    return true
+                }
+                waiters.append(continuation)
+                return false
+            }
+            if acquiredNow { continuation.resume() }
+        }
+    }
+
+    func signal() {
+        let next = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+            if waiters.isEmpty {
+                isBusy = false
+                return nil
+            }
+            return waiters.removeFirst()
+        }
+        next?.resume()
     }
 }

@@ -20,7 +20,7 @@ final class JobsViewModelTests {
             transcriptionService: TranscriptionService(),
             extractSamples: { _, _ in (mic: [0.1], app: nil) },
             prepareModelsHandler: { _ in },
-            transcribePassFromSamplesHandler: { _, _, _, _ in ([], [:]) }
+            transcribePassFromSamplesHandler: { _, _, _, _, _ in ([], [:]) }
         )
         audioImportService = AudioImportService(
             retranscriptionService: retranscriptionService,
