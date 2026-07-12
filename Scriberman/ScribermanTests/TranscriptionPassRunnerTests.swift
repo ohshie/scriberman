@@ -2,16 +2,17 @@ import FluidAudio
 import Foundation
 import SwiftData
 import Testing
+import os
 @testable import Scriberman
 
 struct TranscriptionPassRunnerTests {
     @Test
     func runReturnsEmptyWhenVADProducesNoSpeech() async throws {
-        var engineCreated = false
+        let engineCreated = OSAllocatedUnfairLock(initialState: false)
         let runner = TranscriptionPassRunner(
             segmentSpeech: { _ in [] },
             makePassEngines: { _ in
-                engineCreated = true
+                engineCreated.withLock { $0 = true }
                 return TranscriptionPassRunner.PassEngines(
                     transcribeChunk: { _, _ in
                         TranscriptionPassRunner.PassASRResult(text: "", tokenTimings: [])
@@ -28,7 +29,67 @@ struct TranscriptionPassRunnerTests {
 
         #expect(segments.isEmpty)
         #expect(embeddings.isEmpty)
-        #expect(!engineCreated)
+        #expect(!engineCreated.withLock { $0 })
+    }
+
+    @Test
+    func sharedPassEnginesLoadsFactoryExactlyOnceAcrossConcurrentPasses() async throws {
+        let factoryCalls = OSAllocatedUnfairLock(initialState: 0)
+        let service = TranscriptionService(
+            segmentSpeech: { _ in [VadSegment(startTime: 0, endTime: 1)] },
+            makePassEngines: { _ in
+                factoryCalls.withLock { $0 += 1 }
+                return TranscriptionPassRunner.PassEngines(
+                    transcribeChunk: { _, _ in
+                        TranscriptionPassRunner.PassASRResult(text: "hello", tokenTimings: [])
+                    },
+                    diarize: { _ in
+                        TranscriptionPassRunner.PassDiarizationResult(segments: [], speakerDatabase: nil)
+                    }
+                )
+            }
+        )
+
+        let workspace = try makeWorkspace()
+        let samples = Array(repeating: Float(0.1), count: 16_000)
+        let sharedEngines = await service.makeSharedPassEngines()
+
+        async let mic = service.transcribePassFromSamples(
+            samples: samples, source: .mic, workspace: workspace, engines: sharedEngines
+        )
+        async let app = service.transcribePassFromSamples(
+            samples: samples, source: .app, workspace: workspace, engines: sharedEngines
+        )
+        _ = try await (mic, app)
+
+        #expect(factoryCalls.withLock { $0 } == 1)
+    }
+
+    @Test
+    func passesWithoutSharedEnginesLoadIndependently() async throws {
+        let factoryCalls = OSAllocatedUnfairLock(initialState: 0)
+        let service = TranscriptionService(
+            segmentSpeech: { _ in [VadSegment(startTime: 0, endTime: 1)] },
+            makePassEngines: { _ in
+                factoryCalls.withLock { $0 += 1 }
+                return TranscriptionPassRunner.PassEngines(
+                    transcribeChunk: { _, _ in
+                        TranscriptionPassRunner.PassASRResult(text: "hello", tokenTimings: [])
+                    },
+                    diarize: { _ in
+                        TranscriptionPassRunner.PassDiarizationResult(segments: [], speakerDatabase: nil)
+                    }
+                )
+            }
+        )
+
+        let workspace = try makeWorkspace()
+        let samples = Array(repeating: Float(0.1), count: 16_000)
+
+        _ = try await service.transcribePassFromSamples(samples: samples, source: .mic, workspace: workspace)
+        _ = try await service.transcribePassFromSamples(samples: samples, source: .mic, workspace: workspace)
+
+        #expect(factoryCalls.withLock { $0 } == 2)
     }
 
     @Test
