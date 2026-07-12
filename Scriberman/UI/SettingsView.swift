@@ -4,7 +4,6 @@ struct SettingsView: View {
     private enum SettingsTab {
         case general
         case menuBar
-        case prompts
         case ai
         case hotkeys
         case advanced
@@ -130,50 +129,7 @@ struct SettingsView: View {
                 }
                 .tag(SettingsTab.menuBar)
 
-                Form {
-                    Section("Saved Prompts") {
-                        if promptVM.prompts.isEmpty {
-                            Text("No prompts yet. Add a prompt to enable AI transformations.")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(promptVM.prompts) { prompt in
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text(prompt.name)
-                                        .font(.headline)
-                                    Text(prompt.content)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(3)
-
-                                    HStack {
-                                        Button("Edit") {
-                                            promptVM.presentEditor(for: prompt)
-                                        }
-
-                                        Button("Delete", role: .destructive) {
-                                            promptVM.deletePrompt(prompt)
-                                        }
-                                    }
-                                }
-                                .padding(.vertical, 6)
-                            }
-                        }
-
-                        Button("Add Prompt") {
-                            promptVM.presentEditor(for: nil)
-                        }
-                    }
-                }
-                .formStyle(.grouped)
-                .task {
-                    promptVM.loadPrompts()
-                }
-                .tabItem {
-                    Label("Prompts", systemImage: "text.bubble")
-                }
-                .tag(SettingsTab.prompts)
-
-                AISettingsView()
+                AISettingsView(promptVM: promptVM)
                     .tabItem {
                         Label("AI", systemImage: "sparkles")
                     }
@@ -479,6 +435,6 @@ struct SettingsView: View {
                 }
             }
         }
-        .frame(minWidth: 560, minHeight: 360)
+        .frame(minWidth: 500, minHeight: 360)
     }
 }
