@@ -134,7 +134,10 @@ actor ModelInstallService: ModelInstallServicing {
             throw ModelInstallError.workspaceNotWritable
         }
 
-        let progressHandler = Self.makeDownloadProgressHandler(downloadProgress: downloadProgress)
+        let progressHandler = Self.makeDownloadProgressHandler(
+            downloadProgress: downloadProgress,
+            downloadPhaseWeight: Self.downloadPhaseWeight(for: group)
+        )
         let installedURL = workspace.modelsURL.appendingPathComponent(group.repoFolderName, isDirectory: true)
 
         progress?(.downloading)
@@ -188,22 +191,30 @@ actor ModelInstallService: ModelInstallServicing {
 
     // MARK: - Download (FluidAudio helpers)
 
+    // ModelHub reserves the upper part of its progress range for a CoreML
+    // compile phase that only runs in `loadModels`, which Scriberman does not
+    // use: repo downloads emit fractions in [0, 0.5], subdirectory downloads
+    // in [0, 1]. Normalize by the per-API weight so a completed download
+    // always reports 1.0.
+    static func downloadPhaseWeight(for group: ModelGroup) -> Double {
+        group == .lseendDiarization ? 1.0 : 0.5
+    }
+
     static func makeDownloadProgressHandler(
-        downloadProgress: (@Sendable (Double) -> Void)?
+        downloadProgress: (@Sendable (Double) -> Void)?,
+        downloadPhaseWeight: Double
     ) -> ProgressHandler? {
         guard let downloadProgress else {
             return nil
         }
 
-        // ModelHub reports byte-weighted progress spanning [0, 1] across the
-        // listing/downloading/compiling phases. Clamp to a running maximum so
-        // per-group progress never regresses across sub-downloads or phase
-        // transitions.
+        // Clamp to a running maximum so per-group progress never regresses
+        // across sub-downloads or phase transitions.
         let maxFraction = OSAllocatedUnfairLock(initialState: 0.0)
         return { progress in
-            let clamped = min(max(progress.fractionCompleted, 0.0), 1.0)
+            let normalized = min(max(progress.fractionCompleted / downloadPhaseWeight, 0.0), 1.0)
             let monotonic = maxFraction.withLock { state -> Double in
-                state = max(state, clamped)
+                state = max(state, normalized)
                 return state
             }
             downloadProgress(monotonic)

@@ -40,24 +40,44 @@ struct StatusTagViewTests {
     }
 
     @Test
-    func downloadProgressHandlerForwardsFractionCompletedDirectly() {
+    func downloadProgressHandlerNormalizesRepoDownloadsByPhaseWeight() {
+        // Repo downloads (ASR/VAD/diarizer) emit fractions in [0, 0.5]: the
+        // upper half of ModelHub's range belongs to a compile phase that
+        // never runs for plain downloads. A finished download must report 1.0.
         let recorded = OSAllocatedUnfairLock(initialState: [Double]())
         let handler = ModelInstallService.makeDownloadProgressHandler(
-            downloadProgress: { value in recorded.withLock { $0.append(value) } }
+            downloadProgress: { value in recorded.withLock { $0.append(value) } },
+            downloadPhaseWeight: 0.5
         )
 
         handler?(DownloadProgress(fractionCompleted: 0.0, phase: .listing))
         handler?(DownloadProgress(fractionCompleted: 0.25, phase: .downloading(completedFiles: 1, totalFiles: 4)))
-        handler?(DownloadProgress(fractionCompleted: 1.0, phase: .compiling(modelName: "Encoder.mlmodelc")))
+        handler?(DownloadProgress(fractionCompleted: 0.5, phase: .downloading(completedFiles: 4, totalFiles: 4)))
 
-        #expect(recorded.withLock { $0 } == [0.0, 0.25, 1.0])
+        #expect(recorded.withLock { $0 } == [0.0, 0.5, 1.0])
+    }
+
+    @Test
+    func downloadProgressHandlerForwardsSubdirectoryDownloadsUnscaled() {
+        // Subdirectory downloads (LS-EEND) span the full [0, 1] range.
+        let recorded = OSAllocatedUnfairLock(initialState: [Double]())
+        let handler = ModelInstallService.makeDownloadProgressHandler(
+            downloadProgress: { value in recorded.withLock { $0.append(value) } },
+            downloadPhaseWeight: 1.0
+        )
+
+        handler?(DownloadProgress(fractionCompleted: 0.25, phase: .downloading(completedFiles: 1, totalFiles: 4)))
+        handler?(DownloadProgress(fractionCompleted: 1.0, phase: .downloading(completedFiles: 4, totalFiles: 4)))
+
+        #expect(recorded.withLock { $0 } == [0.25, 1.0])
     }
 
     @Test
     func downloadProgressHandlerNeverRegressesBelowRunningMax() {
         let recorded = OSAllocatedUnfairLock(initialState: [Double]())
         let handler = ModelInstallService.makeDownloadProgressHandler(
-            downloadProgress: { value in recorded.withLock { $0.append(value) } }
+            downloadProgress: { value in recorded.withLock { $0.append(value) } },
+            downloadPhaseWeight: 1.0
         )
 
         handler?(DownloadProgress(fractionCompleted: 0.6, phase: .downloading(completedFiles: 2, totalFiles: 4)))
@@ -71,7 +91,8 @@ struct StatusTagViewTests {
     func downloadProgressHandlerClampsOutOfRangeFractions() {
         let recorded = OSAllocatedUnfairLock(initialState: [Double]())
         let handler = ModelInstallService.makeDownloadProgressHandler(
-            downloadProgress: { value in recorded.withLock { $0.append(value) } }
+            downloadProgress: { value in recorded.withLock { $0.append(value) } },
+            downloadPhaseWeight: 0.5
         )
 
         handler?(DownloadProgress(fractionCompleted: -0.5, phase: .listing))
@@ -81,8 +102,19 @@ struct StatusTagViewTests {
     }
 
     @Test
+    func downloadPhaseWeightMatchesModelHubAPIPerGroup() {
+        #expect(ModelInstallService.downloadPhaseWeight(for: .asrParakeetV3) == 0.5)
+        #expect(ModelInstallService.downloadPhaseWeight(for: .vadSilero) == 0.5)
+        #expect(ModelInstallService.downloadPhaseWeight(for: .offlineDiarization) == 0.5)
+        #expect(ModelInstallService.downloadPhaseWeight(for: .lseendDiarization) == 1.0)
+    }
+
+    @Test
     func makeDownloadProgressHandlerReturnsNilWhenCallbackIsNil() {
-        let handler = ModelInstallService.makeDownloadProgressHandler(downloadProgress: nil)
+        let handler = ModelInstallService.makeDownloadProgressHandler(
+            downloadProgress: nil,
+            downloadPhaseWeight: 0.5
+        )
         #expect(handler == nil)
     }
 
