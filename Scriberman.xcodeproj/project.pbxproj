@@ -42,6 +42,11 @@
 		790FDA9D2FEB2135006EE999 /* AISettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 790FDA9C2FEB2135006EE999 /* AISettingsView.swift */; };
 		7910094F2F78031A00225294 /* RecordingServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7910094E2F78031A00225294 /* RecordingServiceTests.swift */; };
 		791009512F78184900225294 /* AudioMixdownService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009502F78184900225294 /* AudioMixdownService.swift */; };
+		DC9E28C5381A4E4BB770DA58 /* SynchronizedAudioTimeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BB5F720213D4DCC8F8DE9C6 /* SynchronizedAudioTimeline.swift */; };
+		51131E24461C4A109A7F68C8 /* AudioDriftMeasurement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A635159875B424AAA52EBDB /* AudioDriftMeasurement.swift */; };
+		340DCED74830451F973E701D /* AudioSyncConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69CB7E64E73348B7AC45DDA7 /* AudioSyncConfig.swift */; };
+		B1EE4AA554C34DF8A4D66C98 /* SynchronizedAudioTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8831F4F4A0B4BB5B9FED267 /* SynchronizedAudioTimelineTests.swift */; };
+		4CBBB754F76F47E590E37D92 /* AudioDriftMeasurementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDF8E8C6C9F04735BB55BFFC /* AudioDriftMeasurementTests.swift */; };
 		791009532F78184E00225294 /* AudioMixdownServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009522F78184E00225294 /* AudioMixdownServiceTests.swift */; };
 		791009552F78328500225294 /* M4AChannelExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009542F78328500225294 /* M4AChannelExtractor.swift */; };
 		791009572F7832AD00225294 /* M4AChannelExtractorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009562F7832AD00225294 /* M4AChannelExtractorTests.swift */; };
@@ -265,6 +270,11 @@
 		790FDA9C2FEB2135006EE999 /* AISettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISettingsView.swift; sourceTree = "<group>"; };
 		7910094E2F78031A00225294 /* RecordingServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingServiceTests.swift; sourceTree = "<group>"; };
 		791009502F78184900225294 /* AudioMixdownService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioMixdownService.swift; sourceTree = "<group>"; };
+		8BB5F720213D4DCC8F8DE9C6 /* SynchronizedAudioTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Sync/SynchronizedAudioTimeline.swift"; sourceTree = SOURCE_ROOT; };
+		9A635159875B424AAA52EBDB /* AudioDriftMeasurement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Sync/AudioDriftMeasurement.swift"; sourceTree = SOURCE_ROOT; };
+		69CB7E64E73348B7AC45DDA7 /* AudioSyncConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Sync/AudioSyncConfig.swift"; sourceTree = SOURCE_ROOT; };
+		A8831F4F4A0B4BB5B9FED267 /* SynchronizedAudioTimelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/SynchronizedAudioTimelineTests.swift"; sourceTree = SOURCE_ROOT; };
+		DDF8E8C6C9F04735BB55BFFC /* AudioDriftMeasurementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/AudioDriftMeasurementTests.swift"; sourceTree = SOURCE_ROOT; };
 		791009522F78184E00225294 /* AudioMixdownServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioMixdownServiceTests.swift; sourceTree = "<group>"; };
 		791009542F78328500225294 /* M4AChannelExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = M4AChannelExtractor.swift; sourceTree = "<group>"; };
 		791009562F7832AD00225294 /* M4AChannelExtractorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = M4AChannelExtractorTests.swift; sourceTree = "<group>"; };
@@ -492,6 +502,8 @@
 				B88B88B88B88B88B88B88B88 /* ConnectionStatusTests.swift */,
 				B5871E10D502FAEB70EDC99F /* MarkdownRendererTests.swift */,
 				8E2E0F5F51DABC96146DE26B /* RecordingStatusTests.swift */,
+				A8831F4F4A0B4BB5B9FED267 /* SynchronizedAudioTimelineTests.swift */,
+				DDF8E8C6C9F04735BB55BFFC /* AudioDriftMeasurementTests.swift */,
 				B1C2D3E4F5061728394A5B6D /* StatusTagViewTests.swift */,
 				98A016607CB87709B794542A /* TimeFormatterTests.swift */,
 				E6B44A3BD4A39AE7EB75ED6B /* TokenStitcherTests.swift */,
@@ -696,6 +708,9 @@
 			isa = PBXGroup;
 			children = (
 				791009502F78184900225294 /* AudioMixdownService.swift */,
+				8BB5F720213D4DCC8F8DE9C6 /* SynchronizedAudioTimeline.swift */,
+				9A635159875B424AAA52EBDB /* AudioDriftMeasurement.swift */,
+				69CB7E64E73348B7AC45DDA7 /* AudioSyncConfig.swift */,
 				791009542F78328500225294 /* M4AChannelExtractor.swift */,
 				7987326A2F7D8D1700570A03 /* AudioSampleReader.swift */,
 				79A11C242F8601110084F195 /* RecordingMixdownCoordinator.swift */,
@@ -1087,6 +1102,9 @@
 				A44A44A44A44A44A44A44A44 /* AIProviderService.swift in Sources */,
 				798732842F7DA28400570A03 /* AudioResampler.swift in Sources */,
 				791009512F78184900225294 /* AudioMixdownService.swift in Sources */,
+				DC9E28C5381A4E4BB770DA58 /* SynchronizedAudioTimeline.swift in Sources */,
+				51131E24461C4A109A7F68C8 /* AudioDriftMeasurement.swift in Sources */,
+				340DCED74830451F973E701D /* AudioSyncConfig.swift in Sources */,
 				79A11C252F8601110084F195 /* RecordingMixdownCoordinator.swift in Sources */,
 				7910097A2F7F0A6000225294 /* ScreenCaptureServiceProtocol.swift in Sources */,
 				791009782F7F0A5000225294 /* ScreenCaptureService.swift in Sources */,
@@ -1226,6 +1244,8 @@
 				791009572F7832AD00225294 /* M4AChannelExtractorTests.swift in Sources */,
 				798732732F7D8EE600570A03 /* AudioFileProberTests.swift in Sources */,
 				A2E8F18069EB9CB0F14A58BA /* RecordingStatusTests.swift in Sources */,
+				B1EE4AA554C34DF8A4D66C98 /* SynchronizedAudioTimelineTests.swift in Sources */,
+				4CBBB754F76F47E590E37D92 /* AudioDriftMeasurementTests.swift in Sources */,
 				79BE353B2F7EA92C00DB542F /* AudioPlayerViewModelTests.swift in Sources */,
 				A1F001111111111111111113 /* TranscriptSearchStateTests.swift in Sources */,
 				79155F252F84188C0082157E /* LiveTranscriptionPipelineSettingsTests.swift in Sources */,

@@ -216,7 +216,7 @@ actor RecordingService: RecordingServiceProtocol {
     private let voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)?
 
     private var audioEngine: AVAudioEngine?
-    private let micStreamer = AudioFileStreamer()
+    private let micStreamer = AudioFileStreamer(label: "mic")
     private var audioRecorder: AVAudioRecorder?
     private var recordingStartedAt: Date?
     private var recordingCreatedAt: Date?

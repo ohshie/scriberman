@@ -1,15 +1,20 @@
 @preconcurrency import AVFoundation
+import OSLog
 
 /// A thread-safe helper for writing audio buffers to a file and tracking peak levels.
 /// @unchecked Sendable: mutable state is synchronized via stateLock and the internal serial queue.
 final class AudioFileStreamer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.scriberman.audio-file-streamer", qos: .userInitiated)
     private let stateLock = NSLock()
-    
+    private let logger = Logger(subsystem: "Scriberman", category: "AudioFileStreamer")
+    private let label: String
+
     // Internal state protected by stateLock or queue
     private var _audioFile: AVAudioFile?
     private var _currentLevel: Float = 0
-    
+    private var _framesWritten: Int64 = 0
+    private var _writeFailureCount: Int = 0
+
     /// The most recent peak audio level (0.0 to 1.0).
     var audioLevel: Float {
         stateLock.lock()
@@ -17,8 +22,24 @@ final class AudioFileStreamer: @unchecked Sendable {
         return _currentLevel
     }
 
-    /// Initializes a new streamer.
-    init() {}
+    /// Total frames successfully written since the last `prepare` (diagnostics).
+    var framesWritten: Int64 {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return _framesWritten
+    }
+
+    /// Number of write failures observed since the last `prepare` (diagnostics).
+    var writeFailureCount: Int {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return _writeFailureCount
+    }
+
+    /// Initializes a new streamer. `label` tags diagnostics (e.g. "mic", "app").
+    init(label: String = "audio") {
+        self.label = label
+    }
 
     /// Prepares the streamer for writing to a specific URL with the given format.
     /// This method is synchronous on the internal queue to ensure any previous file is closed.
@@ -35,9 +56,11 @@ final class AudioFileStreamer: @unchecked Sendable {
                 commonFormat: format.commonFormat,
                 interleaved: format.isInterleaved
             )
-            
+
             stateLock.lock()
             _currentLevel = 0
+            _framesWritten = 0
+            _writeFailureCount = 0
             stateLock.unlock()
         }
     }
@@ -47,17 +70,27 @@ final class AudioFileStreamer: @unchecked Sendable {
     func write(buffer: AVAudioPCMBuffer) {
         let level = computeLevel(from: buffer)
         
+        let frameLength = Int64(buffer.frameLength)
         queue.async { [weak self] in
             guard let self = self else { return }
             do {
                 try self._audioFile?.write(from: buffer)
-                
+
                 self.stateLock.lock()
                 self._currentLevel = level
+                self._framesWritten += frameLength
                 self.stateLock.unlock()
             } catch {
-                // In a production app, we might want to propagate this error back to a delegate
-                // for now we just fail silently to avoid crashing the background tap
+                // Surface the failure so alignment problems are diagnosable rather than
+                // silent (a dropped write shifts one channel permanently). We still avoid
+                // crashing the realtime capture callback.
+                self.stateLock.lock()
+                self._writeFailureCount += 1
+                let failureCount = self._writeFailureCount
+                self.stateLock.unlock()
+                self.logger.error(
+                    "Audio write failed (\(self.label, privacy: .public), failure #\(failureCount, privacy: .public)): \(error.localizedDescription, privacy: .public)"
+                )
             }
         }
     }

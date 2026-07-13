@@ -7,7 +7,7 @@ import ScreenCaptureKit
 final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendable {
     private let lock = NSLock()
     private var fileURL: URL?
-    private let streamer = AudioFileStreamer()
+    private let streamer = AudioFileStreamer(label: "app")
     private var monoFormat: AVAudioFormat?
     private var firstBufferHostTime: UInt64?
     private let liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation?
