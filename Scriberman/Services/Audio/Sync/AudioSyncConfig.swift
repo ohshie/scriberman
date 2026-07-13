@@ -7,11 +7,13 @@ import Foundation
 enum AudioSyncConfig {
     private static let timelineMixdownKey = "AudioSync.timelineMixdownEnabled"
 
-    /// When true, mixdown/capture should place samples on the shared presentation-time
-    /// timeline (`SynchronizedAudioTimeline`) instead of the single constant start-offset.
-    /// Defaults to false until Phase 1 passes its drift-acceptance measurement.
+    /// When true, mixdown places samples on the shared presentation-time timeline
+    /// (`SynchronizedAudioTimeline`, gap/outage silence-fill) instead of the single constant
+    /// start-offset. **Default ON** (unset ⇒ true); the legacy offset path remains only as a
+    /// graceful fallback when timing sidecars are missing/inconsistent. Force off with
+    /// `defaults write <bundle> AudioSync.timelineMixdownEnabled -bool NO`.
     static var isTimelineMixdownEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: timelineMixdownKey) }
+        get { UserDefaults.standard.object(forKey: timelineMixdownKey) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: timelineMixdownKey) }
     }
 
@@ -19,10 +21,11 @@ enum AudioSyncConfig {
 
     /// Phase 2: when true, mic + app are captured from one ScreenCaptureKit stream
     /// (macOS 15+ `captureMicrophone`) for a shared clock, instead of AVAudioEngine mic +
-    /// a separate SCStream. Only applies to mic+app recordings; best paired with
-    /// `isTimelineMixdownEnabled`. Defaults to false.
+    /// a separate SCStream. Applies to mic+app recordings; the AVAudioEngine path remains as a
+    /// fallback when unified capture cannot start. **Default ON** (unset ⇒ true). Force off with
+    /// `defaults write <bundle> AudioSync.unifiedCaptureEnabled -bool NO`.
     static var isUnifiedCaptureEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: unifiedCaptureKey) }
+        get { UserDefaults.standard.object(forKey: unifiedCaptureKey) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: unifiedCaptureKey) }
     }
 }
