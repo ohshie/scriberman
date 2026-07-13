@@ -113,7 +113,10 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
                 outputBuffer = buffer
             }
 
-            micStreamer.write(buffer: outputBuffer)
+            let hostNanos: UInt64? = audioTime.hostTime != 0
+                ? HostClock.nanoseconds(machTime: audioTime.hostTime)
+                : nil
+            micStreamer.write(buffer: outputBuffer, hostTimeNanos: hostNanos)
             let samples = AudioDownmixer.toMono(buffer: outputBuffer)
             onBuffer(samples, outputBuffer.format.sampleRate)
         }

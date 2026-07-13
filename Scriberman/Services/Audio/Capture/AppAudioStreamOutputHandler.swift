@@ -50,6 +50,7 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
 
     private func process(_ sampleBuffer: CMSampleBuffer) {
         captureFirstBufferHostTimeIfNeeded(from: sampleBuffer)
+        let bufferHostNanos = Self.hostTimeNanos(from: sampleBuffer)
 
         guard let pcmBuffer = createPCMBuffer(from: sampleBuffer) else {
             return
@@ -102,8 +103,17 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
             }
         }
 
-        streamer.write(buffer: monoBuffer)
+        streamer.write(buffer: monoBuffer, hostTimeNanos: bufferHostNanos)
         liveAudioContinuation?.yield((monoSamples, .app, format.sampleRate))
+    }
+
+    /// Host time (nanoseconds) of a sample buffer's first frame, or nil if unavailable.
+    private static func hostTimeNanos(from sampleBuffer: CMSampleBuffer) -> UInt64? {
+        let presentationTimestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        let hostTimeClock = CMClockGetHostTimeClock()
+        let hostTime = CMSyncConvertTime(presentationTimestamp, from: hostTimeClock, to: hostTimeClock)
+        guard CMTIME_IS_VALID(hostTime), CMTIME_IS_NUMERIC(hostTime) else { return nil }
+        return HostClock.nanoseconds(machTime: CMClockConvertHostTimeToSystemUnits(hostTime))
     }
 
     private func createPCMBuffer(from sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {

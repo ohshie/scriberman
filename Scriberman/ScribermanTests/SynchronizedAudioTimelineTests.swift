@@ -73,4 +73,69 @@ struct SynchronizedAudioTimelineTests {
         #expect(timeline.overlapFrames == 2)
         #expect(timeline.insertedSilenceFrames == 0)
     }
+
+    // MARK: - reconstruct (offline, from file samples + segment log)
+
+    private func segment(_ hostNanos: UInt64, _ frames: Int) -> AudioCaptureSegment {
+        AudioCaptureSegment(startHostTimeNanos: hostNanos, frameCount: frames)
+    }
+
+    @Test("reconstruct with contiguous segments returns the samples unchanged")
+    func reconstructContiguous() {
+        let samples: [Float] = [1, 2, 3, 4, 5, 6]
+        // Two contiguous 3-frame buffers, 3 frames = 3/48000 s apart.
+        let dtNanos = UInt64(3.0 / sampleRate * 1_000_000_000)
+        let segments = [segment(1_000, 3), segment(1_000 + dtNanos, 3)]
+        let timeline = SynchronizedAudioTimeline.reconstruct(
+            samples: samples, segments: segments, referenceHostTimeNanos: 1_000, sampleRate: sampleRate
+        )
+        #expect(timeline.frames == samples)
+        #expect(timeline.insertedSilenceFrames == 0)
+    }
+
+    @Test("reconstruct anchored to an earlier shared reference adds leading silence")
+    func reconstructWithSharedReferenceOffset() {
+        let samples: [Float] = [7, 7, 7]
+        // Source's first buffer is 100 frames after the shared reference.
+        let startNanos = UInt64(100.0 / sampleRate * 1_000_000_000) // relative to reference 0
+        let segments = [segment(startNanos, 3)]
+        let timeline = SynchronizedAudioTimeline.reconstruct(
+            samples: samples, segments: segments, referenceHostTimeNanos: 0, sampleRate: sampleRate
+        )
+        #expect(timeline.frames.count == 103)
+        #expect(timeline.insertedSilenceFrames == 100)
+        #expect(timeline.frames[100] == 7)
+    }
+
+    @Test("reconstruct fills a mid-recording outage gap with silence")
+    func reconstructWithOutage() {
+        let samples: [Float] = [1, 1, 9] // 2 frames, then 1 frame after an outage
+        let secondStart = UInt64(3.0 * 1_000_000_000) // 3 s after reference
+        let segments = [segment(0, 2), segment(secondStart, 1)]
+        let timeline = SynchronizedAudioTimeline.reconstruct(
+            samples: samples, segments: segments, referenceHostTimeNanos: 0, sampleRate: sampleRate
+        )
+        #expect(timeline.frames.count == 144_001)
+        #expect(timeline.frames[144_000] == 9)
+        #expect(timeline.insertedSilenceFrames == 144_000 - 2)
+    }
+
+    @Test("Two sources on one shared reference stay aligned")
+    func twoSourcesShareReference() {
+        // Mic starts at reference; app starts 50 frames later. Both reconstructed against the
+        // shared (earlier) reference should place mic at 0 and app at frame 50.
+        let micRef: UInt64 = 5_000
+        let appStart = micRef + UInt64(50.0 / sampleRate * 1_000_000_000)
+        let mic = SynchronizedAudioTimeline.reconstruct(
+            samples: [1, 1, 1], segments: [segment(micRef, 3)],
+            referenceHostTimeNanos: micRef, sampleRate: sampleRate
+        )
+        let app = SynchronizedAudioTimeline.reconstruct(
+            samples: [2, 2, 2], segments: [segment(appStart, 3)],
+            referenceHostTimeNanos: micRef, sampleRate: sampleRate
+        )
+        #expect(mic.frames.first == 1)
+        #expect(app.insertedSilenceFrames == 50)
+        #expect(app.frames[50] == 2)
+    }
 }

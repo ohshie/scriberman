@@ -14,6 +14,9 @@ final class AudioFileStreamer: @unchecked Sendable {
     private var _currentLevel: Float = 0
     private var _framesWritten: Int64 = 0
     private var _writeFailureCount: Int = 0
+    private var _url: URL?
+    private var _sampleRate: Double = 0
+    private var _segments: [AudioCaptureSegment] = []
 
     /// The most recent peak audio level (0.0 to 1.0).
     var audioLevel: Float {
@@ -61,16 +64,28 @@ final class AudioFileStreamer: @unchecked Sendable {
             _currentLevel = 0
             _framesWritten = 0
             _writeFailureCount = 0
+            _url = url
+            _sampleRate = format.sampleRate
+            _segments = []
             stateLock.unlock()
         }
     }
 
     /// Writes a buffer to the audio file asynchronously.
     /// Peak level is calculated synchronously before the async write to ensure UI updates are responsive.
-    func write(buffer: AVAudioPCMBuffer) {
+    ///
+    /// - Parameter hostTimeNanos: presentation host time (nanoseconds) of the buffer's first
+    ///   frame. When provided, a timing segment is recorded so the file can be re-placed onto a
+    ///   real-time timeline at mixdown (see `SynchronizedAudioTimeline`).
+    func write(buffer: AVAudioPCMBuffer, hostTimeNanos: UInt64? = nil) {
         let level = computeLevel(from: buffer)
-        
+
         let frameLength = Int64(buffer.frameLength)
+        if let hostTimeNanos {
+            stateLock.lock()
+            _segments.append(AudioCaptureSegment(startHostTimeNanos: hostTimeNanos, frameCount: Int(frameLength)))
+            stateLock.unlock()
+        }
         queue.async { [weak self] in
             guard let self = self else { return }
             do {
@@ -95,18 +110,52 @@ final class AudioFileStreamer: @unchecked Sendable {
         }
     }
 
-    /// Closes the audio file.
+    /// Closes the audio file and, if timing segments were recorded, writes a `.timing`
+    /// sidecar next to the audio file for timeline-anchored mixdown.
     func close() {
         queue.sync {
             if #available(macOS 15.0, *) {
                 _audioFile?.close()
             }
             _audioFile = nil
-            
+
             stateLock.lock()
             _currentLevel = 0
+            let url = _url
+            let sampleRate = _sampleRate
+            let segments = _segments
             stateLock.unlock()
+
+            if let url, !segments.isEmpty {
+                writeTimingSidecar(for: url, sampleRate: sampleRate, segments: segments)
+            }
         }
+    }
+
+    private func writeTimingSidecar(for audioURL: URL, sampleRate: Double, segments: [AudioCaptureSegment]) {
+        let sidecar = CaptureTimingSidecar(sampleRate: sampleRate, segments: segments)
+        let sidecarURL = Self.timingSidecarURL(for: audioURL)
+        do {
+            let data = try JSONEncoder().encode(sidecar)
+            try data.write(to: sidecarURL, options: .atomic)
+            logger.info(
+                "Wrote timing sidecar (\(self.label, privacy: .public)): segments=\(segments.count, privacy: .public) frames=\(sidecar.totalFrames, privacy: .public)"
+            )
+        } catch {
+            logger.error("Failed to write timing sidecar (\(self.label, privacy: .public)): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// The `.timing` sidecar location for a capture audio file.
+    static func timingSidecarURL(for audioURL: URL) -> URL {
+        audioURL.appendingPathExtension("timing")
+    }
+
+    /// Loads a timing sidecar if present.
+    static func loadTimingSidecar(for audioURL: URL) -> CaptureTimingSidecar? {
+        let sidecarURL = timingSidecarURL(for: audioURL)
+        guard let data = try? Data(contentsOf: sidecarURL) else { return nil }
+        return try? JSONDecoder().decode(CaptureTimingSidecar.self, from: data)
     }
 
     private func computeLevel(from buffer: AVAudioPCMBuffer) -> Float {

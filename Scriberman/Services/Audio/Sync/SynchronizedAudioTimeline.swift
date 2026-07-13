@@ -1,5 +1,42 @@
 import Foundation
 
+/// One written capture buffer: the host time of its first frame (nanoseconds) and
+/// the number of frames written for it. The concatenation of all segments' frames
+/// equals the capture file's sample count, so a file can be re-placed onto a real-time
+/// timeline from its file samples + segment log.
+struct AudioCaptureSegment: Codable, Equatable, Sendable {
+    let startHostTimeNanos: UInt64
+    let frameCount: Int
+}
+
+/// Persisted per-source timing sidecar written next to a capture WAV (`<wav>.timing`).
+struct CaptureTimingSidecar: Codable, Sendable {
+    let sampleRate: Double
+    let segments: [AudioCaptureSegment]
+
+    /// Sum of all segment frame counts (should equal the audio file's sample count).
+    var totalFrames: Int { segments.reduce(0) { $0 + $1.frameCount } }
+}
+
+/// Converts a mach host-time value to nanoseconds using the system timebase. On
+/// Apple Silicon the timebase is 1/1 (host units already are nanoseconds); this stays
+/// correct on any timebase.
+enum HostClock {
+    static func nanoseconds(machTime: UInt64) -> UInt64 {
+        var info = mach_timebase_info_data_t()
+        mach_timebase_info(&info)
+        if info.numer == info.denom || info.denom == 0 {
+            return machTime
+        }
+        // Use 128-bit-safe scaling to avoid overflow on long uptimes.
+        let numer = UInt64(info.numer)
+        let denom = UInt64(info.denom)
+        let whole = machTime / denom * numer
+        let remainder = machTime % denom * numer / denom
+        return whole + remainder
+    }
+}
+
 /// Places captured audio buffers on a fixed-sample-rate timeline by their
 /// presentation time (in seconds) rather than by accumulated sample count.
 ///
@@ -26,8 +63,36 @@ struct SynchronizedAudioTimeline {
     /// appended contiguously instead of overwriting — tracked for diagnostics.
     private(set) var overlapFrames: Int = 0
 
-    init(sampleRate: Double) {
+    /// - Parameter referenceTime: when provided, frame 0 is anchored to this time and
+    ///   `append` will not re-anchor to the first buffer — used to place multiple sources
+    ///   against one shared reference (so a later-starting source gets leading silence).
+    init(sampleRate: Double, referenceTime: Double? = nil) {
         self.sampleRate = sampleRate
+        self.referenceTime = referenceTime
+    }
+
+    /// Rebuilds a source's real-time timeline from its concatenated file samples and its
+    /// segment log, anchored so that `referenceHostTimeNanos` maps to frame 0. Gaps and
+    /// capture outages between segments become silence. Segments whose samples exceed the
+    /// available buffer are skipped defensively.
+    static func reconstruct(
+        samples: [Float],
+        segments: [AudioCaptureSegment],
+        referenceHostTimeNanos: UInt64,
+        sampleRate: Double
+    ) -> SynchronizedAudioTimeline {
+        var timeline = SynchronizedAudioTimeline(sampleRate: sampleRate, referenceTime: 0)
+        var offset = 0
+        for segment in segments {
+            let end = offset + segment.frameCount
+            guard segment.frameCount > 0, end <= samples.count else { break }
+            let slice = Array(samples[offset..<end])
+            let relativeSeconds =
+                (Double(segment.startHostTimeNanos) - Double(referenceHostTimeNanos)) / 1_000_000_000.0
+            timeline.append(samples: slice, at: relativeSeconds)
+            offset = end
+        }
+        return timeline
     }
 
     /// Frame index at which a buffer with the given presentation time should start,
