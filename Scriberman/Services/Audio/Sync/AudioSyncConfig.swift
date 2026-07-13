@@ -14,4 +14,15 @@ enum AudioSyncConfig {
         get { UserDefaults.standard.bool(forKey: timelineMixdownKey) }
         set { UserDefaults.standard.set(newValue, forKey: timelineMixdownKey) }
     }
+
+    private static let unifiedCaptureKey = "AudioSync.unifiedCaptureEnabled"
+
+    /// Phase 2: when true, mic + app are captured from one ScreenCaptureKit stream
+    /// (macOS 15+ `captureMicrophone`) for a shared clock, instead of AVAudioEngine mic +
+    /// a separate SCStream. Only applies to mic+app recordings; best paired with
+    /// `isTimelineMixdownEnabled`. Defaults to false.
+    static var isUnifiedCaptureEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: unifiedCaptureKey) }
+        set { UserDefaults.standard.set(newValue, forKey: unifiedCaptureKey) }
+    }
 }
