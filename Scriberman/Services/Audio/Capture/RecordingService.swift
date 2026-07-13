@@ -724,6 +724,9 @@ actor RecordingService: RecordingServiceProtocol {
             // Release capture writer resources before background mixdown starts.
             await cleanupRecordingState(deleteScreenTmpVideo: !shouldRunScreenMux)
 
+            let timelineEnabled = AudioSyncConfig.isTimelineMixdownEnabled
+            let audioAnchorHostTime = appStartHostTime.map { min(micStartHostTime, $0) } ?? micStartHostTime
+
             Task { [weak self] in
                 await self?.runMixdown(
                     sessionID: sessionID,
@@ -733,9 +736,29 @@ actor RecordingService: RecordingServiceProtocol {
                     micStartHostTime: micStartHostTime,
                     appStartHostTime: appStartHostTime
                 )
+
+                // Timeline path: mux the drift-corrected mixdown audio (produced above) into
+                // the video, so the video gets the same aligned audio and we avoid the
+                // raw-WAV delete race.
+                if timelineEnabled, let videoStartHostTime, shouldRunScreenMux {
+                    let request = ScreenVideoMuxRequest(
+                        sessionID: sessionID,
+                        screenTmpURL: screenTmpVideoURL,
+                        screenVideoURL: finalScreenVideoURL,
+                        micURL: finalRecordingURLs.mic,
+                        appURL: finalRecordingURLs.app,
+                        micStartHostTime: micStartHostTime,
+                        appStartHostTime: appStartHostTime,
+                        videoStartHostTime: videoStartHostTime,
+                        timelineAudioURL: mixdownURL,
+                        audioAnchorHostTime: audioAnchorHostTime
+                    )
+                    await self?.screenVideoMuxer.runMux(request: request)
+                }
             }
 
-            if let videoStartHostTime, shouldRunScreenMux {
+            // Legacy path: mux the raw mic/app tracks concurrently (unchanged default behavior).
+            if !timelineEnabled, let videoStartHostTime, shouldRunScreenMux {
                 let request = ScreenVideoMuxRequest(
                     sessionID: sessionID,
                     screenTmpURL: screenTmpVideoURL,
