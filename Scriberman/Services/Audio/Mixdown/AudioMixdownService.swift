@@ -175,6 +175,11 @@ actor AudioMixdownService {
         }
 
         let reference = min(micFirstSegment.startHostTimeNanos, appFirstSegment.startHostTimeNanos)
+        let micLeadMs = Double(micFirstSegment.startHostTimeNanos - reference) / 1_000_000.0
+        let appLeadMs = Double(appFirstSegment.startHostTimeNanos - reference) / 1_000_000.0
+        logger.info(
+            "Timeline anchors. micFirstNanos=\(micFirstSegment.startHostTimeNanos, privacy: .public) appFirstNanos=\(appFirstSegment.startHostTimeNanos, privacy: .public) referenceNanos=\(reference, privacy: .public) micLeadMs=\(micLeadMs, privacy: .public) appLeadMs=\(appLeadMs, privacy: .public) micFrames=\(micSamples.count, privacy: .public) appFrames=\(appSamples.count, privacy: .public)"
+        )
         let micTimeline = SynchronizedAudioTimeline.reconstruct(
             samples: micSamples,
             segments: micSidecar.segments,
