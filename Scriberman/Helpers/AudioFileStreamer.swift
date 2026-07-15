@@ -138,7 +138,7 @@ final class AudioFileStreamer: @unchecked Sendable {
         do {
             let data = try JSONEncoder().encode(sidecar)
             try data.write(to: sidecarURL, options: .atomic)
-            logger.info(
+            logger.notice(
                 "Wrote timing sidecar (\(self.label, privacy: .public)): segments=\(segments.count, privacy: .public) frames=\(sidecar.totalFrames, privacy: .public)"
             )
         } catch {

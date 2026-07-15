@@ -55,7 +55,7 @@ actor AudioMixdownService {
 
         if AudioSyncConfig.isTimelineMixdownEnabled {
             if try await attemptTimelineMix(micURL: micURL, appURL: appURL, micSamples: micSamples, into: outputURL) {
-                logger.info("Used timeline (PTS-anchored) mixdown path.")
+                logger.notice("Used timeline (PTS-anchored) mixdown path.")
                 logger.info("Mix completed. outputExists=\(self.fileManager.fileExists(atPath: outputURL.path), privacy: .public)")
                 if deleteSourceFiles {
                     deleteSourceWAVFiles(micURL: micURL, appURL: appURL)
@@ -157,7 +157,7 @@ actor AudioMixdownService {
                 referenceHostTimeNanos: micFirstSegment.startHostTimeNanos,
                 sampleRate: outputSampleRate
             )
-            logger.info("Timeline mono. silenceFrames=\(micTimeline.insertedSilenceFrames, privacy: .public) gaps=\(micTimeline.gapCount, privacy: .public)")
+            logger.notice("Timeline mono. silenceFrames=\(micTimeline.insertedSilenceFrames, privacy: .public) gaps=\(micTimeline.gapCount, privacy: .public)")
             try writeMonoAAC(samples: micTimeline.frames, to: outputURL)
             return true
         }
@@ -177,7 +177,7 @@ actor AudioMixdownService {
         let reference = min(micFirstSegment.startHostTimeNanos, appFirstSegment.startHostTimeNanos)
         let micLeadMs = Double(micFirstSegment.startHostTimeNanos - reference) / 1_000_000.0
         let appLeadMs = Double(appFirstSegment.startHostTimeNanos - reference) / 1_000_000.0
-        logger.info(
+        logger.notice(
             "Timeline anchors. micFirstNanos=\(micFirstSegment.startHostTimeNanos, privacy: .public) appFirstNanos=\(appFirstSegment.startHostTimeNanos, privacy: .public) referenceNanos=\(reference, privacy: .public) micLeadMs=\(micLeadMs, privacy: .public) appLeadMs=\(appLeadMs, privacy: .public) micFrames=\(micSamples.count, privacy: .public) appFrames=\(appSamples.count, privacy: .public)"
         )
         let micTimeline = SynchronizedAudioTimeline.reconstruct(
@@ -192,7 +192,7 @@ actor AudioMixdownService {
             referenceHostTimeNanos: reference,
             sampleRate: outputSampleRate
         )
-        logger.info(
+        logger.notice(
             "Timeline stereo. micSilence=\(micTimeline.insertedSilenceFrames, privacy: .public) micGaps=\(micTimeline.gapCount, privacy: .public) appSilence=\(appTimeline.insertedSilenceFrames, privacy: .public) appGaps=\(appTimeline.gapCount, privacy: .public)"
         )
         // Both timelines are anchored to the same reference (frame 0), so no residual offset.
