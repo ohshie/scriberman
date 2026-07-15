@@ -13,7 +13,7 @@ enum AudioSyncConfig {
     /// graceful fallback when timing sidecars are missing/inconsistent. Force off with
     /// `defaults write <bundle> AudioSync.timelineMixdownEnabled -bool NO`.
     static var isTimelineMixdownEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: timelineMixdownKey) as? Bool ?? false }
+        get { UserDefaults.standard.object(forKey: timelineMixdownKey) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: timelineMixdownKey) }
     }
 
@@ -25,7 +25,7 @@ enum AudioSyncConfig {
     /// fallback when unified capture cannot start. **Default ON** (unset ⇒ true). Force off with
     /// `defaults write <bundle> AudioSync.unifiedCaptureEnabled -bool NO`.
     static var isUnifiedCaptureEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: unifiedCaptureKey) as? Bool ?? false }
+        get { UserDefaults.standard.object(forKey: unifiedCaptureKey) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: unifiedCaptureKey) }
     }
 }
