@@ -126,8 +126,17 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
         guard let output = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else {
             return nil
         }
+        // Feed the input buffer exactly once per convert() call. Returning it again when the
+        // converter asks for more input duplicates frames into the output (observed as a
+        // constant per-buffer surplus that time-stretches the whole channel).
+        var didProvideInput = false
         var error: NSError?
         let status = converter.convert(to: output, error: &error) { _, outStatus in
+            if didProvideInput {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            didProvideInput = true
             outStatus.pointee = .haveData
             return buffer
         }

@@ -59,8 +59,8 @@ struct SynchronizedAudioTimeline {
     private(set) var insertedSilenceFrames: Int = 0
     /// Number of discontinuities that required gap-fill (diagnostics).
     private(set) var gapCount: Int = 0
-    /// Frames that arrived "early" (source running faster than wall clock) and were
-    /// appended contiguously instead of overwriting — tracked for diagnostics.
+    /// Frames trimmed from buffers that arrived "early" (source producing more frames than
+    /// wall-clock time allows, e.g. duplicated samples upstream) — tracked for diagnostics.
     private(set) var overlapFrames: Int = 0
 
     /// - Parameter referenceTime: when provided, frame 0 is anchored to this time and
@@ -123,10 +123,23 @@ struct SynchronizedAudioTimeline {
             frames.append(contentsOf: repeatElement(0, count: gap))
             insertedSilenceFrames += gap
             gapCount += 1
-        } else if expected < frames.count {
-            // Source delivered faster than wall clock; append contiguously rather than
-            // overwrite already-written audio. Small and bounded in practice.
-            overlapFrames += frames.count - expected
+            frames.append(contentsOf: samples)
+            return
+        }
+
+        if expected < frames.count {
+            // Source delivered more frames than wall-clock time allows (e.g. duplicated
+            // samples upstream, or a fast source clock). Trim the overlapping head so the
+            // timeline stays anchored to real time instead of accumulating the surplus.
+            // Occasional 1–2 frame trims from timestamp jitter are inaudible; a systematic
+            // surplus (the failure mode this guards against) is corrected buffer by buffer.
+            let overlap = frames.count - expected
+            overlapFrames += min(overlap, samples.count)
+            guard overlap < samples.count else {
+                return // entire buffer is duplicate-in-time; drop it
+            }
+            frames.append(contentsOf: samples[overlap...])
+            return
         }
 
         frames.append(contentsOf: samples)

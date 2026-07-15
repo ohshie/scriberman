@@ -62,16 +62,49 @@ struct SynchronizedAudioTimelineTests {
         #expect(timeline.gapFrames(before: pts, writtenFrames: 2) == 98)
     }
 
-    @Test("Early buffer (source faster than wall clock) appends without overwriting")
-    func earlyBufferIsAppendedNotOverwritten() {
+    @Test("Early buffer overlap is trimmed so the timeline stays wall-clock true")
+    func earlyBufferOverlapIsTrimmed() {
         var timeline = SynchronizedAudioTimeline(sampleRate: sampleRate)
         timeline.append(samples: [1, 1, 1, 1], at: 0)
-        // Presentation time implies frame 2, but 4 frames are already written.
+        // Presentation time implies frame 2, but 4 frames are already written: 2-frame overlap.
         let pts = 2.0 / sampleRate
-        timeline.append(samples: [2, 2], at: pts)
-        #expect(timeline.frames.count == 6) // no overwrite, appended contiguously
+        timeline.append(samples: [2, 2, 9], at: pts)
+        #expect(timeline.frames.count == 5) // only the non-overlapping tail is appended
+        #expect(timeline.frames[4] == 9)
         #expect(timeline.overlapFrames == 2)
         #expect(timeline.insertedSilenceFrames == 0)
+    }
+
+    @Test("Fully-duplicate-in-time buffer is dropped")
+    func fullyEarlyBufferIsDropped() {
+        var timeline = SynchronizedAudioTimeline(sampleRate: sampleRate)
+        timeline.append(samples: [1, 1, 1, 1], at: 0)
+        // Buffer of 2 frames whose window [2, 4) is already fully written.
+        let pts = 2.0 / sampleRate
+        timeline.append(samples: [2, 2], at: pts)
+        #expect(timeline.frames.count == 4)
+        #expect(timeline.overlapFrames == 2)
+    }
+
+    @Test("A time-stretched source (surplus frames per buffer) is corrected to wall clock")
+    func stretchedSourceIsCorrected() {
+        // Regression for the unified-capture converter bug: every buffer carried 544 frames
+        // of audio but only 512 frames of wall-clock time (~6.25% stretch), desyncing the
+        // channel by ~3.75 s/minute. The timeline must trim the surplus, keeping total
+        // length equal to elapsed real time.
+        var timeline = SynchronizedAudioTimeline(sampleRate: sampleRate)
+        let realFramesPerBuffer = 512
+        let surplusFramesPerBuffer = 544
+        let bufferCount = 100
+        for index in 0..<bufferCount {
+            let pts = Double(index * realFramesPerBuffer) / sampleRate
+            timeline.append(samples: [Float](repeating: 1, count: surplusFramesPerBuffer), at: pts)
+        }
+        // Last buffer's tail may legitimately extend past the final PTS; everything before it
+        // must be wall-clock true (index * 512), not stretched (index * 544).
+        let expectedMax = (bufferCount - 1) * realFramesPerBuffer + surplusFramesPerBuffer
+        #expect(timeline.frames.count == expectedMax)
+        #expect(timeline.overlapFrames == (bufferCount - 1) * (surplusFramesPerBuffer - realFramesPerBuffer))
     }
 
     // MARK: - reconstruct (offline, from file samples + segment log)

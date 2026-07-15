@@ -157,7 +157,7 @@ actor AudioMixdownService {
                 referenceHostTimeNanos: micFirstSegment.startHostTimeNanos,
                 sampleRate: outputSampleRate
             )
-            logger.notice("Timeline mono. silenceFrames=\(micTimeline.insertedSilenceFrames, privacy: .public) gaps=\(micTimeline.gapCount, privacy: .public)")
+            logger.notice("Timeline mono. silenceFrames=\(micTimeline.insertedSilenceFrames, privacy: .public) gaps=\(micTimeline.gapCount, privacy: .public) overlap=\(micTimeline.overlapFrames, privacy: .public)")
             try writeMonoAAC(samples: micTimeline.frames, to: outputURL)
             return true
         }
@@ -193,7 +193,7 @@ actor AudioMixdownService {
             sampleRate: outputSampleRate
         )
         logger.notice(
-            "Timeline stereo. micSilence=\(micTimeline.insertedSilenceFrames, privacy: .public) micGaps=\(micTimeline.gapCount, privacy: .public) appSilence=\(appTimeline.insertedSilenceFrames, privacy: .public) appGaps=\(appTimeline.gapCount, privacy: .public)"
+            "Timeline stereo. micSilence=\(micTimeline.insertedSilenceFrames, privacy: .public) micGaps=\(micTimeline.gapCount, privacy: .public) appSilence=\(appTimeline.insertedSilenceFrames, privacy: .public) appGaps=\(appTimeline.gapCount, privacy: .public) micOverlap=\(micTimeline.overlapFrames, privacy: .public) appOverlap=\(appTimeline.overlapFrames, privacy: .public)"
         )
         // Both timelines are anchored to the same reference (frame 0), so no residual offset.
         try writeStereoAAC(

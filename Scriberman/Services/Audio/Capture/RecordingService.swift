@@ -178,8 +178,16 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
             return nil
         }
 
+        // Feed the input buffer exactly once per convert() call; returning it again when the
+        // converter requests more input duplicates frames and time-stretches the channel.
+        var didProvideInput = false
         var error: NSError?
         let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+            if didProvideInput {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            didProvideInput = true
             outStatus.pointee = .haveData
             return buffer
         }
