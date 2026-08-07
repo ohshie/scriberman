@@ -113,7 +113,10 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
                 outputBuffer = buffer
             }
 
-            micStreamer.write(buffer: outputBuffer)
+            let hostNanos: UInt64? = audioTime.hostTime != 0
+                ? HostClock.nanoseconds(machTime: audioTime.hostTime)
+                : nil
+            micStreamer.write(buffer: outputBuffer, hostTimeNanos: hostNanos)
             let samples = AudioDownmixer.toMono(buffer: outputBuffer)
             onBuffer(samples, outputBuffer.format.sampleRate)
         }
@@ -175,8 +178,16 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
             return nil
         }
 
+        // Feed the input buffer exactly once per convert() call; returning it again when the
+        // converter requests more input duplicates frames and time-stretches the channel.
+        var didProvideInput = false
         var error: NSError?
         let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+            if didProvideInput {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            didProvideInput = true
             outStatus.pointee = .haveData
             return buffer
         }
@@ -216,7 +227,7 @@ actor RecordingService: RecordingServiceProtocol {
     private let voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)?
 
     private var audioEngine: AVAudioEngine?
-    private let micStreamer = AudioFileStreamer()
+    private let micStreamer = AudioFileStreamer(label: "mic")
     private var audioRecorder: AVAudioRecorder?
     private var recordingStartedAt: Date?
     private var recordingCreatedAt: Date?
@@ -242,6 +253,7 @@ actor RecordingService: RecordingServiceProtocol {
     private var activeCapturedAppName: String?
     private var pendingTitle: String?
     private var appAudioCaptureSession: AppAudioCaptureSession?
+    private var unifiedCaptureSession: UnifiedCaptureSession?
     private var screenCaptureSession: (any ScreenCaptureSessionControlling)?
     private var shouldSkipScreenMux = false
     private var pendingError: RecordingError?
@@ -433,6 +445,13 @@ actor RecordingService: RecordingServiceProtocol {
     }
 
     func audioLevels() async -> (mic: Float, app: Float) {
+        if let unifiedCaptureSession {
+            let mic = unifiedCaptureSession.micAudioLevel
+            let app = unifiedCaptureSession.appAudioLevel
+            audioLevelValue = max(mic, app)
+            return (mic, app)
+        }
+
         var micLevel: Float = 0
 
         if let audioRecorder {
@@ -513,6 +532,35 @@ actor RecordingService: RecordingServiceProtocol {
             } else {
                 desiredMicDeviceUID = nil
             }
+            // Phase 2: for mic+app recordings, capture both from one ScreenCaptureKit stream
+            // (shared clock) when enabled. Falls back to the legacy AVAudioEngine + separate
+            // SCStream path on any failure.
+            var unifiedStarted = false
+            if AudioSyncConfig.isUnifiedCaptureEnabled, let appProcessID {
+                do {
+                    let unified = UnifiedCaptureSession(
+                        micFileURL: micFileURL,
+                        appFileURL: appFileURL,
+                        processID: appProcessID,
+                        micDeviceUID: desiredMicDeviceUID,
+                        liveAudioContinuation: liveAudioStreamTuple.continuation,
+                        onMicFirstHostTime: { [weak self] hostTime in
+                            Task { [weak self] in await self?.captureMicStartHostTimeIfNeeded(hostTime) }
+                        },
+                        onAppFirstHostTime: { [weak self] hostTime in
+                            Task { [weak self] in await self?.captureAppStartHostTimeIfNeeded(hostTime) }
+                        }
+                    )
+                    try await unified.start()
+                    self.unifiedCaptureSession = unified
+                    self.appAudioURL = appFileURL
+                    unifiedStarted = true
+                } catch {
+                    logger.warning("Unified capture failed to start; falling back to legacy capture. error=\(error.localizedDescription, privacy: .public)")
+                }
+            }
+
+            if !unifiedStarted {
             try micStreamer.prepare(url: micFileURL, format: micTargetFormat)
 
             if let appProcessID {
@@ -564,6 +612,7 @@ actor RecordingService: RecordingServiceProtocol {
                     try startRecorderFallback(to: micFileURL)
                 }
             }
+            } // end if !unifiedStarted
             self.recordingStartedAt = Date()
             self.recordingCreatedAt = recordingCreatedAt
             self.recordingIdentifier = recordingIdentifier
@@ -638,6 +687,8 @@ actor RecordingService: RecordingServiceProtocol {
         micStreamer.close()
         await appAudioCaptureSession?.stop()
         appAudioCaptureSession = nil
+        await unifiedCaptureSession?.stop()
+        unifiedCaptureSession = nil
         let activeScreenCaptureSession = screenCaptureSession
         screenCaptureSession = nil
         await activeScreenCaptureSession?.stop()
@@ -721,6 +772,9 @@ actor RecordingService: RecordingServiceProtocol {
             // Release capture writer resources before background mixdown starts.
             await cleanupRecordingState(deleteScreenTmpVideo: !shouldRunScreenMux)
 
+            let timelineEnabled = AudioSyncConfig.isTimelineMixdownEnabled
+            let audioAnchorHostTime = appStartHostTime.map { min(micStartHostTime, $0) } ?? micStartHostTime
+
             Task { [weak self] in
                 await self?.runMixdown(
                     sessionID: sessionID,
@@ -730,9 +784,29 @@ actor RecordingService: RecordingServiceProtocol {
                     micStartHostTime: micStartHostTime,
                     appStartHostTime: appStartHostTime
                 )
+
+                // Timeline path: mux the drift-corrected mixdown audio (produced above) into
+                // the video, so the video gets the same aligned audio and we avoid the
+                // raw-WAV delete race.
+                if timelineEnabled, let videoStartHostTime, shouldRunScreenMux {
+                    let request = ScreenVideoMuxRequest(
+                        sessionID: sessionID,
+                        screenTmpURL: screenTmpVideoURL,
+                        screenVideoURL: finalScreenVideoURL,
+                        micURL: finalRecordingURLs.mic,
+                        appURL: finalRecordingURLs.app,
+                        micStartHostTime: micStartHostTime,
+                        appStartHostTime: appStartHostTime,
+                        videoStartHostTime: videoStartHostTime,
+                        timelineAudioURL: mixdownURL,
+                        audioAnchorHostTime: audioAnchorHostTime
+                    )
+                    await self?.screenVideoMuxer.runMux(request: request)
+                }
             }
 
-            if let videoStartHostTime, shouldRunScreenMux {
+            // Legacy path: mux the raw mic/app tracks concurrently (unchanged default behavior).
+            if !timelineEnabled, let videoStartHostTime, shouldRunScreenMux {
                 let request = ScreenVideoMuxRequest(
                     sessionID: sessionID,
                     screenTmpURL: screenTmpVideoURL,
@@ -765,6 +839,11 @@ actor RecordingService: RecordingServiceProtocol {
             return
         }
         self.desiredMicDeviceUID = desiredDeviceUID
+        // Unified ScreenCaptureKit capture owns the mic device; mid-recording retarget is
+        // not supported on that path (would require restarting the stream).
+        guard unifiedCaptureSession == nil else {
+            return
+        }
         guard !isRecoveringMicCapture else {
             return
         }
@@ -794,6 +873,10 @@ actor RecordingService: RecordingServiceProtocol {
         micStreamer.close()
         audioRecorder = nil
         appAudioCaptureSession = nil
+        if let unifiedCaptureSession {
+            await unifiedCaptureSession.stop()
+        }
+        unifiedCaptureSession = nil
         if let screenCaptureSession {
             await screenCaptureSession.stop()
         }
@@ -860,6 +943,10 @@ actor RecordingService: RecordingServiceProtocol {
         guard isRecordingValue else {
             return
         }
+        // Unified capture does not use AVAudioEngine; ignore engine reconfig events.
+        guard unifiedCaptureSession == nil else {
+            return
+        }
         // Match prior behavior: only react when engine-path capture is interrupted/stopped.
         guard !micCaptureController.isCaptureRunning() else {
             return
@@ -893,6 +980,9 @@ actor RecordingService: RecordingServiceProtocol {
 
     private func handleHardwareChange() async {
         guard isRecordingValue else {
+            return
+        }
+        guard unifiedCaptureSession == nil else {
             return
         }
         guard !isRecoveringMicCapture else {

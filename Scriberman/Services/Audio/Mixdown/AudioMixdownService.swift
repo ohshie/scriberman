@@ -53,6 +53,18 @@ actor AudioMixdownService {
         let micSamples = try await sampleReader.read(from: micURL, label: "mic")
         logger.info("Mic samples loaded. count=\(micSamples.count, privacy: .public)")
 
+        if AudioSyncConfig.isTimelineMixdownEnabled {
+            if try await attemptTimelineMix(micURL: micURL, appURL: appURL, micSamples: micSamples, into: outputURL) {
+                logger.notice("Used timeline (PTS-anchored) mixdown path.")
+                logger.info("Mix completed. outputExists=\(self.fileManager.fileExists(atPath: outputURL.path), privacy: .public)")
+                if deleteSourceFiles {
+                    deleteSourceWAVFiles(micURL: micURL, appURL: appURL)
+                }
+                return
+            }
+            logger.warning("Timeline mixdown unavailable or inconsistent; falling back to legacy constant-offset path.")
+        }
+
         if let appURL {
             let appSamples = try await sampleReader.read(from: appURL, label: "app")
             logger.info("App samples loaded. count=\(appSamples.count, privacy: .public)")
@@ -99,6 +111,12 @@ actor AudioMixdownService {
     }
 
     private func deleteSourceWAVFile(url: URL, label: String) {
+        // Remove the timing sidecar (best-effort) alongside the source wav.
+        let sidecarURL = AudioFileStreamer.timingSidecarURL(for: url)
+        if fileManager.fileExists(atPath: sidecarURL.path) {
+            try? removeItemAtURL(sidecarURL)
+        }
+
         guard fileManager.fileExists(atPath: url.path) else {
             return
         }
@@ -109,6 +127,82 @@ actor AudioMixdownService {
         } catch {
             logger.error("Failed to delete \(label, privacy: .public) wav at \(url.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    /// PTS-anchored mixdown: re-places each source's file samples onto a shared real-time
+    /// timeline using its `.timing` sidecar (gap-filling silence), then overlays the two
+    /// aligned timelines with no residual offset. Returns false (fall back to legacy) when a
+    /// sidecar is missing or its frame total disagrees with the decoded sample count.
+    private func attemptTimelineMix(
+        micURL: URL,
+        appURL: URL?,
+        micSamples: [Float],
+        into outputURL: URL
+    ) async throws -> Bool {
+        guard let micSidecar = AudioFileStreamer.loadTimingSidecar(for: micURL),
+              let micFirstSegment = micSidecar.segments.first else {
+            return false
+        }
+        guard micSidecar.totalFrames == micSamples.count else {
+            logger.warning(
+                "Mic timing frames (\(micSidecar.totalFrames, privacy: .public)) != decoded samples (\(micSamples.count, privacy: .public)); cannot trust timeline."
+            )
+            return false
+        }
+
+        guard let appURL else {
+            let micTimeline = SynchronizedAudioTimeline.reconstruct(
+                samples: micSamples,
+                segments: micSidecar.segments,
+                referenceHostTimeNanos: micFirstSegment.startHostTimeNanos,
+                sampleRate: outputSampleRate
+            )
+            logger.notice("Timeline mono. silenceFrames=\(micTimeline.insertedSilenceFrames, privacy: .public) gaps=\(micTimeline.gapCount, privacy: .public) overlap=\(micTimeline.overlapFrames, privacy: .public)")
+            try writeMonoAAC(samples: micTimeline.frames, to: outputURL)
+            return true
+        }
+
+        guard let appSidecar = AudioFileStreamer.loadTimingSidecar(for: appURL),
+              let appFirstSegment = appSidecar.segments.first else {
+            return false
+        }
+        let appSamples = try await sampleReader.read(from: appURL, label: "app")
+        guard appSidecar.totalFrames == appSamples.count else {
+            logger.warning(
+                "App timing frames (\(appSidecar.totalFrames, privacy: .public)) != decoded samples (\(appSamples.count, privacy: .public)); cannot trust timeline."
+            )
+            return false
+        }
+
+        let reference = min(micFirstSegment.startHostTimeNanos, appFirstSegment.startHostTimeNanos)
+        let micLeadMs = Double(micFirstSegment.startHostTimeNanos - reference) / 1_000_000.0
+        let appLeadMs = Double(appFirstSegment.startHostTimeNanos - reference) / 1_000_000.0
+        logger.notice(
+            "Timeline anchors. micFirstNanos=\(micFirstSegment.startHostTimeNanos, privacy: .public) appFirstNanos=\(appFirstSegment.startHostTimeNanos, privacy: .public) referenceNanos=\(reference, privacy: .public) micLeadMs=\(micLeadMs, privacy: .public) appLeadMs=\(appLeadMs, privacy: .public) micFrames=\(micSamples.count, privacy: .public) appFrames=\(appSamples.count, privacy: .public)"
+        )
+        let micTimeline = SynchronizedAudioTimeline.reconstruct(
+            samples: micSamples,
+            segments: micSidecar.segments,
+            referenceHostTimeNanos: reference,
+            sampleRate: outputSampleRate
+        )
+        let appTimeline = SynchronizedAudioTimeline.reconstruct(
+            samples: appSamples,
+            segments: appSidecar.segments,
+            referenceHostTimeNanos: reference,
+            sampleRate: outputSampleRate
+        )
+        logger.notice(
+            "Timeline stereo. micSilence=\(micTimeline.insertedSilenceFrames, privacy: .public) micGaps=\(micTimeline.gapCount, privacy: .public) appSilence=\(appTimeline.insertedSilenceFrames, privacy: .public) appGaps=\(appTimeline.gapCount, privacy: .public) micOverlap=\(micTimeline.overlapFrames, privacy: .public) appOverlap=\(appTimeline.overlapFrames, privacy: .public)"
+        )
+        // Both timelines are anchored to the same reference (frame 0), so no residual offset.
+        try writeStereoAAC(
+            micSamples: micTimeline.frames,
+            appSamples: appTimeline.frames,
+            appOffsetSamples: 0,
+            to: outputURL
+        )
+        return true
     }
 
     private func computeOffsetSamples(

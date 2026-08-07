@@ -36,6 +36,40 @@ final class ScreenVideoMuxerTests {
     }
 
     @Test
+    func testMakeTimelineAudioInstructionsMuxesSingleAnchoredTrack() throws {
+        let mixdownURL = temporaryDirectoryURL.appendingPathComponent("recording.m4a")
+
+        // Anchor 0.5s after video start -> single "mixdown" track inserted at +0.5s.
+        let instructions = ScreenVideoMuxer.makeTimelineAudioInstructions(
+            timelineAudioURL: mixdownURL,
+            audioAnchorHostTime: 1_500_000_000,
+            videoStartHostTime: 1_000_000_000
+        )
+
+        #expect(instructions.map(\.label) == ["mixdown"])
+        let instruction = try #require(instructions.first)
+        #expect(instruction.url == mixdownURL)
+        #expect(instruction.sourceStart == .zero)
+        #expect(CMTimeGetSeconds(instruction.insertionTime) == 0.5)
+    }
+
+    @Test
+    func testMakeTimelineAudioInstructionsHandlesAudioBeforeVideo() throws {
+        let mixdownURL = temporaryDirectoryURL.appendingPathComponent("recording.m4a")
+
+        // Anchor 0.5s before video start -> trim source, insert at zero.
+        let instructions = ScreenVideoMuxer.makeTimelineAudioInstructions(
+            timelineAudioURL: mixdownURL,
+            audioAnchorHostTime: 500_000_000,
+            videoStartHostTime: 1_000_000_000
+        )
+
+        let instruction = try #require(instructions.first)
+        #expect(instruction.insertionTime == .zero)
+        #expect(CMTimeGetSeconds(instruction.sourceStart) == 0.5)
+    }
+
+    @Test
     func testMakeAudioInstructionsSupportsAppOnlyAndMicOnly() throws {
         let micURL = temporaryDirectoryURL.appendingPathComponent("mic.wav")
         let appURL = temporaryDirectoryURL.appendingPathComponent("app.wav")

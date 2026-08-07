@@ -27,6 +27,11 @@ struct ScreenVideoMuxRequest: Sendable {
     let micStartHostTime: UInt64?
     let appStartHostTime: UInt64?
     let videoStartHostTime: UInt64
+    /// When set (timeline path), the already-drift-corrected mixdown audio to mux as the
+    /// video's single audio track instead of the raw mic/app files.
+    var timelineAudioURL: URL? = nil
+    /// Shared timeline reference (host-time ns) the `timelineAudioURL` is anchored to.
+    var audioAnchorHostTime: UInt64? = nil
 }
 
 struct ScreenVideoTrackInstruction: Equatable, Sendable {
@@ -94,14 +99,24 @@ actor ScreenVideoMuxer: ScreenVideoMuxing {
     }
 
     func buildPlan(request: ScreenVideoMuxRequest) -> ScreenVideoMuxPlan {
-        let audioInstructions = Self.makeAudioInstructions(
-            micURL: request.micURL,
-            appURL: request.appURL,
-            micStartHostTime: request.micStartHostTime,
-            appStartHostTime: request.appStartHostTime,
-            videoStartHostTime: request.videoStartHostTime,
-            fileManager: fileManager
-        )
+        let audioInstructions: [ScreenVideoTrackInstruction]
+        if let timelineAudioURL = request.timelineAudioURL,
+           fileManager.fileExists(atPath: timelineAudioURL.path) {
+            audioInstructions = Self.makeTimelineAudioInstructions(
+                timelineAudioURL: timelineAudioURL,
+                audioAnchorHostTime: request.audioAnchorHostTime,
+                videoStartHostTime: request.videoStartHostTime
+            )
+        } else {
+            audioInstructions = Self.makeAudioInstructions(
+                micURL: request.micURL,
+                appURL: request.appURL,
+                micStartHostTime: request.micStartHostTime,
+                appStartHostTime: request.appStartHostTime,
+                videoStartHostTime: request.videoStartHostTime,
+                fileManager: fileManager
+            )
+        }
         return ScreenVideoMuxPlan(request: request, audioInstructions: audioInstructions)
     }
 
@@ -163,6 +178,24 @@ actor ScreenVideoMuxer: ScreenVideoMuxing {
         }
 
         return instructions
+    }
+
+    /// Timeline path: a single instruction for the already-aligned mixdown audio, offset to
+    /// the video by the shared timeline anchor. The mixdown is internally drift-corrected, so
+    /// no per-source alignment is needed here.
+    static func makeTimelineAudioInstructions(
+        timelineAudioURL: URL,
+        audioAnchorHostTime: UInt64?,
+        videoStartHostTime: UInt64
+    ) -> [ScreenVideoTrackInstruction] {
+        [
+            makeInstruction(
+                label: "mixdown",
+                url: timelineAudioURL,
+                sourceStartHostTime: audioAnchorHostTime ?? videoStartHostTime,
+                videoStartHostTime: videoStartHostTime
+            )
+        ]
     }
 
     private static func makeInstruction(
