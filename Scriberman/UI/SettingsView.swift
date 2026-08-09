@@ -103,6 +103,9 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    Section("App Icon") {
+                        AppIconPickerView(preferences: appState.appIconPreferences)
+                    }
                 }
                 .formStyle(.grouped)
                 .tabItem {

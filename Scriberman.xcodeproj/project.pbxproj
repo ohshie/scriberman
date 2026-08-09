@@ -44,6 +44,8 @@
 		791009512F78184900225294 /* AudioMixdownService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009502F78184900225294 /* AudioMixdownService.swift */; };
 		CACA88E55CED472B8823033A /* IdlePromptActionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABB74F3722FB4F63901ACA17 /* IdlePromptActionsTests.swift */; };
 		B325EB1964654BA99E8D0A9A /* IdlePromptPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7776031E5854A93A08183C3 /* IdlePromptPreferences.swift */; };
+		6EA86C5E647D40E7AEC4DD22 /* AppIconPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AB539E636E24785976857CC /* AppIconPreferences.swift */; };
+		94F0111369204C028021BC07 /* AppIconPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8626FEEFF64540D98BB1CB4A /* AppIconPickerView.swift */; };
 		69624F5DD3404DC989AF3377 /* IdlePromptSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF3A523BD554416B939B75E /* IdlePromptSettingsSection.swift */; };
 		1BD6AE6B039F42B3904FA416 /* IdlePromptPreferencesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C96C56DC384901B1BDA27D /* IdlePromptPreferencesTests.swift */; };
 		5CC64B179AAA44CDAA1595DD /* IdleSessionPromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 637C1A235DAF4A1E93BAC519 /* IdleSessionPromptView.swift */; };
@@ -286,6 +288,8 @@
 		791009502F78184900225294 /* AudioMixdownService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioMixdownService.swift; sourceTree = "<group>"; };
 		ABB74F3722FB4F63901ACA17 /* IdlePromptActionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/IdlePromptActionsTests.swift"; sourceTree = SOURCE_ROOT; };
 		F7776031E5854A93A08183C3 /* IdlePromptPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ViewModels/IdlePromptPreferences.swift"; sourceTree = SOURCE_ROOT; };
+		5AB539E636E24785976857CC /* AppIconPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ViewModels/AppIconPreferences.swift"; sourceTree = SOURCE_ROOT; };
+		8626FEEFF64540D98BB1CB4A /* AppIconPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/AppIconPickerView.swift"; sourceTree = SOURCE_ROOT; };
 		CAF3A523BD554416B939B75E /* IdlePromptSettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/IdlePromptSettingsSection.swift"; sourceTree = SOURCE_ROOT; };
 		90C96C56DC384901B1BDA27D /* IdlePromptPreferencesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/IdlePromptPreferencesTests.swift"; sourceTree = SOURCE_ROOT; };
 		637C1A235DAF4A1E93BAC519 /* IdleSessionPromptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/IdleSessionPromptView.swift"; sourceTree = SOURCE_ROOT; };
@@ -741,6 +745,8 @@
 			children = (
 				791009502F78184900225294 /* AudioMixdownService.swift */,
 				F7776031E5854A93A08183C3 /* IdlePromptPreferences.swift */,
+				5AB539E636E24785976857CC /* AppIconPreferences.swift */,
+				8626FEEFF64540D98BB1CB4A /* AppIconPickerView.swift */,
 				CAF3A523BD554416B939B75E /* IdlePromptSettingsSection.swift */,
 				637C1A235DAF4A1E93BAC519 /* IdleSessionPromptView.swift */,
 				0FB81E6E407A41448DF078A7 /* IdleSessionPromptController.swift */,
@@ -1145,6 +1151,8 @@
 				798732842F7DA28400570A03 /* AudioResampler.swift in Sources */,
 				791009512F78184900225294 /* AudioMixdownService.swift in Sources */,
 				B325EB1964654BA99E8D0A9A /* IdlePromptPreferences.swift in Sources */,
+				6EA86C5E647D40E7AEC4DD22 /* AppIconPreferences.swift in Sources */,
+				94F0111369204C028021BC07 /* AppIconPickerView.swift in Sources */,
 				69624F5DD3404DC989AF3377 /* IdlePromptSettingsSection.swift in Sources */,
 				5CC64B179AAA44CDAA1595DD /* IdleSessionPromptView.swift in Sources */,
 				6ABC26AEB2454C9AB9258611 /* IdleSessionPromptController.swift in Sources */,

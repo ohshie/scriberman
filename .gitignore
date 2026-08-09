@@ -1,4 +1,5 @@
 *.xcuserstate
+.DS_Store
 xcuserdata/
 Scriberman.xcodeproj/project.xcworkspace/xcuserdata/
 openspec/

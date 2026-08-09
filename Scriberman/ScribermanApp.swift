@@ -29,6 +29,8 @@ struct ScribermanApp: App {
                     appDelegate.appState = appState
                     appDelegate.modelContext = modelContainer.mainContext
                     appDelegate.wireIdleSessionPrompt()
+                    // macOS resets to the bundle icon on every launch, so re-apply the choice.
+                    appState.appIconPreferences.apply()
                     await appState.bootstrapWorkspace()
                 }
                 .onChange(of: appState.dictationService.state) { _, _ in
