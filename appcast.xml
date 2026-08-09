@@ -3,21 +3,24 @@
     <channel>
         <title>Scriberman</title>
         <item>
-            <title>1.0.2</title>
-            <pubDate>Sun, 12 Jul 2026 23:14:43 +0200</pubDate>
-            <sparkle:version>3</sparkle:version>
-            <sparkle:shortVersionString>1.0.2</sparkle:shortVersionString>
+            <title>1.0.3</title>
+            <pubDate>Sun, 09 Aug 2026 15:22:11 +0200</pubDate>
+            <sparkle:version>4</sparkle:version>
+            <sparkle:shortVersionString>1.0.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<h2>Scriberman 1.0.2</h2>
+            <description><![CDATA[<h2>Scriberman 1.0.3</h2>
 <h3>What’s new</h3>
 <ul>
-  <li>Record and Stop controls are now clearer and provide visual feedback when hovered.</li>
-  <li>Session titles are easier to recognize and edit across new, active, and completed recordings.</li>
-  <li>The New Session button now stays out of the way while creating or recording a session.</li>
+  <li>Get a configurable reminder when a meeting appears finished, with options to stop and save, snooze, or stop automatically.</li>
+  <li>Choose between Classic and Purple app icons in Settings → General.</li>
+</ul>
+<h3>Fixes</h3>
+<ul>
+  <li>Keeps microphone, app audio, and screen recordings aligned more reliably during long sessions and brief capture gaps.</li>
 </ul>
 ]]></description>
-            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.0.2/Scriberman-1.0.2-3-arm64.dmg" length="7373630" type="application/octet-stream" sparkle:edSignature="Fs1a9R4q4kCyrjtRR32uFe+WlPpo3BDvy1dKPgtG83rdUc89jeSQhQSPGRu86xNUcp7J6Ntc/tiQDoTNh/DsDg=="/>
+            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.0.3/Scriberman-1.0.3-4-arm64.dmg" length="7890422" type="application/octet-stream" sparkle:edSignature="iAj+s9FUdj0P+j/pTx9QtIzyz9bqQz9gtxsFk99qgIkUYT3Pa03D7jS8CtepgnEs31UEZRTK9zvAOYv1xvKSCA=="/>
         </item>
     </channel>
 </rss>
