@@ -17,6 +17,11 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Senda
         outputHandler.audioLevel
     }
 
+    /// When app audio last produced sustained activity (see `CaptureActivityTracker`).
+    var lastActivityAt: Date? {
+        outputHandler.lastActivityAt
+    }
+
     init(
         fileURL: URL,
         processID: pid_t,

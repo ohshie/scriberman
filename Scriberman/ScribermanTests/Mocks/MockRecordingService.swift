@@ -34,6 +34,12 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
         (max(audioLevelsOverride.mic, audioLevelOverride), audioLevelsOverride.app)
     }
 
+    var activityTimestampsOverride: (mic: Date?, app: Date?) = (nil, nil)
+
+    func activityTimestamps() async -> (mic: Date?, app: Date?) {
+        activityTimestampsOverride
+    }
+
     func startRecording(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID?,

@@ -17,6 +17,7 @@ final class AudioFileStreamer: @unchecked Sendable {
     private var _url: URL?
     private var _sampleRate: Double = 0
     private var _segments: [AudioCaptureSegment] = []
+    private var _activityTracker = CaptureActivityTracker()
 
     /// The most recent peak audio level (0.0 to 1.0).
     var audioLevel: Float {
@@ -37,6 +38,15 @@ final class AudioFileStreamer: @unchecked Sendable {
         stateLock.lock()
         defer { stateLock.unlock() }
         return _writeFailureCount
+    }
+
+    /// When this source last produced sustained audio activity. Stops advancing when
+    /// buffers stop arriving, which is how idle detection distinguishes a finished
+    /// meeting from an ongoing one. See `CaptureActivityTracker`.
+    var lastActivityAt: Date? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return _activityTracker.lastActivityAt
     }
 
     /// Initializes a new streamer. `label` tags diagnostics (e.g. "mic", "app").
@@ -67,6 +77,7 @@ final class AudioFileStreamer: @unchecked Sendable {
             _url = url
             _sampleRate = format.sampleRate
             _segments = []
+            _activityTracker = CaptureActivityTracker()
             stateLock.unlock()
         }
     }
@@ -81,11 +92,14 @@ final class AudioFileStreamer: @unchecked Sendable {
         let level = computeLevel(from: buffer)
 
         let frameLength = Int64(buffer.frameLength)
+        // Record activity synchronously so idle detection sees buffer arrival immediately,
+        // independent of the async file write.
+        stateLock.lock()
+        _activityTracker.record(level: level, at: Date())
         if let hostTimeNanos {
-            stateLock.lock()
             _segments.append(AudioCaptureSegment(startHostTimeNanos: hostTimeNanos, frameCount: Int(frameLength)))
-            stateLock.unlock()
         }
+        stateLock.unlock()
         queue.async { [weak self] in
             guard let self = self else { return }
             do {

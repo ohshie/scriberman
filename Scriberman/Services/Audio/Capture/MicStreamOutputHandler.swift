@@ -25,6 +25,9 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
 
     var audioLevel: Float { streamer.audioLevel }
 
+    /// When the microphone last produced sustained activity (see `CaptureActivityTracker`).
+    var lastActivityAt: Date? { streamer.lastActivityAt }
+
     init(liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil) {
         self.liveAudioContinuation = liveAudioContinuation
         self.targetFormat = AVAudioFormat(

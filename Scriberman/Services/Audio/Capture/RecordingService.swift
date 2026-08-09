@@ -444,6 +444,16 @@ actor RecordingService: RecordingServiceProtocol {
         return max(levels.mic, levels.app)
     }
 
+    func activityTimestamps() async -> (mic: Date?, app: Date?) {
+        if let unifiedCaptureSession {
+            return (unifiedCaptureSession.micLastActivityAt, unifiedCaptureSession.appLastActivityAt)
+        }
+        // Legacy path. Note the AVAudioRecorder fallback does not route through
+        // AudioFileStreamer, so mic activity is unavailable there and reports nil.
+        let mic = audioRecorder == nil ? micStreamer.lastActivityAt : nil
+        return (mic, appAudioCaptureSession?.lastActivityAt)
+    }
+
     func audioLevels() async -> (mic: Float, app: Float) {
         if let unifiedCaptureSession {
             let mic = unifiedCaptureSession.micAudioLevel

@@ -17,6 +17,11 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
         streamer.audioLevel
     }
 
+    /// When app audio last produced sustained activity (see `CaptureActivityTracker`).
+    var lastActivityAt: Date? {
+        streamer.lastActivityAt
+    }
+
     private var hasPrepared = false
 
     init(liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil) {
