@@ -26,8 +26,13 @@ final class NewSessionViewModel {
 
     /// True while the "Still in progress. Stop?" prompt should be on screen.
     var isIdlePromptVisible = false
-    /// Settings for the idle prompt; replaced by persisted settings at composition time.
-    var idlePromptSettings: IdlePromptSettings = .default
+    /// Supplies the current persisted idle-prompt settings. Injected at composition time so
+    /// changes in Settings take effect on the next monitor tick.
+    var idlePromptPreferencesProvider: (() -> IdlePromptSettings)?
+    /// Settings used for evaluation; falls back to the shipped defaults when no provider is set.
+    var idlePromptSettings: IdlePromptSettings {
+        idlePromptPreferencesProvider?() ?? .default
+    }
     private var idlePromptMachine = IdlePromptStateMachine()
     private let userInputIdleProvider: any UserInputIdleProviding
     /// True when this session captures both mic and app audio (the only case the prompt applies to).
