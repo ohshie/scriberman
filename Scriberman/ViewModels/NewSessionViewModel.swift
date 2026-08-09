@@ -21,6 +21,17 @@ final class NewSessionViewModel {
     private let liveTranscriptionService: LiveTranscriptionService
     private var recordingMonitorTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
+
+    // MARK: - Idle session prompt
+
+    /// True while the "Still in progress. Stop?" prompt should be on screen.
+    var isIdlePromptVisible = false
+    /// Settings for the idle prompt; replaced by persisted settings at composition time.
+    var idlePromptSettings: IdlePromptSettings = .default
+    private var idlePromptMachine = IdlePromptStateMachine()
+    private let userInputIdleProvider: any UserInputIdleProviding
+    /// True when this session captures both mic and app audio (the only case the prompt applies to).
+    private var isIdlePromptApplicable = false
     private var activeRecordingSessionID: UUID?
     private let fileManager = FileManager.default
     var menuBarSettings: MenuBarSettings?
@@ -194,8 +205,10 @@ final class NewSessionViewModel {
         screenCaptureService: ScreenCaptureServiceProtocol,
         permissionService: PermissionServiceProtocol,
         speakerEmbeddingStore: SpeakerEmbeddingStore? = nil,
+        userInputIdleProvider: any UserInputIdleProviding = SystemUserInputIdleProvider(),
         userDefaults _: UserDefaults = .standard
     ) {
+        self.userInputIdleProvider = userInputIdleProvider
         self.liveTranscriptionService = LiveTranscriptionService(speakerEmbeddingStore: speakerEmbeddingStore)
         self.workspaceService = workspaceService
         self.recordingService = recordingService
@@ -215,6 +228,9 @@ final class NewSessionViewModel {
         micAudioLevel = 0
         appAudioLevel = 0
         state = .idle
+        isIdlePromptVisible = false
+        isIdlePromptApplicable = false
+        idlePromptMachine = IdlePromptStateMachine()
     }
 
     func refresh() async {
@@ -388,6 +404,10 @@ final class NewSessionViewModel {
             activeRecordingSessionID = recordingSessionID
             state = .recording(duration: 0, level: 0)
             liveSegments = []
+            // The idle prompt only applies to mic + app sessions.
+            isIdlePromptApplicable = selectedAppProcessID != nil
+            idlePromptMachine = IdlePromptStateMachine()
+            isIdlePromptVisible = false
 
             let descriptor = FetchDescriptor<RecordingSession>()
             let session = try? context.fetch(descriptor).first(where: { $0.id == recordingSessionID })
@@ -559,10 +579,65 @@ final class NewSessionViewModel {
                 let duration = Date().timeIntervalSince(startedAt)
                 state = .recording(duration: duration, level: max(levels.mic, levels.app))
 
+                await evaluateIdlePrompt(recordingStartedAt: startedAt)
+
                 try? await Task.sleep(for: .milliseconds(50))
             }
         }
     }
+
+    // MARK: - Idle session prompt
+
+    /// Evaluates idleness once per monitor tick and applies the resulting effect.
+    private func evaluateIdlePrompt(recordingStartedAt: Date) async {
+        let timestamps = await recordingService.activityTimestamps()
+        let now = Date()
+        var userInput: Date?
+        if idlePromptSettings.watchUserInput, let seconds = userInputIdleProvider.secondsSinceLastInput() {
+            userInput = now.addingTimeInterval(-seconds)
+        }
+
+        let snapshot = IdleActivitySnapshot(
+            appAudio: timestamps.app,
+            micAudio: timestamps.mic,
+            userInput: userInput
+        )
+
+        let effect = idlePromptMachine.update(
+            now: now,
+            snapshot: snapshot,
+            settings: idlePromptSettings,
+            recordingStartedAt: recordingStartedAt,
+            isApplicable: isIdlePromptApplicable
+        )
+
+        switch effect {
+        case .none:
+            break
+        case .showPrompt:
+            isIdlePromptVisible = true
+        case .dismissPrompt:
+            isIdlePromptVisible = false
+        case .autoStop:
+            isIdlePromptVisible = false
+            await stopFromIdlePrompt()
+        }
+    }
+
+    /// User chose a snooze duration on the prompt.
+    func snoozeIdlePrompt(for duration: TimeInterval) {
+        idlePromptMachine.snooze(for: duration, now: Date())
+        isIdlePromptVisible = false
+    }
+
+    /// User chose "Stop & Save" on the prompt.
+    func stopFromIdlePrompt() async {
+        isIdlePromptVisible = false
+        await onIdlePromptStopRequested?()
+    }
+
+    /// Injected by the composition layer to stop the recording through the normal path.
+    var onIdlePromptStopRequested: (@Sendable () async -> Void)?
 
     private func startRecordingAttempt(
         in workspace: Workspace,
