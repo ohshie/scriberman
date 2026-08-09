@@ -17,13 +17,14 @@ struct IdlePromptSettingsSection: View {
                 .foregroundStyle(.secondary)
 
             Group {
-                LabeledContent("Watch for activity from") {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Toggle("App audio", isOn: $preferences.watchAppAudio)
-                        Toggle("Microphone", isOn: $preferences.watchMicAudio)
-                        Toggle("Mouse & keyboard", isOn: $preferences.watchUserInput)
-                    }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Watch for activity from")
+                        .foregroundStyle(.secondary)
+                    Toggle("App audio", isOn: $preferences.watchAppAudio)
+                    Toggle("Microphone", isOn: $preferences.watchMicAudio)
+                    Toggle("Mouse & keyboard", isOn: $preferences.watchUserInput)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack {
                     Image(systemName: "link")
@@ -49,10 +50,6 @@ struct IdlePromptSettingsSection: View {
                     }
                 }
                 .disabled(!preferences.autoStopEnabled)
-
-                Text("The recording is never trimmed — stopping keeps everything captured.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
             .disabled(!preferences.isEnabled)
         }

@@ -3,9 +3,9 @@ import Observation
 
 /// Persisted configuration for the idle session prompt.
 ///
-/// Every value defaults to the shipped behaviour when unset, so a fresh install watches app
-/// audio only, requires all watched sources to be idle, prompts after 5 minutes, and never
-/// stops automatically.
+/// Values are stored properties (not computed accessors over `UserDefaults`) because the
+/// `@Observable` macro only tracks stored properties — computed ones publish no change, so
+/// bound controls would write their value but never re-render.
 @MainActor
 @Observable
 final class IdlePromptPreferences {
@@ -25,50 +25,69 @@ final class IdlePromptPreferences {
     /// Selectable durations for the two minute-valued settings.
     static let selectableMinutes = [1, 2, 5, 10, 15, 20, 30, 45, 60]
 
-    private let userDefaults: UserDefaults
-
-    init(userDefaults: UserDefaults = .standard) {
-        self.userDefaults = userDefaults
-    }
+    @ObservationIgnored private let userDefaults: UserDefaults
 
     var isEnabled: Bool {
-        get { bool(Key.isEnabled, default: true) }
-        set { userDefaults.set(newValue, forKey: Key.isEnabled) }
+        didSet { userDefaults.set(isEnabled, forKey: Key.isEnabled) }
     }
 
     var watchAppAudio: Bool {
-        get { bool(Key.watchAppAudio, default: true) }
-        set { userDefaults.set(newValue, forKey: Key.watchAppAudio) }
+        didSet { userDefaults.set(watchAppAudio, forKey: Key.watchAppAudio) }
     }
 
     var watchMicAudio: Bool {
-        get { bool(Key.watchMicAudio, default: false) }
-        set { userDefaults.set(newValue, forKey: Key.watchMicAudio) }
+        didSet { userDefaults.set(watchMicAudio, forKey: Key.watchMicAudio) }
     }
 
     var watchUserInput: Bool {
-        get { bool(Key.watchUserInput, default: false) }
-        set { userDefaults.set(newValue, forKey: Key.watchUserInput) }
+        didSet { userDefaults.set(watchUserInput, forKey: Key.watchUserInput) }
     }
 
     var requiresAllSourcesIdle: Bool {
-        get { bool(Key.requiresAllSourcesIdle, default: true) }
-        set { userDefaults.set(newValue, forKey: Key.requiresAllSourcesIdle) }
+        didSet { userDefaults.set(requiresAllSourcesIdle, forKey: Key.requiresAllSourcesIdle) }
     }
 
+    /// Backing store for the clamped minute values. Clamping happens in the facade's setter
+    /// below rather than in a `didSet`: under `@Observable` a property is no longer a plain
+    /// stored property, so assigning to it inside its own `didSet` re-enters the synthesized
+    /// setter and recurses until the stack overflows.
+    private var storedIdleThresholdMinutes: Int
+
     var idleThresholdMinutes: Int {
-        get { int(Key.idleThresholdMinutes, default: Self.defaultIdleThresholdMinutes) }
-        set { userDefaults.set(max(1, newValue), forKey: Key.idleThresholdMinutes) }
+        get { storedIdleThresholdMinutes }
+        set {
+            storedIdleThresholdMinutes = max(1, newValue)
+            userDefaults.set(storedIdleThresholdMinutes, forKey: Key.idleThresholdMinutes)
+        }
     }
 
     var autoStopEnabled: Bool {
-        get { bool(Key.autoStopEnabled, default: false) }
-        set { userDefaults.set(newValue, forKey: Key.autoStopEnabled) }
+        didSet { userDefaults.set(autoStopEnabled, forKey: Key.autoStopEnabled) }
     }
 
+    private var storedAutoStopDelayMinutes: Int
+
     var autoStopDelayMinutes: Int {
-        get { int(Key.autoStopDelayMinutes, default: Self.defaultAutoStopDelayMinutes) }
-        set { userDefaults.set(max(1, newValue), forKey: Key.autoStopDelayMinutes) }
+        get { storedAutoStopDelayMinutes }
+        set {
+            storedAutoStopDelayMinutes = max(1, newValue)
+            userDefaults.set(storedAutoStopDelayMinutes, forKey: Key.autoStopDelayMinutes)
+        }
+    }
+
+    init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+        // Unset keys fall back to the shipped defaults; an explicit `false` is preserved.
+        isEnabled = userDefaults.object(forKey: Key.isEnabled) as? Bool ?? true
+        watchAppAudio = userDefaults.object(forKey: Key.watchAppAudio) as? Bool ?? true
+        watchMicAudio = userDefaults.object(forKey: Key.watchMicAudio) as? Bool ?? false
+        watchUserInput = userDefaults.object(forKey: Key.watchUserInput) as? Bool ?? false
+        requiresAllSourcesIdle = userDefaults.object(forKey: Key.requiresAllSourcesIdle) as? Bool ?? true
+        let threshold = userDefaults.object(forKey: Key.idleThresholdMinutes) as? Int
+        storedIdleThresholdMinutes = (threshold.map { max(1, $0) }) ?? Self.defaultIdleThresholdMinutes
+        autoStopEnabled = userDefaults.object(forKey: Key.autoStopEnabled) as? Bool ?? false
+        let delay = userDefaults.object(forKey: Key.autoStopDelayMinutes) as? Int
+        storedAutoStopDelayMinutes = (delay.map { max(1, $0) }) ?? Self.defaultAutoStopDelayMinutes
     }
 
     /// Number of watched sources; the all/any rule is meaningless below two.
@@ -99,16 +118,5 @@ final class IdlePromptPreferences {
         idleThresholdMinutes = Self.defaultIdleThresholdMinutes
         autoStopEnabled = false
         autoStopDelayMinutes = Self.defaultAutoStopDelayMinutes
-    }
-
-    private func bool(_ key: String, default defaultValue: Bool) -> Bool {
-        userDefaults.object(forKey: key) as? Bool ?? defaultValue
-    }
-
-    private func int(_ key: String, default defaultValue: Int) -> Int {
-        guard let value = userDefaults.object(forKey: key) as? Int, value > 0 else {
-            return defaultValue
-        }
-        return value
     }
 }
