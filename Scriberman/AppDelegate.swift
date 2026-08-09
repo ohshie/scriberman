@@ -9,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     weak var appState: AppState?
     var modelContext: ModelContext?
+    /// Floating "Still in progress. Stop?" panel for idle recordings.
+    private let idleSessionPrompt = IdleSessionPromptController()
 
     private weak var mainWindow: NSWindow?
     private var statusItem: NSStatusItem?
@@ -580,6 +582,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
 
         return false
+    }
+
+    /// Connects the idle prompt's presentation and actions to the floating panel. Called
+    /// once `appState` and `modelContext` are available.
+    func wireIdleSessionPrompt() {
+        guard let appState else { return }
+        let viewModel = appState.newSessionViewModel
+
+        viewModel.onIdlePromptPresentationChanged = { [weak self] isVisible in
+            guard let self else { return }
+            guard isVisible else {
+                idleSessionPrompt.hide()
+                return
+            }
+            idleSessionPrompt.show(
+                onStop: { [weak self] in
+                    Task { @MainActor [weak self] in
+                        await self?.appState?.newSessionViewModel.stopFromIdlePrompt()
+                    }
+                },
+                onSnooze: { [weak self] duration in
+                    Task { @MainActor [weak self] in
+                        self?.appState?.newSessionViewModel.snoozeIdlePrompt(for: duration)
+                    }
+                }
+            )
+        }
+
+        viewModel.onIdlePromptStopRequested = { [weak self] in
+            guard let self, let modelContext else { return }
+            _ = await self.appState?.newSessionViewModel.stopRecording(context: modelContext)
+        }
     }
 
     private func stopRecordingForLifecycle() async {

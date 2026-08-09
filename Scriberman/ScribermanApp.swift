@@ -28,6 +28,7 @@ struct ScribermanApp: App {
                 .task {
                     appDelegate.appState = appState
                     appDelegate.modelContext = modelContainer.mainContext
+                    appDelegate.wireIdleSessionPrompt()
                     await appState.bootstrapWorkspace()
                 }
                 .onChange(of: appState.dictationService.state) { _, _ in

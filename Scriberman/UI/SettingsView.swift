@@ -153,6 +153,8 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
 
+                    IdlePromptSettingsSection(preferences: appState.idlePromptPreferences)
+
                     Section("Recording Pipeline") {
                         VStack(alignment: .leading) {
                             HStack {

@@ -42,6 +42,18 @@
 		790FDA9D2FEB2135006EE999 /* AISettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 790FDA9C2FEB2135006EE999 /* AISettingsView.swift */; };
 		7910094F2F78031A00225294 /* RecordingServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7910094E2F78031A00225294 /* RecordingServiceTests.swift */; };
 		791009512F78184900225294 /* AudioMixdownService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009502F78184900225294 /* AudioMixdownService.swift */; };
+		CACA88E55CED472B8823033A /* IdlePromptActionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABB74F3722FB4F63901ACA17 /* IdlePromptActionsTests.swift */; };
+		B325EB1964654BA99E8D0A9A /* IdlePromptPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7776031E5854A93A08183C3 /* IdlePromptPreferences.swift */; };
+		69624F5DD3404DC989AF3377 /* IdlePromptSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF3A523BD554416B939B75E /* IdlePromptSettingsSection.swift */; };
+		1BD6AE6B039F42B3904FA416 /* IdlePromptPreferencesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C96C56DC384901B1BDA27D /* IdlePromptPreferencesTests.swift */; };
+		5CC64B179AAA44CDAA1595DD /* IdleSessionPromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 637C1A235DAF4A1E93BAC519 /* IdleSessionPromptView.swift */; };
+		6ABC26AEB2454C9AB9258611 /* IdleSessionPromptController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FB81E6E407A41448DF078A7 /* IdleSessionPromptController.swift */; };
+		3B66D3D82BD04576812F06A0 /* IdlePromptSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE9C40E7049446E88951328D /* IdlePromptSettings.swift */; };
+		0B6FC6CAC2384F1C9D8A8147 /* IdlePromptStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00C5D12CB3204F21ABEF1A31 /* IdlePromptStateMachine.swift */; };
+		10248B7A11864CE7BDCD6E2D /* UserInputIdleProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 236281F026DB4207AA6B8255 /* UserInputIdleProvider.swift */; };
+		CF84962F187B4329B65D149F /* IdlePromptStateMachineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA3BB699A5FA453B97B90962 /* IdlePromptStateMachineTests.swift */; };
+		3BCDB87B2D9B4753B57F18FD /* CaptureActivityTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33D719298BBA4389AD737789 /* CaptureActivityTracker.swift */; };
+		8DA06C06655B4579A70E574A /* CaptureActivityTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2696497D22F4111B22B003F /* CaptureActivityTrackerTests.swift */; };
 		8354E63804B148AEB1D57B97 /* MicStreamOutputHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 582AEFDF918D425FB87D5019 /* MicStreamOutputHandler.swift */; };
 		6402AD8CA78146809D04D1E7 /* UnifiedCaptureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B31D758FF2004F3EA26EB66E /* UnifiedCaptureSession.swift */; };
 		DC9E28C5381A4E4BB770DA58 /* SynchronizedAudioTimeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BB5F720213D4DCC8F8DE9C6 /* SynchronizedAudioTimeline.swift */; };
@@ -272,6 +284,18 @@
 		790FDA9C2FEB2135006EE999 /* AISettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISettingsView.swift; sourceTree = "<group>"; };
 		7910094E2F78031A00225294 /* RecordingServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingServiceTests.swift; sourceTree = "<group>"; };
 		791009502F78184900225294 /* AudioMixdownService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioMixdownService.swift; sourceTree = "<group>"; };
+		ABB74F3722FB4F63901ACA17 /* IdlePromptActionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/IdlePromptActionsTests.swift"; sourceTree = SOURCE_ROOT; };
+		F7776031E5854A93A08183C3 /* IdlePromptPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ViewModels/IdlePromptPreferences.swift"; sourceTree = SOURCE_ROOT; };
+		CAF3A523BD554416B939B75E /* IdlePromptSettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/IdlePromptSettingsSection.swift"; sourceTree = SOURCE_ROOT; };
+		90C96C56DC384901B1BDA27D /* IdlePromptPreferencesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/IdlePromptPreferencesTests.swift"; sourceTree = SOURCE_ROOT; };
+		637C1A235DAF4A1E93BAC519 /* IdleSessionPromptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/IdleSessionPromptView.swift"; sourceTree = SOURCE_ROOT; };
+		0FB81E6E407A41448DF078A7 /* IdleSessionPromptController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Idle/IdleSessionPromptController.swift"; sourceTree = SOURCE_ROOT; };
+		CE9C40E7049446E88951328D /* IdlePromptSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Idle/IdlePromptSettings.swift"; sourceTree = SOURCE_ROOT; };
+		00C5D12CB3204F21ABEF1A31 /* IdlePromptStateMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Idle/IdlePromptStateMachine.swift"; sourceTree = SOURCE_ROOT; };
+		236281F026DB4207AA6B8255 /* UserInputIdleProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Idle/UserInputIdleProvider.swift"; sourceTree = SOURCE_ROOT; };
+		BA3BB699A5FA453B97B90962 /* IdlePromptStateMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/IdlePromptStateMachineTests.swift"; sourceTree = SOURCE_ROOT; };
+		33D719298BBA4389AD737789 /* CaptureActivityTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Idle/CaptureActivityTracker.swift"; sourceTree = SOURCE_ROOT; };
+		E2696497D22F4111B22B003F /* CaptureActivityTrackerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/CaptureActivityTrackerTests.swift"; sourceTree = SOURCE_ROOT; };
 		582AEFDF918D425FB87D5019 /* MicStreamOutputHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Capture/MicStreamOutputHandler.swift"; sourceTree = SOURCE_ROOT; };
 		B31D758FF2004F3EA26EB66E /* UnifiedCaptureSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Capture/UnifiedCaptureSession.swift"; sourceTree = SOURCE_ROOT; };
 		8BB5F720213D4DCC8F8DE9C6 /* SynchronizedAudioTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Sync/SynchronizedAudioTimeline.swift"; sourceTree = SOURCE_ROOT; };
@@ -506,6 +530,10 @@
 				B88B88B88B88B88B88B88B88 /* ConnectionStatusTests.swift */,
 				B5871E10D502FAEB70EDC99F /* MarkdownRendererTests.swift */,
 				8E2E0F5F51DABC96146DE26B /* RecordingStatusTests.swift */,
+				ABB74F3722FB4F63901ACA17 /* IdlePromptActionsTests.swift */,
+				90C96C56DC384901B1BDA27D /* IdlePromptPreferencesTests.swift */,
+				BA3BB699A5FA453B97B90962 /* IdlePromptStateMachineTests.swift */,
+				E2696497D22F4111B22B003F /* CaptureActivityTrackerTests.swift */,
 				A8831F4F4A0B4BB5B9FED267 /* SynchronizedAudioTimelineTests.swift */,
 				DDF8E8C6C9F04735BB55BFFC /* AudioDriftMeasurementTests.swift */,
 				B1C2D3E4F5061728394A5B6D /* StatusTagViewTests.swift */,
@@ -712,6 +740,14 @@
 			isa = PBXGroup;
 			children = (
 				791009502F78184900225294 /* AudioMixdownService.swift */,
+				F7776031E5854A93A08183C3 /* IdlePromptPreferences.swift */,
+				CAF3A523BD554416B939B75E /* IdlePromptSettingsSection.swift */,
+				637C1A235DAF4A1E93BAC519 /* IdleSessionPromptView.swift */,
+				0FB81E6E407A41448DF078A7 /* IdleSessionPromptController.swift */,
+				CE9C40E7049446E88951328D /* IdlePromptSettings.swift */,
+				00C5D12CB3204F21ABEF1A31 /* IdlePromptStateMachine.swift */,
+				236281F026DB4207AA6B8255 /* UserInputIdleProvider.swift */,
+				33D719298BBA4389AD737789 /* CaptureActivityTracker.swift */,
 				582AEFDF918D425FB87D5019 /* MicStreamOutputHandler.swift */,
 				B31D758FF2004F3EA26EB66E /* UnifiedCaptureSession.swift */,
 				8BB5F720213D4DCC8F8DE9C6 /* SynchronizedAudioTimeline.swift */,
@@ -1108,6 +1144,14 @@
 				A44A44A44A44A44A44A44A44 /* AIProviderService.swift in Sources */,
 				798732842F7DA28400570A03 /* AudioResampler.swift in Sources */,
 				791009512F78184900225294 /* AudioMixdownService.swift in Sources */,
+				B325EB1964654BA99E8D0A9A /* IdlePromptPreferences.swift in Sources */,
+				69624F5DD3404DC989AF3377 /* IdlePromptSettingsSection.swift in Sources */,
+				5CC64B179AAA44CDAA1595DD /* IdleSessionPromptView.swift in Sources */,
+				6ABC26AEB2454C9AB9258611 /* IdleSessionPromptController.swift in Sources */,
+				3B66D3D82BD04576812F06A0 /* IdlePromptSettings.swift in Sources */,
+				0B6FC6CAC2384F1C9D8A8147 /* IdlePromptStateMachine.swift in Sources */,
+				10248B7A11864CE7BDCD6E2D /* UserInputIdleProvider.swift in Sources */,
+				3BCDB87B2D9B4753B57F18FD /* CaptureActivityTracker.swift in Sources */,
 				8354E63804B148AEB1D57B97 /* MicStreamOutputHandler.swift in Sources */,
 				6402AD8CA78146809D04D1E7 /* UnifiedCaptureSession.swift in Sources */,
 				DC9E28C5381A4E4BB770DA58 /* SynchronizedAudioTimeline.swift in Sources */,
@@ -1252,6 +1296,10 @@
 				791009572F7832AD00225294 /* M4AChannelExtractorTests.swift in Sources */,
 				798732732F7D8EE600570A03 /* AudioFileProberTests.swift in Sources */,
 				A2E8F18069EB9CB0F14A58BA /* RecordingStatusTests.swift in Sources */,
+				CACA88E55CED472B8823033A /* IdlePromptActionsTests.swift in Sources */,
+				1BD6AE6B039F42B3904FA416 /* IdlePromptPreferencesTests.swift in Sources */,
+				CF84962F187B4329B65D149F /* IdlePromptStateMachineTests.swift in Sources */,
+				8DA06C06655B4579A70E574A /* CaptureActivityTrackerTests.swift in Sources */,
 				B1EE4AA554C34DF8A4D66C98 /* SynchronizedAudioTimelineTests.swift in Sources */,
 				4CBBB754F76F47E590E37D92 /* AudioDriftMeasurementTests.swift in Sources */,
 				79BE353B2F7EA92C00DB542F /* AudioPlayerViewModelTests.swift in Sources */,

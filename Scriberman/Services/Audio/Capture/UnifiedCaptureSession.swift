@@ -25,6 +25,8 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
 
     var micAudioLevel: Float { micHandler.audioLevel }
     var appAudioLevel: Float { appHandler.audioLevel }
+    var micLastActivityAt: Date? { micHandler.lastActivityAt }
+    var appLastActivityAt: Date? { appHandler.lastActivityAt }
 
     init(
         micFileURL: URL,

@@ -37,10 +37,6 @@ Download the latest DMG from
 xattr -cr /Applications/Scriberman.app
 ```
 
-See [scripts/README_install.md](scripts/README_install.md) for details.
-Requires an Apple-silicon Mac. Models (~1.5 GB) download on first run into
-your chosen workspace folder.
-
 ## Support
 
 Scriberman is free software, developed in spare time. If it's useful to you,
