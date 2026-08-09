@@ -228,9 +228,16 @@ final class NewSessionViewModel {
         micAudioLevel = 0
         appAudioLevel = 0
         state = .idle
-        isIdlePromptVisible = false
+        dismissIdlePrompt()
         isIdlePromptApplicable = false
         idlePromptMachine = IdlePromptStateMachine()
+    }
+
+    /// Tears the prompt down. Safe to call when it is not showing.
+    private func dismissIdlePrompt() {
+        guard isIdlePromptVisible else { return }
+        isIdlePromptVisible = false
+        onIdlePromptPresentationChanged?(false)
     }
 
     func refresh() async {
@@ -462,6 +469,11 @@ final class NewSessionViewModel {
         let liveFinalSegments = await liveTranscriptionService.stop()
         let sessionID = await recordingService.stopRecording() ?? activeRecordingSessionID
         activeRecordingSessionID = nil
+        // Tear the idle prompt down however the session ends (panel, UI button, menu bar,
+        // app lifecycle), not just via reset().
+        dismissIdlePrompt()
+        isIdlePromptApplicable = false
+        idlePromptMachine = IdlePromptStateMachine()
         
         var fetchedSession: RecordingSession?
         if let sessionID = sessionID {
@@ -616,28 +628,36 @@ final class NewSessionViewModel {
             break
         case .showPrompt:
             isIdlePromptVisible = true
+            onIdlePromptPresentationChanged?(true)
         case .dismissPrompt:
             isIdlePromptVisible = false
+            onIdlePromptPresentationChanged?(false)
         case .autoStop:
             isIdlePromptVisible = false
+            onIdlePromptPresentationChanged?(false)
             await stopFromIdlePrompt()
         }
     }
+
+    /// Injected by the composition layer to show/hide the floating prompt panel.
+    var onIdlePromptPresentationChanged: ((Bool) -> Void)?
 
     /// User chose a snooze duration on the prompt.
     func snoozeIdlePrompt(for duration: TimeInterval) {
         idlePromptMachine.snooze(for: duration, now: Date())
         isIdlePromptVisible = false
+        onIdlePromptPresentationChanged?(false)
     }
 
     /// User chose "Stop & Save" on the prompt.
     func stopFromIdlePrompt() async {
         isIdlePromptVisible = false
+        onIdlePromptPresentationChanged?(false)
         await onIdlePromptStopRequested?()
     }
 
     /// Injected by the composition layer to stop the recording through the normal path.
-    var onIdlePromptStopRequested: (@Sendable () async -> Void)?
+    var onIdlePromptStopRequested: (() async -> Void)?
 
     private func startRecordingAttempt(
         in workspace: Workspace,
