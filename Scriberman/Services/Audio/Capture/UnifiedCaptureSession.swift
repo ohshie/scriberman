@@ -14,14 +14,20 @@ import ScreenCaptureKit
 final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendable {
     private let appFileURL: URL
     private let processID: pid_t
-    private let micDeviceUID: String?
     private let appHandler: AppAudioStreamOutputHandler
     private let micHandler: MicStreamOutputHandler
     private let appQueue = DispatchQueue(label: "com.scriberman.unified.app")
     private let micQueue = DispatchQueue(label: "com.scriberman.unified.mic")
     private let notificationCenter: NotificationCenter
     private let logger = Logger(subsystem: "Scriberman", category: "UnifiedCaptureSession")
-    private var stream: SCStream?
+    /// Retained so the microphone device can be changed on the running stream (see
+    /// `retargetMic(deviceUID:)`) instead of being rebuilt and discarded inside `start()`.
+    private let configuration: SCStreamConfiguration
+    private var stream: (any UnifiedCaptureStreaming)?
+
+    /// The microphone device identifier the stream is currently configured with. Used by
+    /// `RecordingService` to decide whether a device change actually requires a retarget.
+    private(set) var currentMicDeviceUID: String?
 
     var micAudioLevel: Float { micHandler.audioLevel }
     var appAudioLevel: Float { appHandler.audioLevel }
@@ -40,7 +46,8 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
     ) {
         self.appFileURL = appFileURL
         self.processID = processID
-        self.micDeviceUID = micDeviceUID
+        self.currentMicDeviceUID = micDeviceUID
+        self.configuration = Self.makeConfiguration(micDeviceUID: micDeviceUID)
         self.notificationCenter = notificationCenter
         self.appHandler = AppAudioStreamOutputHandler(liveAudioContinuation: liveAudioContinuation)
         self.micHandler = MicStreamOutputHandler(liveAudioContinuation: liveAudioContinuation)
@@ -61,17 +68,6 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
         }
 
         let filter = SCContentFilter(desktopIndependentWindow: window)
-        let configuration = SCStreamConfiguration()
-        configuration.capturesAudio = true
-        configuration.captureMicrophone = true
-        configuration.microphoneCaptureDeviceID = micDeviceUID
-        configuration.sampleRate = 48_000
-        configuration.channelCount = 2
-        configuration.width = 1
-        configuration.height = 1
-        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
-        configuration.queueDepth = 3
-
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try stream.addStreamOutput(appHandler, type: .audio, sampleHandlerQueue: appQueue)
         try stream.addStreamOutput(micHandler, type: .microphone, sampleHandlerQueue: micQueue)
@@ -90,6 +86,60 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
             }
         }
         throw RecordingError.failedToStart(lastError?.localizedDescription ?? "Failed to start unified capture.")
+    }
+
+    private static func makeConfiguration(micDeviceUID: String?) -> SCStreamConfiguration {
+        let configuration = SCStreamConfiguration()
+        configuration.capturesAudio = true
+        configuration.captureMicrophone = true
+        configuration.microphoneCaptureDeviceID = micDeviceUID
+        configuration.sampleRate = 48_000
+        configuration.channelCount = 2
+        configuration.width = 1
+        configuration.height = 1
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+        configuration.queueDepth = 3
+        return configuration
+    }
+
+    /// Switches the microphone captured by the running stream, without stopping, recreating, or
+    /// restarting it. App audio is not interrupted and the stream's presentation-time reference is
+    /// unchanged, so both sources stay on the timeline established at recording start. The mic
+    /// handler is deliberately *not* reconfigured: doing so would reset its timeline anchor and
+    /// reopen its output file.
+    ///
+    /// Returns `false` when the stream is not running or the update was rejected; in that case the
+    /// retained configuration is rolled back so it keeps describing what the stream actually has.
+    func retargetMic(deviceUID: String?) async -> Bool {
+        guard let stream else {
+            logger.warning(
+                "Mic retarget requested with no running stream. deviceUID=\(deviceUID ?? "<default>", privacy: .public)"
+            )
+            return false
+        }
+
+        let previous = configuration.microphoneCaptureDeviceID
+        configuration.microphoneCaptureDeviceID = deviceUID
+        do {
+            try await stream.updateConfiguration(configuration)
+            currentMicDeviceUID = deviceUID
+            logger.notice(
+                "Mic retargeted on live stream. deviceUID=\(deviceUID ?? "<default>", privacy: .public)"
+            )
+            return true
+        } catch {
+            configuration.microphoneCaptureDeviceID = previous
+            logger.error(
+                "Mic retarget failed; continuing on previous device. deviceUID=\(deviceUID ?? "<default>", privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+            )
+            return false
+        }
+    }
+
+    /// Test seam: attach an already-"started" stream without going through `start()`, which needs
+    /// live `SCShareableContent`, a capturable window, and TCC grants.
+    func attachStreamForTesting(_ stream: any UnifiedCaptureStreaming) {
+        self.stream = stream
     }
 
     func stop() async {

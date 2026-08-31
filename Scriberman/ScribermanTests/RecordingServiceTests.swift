@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreGraphics
 import Foundation
+import ScreenCaptureKit
 import SwiftData
 import Testing
 @testable import Scriberman
@@ -910,6 +911,185 @@ final class RecordingServiceTests {
         try? FileManager.default.removeItem(at: url)
     }
 
+    // MARK: - Mic resilience under unified ScreenCaptureKit capture
+
+    private func makeUnifiedSession(micDeviceUID: String?) -> UnifiedCaptureSession {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        return UnifiedCaptureSession(
+            micFileURL: root.appendingPathComponent("mic.wav"),
+            appFileURL: root.appendingPathComponent("app.wav"),
+            processID: 4321,
+            micDeviceUID: micDeviceUID
+        )
+    }
+
+    @Test
+    func testRetargetMicUnderUnifiedCaptureUpdatesLiveStreamWithoutEngineRecovery() async throws {
+        let fixture = try await makeRecoveryFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        fixture.hardware.devices = [(id: 1, uid: "device-a"), (id: 2, uid: "device-b")]
+
+        let unified = makeUnifiedSession(micDeviceUID: "device-a")
+        let stream = StubUnifiedStream()
+        unified.attachStreamForTesting(stream)
+        await fixture.service.setRecordingStateForTesting(isRecording: true)
+        await fixture.service.setMicRecoveryStateForTesting(
+            desiredMicDeviceUID: "device-a",
+            micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav")
+        )
+        await fixture.service.setUnifiedCaptureSessionForTesting(unified)
+
+        await fixture.service.retargetMic(desiredDeviceUID: "device-b")
+
+        #expect(stream.updateCallCount == 1)
+        #expect(unified.currentMicDeviceUID == "device-b")
+        let state = await fixture.service.recoveryDebugStateForTesting()
+        #expect(state.desiredMicDeviceUID == "device-b")
+        #expect(!state.isRecoveringMicCapture)
+        // The engine path must not run: no restart, and no retry loop scheduled.
+        #expect(fixture.micController.startCaptureCalls.isEmpty)
+        #expect(!state.hasRecoveryRetryTask)
+        #expect(await fixture.service.isRecording())
+        #expect(await fixture.service.consumePendingError() == nil)
+    }
+
+    @Test
+    func testFailedUnifiedRetargetKeepsSessionActiveWithoutError() async throws {
+        let fixture = try await makeRecoveryFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        fixture.hardware.devices = [(id: 1, uid: "device-a"), (id: 2, uid: "device-b")]
+
+        let unified = makeUnifiedSession(micDeviceUID: "device-a")
+        let stream = StubUnifiedStream()
+        stream.updateError = StubUnifiedStreamError()
+        unified.attachStreamForTesting(stream)
+        await fixture.service.setRecordingStateForTesting(isRecording: true)
+        await fixture.service.setMicRecoveryStateForTesting(
+            desiredMicDeviceUID: "device-a",
+            micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav")
+        )
+        await fixture.service.setUnifiedCaptureSessionForTesting(unified)
+
+        await fixture.service.retargetMic(desiredDeviceUID: "device-b")
+
+        #expect(unified.currentMicDeviceUID == "device-a")
+        #expect(await fixture.service.isRecording())
+        #expect(await fixture.service.consumePendingError() == nil)
+        let state = await fixture.service.recoveryDebugStateForTesting()
+        #expect(!state.hasRecoveryRetryTask)
+    }
+
+    @Test
+    func testRetargetMicWhileNotRecordingIsNoOpUnderUnifiedCapture() async throws {
+        let fixture = try await makeRecoveryFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+
+        let unified = makeUnifiedSession(micDeviceUID: "device-a")
+        let stream = StubUnifiedStream()
+        unified.attachStreamForTesting(stream)
+        await fixture.service.setUnifiedCaptureSessionForTesting(unified)
+
+        await fixture.service.retargetMic(desiredDeviceUID: "device-b")
+
+        #expect(stream.updateCallCount == 0)
+        #expect(unified.currentMicDeviceUID == "device-a")
+    }
+
+    @Test
+    func testHardwareChangeRetargetsUnifiedCaptureWhenPreferredMicReappears() async throws {
+        let fixture = try await makeRecoveryFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        fixture.hardware.devices = [(id: 1, uid: "device-a"), (id: 2, uid: "device-b")]
+
+        let unified = makeUnifiedSession(micDeviceUID: "device-a")
+        let stream = StubUnifiedStream()
+        unified.attachStreamForTesting(stream)
+        await fixture.service.setRecordingStateForTesting(isRecording: true)
+        await fixture.service.setMicRecoveryStateForTesting(
+            desiredMicDeviceUID: "device-b",
+            micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav")
+        )
+        await fixture.service.setUnifiedCaptureSessionForTesting(unified)
+
+        await fixture.service.simulateHardwareChangeForTesting()
+
+        #expect(stream.updateCallCount == 1)
+        #expect(unified.currentMicDeviceUID == "device-b")
+        #expect(fixture.micController.startCaptureCalls.isEmpty)
+    }
+
+    @Test
+    func testHardwareChangeDoesNotRetargetWhenAlreadyOnPreferredMic() async throws {
+        let fixture = try await makeRecoveryFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        fixture.hardware.devices = [(id: 1, uid: "device-a"), (id: 2, uid: "device-b")]
+
+        let unified = makeUnifiedSession(micDeviceUID: "device-a")
+        let stream = StubUnifiedStream()
+        unified.attachStreamForTesting(stream)
+        await fixture.service.setRecordingStateForTesting(isRecording: true)
+        await fixture.service.setMicRecoveryStateForTesting(
+            desiredMicDeviceUID: "device-a",
+            micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav")
+        )
+        await fixture.service.setUnifiedCaptureSessionForTesting(unified)
+
+        await fixture.service.simulateHardwareChangeForTesting()
+
+        #expect(stream.updateCallCount == 0)
+    }
+
+    @Test
+    func testHardwareChangeDoesNotRetargetWhenPreferredMicIsAbsent() async throws {
+        let fixture = try await makeRecoveryFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        // The preferred device is not among the currently available devices.
+        fixture.hardware.devices = [(id: 1, uid: "device-a")]
+
+        let unified = makeUnifiedSession(micDeviceUID: "device-a")
+        let stream = StubUnifiedStream()
+        unified.attachStreamForTesting(stream)
+        await fixture.service.setRecordingStateForTesting(isRecording: true)
+        await fixture.service.setMicRecoveryStateForTesting(
+            desiredMicDeviceUID: "device-b",
+            micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav")
+        )
+        await fixture.service.setUnifiedCaptureSessionForTesting(unified)
+
+        await fixture.service.simulateHardwareChangeForTesting()
+
+        #expect(stream.updateCallCount == 0)
+        #expect(unified.currentMicDeviceUID == "device-a")
+    }
+
+    @Test
+    func testEngineConfigurationChangeUnderUnifiedCaptureIsANoOp() async throws {
+        let fixture = try await makeRecoveryFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        fixture.hardware.devices = [(id: 1, uid: "device-a")]
+
+        let unified = makeUnifiedSession(micDeviceUID: "device-a")
+        let stream = StubUnifiedStream()
+        unified.attachStreamForTesting(stream)
+        await fixture.service.setRecordingStateForTesting(isRecording: true)
+        await fixture.service.setMicRecoveryStateForTesting(
+            desiredMicDeviceUID: "device-a",
+            micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav")
+        )
+        await fixture.service.setUnifiedCaptureSessionForTesting(unified)
+
+        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
+
+        // There is no AVAudioEngine to restart on this path.
+        #expect(fixture.micController.startCaptureCalls.isEmpty)
+        #expect(stream.updateCallCount == 0)
+        #expect(await fixture.service.isRecording())
+        #expect(await fixture.service.consumePendingError() == nil)
+        let state = await fixture.service.recoveryDebugStateForTesting()
+        #expect(!state.hasRecoveryRetryTask)
+    }
+
     private func makeRecoveryFixture() async throws -> (
         service: RecordingService,
         workspace: Workspace,
@@ -1181,5 +1361,35 @@ private final class MockRecoveryAudioDeviceHardware: AudioDeviceHardwareProvidin
 
     func defaultInputDeviceID() -> AudioDeviceID? {
         devices.first?.id
+    }
+}
+
+private struct StubUnifiedStreamError: Error {}
+
+private final class StubUnifiedStream: UnifiedCaptureStreaming, @unchecked Sendable {
+    var updateError: Error?
+    private(set) var updateCallCount = 0
+    private(set) var startCallCount = 0
+    private(set) var stopCallCount = 0
+
+    func addStreamOutput(
+        _: SCStreamOutput,
+        type _: SCStreamOutputType,
+        sampleHandlerQueue _: DispatchQueue?
+    ) throws {}
+
+    func startCapture() async throws {
+        startCallCount += 1
+    }
+
+    func stopCapture() async throws {
+        stopCallCount += 1
+    }
+
+    func updateConfiguration(_: SCStreamConfiguration) async throws {
+        updateCallCount += 1
+        if let updateError {
+            throw updateError
+        }
     }
 }

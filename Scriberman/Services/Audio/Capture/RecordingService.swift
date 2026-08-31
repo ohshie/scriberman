@@ -416,6 +416,14 @@ actor RecordingService: RecordingServiceProtocol {
         await handleAudioEngineConfigurationChange()
     }
 
+    func setUnifiedCaptureSessionForTesting(_ session: UnifiedCaptureSession?) {
+        self.unifiedCaptureSession = session
+    }
+
+    func simulateHardwareChangeForTesting() async {
+        await handleHardwareChange()
+    }
+
     func recoveryDebugStateForTesting() -> (
         desiredMicDeviceUID: String?,
         currentCaptureDeviceID: AudioDeviceID?,
@@ -849,9 +857,12 @@ actor RecordingService: RecordingServiceProtocol {
             return
         }
         self.desiredMicDeviceUID = desiredDeviceUID
-        // Unified ScreenCaptureKit capture owns the mic device; mid-recording retarget is
-        // not supported on that path (would require restarting the stream).
-        guard unifiedCaptureSession == nil else {
+        // Unified ScreenCaptureKit capture owns the mic device, so the swap is applied to the
+        // running stream instead of by restarting engine capture. A failed update leaves capture
+        // on the previous device; the next CoreAudio hardware event re-attempts it, so the engine
+        // path's retry loop is deliberately not started here.
+        if let unifiedCaptureSession {
+            _ = await unifiedCaptureSession.retargetMic(deviceUID: desiredDeviceUID)
             return
         }
         guard !isRecoveringMicCapture else {
@@ -953,7 +964,9 @@ actor RecordingService: RecordingServiceProtocol {
         guard isRecordingValue else {
             return
         }
-        // Unified capture does not use AVAudioEngine; ignore engine reconfig events.
+        // The recording path holds no `AVAudioEngine` under unified capture, so there is nothing
+        // to restart. Recorded as an explicit exemption in `mic-capture-resilience` rather than
+        // left implicit here.
         guard unifiedCaptureSession == nil else {
             return
         }
@@ -992,7 +1005,17 @@ actor RecordingService: RecordingServiceProtocol {
         guard isRecordingValue else {
             return
         }
-        guard unifiedCaptureSession == nil else {
+        // Under unified capture the preferred mic is restored by updating the running stream.
+        // Same preconditions as the engine path below: the desired device must actually be
+        // present, and must differ from the one currently being captured.
+        if let unifiedCaptureSession {
+            guard let desiredMicDeviceUID,
+                  resolveDeviceID(for: desiredMicDeviceUID) != nil,
+                  unifiedCaptureSession.currentMicDeviceUID != desiredMicDeviceUID
+            else {
+                return
+            }
+            _ = await unifiedCaptureSession.retargetMic(deviceUID: desiredMicDeviceUID)
             return
         }
         guard !isRecoveringMicCapture else {
