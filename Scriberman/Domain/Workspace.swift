@@ -19,6 +19,10 @@ struct Workspace: Equatable {
         rootURL.appendingPathComponent("imports", isDirectory: true)
     }
 
+    var logsURL: URL {
+        rootURL.appendingPathComponent("logs", isDirectory: true)
+    }
+
     var tmpRecordingURL: URL {
         recordingsURL.appendingPathComponent("tmp", isDirectory: true)
     }

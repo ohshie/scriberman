@@ -22,6 +22,13 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
         streamer.lastActivityAt
     }
 
+    /// Frames successfully written to this source's file since capture started. Counts buffers
+    /// landed, not sound detected, so silence still advances it.
+    var framesWritten: Int64 { streamer.framesWritten }
+
+    /// Write failures observed since capture started.
+    var writeFailureCount: Int { streamer.writeFailureCount }
+
     private var hasPrepared = false
 
     init(liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil) {

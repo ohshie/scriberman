@@ -28,6 +28,13 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
     /// When the microphone last produced sustained activity (see `CaptureActivityTracker`).
     var lastActivityAt: Date? { streamer.lastActivityAt }
 
+    /// Frames successfully written to this source's file since capture started. Counts buffers
+    /// landed, not sound detected, so silence still advances it.
+    var framesWritten: Int64 { streamer.framesWritten }
+
+    /// Write failures observed since capture started.
+    var writeFailureCount: Int { streamer.writeFailureCount }
+
     init(liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil) {
         self.liveAudioContinuation = liveAudioContinuation
         self.targetFormat = AVAudioFormat(

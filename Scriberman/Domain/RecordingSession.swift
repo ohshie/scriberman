@@ -15,6 +15,10 @@ final class RecordingSession {
     var statusRawValue: String
     var errorMessage: String?
     var screenCaptureWarning: String?
+    /// True when a recording was started with app audio but the app source produced no frames for
+    /// its entire duration, so it was finalized as microphone-only. Stored as a flag rather than a
+    /// message because the wording belongs to the view.
+    var appAudioMissing: Bool?
     var mixdownAttemptCountValue: Int?
     var transcriptData: Data?
     var retranscriptData: Data?

@@ -1,6 +1,7 @@
 import CoreAudio
 import CoreGraphics
 import Foundation
+import OSLog
 import Observation
 import SwiftData
 
@@ -56,6 +57,12 @@ final class NewSessionViewModel {
     }
     var liveSegments: [TranscriptSegment] = []
     var errorMessage: String?
+    /// Set when a recording was stopped because it never started writing audio. The UI observes
+    /// this to present the failure; the wording is owned by the view, not by this model.
+    var didFailToStartRecording = false
+    private var startVerificationTask: Task<Void, Never>?
+    private let sessionFailureLogWriter = SessionFailureLogWriter()
+    private let logger = Logger(subsystem: "Scriberman", category: "NewSessionViewModel")
     var availableDevices: [AudioInputDevice] {
         audioDeviceService.availableDevices
     }
@@ -227,6 +234,11 @@ final class NewSessionViewModel {
     func reset() {
         recordingMonitorTask?.cancel()
         recordingMonitorTask = nil
+        startVerificationTask?.cancel()
+        startVerificationTask = nil
+        if didFailToStartRecording {
+            dismissRecordingStartFailure()
+        }
         recordingStartedAt = nil
         activeRecordingSessionID = nil
         errorMessage = nil
@@ -320,6 +332,9 @@ final class NewSessionViewModel {
     func startRecording(title: String, context: ModelContext) async -> RecordingSession? {
         recordingMonitorTask?.cancel()
         recordingMonitorTask = nil
+        if didFailToStartRecording {
+            dismissRecordingStartFailure()
+        }
         errorMessage = nil
 
         do {
@@ -436,6 +451,7 @@ final class NewSessionViewModel {
             }
             
             startRecordingMonitor()
+            verifyRecordingStart(sessionID: recordingSessionID, workspace: workspace, context: context)
             return session
         } catch {
             errorMessage = error.localizedDescription
@@ -470,6 +486,8 @@ final class NewSessionViewModel {
     func stopRecording(context: ModelContext) async -> RecordingSession? {
         recordingMonitorTask?.cancel()
         recordingMonitorTask = nil
+        startVerificationTask?.cancel()
+        startVerificationTask = nil
 
         let liveFinalSegments = await liveTranscriptionService.stop()
         let sessionID = await recordingService.stopRecording() ?? activeRecordingSessionID
@@ -576,6 +594,115 @@ final class NewSessionViewModel {
         return selectedDisplayID
     }
 
+    /// How long after a successful start to check that audio is actually being written.
+    ///
+    /// Long enough for the first buffers to land on both capture paths, short enough that a dead
+    /// recording is caught before the user has said anything worth keeping.
+    static let defaultStartVerificationDelay: Duration = .seconds(1)
+
+    /// Overridable so tests can exercise the verify/retry sequence without waiting real seconds.
+    var startVerificationDelay: Duration = NewSessionViewModel.defaultStartVerificationDelay
+
+    /// Verifies, one second after start, that frames are being written; restarts capture once if
+    /// not; and fails the session if the restart does not help.
+    ///
+    /// Runs detached so the UI shows the recording immediately rather than stalling a second on a
+    /// check that almost always passes.
+    private func verifyRecordingStart(sessionID: UUID, workspace: Workspace, context: ModelContext) {
+        startVerificationTask?.cancel()
+        startVerificationTask = Task { [weak self] in
+            guard let self else { return }
+
+            try? await Task.sleep(for: startVerificationDelay)
+            guard !Task.isCancelled else { return }
+
+            var counts = await recordingService.captureFrameCounts()
+            if RecordingStartVerifier.verdict(micFrames: counts.mic, appFrames: counts.app) != .dead {
+                return
+            }
+
+            logger.warning("Recording start verification found no frames written; restarting capture.")
+            let didRestart = await recordingService.restartAudioCapture()
+
+            if didRestart {
+                try? await Task.sleep(for: startVerificationDelay)
+                guard !Task.isCancelled else { return }
+                counts = await recordingService.captureFrameCounts()
+                if RecordingStartVerifier.verdict(micFrames: counts.mic, appFrames: counts.app) != .dead {
+                    return
+                }
+            }
+
+            await failRecordingStart(
+                sessionID: sessionID,
+                workspace: workspace,
+                context: context,
+                counts: counts,
+                restartAttempted: didRestart
+            )
+        }
+    }
+
+    private func failRecordingStart(
+        sessionID: UUID,
+        workspace: Workspace,
+        context: ModelContext,
+        counts: (mic: Int64?, app: Int64?, micWriteFailures: Int, appWriteFailures: Int),
+        restartAttempted: Bool
+    ) async {
+        let startedAt = recordingStartedAt ?? Date()
+        let lastError = await recordingService.consumePendingError()?.localizedDescription
+
+        sessionFailureLogWriter.write(
+            SessionFailureLogWriter.Failure(
+                sessionID: sessionID,
+                startedAt: startedAt,
+                micFrames: counts.mic,
+                appFrames: counts.app,
+                micWriteFailures: counts.micWriteFailures,
+                appWriteFailures: counts.appWriteFailures,
+                restartAttempted: restartAttempted,
+                lastError: lastError
+            ),
+            in: workspace
+        )
+
+        _ = await recordingService.stopRecording()
+        _ = await liveTranscriptionService.stop()
+        recordingMonitorTask?.cancel()
+        recordingMonitorTask = nil
+        activeRecordingSessionID = nil
+        recordingStartedAt = nil
+        micAudioLevel = 0
+        appAudioLevel = 0
+        dismissIdlePrompt()
+        isIdlePromptApplicable = false
+        idlePromptMachine = IdlePromptStateMachine()
+
+        // Mark the session failed rather than deleting it: this reuses the status vocabulary the
+        // jobs pipeline already uses for failures, and leaves the row to point at its log.
+        let descriptor = FetchDescriptor<RecordingSession>()
+        if let sessions = try? context.fetch(descriptor) {
+            for session in sessions where session.id == sessionID {
+                let reason = lastError ?? "Recording produced no audio."
+                session.status = .error(reason)
+                session.errorMessage = reason
+                try? context.save()
+                break
+            }
+        }
+
+        state = .idle
+        didFailToStartRecording = true
+        onRecordingStartFailurePresentationChanged?(true)
+    }
+
+    /// Dismisses the failure panel. Nothing was captured, so there is no state to restore.
+    func dismissRecordingStartFailure() {
+        didFailToStartRecording = false
+        onRecordingStartFailurePresentationChanged?(false)
+    }
+
     private func startRecordingMonitor() {
         recordingMonitorTask?.cancel()
         recordingMonitorTask = Task { [weak self] in
@@ -645,6 +772,10 @@ final class NewSessionViewModel {
     }
 
     /// Injected by the composition layer to show/hide the floating prompt panel.
+    /// Presents or hides the "Recording failed." panel. Set by `AppDelegate`, which owns the
+    /// panel; the view model owns only the fact that the start failed.
+    var onRecordingStartFailurePresentationChanged: ((Bool) -> Void)?
+
     var onIdlePromptPresentationChanged: ((Bool) -> Void)?
 
     /// User chose a snooze duration on the prompt.

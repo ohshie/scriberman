@@ -13,6 +13,14 @@ protocol RecordingServiceProtocol: Sendable {
     /// these stop advancing when a source stops delivering buffers, so they can be used to
     /// measure idleness. `nil` means the source has never been active (or is not tracked).
     func activityTimestamps() async -> (mic: Date?, app: Date?)
+    /// Frames written per source since capture started. Unlike `audioLevels()` and
+    /// `activityTimestamps()`, this counts buffers landed rather than sound detected, so a silent
+    /// room still reports a healthy capture. `mic` is `nil` under the recorder fallback, which does
+    /// not write through the shared file streamer; `app` is `nil` when app audio is not captured.
+    func captureFrameCounts() async -> (mic: Int64?, app: Int64?, micWriteFailures: Int, appWriteFailures: Int)
+    /// Restarts audio capture with the same configuration and files, keeping the session. Returns
+    /// whether capture started again.
+    func restartAudioCapture() async -> Bool
     func startRecording(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID?,

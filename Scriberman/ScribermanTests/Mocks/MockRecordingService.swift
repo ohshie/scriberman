@@ -40,6 +40,26 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
         activityTimestampsOverride
     }
 
+    /// Frame counts returned by `captureFrameCounts()`. Successive verification passes pop from
+    /// the front when more than one is queued, so a test can model "dead, then healthy after the
+    /// restart" without timing games.
+    var frameCountQueue: [(mic: Int64?, app: Int64?)] = [(mic: 512, app: nil)]
+    private(set) var frameCountCallCount = 0
+
+    func captureFrameCounts() async -> (mic: Int64?, app: Int64?, micWriteFailures: Int, appWriteFailures: Int) {
+        frameCountCallCount += 1
+        let counts = frameCountQueue.count > 1 ? frameCountQueue.removeFirst() : (frameCountQueue.first ?? (mic: 512, app: nil))
+        return (counts.mic, counts.app, 0, 0)
+    }
+
+    var restartAudioCaptureResult = true
+    private(set) var restartAudioCaptureCallCount = 0
+
+    func restartAudioCapture() async -> Bool {
+        restartAudioCaptureCallCount += 1
+        return restartAudioCaptureResult
+    }
+
     func startRecording(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID?,
