@@ -33,6 +33,10 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
     var appAudioLevel: Float { appHandler.audioLevel }
     var micLastActivityAt: Date? { micHandler.lastActivityAt }
     var appLastActivityAt: Date? { appHandler.lastActivityAt }
+    var micFramesWritten: Int64 { micHandler.framesWritten }
+    var appFramesWritten: Int64 { appHandler.framesWritten }
+    var micWriteFailureCount: Int { micHandler.writeFailureCount }
+    var appWriteFailureCount: Int { appHandler.writeFailureCount }
 
     init(
         micFileURL: URL,

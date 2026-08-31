@@ -765,6 +765,52 @@ struct NewSessionViewModelTests {
             try? await Task.sleep(nanoseconds: pollNanoseconds)
         }
     }
+    // MARK: - Recording start failure panel
+
+    @Test
+    @MainActor
+    func testDismissingStartFailureHidesPanelAndClearsFlag() {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        var presentations: [Bool] = []
+        fixture.viewModel.didFailToStartRecording = true
+        fixture.viewModel.onRecordingStartFailurePresentationChanged = { presentations.append($0) }
+
+        fixture.viewModel.dismissRecordingStartFailure()
+
+        #expect(presentations == [false])
+        #expect(!fixture.viewModel.didFailToStartRecording)
+    }
+
+    /// A reset must not leave a stale failure panel on screen.
+    @Test
+    @MainActor
+    func testResetClearsAnOutstandingStartFailure() {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        var presentations: [Bool] = []
+        fixture.viewModel.didFailToStartRecording = true
+        fixture.viewModel.onRecordingStartFailurePresentationChanged = { presentations.append($0) }
+
+        fixture.viewModel.reset()
+
+        #expect(presentations == [false])
+        #expect(!fixture.viewModel.didFailToStartRecording)
+    }
+
+    @Test
+    @MainActor
+    func testDismissWithNoOutstandingFailureStillHidesThePanel() {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        var presentations: [Bool] = []
+        fixture.viewModel.onRecordingStartFailurePresentationChanged = { presentations.append($0) }
+
+        fixture.viewModel.dismissRecordingStartFailure()
+
+        #expect(presentations == [false])
+    }
+
 }
 
 @MainActor

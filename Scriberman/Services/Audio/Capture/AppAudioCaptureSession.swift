@@ -22,6 +22,10 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Senda
         outputHandler.lastActivityAt
     }
 
+    var framesWritten: Int64 { outputHandler.framesWritten }
+
+    var writeFailureCount: Int { outputHandler.writeFailureCount }
+
     init(
         fileURL: URL,
         processID: pid_t,

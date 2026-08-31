@@ -254,6 +254,9 @@ actor RecordingService: RecordingServiceProtocol {
     private var pendingTitle: String?
     private var appAudioCaptureSession: AppAudioCaptureSession?
     private var unifiedCaptureSession: UnifiedCaptureSession?
+    /// Retained so the start safety net can repeat a capture start with identical inputs.
+    private var activeAppFileURL: URL?
+    private var activeAppProcessID: pid_t?
     private var screenCaptureSession: (any ScreenCaptureSessionControlling)?
     private var shouldSkipScreenMux = false
     private var pendingError: RecordingError?
@@ -462,6 +465,39 @@ actor RecordingService: RecordingServiceProtocol {
         return (mic, appAudioCaptureSession?.lastActivityAt)
     }
 
+    /// Frames written per source since capture started, plus write failures.
+    ///
+    /// This is the signal the start safety net verifies against, deliberately in preference to
+    /// `audioLevels()` or `activityTimestamps()`: frames are produced at the capture sample rate
+    /// whether or not anyone is speaking, so a silent room reads as healthy. Levels and activity
+    /// both require sound above a floor and would fail a recording that simply started quiet.
+    ///
+    /// `mic` is `nil` — not zero — under the `AVAudioRecorder` fallback, which does not write
+    /// through `AudioFileStreamer`. Callers must not read that as a dead capture. `app` is `nil`
+    /// when app audio is not being captured at all.
+    func captureFrameCounts() async -> (mic: Int64?, app: Int64?, micWriteFailures: Int, appWriteFailures: Int) {
+        if let unifiedCaptureSession {
+            return (
+                unifiedCaptureSession.micFramesWritten,
+                appAudioURL == nil ? nil : unifiedCaptureSession.appFramesWritten,
+                unifiedCaptureSession.micWriteFailureCount,
+                unifiedCaptureSession.appWriteFailureCount
+            )
+        }
+#if DEBUG
+        let isRecorderFallbackActive = audioRecorder != nil || recorderFallbackActiveForTesting
+#else
+        let isRecorderFallbackActive = audioRecorder != nil
+#endif
+        let mic = isRecorderFallbackActive ? nil : micStreamer.framesWritten
+        return (
+            mic,
+            appAudioCaptureSession?.framesWritten,
+            isRecorderFallbackActive ? 0 : micStreamer.writeFailureCount,
+            appAudioCaptureSession?.writeFailureCount ?? 0
+        )
+    }
+
     func audioLevels() async -> (mic: Float, app: Float) {
         if let unifiedCaptureSession {
             let mic = unifiedCaptureSession.micAudioLevel
@@ -486,6 +522,149 @@ actor RecordingService: RecordingServiceProtocol {
 
         audioLevelValue = max(micLevel, appLevel)
         return (micLevel, appLevel)
+    }
+
+    /// Starts audio capture for a recording: unified ScreenCaptureKit when enabled and an app was
+    /// selected, otherwise the legacy engine path with its device and recorder fallbacks.
+    ///
+    /// Extracted so the start safety net can restart capture without disturbing the session,
+    /// folder, or screen capture around it. Callers own session state; this owns only capture.
+    private func startAudioCapture(
+        micFileURL: URL,
+        appFileURL: URL,
+        appProcessID: pid_t?
+    ) async throws {
+        var unifiedStarted = false
+        if AudioSyncConfig.isUnifiedCaptureEnabled, let appProcessID {
+            do {
+                let unified = UnifiedCaptureSession(
+                    micFileURL: micFileURL,
+                    appFileURL: appFileURL,
+                    processID: appProcessID,
+                    micDeviceUID: desiredMicDeviceUID,
+                    liveAudioContinuation: liveAudioStreamTuple.continuation,
+                    onMicFirstHostTime: { [weak self] hostTime in
+                        Task { [weak self] in await self?.captureMicStartHostTimeIfNeeded(hostTime) }
+                    },
+                    onAppFirstHostTime: { [weak self] hostTime in
+                        Task { [weak self] in await self?.captureAppStartHostTimeIfNeeded(hostTime) }
+                    }
+                )
+                try await unified.start()
+                self.unifiedCaptureSession = unified
+                self.appAudioURL = appFileURL
+                unifiedStarted = true
+            } catch {
+                logger.warning("Unified capture failed to start; falling back to legacy capture. error=\(error.localizedDescription, privacy: .public)")
+            }
+        }
+
+        if !unifiedStarted {
+        try micStreamer.prepare(url: micFileURL, format: micTargetFormat)
+
+        if let appProcessID {
+            let appSession = AppAudioCaptureSession(
+                fileURL: appFileURL,
+                processID: appProcessID,
+                onFirstBufferHostTime: { [weak self] hostTime in
+                    Task { [weak self] in
+                        await self?.captureAppStartHostTimeIfNeeded(hostTime)
+                    }
+                },
+                liveAudioContinuation: liveAudioStreamTuple.continuation
+            )
+            try await appSession.start()
+            self.appAudioCaptureSession = appSession
+            self.appAudioURL = appFileURL
+        } else {
+            self.appAudioCaptureSession = nil
+            self.appAudioURL = nil
+        }
+
+        do {
+            try await startMicCapture(
+                deviceUID: desiredMicDeviceUID,
+                micFileURL: micFileURL,
+                liveContinuation: liveAudioStreamTuple.continuation
+            )
+        } catch {
+            // Bluetooth/external devices can fail explicit routing on some setups.
+            // Retry with the default input device so the live stream path stays active.
+            if desiredMicDeviceUID != nil {
+                logger.warning(
+                    "Mic capture failed for selected device; retrying on default input. error=\(error.localizedDescription, privacy: .public)"
+                )
+                desiredMicDeviceUID = nil
+                do {
+                    try await startMicCapture(
+                        deviceUID: nil,
+                        micFileURL: micFileURL,
+                        liveContinuation: liveAudioStreamTuple.continuation
+                    )
+                } catch {
+                    logger.warning(
+                        "Default-device mic capture retry failed; falling back to recorder. error=\(error.localizedDescription, privacy: .public)"
+                    )
+                    try startRecorderFallback(to: micFileURL)
+                }
+            } else {
+                try startRecorderFallback(to: micFileURL)
+            }
+        }
+        } // end if !unifiedStarted
+    }
+
+    /// Tears audio capture down and starts it again with the same configuration and the same
+    /// files, leaving the session, its folder, and screen capture untouched.
+    ///
+    /// Used by the start safety net when verification finds that nothing is being written.
+    /// Overwriting the existing audio files is safe for exactly one reason: this runs only when
+    /// zero frames were written, so there is nothing to lose. Any future caller that restarts
+    /// after a partial failure must revisit that.
+    func restartAudioCapture() async -> Bool {
+        guard isRecordingValue, let micFileURL, let activeAppFileURL else {
+            return false
+        }
+
+        await stopAudioCaptureForRestart()
+
+        // Re-anchor: the previous attempt contributed no samples, so the timeline reference must
+        // come from the new one.
+        micStartHostTime = nil
+        appStartHostTime = nil
+
+        do {
+            try await startAudioCapture(
+                micFileURL: micFileURL,
+                appFileURL: activeAppFileURL,
+                appProcessID: activeAppProcessID
+            )
+            logger.notice("Audio capture restarted after failed start verification.")
+            return true
+        } catch {
+            logger.error(
+                "Audio capture restart failed: \(error.localizedDescription, privacy: .public)"
+            )
+            return false
+        }
+    }
+
+    private func stopAudioCaptureForRestart() async {
+        micRecoveryRetryTask?.cancel()
+        micRecoveryRetryTask = nil
+        if let unifiedCaptureSession {
+            await unifiedCaptureSession.stop()
+        }
+        unifiedCaptureSession = nil
+        if let appAudioCaptureSession {
+            await appAudioCaptureSession.stop()
+        }
+        appAudioCaptureSession = nil
+        stopMicCapture()
+        audioRecorder?.stop()
+        audioRecorder = nil
+        micStreamer.close()
+        appAudioURL = nil
     }
 
     func startRecording(
@@ -553,84 +732,13 @@ actor RecordingService: RecordingServiceProtocol {
             // Phase 2: for mic+app recordings, capture both from one ScreenCaptureKit stream
             // (shared clock) when enabled. Falls back to the legacy AVAudioEngine + separate
             // SCStream path on any failure.
-            var unifiedStarted = false
-            if AudioSyncConfig.isUnifiedCaptureEnabled, let appProcessID {
-                do {
-                    let unified = UnifiedCaptureSession(
-                        micFileURL: micFileURL,
-                        appFileURL: appFileURL,
-                        processID: appProcessID,
-                        micDeviceUID: desiredMicDeviceUID,
-                        liveAudioContinuation: liveAudioStreamTuple.continuation,
-                        onMicFirstHostTime: { [weak self] hostTime in
-                            Task { [weak self] in await self?.captureMicStartHostTimeIfNeeded(hostTime) }
-                        },
-                        onAppFirstHostTime: { [weak self] hostTime in
-                            Task { [weak self] in await self?.captureAppStartHostTimeIfNeeded(hostTime) }
-                        }
-                    )
-                    try await unified.start()
-                    self.unifiedCaptureSession = unified
-                    self.appAudioURL = appFileURL
-                    unifiedStarted = true
-                } catch {
-                    logger.warning("Unified capture failed to start; falling back to legacy capture. error=\(error.localizedDescription, privacy: .public)")
-                }
-            }
-
-            if !unifiedStarted {
-            try micStreamer.prepare(url: micFileURL, format: micTargetFormat)
-
-            if let appProcessID {
-                let appSession = AppAudioCaptureSession(
-                    fileURL: appFileURL,
-                    processID: appProcessID,
-                    onFirstBufferHostTime: { [weak self] hostTime in
-                        Task { [weak self] in
-                            await self?.captureAppStartHostTimeIfNeeded(hostTime)
-                        }
-                    },
-                    liveAudioContinuation: liveAudioStreamTuple.continuation
-                )
-                try await appSession.start()
-                self.appAudioCaptureSession = appSession
-                self.appAudioURL = appFileURL
-            } else {
-                self.appAudioCaptureSession = nil
-                self.appAudioURL = nil
-            }
-
-            do {
-                try await startMicCapture(
-                    deviceUID: desiredMicDeviceUID,
-                    micFileURL: micFileURL,
-                    liveContinuation: liveAudioStreamTuple.continuation
-                )
-            } catch {
-                // Bluetooth/external devices can fail explicit routing on some setups.
-                // Retry with the default input device so the live stream path stays active.
-                if desiredMicDeviceUID != nil {
-                    logger.warning(
-                        "Mic capture failed for selected device; retrying on default input. error=\(error.localizedDescription, privacy: .public)"
-                    )
-                    desiredMicDeviceUID = nil
-                    do {
-                        try await startMicCapture(
-                            deviceUID: nil,
-                            micFileURL: micFileURL,
-                            liveContinuation: liveAudioStreamTuple.continuation
-                        )
-                    } catch {
-                        logger.warning(
-                            "Default-device mic capture retry failed; falling back to recorder. error=\(error.localizedDescription, privacy: .public)"
-                        )
-                        try startRecorderFallback(to: micFileURL)
-                    }
-                } else {
-                    try startRecorderFallback(to: micFileURL)
-                }
-            }
-            } // end if !unifiedStarted
+            self.activeAppFileURL = appFileURL
+            self.activeAppProcessID = appProcessID
+            try await startAudioCapture(
+                micFileURL: micFileURL,
+                appFileURL: appFileURL,
+                appProcessID: appProcessID
+            )
             self.recordingStartedAt = Date()
             self.recordingCreatedAt = recordingCreatedAt
             self.recordingIdentifier = recordingIdentifier
@@ -699,6 +807,15 @@ actor RecordingService: RecordingServiceProtocol {
             releaseRecordingScopeIfNeeded()
         }
 
+        // Read before teardown: these counters live on the capture sessions, which are released
+        // immediately below. Zero app frames for the whole recording means app audio never
+        // arrived, and the recording is finalized as microphone-only.
+        let appFramesAtStop: Int64? = if let unifiedCaptureSession {
+            appAudioURL == nil ? nil : unifiedCaptureSession.appFramesWritten
+        } else {
+            appAudioCaptureSession?.framesWritten
+        }
+
         deregisterMicHardwareListeners()
         stopMicCapture()
         audioRecorder?.stop()
@@ -733,9 +850,22 @@ actor RecordingService: RecordingServiceProtocol {
             await cleanupRecordingState()
             return nil
         }
+        // An app source that wrote nothing is dropped here rather than carried into mixdown. Left
+        // in place it produces no timing sidecar, which makes the timeline mix decline and fall
+        // back to the constant-offset path, yielding a stereo file with a dead channel instead of
+        // a clean mono one.
+        let appAudioMissing = RecordingStartVerifier.shouldFinalizeWithoutAppAudio(appFrames: appFramesAtStop)
+        let appProducedAudio = appFramesAtStop != nil && !appAudioMissing
+        if appAudioMissing {
+            logger.notice(
+                "App audio produced no frames for the whole recording; finalizing as mic-only."
+            )
+        }
         let finalRecordingURLs: (mic: URL, app: URL?) = (
             captureFileURLs.mic,
-            fileManager.fileExists(atPath: captureFileURLs.app.path) ? captureFileURLs.app : nil
+            appProducedAudio && fileManager.fileExists(atPath: captureFileURLs.app.path)
+                ? captureFileURLs.app
+                : nil
         )
         let screenTmpVideoURL = RecordingFileLayout.screenTmpVideoURL(
             in: workspace,
@@ -778,6 +908,7 @@ actor RecordingService: RecordingServiceProtocol {
             session.duration = duration
             session.micAudioURL = finalRecordingURLs.mic.path
             session.appAudioURL = finalRecordingURLs.app?.path
+            session.appAudioMissing = appAudioMissing ? true : nil
             session.status = .recorded
             if activeCaptureDisplayID != nil && !shouldRunScreenMux {
                 session.screenCaptureWarning = "Screen recording failed — the display may have been off, disconnected, or not capturable."

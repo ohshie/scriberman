@@ -11,6 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     var modelContext: ModelContext?
     /// Floating "Still in progress. Stop?" panel for idle recordings.
     private let idleSessionPrompt = IdleSessionPromptController()
+    /// Floating "Recording failed." panel for a recording that never started writing audio.
+    private let recordingStartFailurePrompt = RecordingStartFailureController()
 
     private weak var mainWindow: NSWindow?
     private var statusItem: NSStatusItem?
@@ -613,6 +615,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         viewModel.onIdlePromptStopRequested = { [weak self] in
             guard let self, let modelContext else { return }
             _ = await self.appState?.newSessionViewModel.stopRecording(context: modelContext)
+        }
+
+        viewModel.onRecordingStartFailurePresentationChanged = { [weak self] isVisible in
+            guard let self else { return }
+            guard isVisible else {
+                recordingStartFailurePrompt.hide()
+                return
+            }
+            recordingStartFailurePrompt.show(
+                onOpen: { [weak self] in
+                    NSApp.activate(ignoringOtherApps: true)
+                    self?.mainWindow?.makeKeyAndOrderFront(nil)
+                    Task { @MainActor [weak self] in
+                        self?.appState?.newSessionViewModel.dismissRecordingStartFailure()
+                    }
+                },
+                onDismiss: { [weak self] in
+                    Task { @MainActor [weak self] in
+                        self?.appState?.newSessionViewModel.dismissRecordingStartFailure()
+                    }
+                }
+            )
         }
     }
 

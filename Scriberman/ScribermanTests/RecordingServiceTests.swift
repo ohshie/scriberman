@@ -911,6 +911,69 @@ final class RecordingServiceTests {
         try? FileManager.default.removeItem(at: url)
     }
 
+    // MARK: - Capture frame counts (start safety net signal)
+
+    @Test
+    func testFrameCountsReportUnifiedSessionCountersWhenUnifiedCaptureIsActive() async throws {
+        let fixture = try await makeRecoveryFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+
+        let unified = makeUnifiedSession(micDeviceUID: "device-a")
+        await fixture.service.setRecordingStateForTesting(isRecording: true)
+        await fixture.service.setUnifiedCaptureSessionForTesting(unified)
+
+        let counts = await fixture.service.captureFrameCounts()
+
+        // Nothing has been written, which is exactly the state the safety net must be able to see.
+        #expect(counts.mic == 0)
+        #expect(counts.micWriteFailures == 0)
+    }
+
+    @Test
+    func testFrameCountsReportNilAppWhenAppAudioIsNotBeingCaptured() async throws {
+        let fixture = try await makeRecoveryFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+
+        let unified = makeUnifiedSession(micDeviceUID: "device-a")
+        await fixture.service.setRecordingStateForTesting(isRecording: true)
+        await fixture.service.setUnifiedCaptureSessionForTesting(unified)
+
+        let counts = await fixture.service.captureFrameCounts()
+
+        #expect(counts.app == nil)
+    }
+
+    @Test
+    func testFrameCountsReportMicOnLegacyPath() async throws {
+        let fixture = try await makeRecoveryFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        await fixture.service.setRecordingStateForTesting(isRecording: true)
+
+        let counts = await fixture.service.captureFrameCounts()
+
+        // Legacy path with no app capture: a real count for mic, nothing for app.
+        #expect(counts.mic == 0)
+        #expect(counts.app == nil)
+    }
+
+    @Test
+    func testFrameCountsReportMicUnavailableUnderRecorderFallback() async throws {
+        let fixture = try await makeRecoveryFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        await fixture.service.setRecordingStateForTesting(isRecording: true)
+        await fixture.service.setMicRecoveryStateForTesting(
+            desiredMicDeviceUID: nil,
+            micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav"),
+            recorderFallbackActive: true
+        )
+
+        let counts = await fixture.service.captureFrameCounts()
+
+        // nil, not 0 — the recorder fallback does not write through AudioFileStreamer, and must
+        // never be mistaken for a dead capture.
+        #expect(counts.mic == nil)
+    }
+
     // MARK: - Mic resilience under unified ScreenCaptureKit capture
 
     private func makeUnifiedSession(micDeviceUID: String?) -> UnifiedCaptureSession {
