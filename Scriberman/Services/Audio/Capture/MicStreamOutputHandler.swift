@@ -64,6 +64,14 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
         process(sampleBuffer)
     }
 
+#if DEBUG
+    /// Test seam: feed a sample buffer without an `SCStream`, which cannot be constructed in
+    /// tests (it needs live `SCShareableContent`, a capturable window, and TCC grants).
+    func processSampleBufferForTesting(_ sampleBuffer: CMSampleBuffer) {
+        process(sampleBuffer)
+    }
+#endif
+
     private func process(_ sampleBuffer: CMSampleBuffer) {
         let hostNanos = Self.hostTimeNanos(from: sampleBuffer)
         captureFirstBufferHostTimeIfNeeded(hostNanos)
