@@ -4,13 +4,13 @@ struct SettingsView: View {
     private enum SettingsTab {
         case general
         case menuBar
-        case prompts
         case ai
         case hotkeys
         case advanced
     }
 
     var viewModel: SettingsViewModel
+    var updateService: UpdateService
     @Environment(AppState.self) private var appState
     @Environment(AIProviderService.self) private var aiProviderService
     @State private var selectedTab: SettingsTab = .general
@@ -73,6 +73,39 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+
+                    Section("Updates") {
+                        LabeledContent("Current version") {
+                            Text(updateService.currentVersionText)
+                        }
+
+                        Toggle(
+                            "Automatically check for updates",
+                            isOn: Binding(
+                                get: { updateService.automaticallyChecksForUpdates },
+                                set: { updateService.automaticallyChecksForUpdates = $0 }
+                            )
+                        )
+                        .disabled(!updateService.isConfigured)
+
+                        Button("Check for Updates…") {
+                            updateService.checkForUpdates()
+                        }
+                        .disabled(!updateService.canCheckForUpdates)
+
+                        if let updateErrorMessage = updateService.errorMessage {
+                            Text(updateErrorMessage)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                        } else if !updateService.isConfigured {
+                            Text("Update checks are available in production releases.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Section("App Icon") {
+                        AppIconPickerView(preferences: appState.appIconPreferences)
+                    }
                 }
                 .formStyle(.grouped)
                 .tabItem {
@@ -99,50 +132,7 @@ struct SettingsView: View {
                 }
                 .tag(SettingsTab.menuBar)
 
-                Form {
-                    Section("Saved Prompts") {
-                        if promptVM.prompts.isEmpty {
-                            Text("No prompts yet. Add a prompt to enable AI transformations.")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(promptVM.prompts) { prompt in
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text(prompt.name)
-                                        .font(.headline)
-                                    Text(prompt.content)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(3)
-
-                                    HStack {
-                                        Button("Edit") {
-                                            promptVM.presentEditor(for: prompt)
-                                        }
-
-                                        Button("Delete", role: .destructive) {
-                                            promptVM.deletePrompt(prompt)
-                                        }
-                                    }
-                                }
-                                .padding(.vertical, 6)
-                            }
-                        }
-
-                        Button("Add Prompt") {
-                            promptVM.presentEditor(for: nil)
-                        }
-                    }
-                }
-                .formStyle(.grouped)
-                .task {
-                    promptVM.loadPrompts()
-                }
-                .tabItem {
-                    Label("Prompts", systemImage: "text.bubble")
-                }
-                .tag(SettingsTab.prompts)
-
-                AISettingsView()
+                AISettingsView(promptVM: promptVM)
                     .tabItem {
                         Label("AI", systemImage: "sparkles")
                     }
@@ -165,6 +155,8 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+
+                    IdlePromptSettingsSection(preferences: appState.idlePromptPreferences)
 
                     Section("Recording Pipeline") {
                         VStack(alignment: .leading) {
@@ -448,6 +440,6 @@ struct SettingsView: View {
                 }
             }
         }
-        .frame(minWidth: 560, minHeight: 360)
+        .frame(minWidth: 500, minHeight: 360)
     }
 }

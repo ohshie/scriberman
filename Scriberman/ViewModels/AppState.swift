@@ -18,8 +18,11 @@ final class AppState {
     let newSessionViewModel: NewSessionViewModel
     let jobsViewModel: JobsViewModel
     let settingsViewModel: SettingsViewModel
+    let updateService: UpdateService
     let menuBarSettings: MenuBarSettings
     let appAudioSettings: AppAudioSettings
+    let idlePromptPreferences = IdlePromptPreferences()
+    let appIconPreferences = AppIconPreferences()
     private let restoreWorkspaceHandler: () async throws -> Workspace
     private let setWorkspaceHandler: (URL) async throws -> Workspace
 
@@ -73,12 +76,14 @@ final class AppState {
 
     init(
         services: ServiceContainer,
+        updateService: UpdateService? = nil,
         restoreWorkspaceHandler: (() async throws -> Workspace)? = nil,
         setWorkspaceHandler: ((URL) async throws -> Workspace)? = nil
     ) {
         self.mainServices = services.main
         self.backgroundServices = services.background
         self.permissionService = services.main.permissionService
+        self.updateService = updateService ?? .live()
         self.restoreWorkspaceHandler = restoreWorkspaceHandler ?? {
             try await services.background.workspaceService.restoreWorkspaceIfPossible()
         }
@@ -109,6 +114,9 @@ final class AppState {
         )
         self.menuBarSettings = MenuBarSettings()
         self.appAudioSettings = services.main.appAudioSettings
+        self.newSessionViewModel.idlePromptPreferencesProvider = { [idlePromptPreferences] in
+            idlePromptPreferences.settings
+        }
         self.dictationService = DictationService(recordingService: services.background.recordingService)
         self.newSessionViewModel.menuBarSettings = self.menuBarSettings
         self.newSessionViewModel.settingsViewModel = self.settingsViewModel

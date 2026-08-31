@@ -436,9 +436,10 @@ final class SettingsViewSourceTests {
 
         #expect(source.contains("TabView(selection: $selectedTab)"))
         #expect(source.contains("Label(\"General\", systemImage: \"gearshape\")"))
-        #expect(source.contains("Label(\"Prompts\", systemImage: \"text.bubble\")"))
+        #expect(!source.contains("Label(\"Prompts\", systemImage: \"text.bubble\")"))
+        #expect(!source.contains("case prompts"))
         #expect(source.contains("Label(\"AI\", systemImage: \"sparkles\")"))
-        #expect(source.contains("AISettingsView()"))
+        #expect(source.contains("AISettingsView(promptVM: promptVM)"))
         #expect(!source.contains("Section(\"AI Integration\")"))
     }
 
@@ -458,20 +459,32 @@ final class SettingsViewSourceTests {
 
     @Test
 
-    func testPromptsTabSupportsCRUDAndValidationHooks() throws {
+    func testAITabSupportsPromptCRUDAndValidationHooks() throws {
         let settingsSource = try settingsSource()
+        let aiSettingsSource = try aiSettingsSource()
         let promptViewModelSource = try promptManagementViewModelSource()
 
-        #expect(settingsSource.contains("Button(\"Add Prompt\")"))
-        #expect(settingsSource.contains("Button(\"Edit\")"))
-        #expect(settingsSource.contains("Button(\"Delete\", role: .destructive)"))
+        #expect(aiSettingsSource.contains("Section(\"Saved Prompts\")"))
+        #expect(aiSettingsSource.contains("Button(\"Add Prompt\")"))
+        #expect(aiSettingsSource.contains("Button(\"Edit\")"))
+        #expect(aiSettingsSource.contains("Button(\"Delete\", role: .destructive)"))
+        #expect(aiSettingsSource.contains("promptVM.loadPrompts()"))
+        #expect(aiSettingsSource.contains("promptVM.deletePrompt(prompt)"))
+        #expect(aiSettingsSource.contains("promptVM.presentEditor(for: nil)"))
+        #expect(!aiSettingsSource.contains("AIPromptStore"))
         #expect(settingsSource.contains("promptVM.savePrompt()"))
-        #expect(settingsSource.contains("promptVM.deletePrompt(prompt)"))
-        #expect(settingsSource.contains("promptVM.presentEditor(for: nil)"))
 
         #expect(promptViewModelSource.contains("\"Prompt name is required.\""))
         #expect(promptViewModelSource.contains("\"Prompt content is required.\""))
         #expect(promptViewModelSource.contains("\"Prompt name must be unique.\""))
+    }
+
+    @Test
+    func testSettingsViewUsesContentFittingMinimumWidth() throws {
+        let source = try settingsSource()
+
+        #expect(source.contains(".frame(minWidth: 500, minHeight: 360)"))
+        #expect(!source.contains(".frame(minWidth: 560, minHeight: 360)"))
     }
 
     private func settingsSource() throws -> String {

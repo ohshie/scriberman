@@ -14,6 +14,7 @@ struct TranscriptDetailView: View {
     @State private var editingTitle: String
     @State private var viewModel: TranscriptDetailViewModel
     @FocusState private var titleFocused: Bool
+    @State private var isTitleHovering = false
 
     init(
         session: any TranscribableSession,
@@ -108,6 +109,7 @@ struct TranscriptDetailView: View {
                         commitTitle()
                     }
                 }
+                .editableTitleHover(isHovering: $isTitleHovering)
 
             Text(headerFactsLine)
                 .font(.headline)

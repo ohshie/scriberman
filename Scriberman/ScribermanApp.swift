@@ -28,6 +28,9 @@ struct ScribermanApp: App {
                 .task {
                     appDelegate.appState = appState
                     appDelegate.modelContext = modelContainer.mainContext
+                    appDelegate.wireIdleSessionPrompt()
+                    // macOS resets to the bundle icon on every launch, so re-apply the choice.
+                    appState.appIconPreferences.apply()
                     await appState.bootstrapWorkspace()
                 }
                 .onChange(of: appState.dictationService.state) { _, _ in
@@ -38,12 +41,29 @@ struct ScribermanApp: App {
         .commands {
             SidebarCommands()
             TrimCommands(appState: appState)
+            ScribermanUpdateCommands(updateService: appState.updateService)
         }
 
         Settings {
-            SettingsView(viewModel: appState.settingsViewModel)
+            SettingsView(
+                viewModel: appState.settingsViewModel,
+                updateService: appState.updateService
+            )
                 .environment(appState)
                 .environment(appState.aiProviderService)
+        }
+    }
+}
+
+private struct ScribermanUpdateCommands: Commands {
+    let updateService: UpdateService
+
+    var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…") {
+                updateService.checkForUpdates()
+            }
+            .disabled(!updateService.canCheckForUpdates)
         }
     }
 }
