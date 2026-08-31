@@ -765,6 +765,117 @@ struct NewSessionViewModelTests {
             try? await Task.sleep(nanoseconds: pollNanoseconds)
         }
     }
+    // MARK: - Start verification and retry
+
+    /// Polls until `condition` holds, or gives up. The verification delay is compressed to
+    /// milliseconds by the tests, so the only real cost here is the failure path's log write.
+    @MainActor
+    private func waitUntil(
+        timeout: Duration = .seconds(20),
+        _ condition: () -> Bool
+    ) async {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if condition() { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    /// Settles the healthy path, where there is no observable end state to poll for: give the
+    /// verification task room to run and then confirm it did nothing.
+    @MainActor
+    private func waitForVerificationPass(_ recordingService: MockRecordingService) async {
+        await waitUntil { recordingService.frameCountCallCount >= 1 }
+        try? await Task.sleep(for: .milliseconds(50))
+    }
+
+    @Test
+    @MainActor
+    func testHealthyStartIsNotRestarted() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.viewModel.startVerificationDelay = .milliseconds(1)
+        fixture.recordingService.frameCountQueue = [(mic: 512, app: nil)]
+
+        _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
+        await waitForVerificationPass(fixture.recordingService)
+
+        #expect(fixture.recordingService.restartAudioCaptureCallCount == 0)
+        #expect(!fixture.viewModel.didFailToStartRecording)
+    }
+
+    @Test
+    @MainActor
+    func testDeadStartIsRestartedOnceAndRecovers() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.viewModel.startVerificationDelay = .milliseconds(1)
+        // Dead on the first check, writing after the restart.
+        fixture.recordingService.frameCountQueue = [(mic: 0, app: nil), (mic: 512, app: nil)]
+
+        _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
+        await waitUntil { fixture.recordingService.restartAudioCaptureCallCount >= 1 }
+        await waitUntil { fixture.recordingService.frameCountCallCount >= 2 }
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(fixture.recordingService.restartAudioCaptureCallCount == 1)
+        #expect(!fixture.viewModel.didFailToStartRecording)
+    }
+
+    @Test
+    @MainActor
+    func testDeadStartThatStaysDeadFailsAfterExactlyOneRestart() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.viewModel.startVerificationDelay = .milliseconds(1)
+        fixture.recordingService.frameCountQueue = [(mic: 0, app: nil)]
+
+        _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
+        await waitUntil { fixture.viewModel.didFailToStartRecording }
+
+        // Restarted once, never twice.
+        #expect(fixture.recordingService.restartAudioCaptureCallCount == 1)
+        #expect(fixture.viewModel.didFailToStartRecording)
+        if case .idle = fixture.viewModel.state {} else {
+            Issue.record("expected the failed session to return to idle")
+        }
+    }
+
+    /// A restart that will not start at all must not be retried again either.
+    @Test
+    @MainActor
+    func testFailedRestartIsNotRetried() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.viewModel.startVerificationDelay = .milliseconds(1)
+        fixture.recordingService.frameCountQueue = [(mic: 0, app: nil)]
+        fixture.recordingService.restartAudioCaptureResult = false
+
+        _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
+        await waitUntil { fixture.viewModel.didFailToStartRecording }
+
+        #expect(fixture.recordingService.restartAudioCaptureCallCount == 1)
+        #expect(fixture.viewModel.didFailToStartRecording)
+    }
+
+    /// The retry keeps the same session: no second session is persisted.
+    @Test
+    @MainActor
+    func testRetryDoesNotPersistASecondSession() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.viewModel.startVerificationDelay = .milliseconds(1)
+        fixture.recordingService.frameCountQueue = [(mic: 0, app: nil), (mic: 512, app: nil)]
+
+        _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
+        await waitUntil { fixture.recordingService.restartAudioCaptureCallCount >= 1 }
+        await waitUntil { fixture.recordingService.frameCountCallCount >= 2 }
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(fixture.recordingService.startCalls.count == 1)
+        #expect(fixture.recordingService.restartAudioCaptureCallCount == 1)
+    }
+
     // MARK: - Recording start failure panel
 
     @Test

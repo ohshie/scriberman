@@ -598,7 +598,10 @@ final class NewSessionViewModel {
     ///
     /// Long enough for the first buffers to land on both capture paths, short enough that a dead
     /// recording is caught before the user has said anything worth keeping.
-    static let startVerificationDelay: Duration = .seconds(1)
+    static let defaultStartVerificationDelay: Duration = .seconds(1)
+
+    /// Overridable so tests can exercise the verify/retry sequence without waiting real seconds.
+    var startVerificationDelay: Duration = NewSessionViewModel.defaultStartVerificationDelay
 
     /// Verifies, one second after start, that frames are being written; restarts capture once if
     /// not; and fails the session if the restart does not help.
@@ -610,7 +613,7 @@ final class NewSessionViewModel {
         startVerificationTask = Task { [weak self] in
             guard let self else { return }
 
-            try? await Task.sleep(for: Self.startVerificationDelay)
+            try? await Task.sleep(for: startVerificationDelay)
             guard !Task.isCancelled else { return }
 
             var counts = await recordingService.captureFrameCounts()
@@ -622,7 +625,7 @@ final class NewSessionViewModel {
             let didRestart = await recordingService.restartAudioCapture()
 
             if didRestart {
-                try? await Task.sleep(for: Self.startVerificationDelay)
+                try? await Task.sleep(for: startVerificationDelay)
                 guard !Task.isCancelled else { return }
                 counts = await recordingService.captureFrameCounts()
                 if RecordingStartVerifier.verdict(micFrames: counts.mic, appFrames: counts.app) != .dead {
