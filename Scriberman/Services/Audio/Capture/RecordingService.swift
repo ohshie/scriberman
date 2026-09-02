@@ -446,6 +446,12 @@ actor RecordingService: RecordingServiceProtocol {
         await handleAudioEngineConfigurationChange()
     }
 
+    /// Test seam: the count is only advanced by a real mid-session restart, which needs a live
+    /// `SCStream`.
+    func setCaptureRestartCountForTesting(_ count: Int) {
+        captureRestartCount = count
+    }
+
     func setUnifiedCaptureSessionForTesting(_ session: UnifiedCaptureSession?) {
         self.unifiedCaptureSession = session
     }
@@ -1050,6 +1056,7 @@ actor RecordingService: RecordingServiceProtocol {
             session.micAudioURL = finalRecordingURLs.mic.path
             session.appAudioURL = finalRecordingURLs.app?.path
             session.appAudioMissing = appAudioMissing ? true : nil
+            session.captureInterruptionCount = captureRestartCount > 0 ? captureRestartCount : nil
             session.status = .recorded
             if activeCaptureDisplayID != nil && !shouldRunScreenMux {
                 session.screenCaptureWarning = "Screen recording failed — the display may have been off, disconnected, or not capturable."

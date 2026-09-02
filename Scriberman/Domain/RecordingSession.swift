@@ -19,6 +19,12 @@ final class RecordingSession {
     /// its entire duration, so it was finalized as microphone-only. Stored as a flag rather than a
     /// message because the wording belongs to the view.
     var appAudioMissing: Bool?
+    /// How many times capture was restarted mid-recording, or `nil` when it was never interrupted.
+    ///
+    /// A count rather than a flag: a recording interrupted once and one interrupted eleven times
+    /// are materially different, and the count costs nothing to store. Stored as data, not a
+    /// message — the wording belongs to the view, as with `appAudioMissing`.
+    var captureInterruptionCount: Int?
     var mixdownAttemptCountValue: Int?
     var transcriptData: Data?
     var retranscriptData: Data?
@@ -31,6 +37,10 @@ final class RecordingSession {
     var trimEnd: Double?
 
     var isTrimmed: Bool { originalMixdownURL != nil }
+
+    /// Whether this recording's capture was interrupted and restarted at least once, so it
+    /// contains an interval of silence where capture was dead.
+    var wasCaptureInterrupted: Bool { (captureInterruptionCount ?? 0) > 0 }
 
     var status: RecordingStatus {
         get { RecordingStatus(persistedValue: statusRawValue, errorMessage: errorMessage) }
