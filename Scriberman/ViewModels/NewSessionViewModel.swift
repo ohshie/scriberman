@@ -35,6 +35,11 @@ final class NewSessionViewModel {
         idlePromptPreferencesProvider?() ?? .default
     }
     private var idlePromptMachine = IdlePromptStateMachine()
+    private var captureHealthMonitor = CaptureHealthMonitor()
+    /// When capture health was last evaluated. The recording monitor ticks every 50 ms for the
+    /// level meters; sampling frame counts that often would mean twenty extra actor hops a second
+    /// for a check that only needs to be as fine-grained as the stall threshold.
+    private var lastCaptureHealthEvaluationAt: Date?
     private let userInputIdleProvider: any UserInputIdleProviding
     /// True when this session captures both mic and app audio (the only case the prompt applies to).
     private var isIdlePromptApplicable = false
@@ -248,6 +253,9 @@ final class NewSessionViewModel {
         dismissIdlePrompt()
         isIdlePromptApplicable = false
         idlePromptMachine = IdlePromptStateMachine()
+        captureHealthMonitor = CaptureHealthMonitor(configuration: captureHealthConfiguration)
+        lastCaptureHealthEvaluationAt = nil
+        lastCaptureHealthEffect = .none
     }
 
     /// Tears the prompt down. Safe to call when it is not showing.
@@ -434,6 +442,9 @@ final class NewSessionViewModel {
             // The idle prompt only applies to mic + app sessions.
             isIdlePromptApplicable = selectedAppProcessID != nil
             idlePromptMachine = IdlePromptStateMachine()
+            captureHealthMonitor = CaptureHealthMonitor(configuration: captureHealthConfiguration)
+            lastCaptureHealthEvaluationAt = nil
+            lastCaptureHealthEffect = .none
             isIdlePromptVisible = false
 
             let descriptor = FetchDescriptor<RecordingSession>()
@@ -497,6 +508,9 @@ final class NewSessionViewModel {
         dismissIdlePrompt()
         isIdlePromptApplicable = false
         idlePromptMachine = IdlePromptStateMachine()
+        captureHealthMonitor = CaptureHealthMonitor(configuration: captureHealthConfiguration)
+        lastCaptureHealthEvaluationAt = nil
+        lastCaptureHealthEffect = .none
         
         var fetchedSession: RecordingSession?
         if let sessionID = sessionID {
@@ -678,6 +692,9 @@ final class NewSessionViewModel {
         dismissIdlePrompt()
         isIdlePromptApplicable = false
         idlePromptMachine = IdlePromptStateMachine()
+        captureHealthMonitor = CaptureHealthMonitor(configuration: captureHealthConfiguration)
+        lastCaptureHealthEvaluationAt = nil
+        lastCaptureHealthEffect = .none
 
         // Mark the session failed rather than deleting it: this reuses the status vocabulary the
         // jobs pipeline already uses for failures, and leaves the row to point at its log.
@@ -724,10 +741,60 @@ final class NewSessionViewModel {
                 state = .recording(duration: duration, level: max(levels.mic, levels.app))
 
                 await evaluateIdlePrompt(recordingStartedAt: startedAt)
+                await evaluateCaptureHealth()
 
                 try? await Task.sleep(for: .milliseconds(50))
             }
         }
+    }
+
+    // MARK: - Capture health
+
+    /// How this view model configures `CaptureHealthMonitor`. Overridable so tests can exercise
+    /// detection without waiting real seconds, mirroring `startVerificationDelay`.
+    var captureHealthConfiguration: CaptureHealthMonitor.Configuration = .default
+
+    /// How often capture health is evaluated. The recording monitor's own tick is 50 ms, which is
+    /// what the level meters need and far finer than a stall threshold measured in seconds.
+    var captureHealthEvaluationInterval: TimeInterval = 1
+
+    /// The effect the monitor produced on its most recent evaluation. Observed by tests; while
+    /// detection is observation-only this is also the only record of what it decided.
+    private(set) var lastCaptureHealthEffect: CaptureHealthMonitor.Effect = .none
+
+    /// Whether this recording's capture has been restarted at least once.
+    var wasCaptureInterrupted: Bool { captureHealthMonitor.wasInterrupted }
+
+    /// Evaluates capture health at most once per `captureHealthEvaluationInterval`.
+    ///
+    /// Observation only for now: the effect is recorded and logged, never applied. Detection ships
+    /// ahead of recovery so it can be validated against real recordings before anything is allowed
+    /// to tear capture down and rebuild it.
+    private func evaluateCaptureHealth() async {
+        let now = Date()
+        if let last = lastCaptureHealthEvaluationAt,
+           now.timeIntervalSince(last) < captureHealthEvaluationInterval {
+            return
+        }
+        lastCaptureHealthEvaluationAt = now
+
+        let snapshot = await recordingService.captureHealthSnapshot()
+        let effect = captureHealthMonitor.update(
+            now: now,
+            snapshot: snapshot,
+            isRecording: activeRecordingSessionID != nil
+        )
+        lastCaptureHealthEffect = effect
+
+        guard effect != .none else { return }
+        let mic = snapshot.micFrames.map(String.init) ?? "unavailable"
+        let app = snapshot.appFrames.map(String.init) ?? "not captured"
+        let failures = snapshot.streamFailureCount
+        let restarts = captureHealthMonitor.restartsIssued
+        let action = effect == .restart ? "restart capture" : "stop the recording"
+        logger.warning(
+            "Capture health would \(action, privacy: .public) (observation only). micFrames=\(mic, privacy: .public) appFrames=\(app, privacy: .public) streamFailures=\(failures, privacy: .public) restartsIssued=\(restarts, privacy: .public)"
+        )
     }
 
     // MARK: - Idle session prompt

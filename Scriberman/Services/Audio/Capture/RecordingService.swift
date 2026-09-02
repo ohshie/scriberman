@@ -276,6 +276,10 @@ actor RecordingService: RecordingServiceProtocol {
     private var screenCaptureSession: (any ScreenCaptureSessionControlling)?
     private var shouldSkipScreenMux = false
     private var pendingError: RecordingError?
+    /// Monotonic per-recording count of capture streams that stopped on their own. Read by
+    /// the capture-health monitor as direct evidence of death, rather than inferred from
+    /// stalled counters. Reset when a recording starts.
+    private var captureStreamFailureCount = 0
     private var micRecoveryRetryTask: Task<Void, Never>?
     private let liveAudioStreamTuple: (stream: AsyncStream<([Float], AudioSource, Double)>, continuation: AsyncStream<([Float], AudioSource, Double)>.Continuation)
     // nonisolated(unsafe): written once in init on the actor; read only in deinit; lifetime matches the actor
@@ -553,6 +557,21 @@ actor RecordingService: RecordingServiceProtocol {
         let detail = error.localizedDescription
         logger.error("Capture stream stopped during an active recording: \(detail, privacy: .public)")
         pendingError = .captureInterrupted(detail: detail)
+        captureStreamFailureCount += 1
+    }
+
+    /// Everything the capture-health monitor needs, gathered in one actor hop.
+    ///
+    /// `streamFailureCount` is deliberately not consuming, unlike `consumePendingError()`: the
+    /// monitor observes it every tick, while the pending error is spent once when a failure is
+    /// reported to the user and written to the session log.
+    func captureHealthSnapshot() async -> CaptureHealthMonitor.Snapshot {
+        let counts = await captureFrameCounts()
+        return CaptureHealthMonitor.Snapshot(
+            micFrames: counts.mic,
+            appFrames: counts.app,
+            streamFailureCount: captureStreamFailureCount
+        )
     }
 
     /// Starts audio capture for a recording: unified ScreenCaptureKit when enabled and an app was
@@ -782,6 +801,7 @@ actor RecordingService: RecordingServiceProtocol {
             self.isRecordingValue = true
             self.audioLevelValue = 0
             self.pendingError = nil
+            self.captureStreamFailureCount = 0
             self.activeCapturedAppName = capturedAppName
             self.pendingTitle = title
 
