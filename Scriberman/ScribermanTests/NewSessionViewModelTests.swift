@@ -1298,6 +1298,64 @@ struct NewSessionViewModelTests {
         }
         #expect(fixture.viewModel.errorMessage != nil)
     }
+
+    // MARK: - Verification is anchored to capture start
+
+    /// The delay is counted from when capture started, so start-up work that runs afterwards --
+    /// loading ASR and diarizer models, which takes an unbounded amount of time -- cannot push the
+    /// check later.
+    @Test
+    @MainActor
+    func testRemainingDelayShrinksByTimeAlreadyElapsed() {
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        let remaining = NewSessionViewModel.remainingDelay(
+            .seconds(1),
+            since: start,
+            now: start.addingTimeInterval(0.4)
+        )
+        #expect(remaining <= .milliseconds(601))
+        #expect(remaining >= .milliseconds(599))
+    }
+
+    @Test
+    @MainActor
+    func testRemainingDelayIsZeroOnceTheDelayHasAlreadyElapsed() {
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        // Model loading took four seconds; the one-second check is already overdue and must run
+        // immediately rather than waiting another full second.
+        let remaining = NewSessionViewModel.remainingDelay(
+            .seconds(1),
+            since: start,
+            now: start.addingTimeInterval(4)
+        )
+        #expect(remaining == .zero)
+    }
+
+    @Test
+    @MainActor
+    func testRemainingDelayIsTheFullDelayWhenNoTimeHasPassed() {
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        #expect(
+            NewSessionViewModel.remainingDelay(.seconds(1), since: start, now: start) == .seconds(1)
+        )
+    }
+
+    /// Verification still runs, and still restarts a dead start exactly once, now that it is
+    /// scheduled before live transcription rather than after it.
+    @Test
+    @MainActor
+    func testVerificationStillRunsWhenScheduledBeforeLiveTranscription() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.viewModel.startVerificationDelay = .milliseconds(1)
+        fixture.recordingService.frameCountQueue = [(mic: 0, app: nil), (mic: 512, app: nil)]
+
+        _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
+        await waitUntil { fixture.recordingService.restartAudioCaptureCallCount >= 1 }
+
+        #expect(fixture.recordingService.restartAudioCaptureCallCount == 1)
+        #expect(!fixture.viewModel.didFailToStartRecording)
+    }
 }
 
 @MainActor

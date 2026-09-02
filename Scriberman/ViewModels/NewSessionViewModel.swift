@@ -447,6 +447,18 @@ final class NewSessionViewModel {
             lastCaptureHealthEffect = .none
             isIdlePromptVisible = false
 
+            // Scheduled here, immediately after capture started, and deliberately not after the
+            // live-transcription start below. That start loads ASR and diarizer models and takes
+            // an unbounded amount of time; sequencing verification behind it deferred the check by
+            // that duration, which defeats catching a dead recording before anything worth keeping
+            // was said.
+            verifyRecordingStart(
+                sessionID: recordingSessionID,
+                workspace: workspace,
+                context: context,
+                captureStartedAt: recordingStartedAt ?? Date()
+            )
+
             let descriptor = FetchDescriptor<RecordingSession>()
             let session = try? context.fetch(descriptor).first(where: { $0.id == recordingSessionID })
             
@@ -462,7 +474,6 @@ final class NewSessionViewModel {
             }
             
             startRecordingMonitor(workspace: workspace, context: context)
-            verifyRecordingStart(sessionID: recordingSessionID, workspace: workspace, context: context)
             return session
         } catch {
             errorMessage = error.localizedDescription
@@ -617,17 +628,42 @@ final class NewSessionViewModel {
     /// Overridable so tests can exercise the verify/retry sequence without waiting real seconds.
     var startVerificationDelay: Duration = NewSessionViewModel.defaultStartVerificationDelay
 
+    /// How much of `delay` is left, measured from `start`. Zero once it has already elapsed.
+    ///
+    /// Pure so the anchoring is testable without a clock: the point of the verification delay is
+    /// that it is counted from the moment capture started, not from whenever the checking task got
+    /// around to running.
+    static func remainingDelay(_ delay: Duration, since start: Date, now: Date) -> Duration {
+        let elapsed = now.timeIntervalSince(start)
+        guard elapsed > 0 else { return delay }
+        let remaining = delay - .seconds(elapsed)
+        return remaining > .zero ? remaining : .zero
+    }
+
     /// Verifies, one second after start, that frames are being written; restarts capture once if
     /// not; and fails the session if the restart does not help.
     ///
     /// Runs detached so the UI shows the recording immediately rather than stalling a second on a
     /// check that almost always passes.
-    private func verifyRecordingStart(sessionID: UUID, workspace: Workspace, context: ModelContext) {
+    private func verifyRecordingStart(
+        sessionID: UUID,
+        workspace: Workspace,
+        context: ModelContext,
+        captureStartedAt: Date
+    ) {
         startVerificationTask?.cancel()
         startVerificationTask = Task { [weak self] in
             guard let self else { return }
 
-            try? await Task.sleep(for: startVerificationDelay)
+            // Anchored to when capture started, not to when this task happened to begin running,
+            // so unrelated start-up work cannot push the check later.
+            try? await Task.sleep(
+                for: Self.remainingDelay(
+                    startVerificationDelay,
+                    since: captureStartedAt,
+                    now: Date()
+                )
+            )
             guard !Task.isCancelled else { return }
 
             var counts = await recordingService.captureFrameCounts()
