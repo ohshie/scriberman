@@ -75,20 +75,40 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
         liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil,
         onMicFirstHostTime: (@Sendable (UInt64) -> Void)? = nil,
         onAppFirstHostTime: (@Sendable (UInt64) -> Void)? = nil,
-        notificationCenter: NotificationCenter = .default
+        notificationCenter: NotificationCenter = .default,
+        reusingStreamers: (mic: AudioFileStreamer, app: AudioFileStreamer)? = nil
     ) {
         self.appFileURL = appFileURL
         self.processID = processID
         self.currentMicDeviceUID = micDeviceUID
         self.configuration = Self.makeConfiguration(micDeviceUID: micDeviceUID)
         self.notificationCenter = notificationCenter
-        self.appHandler = AppAudioStreamOutputHandler(liveAudioContinuation: liveAudioContinuation)
-        self.micHandler = MicStreamOutputHandler(liveAudioContinuation: liveAudioContinuation)
+        self.appHandler = AppAudioStreamOutputHandler(
+            liveAudioContinuation: liveAudioContinuation,
+            streamer: reusingStreamers?.app ?? AudioFileStreamer(label: "app")
+        )
+        self.micHandler = MicStreamOutputHandler(
+            liveAudioContinuation: liveAudioContinuation,
+            streamer: reusingStreamers?.mic ?? AudioFileStreamer(label: "mic")
+        )
         self.appHandler.onFirstBufferHostTime = onAppFirstHostTime
         self.micHandler.onFirstBufferHostTime = onMicFirstHostTime
         super.init()
-        self.appHandler.configureOutput(url: appFileURL)
-        self.micHandler.configureOutput(url: micFileURL)
+        // A mid-session restart adopts writers that are already open and mid-recording. Preparing
+        // them again would truncate the files and reset their timing segments, which is exactly the
+        // audio a restart exists to preserve.
+        if reusingStreamers == nil {
+            self.appHandler.configureOutput(url: appFileURL)
+            self.micHandler.configureOutput(url: micFileURL)
+        } else {
+            self.appHandler.adoptPreparedOutput(url: appFileURL)
+            self.micHandler.adoptPreparedOutput(url: micFileURL)
+        }
+    }
+
+    /// The writers this session is feeding, so a replacement session can adopt them.
+    var streamers: (mic: AudioFileStreamer, app: AudioFileStreamer) {
+        (micHandler.streamer, appHandler.streamer)
     }
 
     func start() async throws {

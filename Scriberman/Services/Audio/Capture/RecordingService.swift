@@ -280,6 +280,9 @@ actor RecordingService: RecordingServiceProtocol {
     /// the capture-health monitor as direct evidence of death, rather than inferred from
     /// stalled counters. Reset when a recording starts.
     private var captureStreamFailureCount = 0
+    /// How many times capture was restarted mid-recording. Persisted onto the session at stop so
+    /// an interrupted recording is discoverable when reviewed, not only in the log.
+    private(set) var captureRestartCount = 0
     private var micRecoveryRetryTask: Task<Void, Never>?
     private let liveAudioStreamTuple: (stream: AsyncStream<([Float], AudioSource, Double)>, continuation: AsyncStream<([Float], AudioSource, Double)>.Continuation)
     // nonisolated(unsafe): written once in init on the actor; read only in deinit; lifetime matches the actor
@@ -401,8 +404,12 @@ actor RecordingService: RecordingServiceProtocol {
         currentSessionID: UUID? = nil,
         screenCaptureSession: (any ScreenCaptureSessionControlling)? = nil,
         videoStartHostTime: UInt64? = nil,
-        shouldSkipScreenMux: Bool = false
+        shouldSkipScreenMux: Bool = false,
+        activeAppFileURL: URL? = nil,
+        activeAppProcessID: pid_t? = nil
     ) {
+        self.activeAppFileURL = activeAppFileURL
+        self.activeAppProcessID = activeAppProcessID
         self.isRecordingValue = isRecording
         self.recordingIdentifier = recordingIdentifier
         self.recordingWorkspaceRootURL = recordingWorkspaceRootURL
@@ -682,6 +689,18 @@ actor RecordingService: RecordingServiceProtocol {
             return false
         }
 
+        // This path overwrites the audio files, which is safe only because it runs when nothing has
+        // been written. Once frames exist, overwriting destroys the recording it was meant to save;
+        // `restartAudioCaptureInPlace()` is the caller for that case.
+        let counts = await captureFrameCounts()
+        let framesWritten = (counts.mic ?? 0) + (counts.app ?? 0)
+        guard framesWritten == 0 else {
+            logger.error(
+                "Start-path restart refused: \(framesWritten, privacy: .public) frames already written. Mid-session recovery must use restartAudioCaptureInPlace()."
+            )
+            return false
+        }
+
         await stopAudioCaptureForRestart()
 
         // Re-anchor: the previous attempt contributed no samples, so the timeline reference must
@@ -703,6 +722,70 @@ actor RecordingService: RecordingServiceProtocol {
             )
             return false
         }
+    }
+
+    /// Restarts capture mid-recording, preserving every frame already captured.
+    ///
+    /// Distinct from `restartAudioCapture()` in the one way that matters: it does not touch the
+    /// writers. The `SCStream` and its output handlers are replaced, but the same
+    /// `AudioFileStreamer` instances carry over, so the files stay open, their accumulated timing
+    /// segments survive, and no `.timing` sidecar is written early.
+    ///
+    /// The timeline anchors are deliberately left in place. `captureMicStartHostTimeIfNeeded`
+    /// guards on nil, so the new handlers' first buffers do not re-anchor the recording — audio
+    /// captured after the restart lands at its true position against the reference established at
+    /// start, and the dead interval reads as silence of its real duration rather than a splice.
+    func restartAudioCaptureInPlace() async -> Bool {
+        guard isRecordingValue, let activeAppFileURL, let micFileURL else {
+            return false
+        }
+
+        // Mic-only recordings never take the unified path, and the engine path already has its own
+        // recovery in `mic-capture-resilience` — which likewise does not re-prepare the writer.
+        guard let existing = unifiedCaptureSession else {
+            logger.notice("Mid-session restart delegating to engine-path mic recovery.")
+            return await recoverMicCapture()
+        }
+
+        let startedAt = Date()
+        let framesBefore = (mic: existing.micFramesWritten, app: existing.appFramesWritten)
+        await existing.stopStreamPreservingOutput()
+        let reused = existing.streamers
+
+        let replacement = UnifiedCaptureSession(
+            micFileURL: micFileURL,
+            appFileURL: activeAppFileURL,
+            processID: activeAppProcessID ?? 0,
+            micDeviceUID: existing.currentMicDeviceUID,
+            liveAudioContinuation: liveAudioStreamTuple.continuation,
+            onMicFirstHostTime: { [weak self] hostTime in
+                Task { [weak self] in await self?.captureMicStartHostTimeIfNeeded(hostTime) }
+            },
+            onAppFirstHostTime: { [weak self] hostTime in
+                Task { [weak self] in await self?.captureAppStartHostTimeIfNeeded(hostTime) }
+            },
+            reusingStreamers: reused
+        )
+        replacement.onStreamStopped = { [weak self] error in
+            Task { [weak self] in await self?.reportCaptureStreamFailure(error) }
+        }
+
+        do {
+            try await replacement.start()
+        } catch {
+            logger.error(
+                "Mid-session capture restart failed: \(error.localizedDescription, privacy: .public). Captured audio is retained."
+            )
+            return false
+        }
+
+        unifiedCaptureSession = replacement
+        captureRestartCount += 1
+        let elapsedMs = Date().timeIntervalSince(startedAt) * 1_000
+        logger.notice(
+            "Capture restarted mid-session (restart #\(self.captureRestartCount, privacy: .public)). teardownAndStartMs=\(elapsedMs, privacy: .public) micFramesBefore=\(framesBefore.mic, privacy: .public) appFramesBefore=\(framesBefore.app, privacy: .public). The outage appears as silence in the timing sidecar gap."
+        )
+        return true
     }
 
     private func stopAudioCaptureForRestart() async {
@@ -802,6 +885,7 @@ actor RecordingService: RecordingServiceProtocol {
             self.audioLevelValue = 0
             self.pendingError = nil
             self.captureStreamFailureCount = 0
+            self.captureRestartCount = 0
             self.activeCapturedAppName = capturedAppName
             self.pendingTitle = title
 

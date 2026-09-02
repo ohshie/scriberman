@@ -7,7 +7,9 @@ import ScreenCaptureKit
 final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendable {
     private let lock = NSLock()
     private var fileURL: URL?
-    private let streamer = AudioFileStreamer(label: "app")
+    /// Injected so a mid-session capture restart can rebuild the stream and its handlers while
+    /// continuing to write into the same file, with its accumulated timing segments intact.
+    let streamer: AudioFileStreamer
     private var monoFormat: AVAudioFormat?
     private var firstBufferHostTime: UInt64?
     private let liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation?
@@ -31,9 +33,24 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
 
     private var hasPrepared = false
 
-    init(liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil) {
+    init(
+        liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil,
+        streamer: AudioFileStreamer = AudioFileStreamer(label: "app")
+    ) {
         self.liveAudioContinuation = liveAudioContinuation
+        self.streamer = streamer
         super.init()
+    }
+
+    /// Adopts a writer that is already open and mid-recording. See the mic handler for why a
+    /// restart must not re-prepare.
+    func adoptPreparedOutput(url: URL) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.fileURL = url
+        self.monoFormat = nil
+        self.firstBufferHostTime = nil
+        self.hasPrepared = true
     }
 
     func configureOutput(url: URL) {
