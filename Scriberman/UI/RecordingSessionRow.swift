@@ -33,6 +33,16 @@ struct RecordingSessionRow: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
+
+                // A caveat, not a failure: capture dropped mid-recording and came back, so the
+                // audio contains an interval of silence. Deliberately not the `.error` treatment —
+                // the recording succeeded and its audio is usable. Independent of the screen
+                // warning above, so a recording that hit both shows both.
+                if session.wasCaptureInterrupted {
+                    Label("Capture was interrupted and resumed", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
 
             Spacer(minLength: 12)
