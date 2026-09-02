@@ -78,6 +78,14 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
         return restartAudioCaptureResult
     }
 
+    var restartAudioCaptureInPlaceResult = true
+    private(set) var restartAudioCaptureInPlaceCallCount = 0
+
+    func restartAudioCaptureInPlace() async -> Bool {
+        restartAudioCaptureInPlaceCallCount += 1
+        return restartAudioCaptureInPlaceResult
+    }
+
     func startRecording(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID?,

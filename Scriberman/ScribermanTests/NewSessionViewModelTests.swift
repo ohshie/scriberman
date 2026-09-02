@@ -1015,12 +1015,16 @@ struct NewSessionViewModelTests {
         ]
         // Healthy at start, so any restart observed could only have come from capture health.
         fixture.recordingService.frameCountQueue = [(mic: 512, app: nil)]
+        // Explicit rather than relying on the shipped default, so the machine's user defaults
+        // cannot decide what this test asserts.
+        fixture.viewModel.isCaptureHealthRecoveryEnabled = false
 
         _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
         await waitUntil { fixture.viewModel.lastCaptureHealthEffect == .restart }
         try? await Task.sleep(for: .milliseconds(100))
 
         #expect(fixture.recordingService.restartAudioCaptureCallCount == 0)
+        #expect(fixture.recordingService.restartAudioCaptureInPlaceCallCount == 0)
         #expect(!fixture.viewModel.didFailToStartRecording)
         if case .recording = fixture.viewModel.state {} else {
             Issue.record("observation-only detection must leave the recording running")
@@ -1127,6 +1131,172 @@ struct NewSessionViewModelTests {
         #expect(fixture.recordingService.captureHealthSnapshotCallCount == countAfterStop)
         #expect(fixture.viewModel.lastCaptureHealthEffect == .none)
         #expect(!fixture.viewModel.wasCaptureInterrupted)
+    }
+
+    // MARK: - Capture health recovery
+
+    private func enableRecovery(
+        _ fixture: Fixture,
+        stallThreshold: TimeInterval = 0.05,
+        consecutiveRestartLimit: Int = 3
+    ) {
+        fixture.viewModel.startVerificationDelay = .milliseconds(1)
+        fixture.viewModel.captureHealthEvaluationInterval = 0.01
+        fixture.viewModel.isCaptureHealthRecoveryEnabled = true
+        fixture.viewModel.captureHealthConfiguration = CaptureHealthMonitor.Configuration(
+            stallThreshold: stallThreshold,
+            consecutiveRestartLimit: consecutiveRestartLimit,
+            totalRestartLimit: 10
+        )
+        fixture.recordingService.isRecordingOverride = true
+    }
+
+    /// A stalled capture is restarted in place, not through the start path that overwrites the
+    /// audio files.
+    @Test
+    @MainActor
+    func testDeadCaptureIsRestartedInPlace() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        enableRecovery(fixture)
+        fixture.recordingService.captureHealthSnapshotQueue = [
+            CaptureHealthMonitor.Snapshot(micFrames: 512, appFrames: nil)
+        ]
+
+        _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
+        await waitUntil { fixture.recordingService.restartAudioCaptureInPlaceCallCount >= 1 }
+
+        #expect(fixture.recordingService.restartAudioCaptureInPlaceCallCount >= 1)
+        // The start path overwrites the files; it must never be the mid-session recovery.
+        #expect(fixture.recordingService.restartAudioCaptureCallCount == 0)
+    }
+
+    /// A restart that recovers keeps the recording running and the session untouched.
+    @Test
+    @MainActor
+    func testRecoveredRestartKeepsTheRecordingRunning() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        enableRecovery(fixture)
+        // Dead once, then producing frames again after the restart.
+        fixture.recordingService.captureHealthSnapshotQueue = [
+            CaptureHealthMonitor.Snapshot(micFrames: 512, appFrames: nil),
+            CaptureHealthMonitor.Snapshot(micFrames: 512, appFrames: nil)
+        ] + (1...40).map { CaptureHealthMonitor.Snapshot(micFrames: 512 + Int64($0) * 960, appFrames: nil) }
+
+        let sessionID = fixture.recordingService.startReturns
+        _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
+        await waitUntil { fixture.recordingService.restartAudioCaptureInPlaceCallCount >= 1 }
+        try? await Task.sleep(for: .milliseconds(150))
+
+        #expect(!fixture.viewModel.didFailToStartRecording)
+        if case .recording = fixture.viewModel.state {} else {
+            Issue.record("a recovered restart must leave the recording running")
+        }
+        // No second session was created for the restart.
+        let sessions = (try? fixture.context.fetch(FetchDescriptor<RecordingSession>())) ?? []
+        #expect(sessions.filter { $0.id != sessionID }.isEmpty)
+    }
+
+    /// When restarts are exhausted the recording is stopped and reported — but finalized, not
+    /// discarded, because unlike a failed start it captured real audio.
+    @Test
+    @MainActor
+    func testExhaustedRestartsStopAndReportTheRecording() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        enableRecovery(fixture, consecutiveRestartLimit: 1)
+        fixture.recordingService.captureHealthSnapshotQueue = [
+            CaptureHealthMonitor.Snapshot(micFrames: 512, appFrames: nil)
+        ]
+        let stopped = RecordingSession(
+            createdAt: .now,
+            duration: 8,
+            micAudioURL: "/tmp/mic.wav",
+            title: "Interrupted",
+            status: .recorded
+        )
+        fixture.context.insert(stopped)
+        try? fixture.context.save()
+        fixture.recordingService.stopReturns = stopped.id
+
+        _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
+        await waitUntil { fixture.viewModel.didFailToStartRecording }
+
+        #expect(fixture.viewModel.didFailToStartRecording)
+        if case .idle = fixture.viewModel.state {} else {
+            Issue.record("a recording stopped by capture loss must return to idle")
+        }
+        // Finalized through the normal stop path, so the audio it did capture survives. Unlike a
+        // failed start, the session is neither discarded nor marked `.error`.
+        let sessions = (try? fixture.context.fetch(FetchDescriptor<RecordingSession>())) ?? []
+        #expect(sessions.contains { $0.id == stopped.id })
+        if case .error = stopped.status {
+            Issue.record("a recording that captured audio must not be finalized as an error")
+        }
+    }
+
+    /// The failure is presented the same way a failed start is.
+    @Test
+    @MainActor
+    func testCaptureLossPresentsTheFailurePanel() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        enableRecovery(fixture, consecutiveRestartLimit: 1)
+        fixture.recordingService.captureHealthSnapshotQueue = [
+            CaptureHealthMonitor.Snapshot(micFrames: 512, appFrames: nil)
+        ]
+        var presentations: [Bool] = []
+        fixture.viewModel.onRecordingStartFailurePresentationChanged = { presentations.append($0) }
+
+        _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
+        await waitUntil { presentations.contains(true) }
+
+        #expect(presentations.contains(true))
+    }
+
+    /// A restart that will not start is not a recovery: the budget keeps counting and the
+    /// recording is eventually stopped rather than left running dead.
+    @Test
+    @MainActor
+    func testRestartThatDoesNotTakeStillExhaustsTheBudget() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        enableRecovery(fixture, consecutiveRestartLimit: 2)
+        fixture.recordingService.restartAudioCaptureInPlaceResult = false
+        fixture.recordingService.captureHealthSnapshotQueue = [
+            CaptureHealthMonitor.Snapshot(micFrames: 512, appFrames: nil)
+        ]
+
+        _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
+        await waitUntil { fixture.viewModel.didFailToStartRecording }
+
+        #expect(fixture.recordingService.restartAudioCaptureInPlaceCallCount == 2)
+        #expect(fixture.viewModel.didFailToStartRecording)
+    }
+
+    /// Capture ending behind the view model's back must return the UI to idle. This branch was
+    /// unreachable while `pendingError` was never assigned.
+    @Test
+    @MainActor
+    func testCaptureEndingBehindTheViewModelReturnsToIdle() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.viewModel.startVerificationDelay = .milliseconds(1)
+        fixture.recordingService.isRecordingOverride = true
+
+        _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
+        await waitUntil { if case .recording = fixture.viewModel.state { return true } else { return false } }
+
+        // Capture stops without the view model asking, exactly as a dead stream would.
+        fixture.recordingService.pendingError = .captureInterrupted(detail: "stream stopped")
+        fixture.recordingService.isRecordingOverride = false
+
+        await waitUntil { if case .idle = fixture.viewModel.state { return true } else { return false } }
+        if case .idle = fixture.viewModel.state {} else {
+            Issue.record("the UI must not keep showing a recording that has ended")
+        }
+        #expect(fixture.viewModel.errorMessage != nil)
     }
 }
 

@@ -28,6 +28,12 @@ protocol RecordingServiceProtocol: Sendable {
     /// Restarts audio capture with the same configuration and files, keeping the session. Returns
     /// whether capture started again.
     func restartAudioCapture() async -> Bool
+
+    /// Restarts capture mid-recording, preserving every frame already captured.
+    ///
+    /// Distinct from `restartAudioCapture()`, which overwrites the audio files and is therefore
+    /// only safe before anything has been written.
+    func restartAudioCaptureInPlace() async -> Bool
     func startRecording(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID?,

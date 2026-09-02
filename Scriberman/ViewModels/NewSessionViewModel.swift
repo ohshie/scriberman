@@ -461,7 +461,7 @@ final class NewSessionViewModel {
                 errorMessage = "Live transcription unavailable: \(error.localizedDescription)"
             }
             
-            startRecordingMonitor()
+            startRecordingMonitor(workspace: workspace, context: context)
             verifyRecordingStart(sessionID: recordingSessionID, workspace: workspace, context: context)
             return session
         } catch {
@@ -720,16 +720,19 @@ final class NewSessionViewModel {
         onRecordingStartFailurePresentationChanged?(false)
     }
 
-    private func startRecordingMonitor() {
+    private func startRecordingMonitor(workspace: Workspace, context: ModelContext) {
         recordingMonitorTask?.cancel()
         recordingMonitorTask = Task { [weak self] in
             while let self, !Task.isCancelled {
                 let isRecording = await recordingService.isRecording()
                 guard isRecording else {
+                    // `state = .idle` used to sit inside the `if let pendingError`, and
+                    // `pendingError` was never assigned, so it was unreachable: capture ending
+                    // behind the view model's back left the UI showing a recording forever.
                     if let pendingError = await recordingService.consumePendingError() {
                         errorMessage = pendingError.localizedDescription
-                        state = .idle
                     }
+                    state = .idle
                     break
                 }
 
@@ -741,7 +744,7 @@ final class NewSessionViewModel {
                 state = .recording(duration: duration, level: max(levels.mic, levels.app))
 
                 await evaluateIdlePrompt(recordingStartedAt: startedAt)
-                await evaluateCaptureHealth()
+                await evaluateCaptureHealth(workspace: workspace, context: context)
 
                 try? await Task.sleep(for: .milliseconds(50))
             }
@@ -765,12 +768,18 @@ final class NewSessionViewModel {
     /// Whether this recording's capture has been restarted at least once.
     var wasCaptureInterrupted: Bool { captureHealthMonitor.wasInterrupted }
 
-    /// Evaluates capture health at most once per `captureHealthEvaluationInterval`.
+    /// Whether a detected capture death is acted on, or only observed and logged.
     ///
-    /// Observation only for now: the effect is recorded and logged, never applied. Detection ships
-    /// ahead of recovery so it can be validated against real recordings before anything is allowed
-    /// to tear capture down and rebuild it.
-    private func evaluateCaptureHealth() async {
+    /// Overridable so tests can exercise both sides without touching user defaults.
+    var isCaptureHealthRecoveryEnabled: Bool = AudioSyncConfig.isCaptureHealthRecoveryEnabled
+
+    /// Set while a restart is in flight, so the 50 ms monitor loop cannot start a second one on top
+    /// of it. Mirrors `RecordingService.isRecoveringMicCapture`.
+    private var isRecoveringCapture = false
+
+    /// Evaluates capture health at most once per `captureHealthEvaluationInterval`, and applies the
+    /// resulting effect.
+    private func evaluateCaptureHealth(workspace: Workspace, context: ModelContext) async {
         let now = Date()
         if let last = lastCaptureHealthEvaluationAt,
            now.timeIntervalSince(last) < captureHealthEvaluationInterval {
@@ -778,12 +787,15 @@ final class NewSessionViewModel {
         }
         lastCaptureHealthEvaluationAt = now
 
+        guard !isRecoveringCapture else { return }
+
         let snapshot = await recordingService.captureHealthSnapshot()
-        let effect = captureHealthMonitor.update(
-            now: now,
-            snapshot: snapshot,
-            isRecording: activeRecordingSessionID != nil
-        )
+        guard let sessionID = activeRecordingSessionID else {
+            _ = captureHealthMonitor.update(now: now, snapshot: snapshot, isRecording: false)
+            lastCaptureHealthEffect = .none
+            return
+        }
+        let effect = captureHealthMonitor.update(now: now, snapshot: snapshot, isRecording: true)
         lastCaptureHealthEffect = effect
 
         guard effect != .none else { return }
@@ -791,10 +803,76 @@ final class NewSessionViewModel {
         let app = snapshot.appFrames.map(String.init) ?? "not captured"
         let failures = snapshot.streamFailureCount
         let restarts = captureHealthMonitor.restartsIssued
-        let action = effect == .restart ? "restart capture" : "stop the recording"
-        logger.warning(
-            "Capture health would \(action, privacy: .public) (observation only). micFrames=\(mic, privacy: .public) appFrames=\(app, privacy: .public) streamFailures=\(failures, privacy: .public) restartsIssued=\(restarts, privacy: .public)"
+
+        guard isCaptureHealthRecoveryEnabled else {
+            let action = effect == .restart ? "restart capture" : "stop the recording"
+            logger.warning(
+                "Capture health would \(action, privacy: .public) (recovery disabled). micFrames=\(mic, privacy: .public) appFrames=\(app, privacy: .public) streamFailures=\(failures, privacy: .public) restartsIssued=\(restarts, privacy: .public)"
+            )
+            return
+        }
+
+        switch effect {
+        case .none:
+            return
+        case .restart:
+            logger.warning(
+                "Capture health restarting capture. micFrames=\(mic, privacy: .public) appFrames=\(app, privacy: .public) streamFailures=\(failures, privacy: .public) restartsIssued=\(restarts, privacy: .public)"
+            )
+            isRecoveringCapture = true
+            let didRestart = await recordingService.restartAudioCaptureInPlace()
+            isRecoveringCapture = false
+            if !didRestart {
+                // The monitor's budget still governs: a restart that would not start is simply not
+                // a recovery, and the next evaluation counts it against the consecutive limit.
+                logger.error("Capture restart did not take. Captured audio is retained.")
+            }
+        case .fail:
+            logger.error(
+                "Capture health stopping the recording; restarts exhausted. micFrames=\(mic, privacy: .public) appFrames=\(app, privacy: .public) streamFailures=\(failures, privacy: .public) restartsIssued=\(restarts, privacy: .public)"
+            )
+            await failRecordingAfterCaptureLoss(
+                sessionID: sessionID,
+                workspace: workspace,
+                context: context,
+                snapshot: snapshot
+            )
+        }
+    }
+
+    /// Ends a recording whose capture could not be recovered.
+    ///
+    /// Unlike a failed *start*, this recording captured audio, so it is finalized through the normal
+    /// stop path rather than discarded: `stopRecording` closes the writers, writes the timing
+    /// sidecars, and runs mixdown over everything that was captured on both sides of the outage.
+    private func failRecordingAfterCaptureLoss(
+        sessionID: UUID,
+        workspace: Workspace,
+        context: ModelContext,
+        snapshot: CaptureHealthMonitor.Snapshot
+    ) async {
+        startVerificationTask?.cancel()
+        startVerificationTask = nil
+
+        let startedAt = recordingStartedAt ?? Date()
+        let lastError = await recordingService.consumePendingError()
+        sessionFailureLogWriter.write(
+            SessionFailureLogWriter.Failure(
+                sessionID: sessionID,
+                startedAt: startedAt,
+                micFrames: snapshot.micFrames,
+                appFrames: snapshot.appFrames,
+                micWriteFailures: 0,
+                appWriteFailures: 0,
+                restartAttempted: captureHealthMonitor.restartsIssued > 0,
+                lastError: lastError?.diagnosticDetail ?? lastError?.localizedDescription
+            ),
+            in: workspace
         )
+
+        _ = await stopRecording(context: context)
+        didFailToStartRecording = true
+        onRecordingStartFailurePresentationChanged?(true)
     }
 
     // MARK: - Idle session prompt
