@@ -12,7 +12,10 @@ enum RecordingError: LocalizedError {
     case alreadyRecording
     case microphoneDenied
     case invalidWorkspaceAccess
-    case captureInterrupted
+    /// Capture stopped on its own during an active recording. `detail` carries the underlying
+    /// cause (e.g. the `SCStream` error's description) for diagnostics only — it is deliberately
+    /// kept out of `errorDescription`, whose wording is user-facing and unchanged.
+    case captureInterrupted(detail: String?)
     case failedToStart(String)
 
     var errorDescription: String? {
@@ -27,6 +30,19 @@ enum RecordingError: LocalizedError {
             return "Recording stopped because audio capture was interrupted."
         case .failedToStart(let reason):
             return "Failed to start recording: \(reason)"
+        }
+    }
+
+    /// The underlying cause, when one is known. Written to the session failure log so a failure
+    /// records what actually happened rather than a generic reason. Not shown to the user.
+    var diagnosticDetail: String? {
+        switch self {
+        case .captureInterrupted(let detail):
+            return detail
+        case .failedToStart(let reason):
+            return reason
+        case .alreadyRecording, .microphoneDenied, .invalidWorkspaceAccess:
+            return nil
         }
     }
 }
@@ -524,6 +540,21 @@ actor RecordingService: RecordingServiceProtocol {
         return (micLevel, appLevel)
     }
 
+    /// Records that a capture stream stopped on its own during an active recording.
+    ///
+    /// Before this existed, `stream(_:didStopWithError:)` terminated in a `logger.error` for every
+    /// error that was not a TCC denial, so a dead stream left `isRecordingValue == true` and the
+    /// recording appeared healthy for the rest of its duration. `pendingError` is the channel that
+    /// carries the failure to the user interface and into the session failure log.
+    func reportCaptureStreamFailure(_ error: any Error) {
+        guard isRecordingValue else {
+            return
+        }
+        let detail = error.localizedDescription
+        logger.error("Capture stream stopped during an active recording: \(detail, privacy: .public)")
+        pendingError = .captureInterrupted(detail: detail)
+    }
+
     /// Starts audio capture for a recording: unified ScreenCaptureKit when enabled and an app was
     /// selected, otherwise the legacy engine path with its device and recorder fallbacks.
     ///
@@ -550,6 +581,9 @@ actor RecordingService: RecordingServiceProtocol {
                         Task { [weak self] in await self?.captureAppStartHostTimeIfNeeded(hostTime) }
                     }
                 )
+                unified.onStreamStopped = { [weak self] error in
+                    Task { [weak self] in await self?.reportCaptureStreamFailure(error) }
+                }
                 try await unified.start()
                 self.unifiedCaptureSession = unified
                 self.appAudioURL = appFileURL
@@ -573,6 +607,9 @@ actor RecordingService: RecordingServiceProtocol {
                 },
                 liveAudioContinuation: liveAudioStreamTuple.continuation
             )
+            appSession.onStreamStopped = { [weak self] error in
+                Task { [weak self] in await self?.reportCaptureStreamFailure(error) }
+            }
             try await appSession.start()
             self.appAudioCaptureSession = appSession
             self.appAudioURL = appFileURL
