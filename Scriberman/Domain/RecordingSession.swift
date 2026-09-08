@@ -29,6 +29,10 @@ final class RecordingSession {
     /// none. The audio is intact; the failed intervals are silence of their real duration. Stored
     /// as data, not a message — the wording belongs to the view.
     var captureWriteFailureCount: Int?
+    /// Sources that covered materially less of the recording than the recording ran, as source
+    /// labels ("mic", "app"), or `nil` when every source covered it. The audio is real and
+    /// correctly placed; the uncovered interval is silence. Stored as data, not a message.
+    var partiallyCoveredSources: [String]?
     var mixdownAttemptCountValue: Int?
     var transcriptData: Data?
     var retranscriptData: Data?
@@ -48,6 +52,9 @@ final class RecordingSession {
 
     /// Whether the recording's capture recorded one or more failed writes.
     var hadCaptureWriteFailures: Bool { (captureWriteFailureCount ?? 0) > 0 }
+
+    /// Whether any captured source stopped producing audio partway through the recording.
+    var hasPartiallyCoveredSource: Bool { !(partiallyCoveredSources ?? []).isEmpty }
 
     var status: RecordingStatus {
         get { RecordingStatus(persistedValue: statusRawValue, errorMessage: errorMessage) }

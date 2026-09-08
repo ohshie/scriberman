@@ -972,6 +972,15 @@ actor RecordingService: RecordingServiceProtocol {
         } else {
             appAudioCaptureSession?.framesWritten
         }
+        let micFramesAtStop: Int64? = if let unifiedCaptureSession {
+            unifiedCaptureSession.micFramesWritten
+        } else if audioRecorder != nil {
+            // The AVAudioRecorder fallback does not write through AudioFileStreamer, so there is
+            // no frame count to measure coverage against.
+            nil
+        } else {
+            micStreamer.framesWritten
+        }
         // Write failures are read here for the same reason: the counters live on the capture
         // sessions, which are released below.
         var writeFailuresAtStop: Int = if let unifiedCaptureSession {
@@ -1029,6 +1038,22 @@ actor RecordingService: RecordingServiceProtocol {
         // back to the constant-offset path, yielding a stereo file with a dead channel instead of
         // a clean mono one.
         let appAudioMissing = RecordingStartVerifier.shouldFinalizeWithoutAppAudio(appFrames: appFramesAtStop)
+        // Coverage is measured against the recording's duration, so a source that stopped partway
+        // is reported even though it produced real audio. Zero coverage is the limiting case, and
+        // `appAudioMissing` above still owns what happens there.
+        var partiallyCoveredSources: [String] = []
+        if RecordingStartVerifier.isSourcePartiallyCovered(frames: micFramesAtStop, duration: duration) {
+            partiallyCoveredSources.append("mic")
+        }
+        if !appAudioMissing,
+           RecordingStartVerifier.isSourcePartiallyCovered(frames: appFramesAtStop, duration: duration) {
+            partiallyCoveredSources.append("app")
+        }
+        if !partiallyCoveredSources.isEmpty {
+            logger.warning(
+                "Recording finished with partially covered source(s): \(partiallyCoveredSources.joined(separator: ", "), privacy: .public). Audio is intact; the uncovered intervals are silence."
+            )
+        }
         let appProducedAudio = appFramesAtStop != nil && !appAudioMissing
         if appAudioMissing {
             logger.notice(
@@ -1085,6 +1110,7 @@ actor RecordingService: RecordingServiceProtocol {
             session.appAudioMissing = appAudioMissing ? true : nil
             session.captureInterruptionCount = captureRestartCount > 0 ? captureRestartCount : nil
             session.captureWriteFailureCount = writeFailuresAtStop > 0 ? writeFailuresAtStop : nil
+            session.partiallyCoveredSources = partiallyCoveredSources.isEmpty ? nil : partiallyCoveredSources
             session.status = .recorded
             if activeCaptureDisplayID != nil && !shouldRunScreenMux {
                 session.screenCaptureWarning = "Screen recording failed — the display may have been off, disconnected, or not capturable."

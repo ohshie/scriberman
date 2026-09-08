@@ -1086,6 +1086,53 @@ final class RecordingServiceTests {
         #expect(second.captureInterruptionCount == nil)
     }
 
+    @Test
+    func testNewMarkersRoundTripThroughAnOnDiskStore() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storeURL = root.appendingPathComponent("store.sqlite")
+
+        let markedID = UUID()
+        let cleanID = UUID()
+        do {
+            let container = try ModelContainer(
+                for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+                configurations: ModelConfiguration(url: storeURL)
+            )
+            let context = ModelContext(container)
+            let marked = RecordingSession(
+                id: markedID, duration: 600, micAudioURL: "/tmp/a.wav", title: "Marked"
+            )
+            marked.captureWriteFailureCount = 4
+            marked.partiallyCoveredSources = ["app"]
+            let clean = RecordingSession(
+                id: cleanID, duration: 600, micAudioURL: "/tmp/b.wav", title: "Clean"
+            )
+            context.insert(marked)
+            context.insert(clean)
+            try context.save()
+        }
+
+        let reopened = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(url: storeURL)
+        )
+        let context = ModelContext(reopened)
+        let sessions = try context.fetch(FetchDescriptor<RecordingSession>())
+        let marked = try #require(sessions.first { $0.id == markedID })
+        let clean = try #require(sessions.first { $0.id == cleanID })
+        #expect(marked.captureWriteFailureCount == 4)
+        #expect(marked.partiallyCoveredSources == ["app"])
+        #expect(marked.hasPartiallyCoveredSource)
+        // Rows written without the new attributes read back as nil, which is the half of
+        // lightweight migration a unit test can cover.
+        #expect(clean.captureWriteFailureCount == nil)
+        #expect(clean.partiallyCoveredSources == nil)
+        #expect(!clean.hasPartiallyCoveredSource)
+    }
+
     /// Adding an optional attribute is SwiftData's lightweight-migration case. This exercises the
     /// half that can be checked in a unit test: an on-disk store round-trips, and rows written
     /// without the marker read back as nil rather than failing to load.
