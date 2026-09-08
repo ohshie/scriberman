@@ -165,6 +165,52 @@ struct RecordingStatusTests {
         #expect(source.contains("isPulsing"))
     }
 
+    // MARK: - Interrupted-capture marker
+
+    @Test
+    func testRecordingSessionRowShowsTheInterruptedCaptureMarker() throws {
+        let source = try sourceForFile(named: "RecordingSessionRow.swift")
+        #expect(source.contains("session.wasCaptureInterrupted"))
+        #expect(source.contains("Capture was interrupted and resumed"))
+        #expect(source.contains("exclamationmark.triangle.fill"))
+    }
+
+    /// An interrupted recording succeeded and its audio is usable, so it must not borrow the
+    /// `.error` treatment.
+    @Test
+    func testInterruptedCaptureIsNotShownAsAnError() throws {
+        let source = try sourceForFile(named: "RecordingSessionRow.swift")
+        let markerRange = try #require(source.range(of: "session.wasCaptureInterrupted"))
+        let block = source[markerRange.lowerBound...].prefix(400)
+        #expect(!block.contains("xmark"))
+        #expect(!block.contains(".red"))
+    }
+
+    /// The screen-capture warning and the interrupted-capture marker are independent conditions;
+    /// a recording that hit both shows both rather than one replacing the other.
+    @Test
+    func testBothCaptureCaveatsCanAppearTogether() throws {
+        let source = try sourceForFile(named: "RecordingSessionRow.swift")
+        let screenWarning = try #require(source.range(of: "session.screenCaptureWarning != nil"))
+        let interrupted = try #require(source.range(of: "session.wasCaptureInterrupted"))
+        #expect(screenWarning.upperBound < interrupted.lowerBound)
+        // Separate `if` conditions, not an `else if` chain.
+        let between = String(source[screenWarning.upperBound..<interrupted.lowerBound])
+        #expect(!between.contains("else"))
+    }
+
+    @Test
+    func testInterruptedCaptureMarkerIsDrivenByThePersistedCount() {
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/a.wav", title: "t")
+        #expect(!session.wasCaptureInterrupted)
+
+        session.captureInterruptionCount = 1
+        #expect(session.wasCaptureInterrupted)
+
+        session.captureInterruptionCount = nil
+        #expect(!session.wasCaptureInterrupted)
+    }
+
     private func sourceForFile(named fileName: String) throws -> String {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let fileURL = testsDirectory.appendingPathComponent("../UI/\(fileName)")

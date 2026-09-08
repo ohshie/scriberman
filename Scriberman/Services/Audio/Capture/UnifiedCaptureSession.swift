@@ -23,7 +23,36 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
     /// Retained so the microphone device can be changed on the running stream (see
     /// `retargetMic(deviceUID:)`) instead of being rebuilt and discarded inside `start()`.
     private let configuration: SCStreamConfiguration
-    private var stream: (any UnifiedCaptureStreaming)?
+    /// Guards `_stream`, which is read and cleared from the nonisolated `SCStreamDelegate`
+    /// callback as well as from the async start/stop context.
+    private let streamLock = NSLock()
+    private var _stream: (any UnifiedCaptureStreaming)?
+
+    private var stream: (any UnifiedCaptureStreaming)? {
+        streamLock.lock()
+        defer { streamLock.unlock() }
+        return _stream
+    }
+
+    private func setStream(_ newValue: (any UnifiedCaptureStreaming)?) {
+        streamLock.lock()
+        _stream = newValue
+        streamLock.unlock()
+    }
+
+    /// Clears the retained stream and returns what it was, so a caller can stop it exactly once.
+    @discardableResult
+    private func takeStream() -> (any UnifiedCaptureStreaming)? {
+        streamLock.lock()
+        defer { streamLock.unlock() }
+        let existing = _stream
+        _stream = nil
+        return existing
+    }
+
+    /// Invoked for every error the stream delegate receives, TCC denials included, so the owning
+    /// recording can react instead of the failure ending in a log line. Set by `RecordingService`.
+    var onStreamStopped: (@Sendable (any Error) -> Void)?
 
     /// The microphone device identifier the stream is currently configured with. Used by
     /// `RecordingService` to decide whether a device change actually requires a retarget.
@@ -46,20 +75,40 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
         liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil,
         onMicFirstHostTime: (@Sendable (UInt64) -> Void)? = nil,
         onAppFirstHostTime: (@Sendable (UInt64) -> Void)? = nil,
-        notificationCenter: NotificationCenter = .default
+        notificationCenter: NotificationCenter = .default,
+        reusingStreamers: (mic: AudioFileStreamer, app: AudioFileStreamer)? = nil
     ) {
         self.appFileURL = appFileURL
         self.processID = processID
         self.currentMicDeviceUID = micDeviceUID
         self.configuration = Self.makeConfiguration(micDeviceUID: micDeviceUID)
         self.notificationCenter = notificationCenter
-        self.appHandler = AppAudioStreamOutputHandler(liveAudioContinuation: liveAudioContinuation)
-        self.micHandler = MicStreamOutputHandler(liveAudioContinuation: liveAudioContinuation)
+        self.appHandler = AppAudioStreamOutputHandler(
+            liveAudioContinuation: liveAudioContinuation,
+            streamer: reusingStreamers?.app ?? AudioFileStreamer(label: "app")
+        )
+        self.micHandler = MicStreamOutputHandler(
+            liveAudioContinuation: liveAudioContinuation,
+            streamer: reusingStreamers?.mic ?? AudioFileStreamer(label: "mic")
+        )
         self.appHandler.onFirstBufferHostTime = onAppFirstHostTime
         self.micHandler.onFirstBufferHostTime = onMicFirstHostTime
         super.init()
-        self.appHandler.configureOutput(url: appFileURL)
-        self.micHandler.configureOutput(url: micFileURL)
+        // A mid-session restart adopts writers that are already open and mid-recording. Preparing
+        // them again would truncate the files and reset their timing segments, which is exactly the
+        // audio a restart exists to preserve.
+        if reusingStreamers == nil {
+            self.appHandler.configureOutput(url: appFileURL)
+            self.micHandler.configureOutput(url: micFileURL)
+        } else {
+            self.appHandler.adoptPreparedOutput(url: appFileURL)
+            self.micHandler.adoptPreparedOutput(url: micFileURL)
+        }
+    }
+
+    /// The writers this session is feeding, so a replacement session can adopt them.
+    var streamers: (mic: AudioFileStreamer, app: AudioFileStreamer) {
+        (micHandler.streamer, appHandler.streamer)
     }
 
     func start() async throws {
@@ -80,7 +129,7 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
         for attempt in 0..<3 {
             do {
                 try await stream.startCapture()
-                self.stream = stream
+                setStream(stream)
                 return
             } catch {
                 lastError = error
@@ -143,26 +192,56 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
     /// Test seam: attach an already-"started" stream without going through `start()`, which needs
     /// live `SCShareableContent`, a capturable window, and TCC grants.
     func attachStreamForTesting(_ stream: any UnifiedCaptureStreaming) {
-        self.stream = stream
+        setStream(stream)
     }
 
     func stop() async {
-        if let stream {
+        if let stream = takeStream() {
             try? await stream.stopCapture()
         }
-        stream = nil
         appHandler.closeOutput()
         micHandler.closeOutput()
     }
 
+    /// Stops the stream but leaves the output writers open, so the files stay open, no `.timing`
+    /// sidecar is written, and the accumulated timing segments survive.
+    ///
+    /// Used by the mid-session restart, which replaces the stream and its handlers while the
+    /// recording continues writing into the same files. Callers that are finishing a recording must
+    /// use `stop()` instead — this deliberately leaves the writers unfinalized.
+    func stopStreamPreservingOutput() async {
+        if let stream = takeStream() {
+            try? await stream.stopCapture()
+        }
+    }
+
     nonisolated func stream(_ stream: SCStream, didStopWithError error: any Error) {
+        handleStreamStopped(error)
+    }
+
+#if DEBUG
+    /// Test seam: drive the stream-stopped path without an `SCStream`, which cannot be constructed
+    /// in tests (it needs live `SCShareableContent`, a capturable window, and TCC grants).
+    func handleStreamStoppedForTesting(_ error: any Error) {
+        handleStreamStopped(error)
+    }
+#endif
+
+    nonisolated private func handleStreamStopped(_ error: any Error) {
         logger.error("Unified capture stream stopped with error: \(error.localizedDescription, privacy: .public)")
-        guard isTCCAccessDeniedError(error) else { return }
-        notificationCenter.post(
-            name: .appAudioCaptureAccessDenied,
-            object: nil,
-            userInfo: ["errorDescription": error.localizedDescription]
-        )
+        // The stream is gone; stop reporting it as an active capture before anyone reacts to the
+        // error and tries to use it.
+        takeStream()
+        if isTCCAccessDeniedError(error) {
+            notificationCenter.post(
+                name: .appAudioCaptureAccessDenied,
+                object: nil,
+                userInfo: ["errorDescription": error.localizedDescription]
+            )
+        }
+        // Reported for every error, not just TCC: a filter losing its window and the capture
+        // connection being interrupted both end the recording's audio just as completely.
+        onStreamStopped?(error)
     }
 
     nonisolated private func isTCCAccessDeniedError(_ error: any Error) -> Bool {

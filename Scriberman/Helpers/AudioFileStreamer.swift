@@ -102,8 +102,22 @@ final class AudioFileStreamer: @unchecked Sendable {
         stateLock.unlock()
         queue.async { [weak self] in
             guard let self = self else { return }
+            // Previously `try self._audioFile?.write(from: buffer)`: with no open file that is a
+            // silent no-op — it neither throws nor increments the failure count, while `_segments`
+            // above keeps growing. A source in that state looks healthy in the timing sidecar and
+            // produces silence on disk, which is precisely the failure this code is meant to catch.
+            guard let audioFile = self._audioFile else {
+                self.stateLock.lock()
+                self._writeFailureCount += 1
+                let failureCount = self._writeFailureCount
+                self.stateLock.unlock()
+                self.logger.error(
+                    "Audio write dropped (\(self.label, privacy: .public), failure #\(failureCount, privacy: .public)): no file is open."
+                )
+                return
+            }
             do {
-                try self._audioFile?.write(from: buffer)
+                try audioFile.write(from: buffer)
 
                 self.stateLock.lock()
                 self._currentLevel = level

@@ -12,7 +12,10 @@ enum RecordingError: LocalizedError {
     case alreadyRecording
     case microphoneDenied
     case invalidWorkspaceAccess
-    case captureInterrupted
+    /// Capture stopped on its own during an active recording. `detail` carries the underlying
+    /// cause (e.g. the `SCStream` error's description) for diagnostics only — it is deliberately
+    /// kept out of `errorDescription`, whose wording is user-facing and unchanged.
+    case captureInterrupted(detail: String?)
     case failedToStart(String)
 
     var errorDescription: String? {
@@ -27,6 +30,19 @@ enum RecordingError: LocalizedError {
             return "Recording stopped because audio capture was interrupted."
         case .failedToStart(let reason):
             return "Failed to start recording: \(reason)"
+        }
+    }
+
+    /// The underlying cause, when one is known. Written to the session failure log so a failure
+    /// records what actually happened rather than a generic reason. Not shown to the user.
+    var diagnosticDetail: String? {
+        switch self {
+        case .captureInterrupted(let detail):
+            return detail
+        case .failedToStart(let reason):
+            return reason
+        case .alreadyRecording, .microphoneDenied, .invalidWorkspaceAccess:
+            return nil
         }
     }
 }
@@ -260,6 +276,13 @@ actor RecordingService: RecordingServiceProtocol {
     private var screenCaptureSession: (any ScreenCaptureSessionControlling)?
     private var shouldSkipScreenMux = false
     private var pendingError: RecordingError?
+    /// Monotonic per-recording count of capture streams that stopped on their own. Read by
+    /// the capture-health monitor as direct evidence of death, rather than inferred from
+    /// stalled counters. Reset when a recording starts.
+    private var captureStreamFailureCount = 0
+    /// How many times capture was restarted mid-recording. Persisted onto the session at stop so
+    /// an interrupted recording is discoverable when reviewed, not only in the log.
+    private(set) var captureRestartCount = 0
     private var micRecoveryRetryTask: Task<Void, Never>?
     private let liveAudioStreamTuple: (stream: AsyncStream<([Float], AudioSource, Double)>, continuation: AsyncStream<([Float], AudioSource, Double)>.Continuation)
     // nonisolated(unsafe): written once in init on the actor; read only in deinit; lifetime matches the actor
@@ -381,8 +404,12 @@ actor RecordingService: RecordingServiceProtocol {
         currentSessionID: UUID? = nil,
         screenCaptureSession: (any ScreenCaptureSessionControlling)? = nil,
         videoStartHostTime: UInt64? = nil,
-        shouldSkipScreenMux: Bool = false
+        shouldSkipScreenMux: Bool = false,
+        activeAppFileURL: URL? = nil,
+        activeAppProcessID: pid_t? = nil
     ) {
+        self.activeAppFileURL = activeAppFileURL
+        self.activeAppProcessID = activeAppProcessID
         self.isRecordingValue = isRecording
         self.recordingIdentifier = recordingIdentifier
         self.recordingWorkspaceRootURL = recordingWorkspaceRootURL
@@ -417,6 +444,12 @@ actor RecordingService: RecordingServiceProtocol {
 
     func simulateAudioEngineConfigurationChangeForTesting() async {
         await handleAudioEngineConfigurationChange()
+    }
+
+    /// Test seam: the count is only advanced by a real mid-session restart, which needs a live
+    /// `SCStream`.
+    func setCaptureRestartCountForTesting(_ count: Int) {
+        captureRestartCount = count
     }
 
     func setUnifiedCaptureSessionForTesting(_ session: UnifiedCaptureSession?) {
@@ -524,6 +557,36 @@ actor RecordingService: RecordingServiceProtocol {
         return (micLevel, appLevel)
     }
 
+    /// Records that a capture stream stopped on its own during an active recording.
+    ///
+    /// Before this existed, `stream(_:didStopWithError:)` terminated in a `logger.error` for every
+    /// error that was not a TCC denial, so a dead stream left `isRecordingValue == true` and the
+    /// recording appeared healthy for the rest of its duration. `pendingError` is the channel that
+    /// carries the failure to the user interface and into the session failure log.
+    func reportCaptureStreamFailure(_ error: any Error) {
+        guard isRecordingValue else {
+            return
+        }
+        let detail = error.localizedDescription
+        logger.error("Capture stream stopped during an active recording: \(detail, privacy: .public)")
+        pendingError = .captureInterrupted(detail: detail)
+        captureStreamFailureCount += 1
+    }
+
+    /// Everything the capture-health monitor needs, gathered in one actor hop.
+    ///
+    /// `streamFailureCount` is deliberately not consuming, unlike `consumePendingError()`: the
+    /// monitor observes it every tick, while the pending error is spent once when a failure is
+    /// reported to the user and written to the session log.
+    func captureHealthSnapshot() async -> CaptureHealthMonitor.Snapshot {
+        let counts = await captureFrameCounts()
+        return CaptureHealthMonitor.Snapshot(
+            micFrames: counts.mic,
+            appFrames: counts.app,
+            streamFailureCount: captureStreamFailureCount
+        )
+    }
+
     /// Starts audio capture for a recording: unified ScreenCaptureKit when enabled and an app was
     /// selected, otherwise the legacy engine path with its device and recorder fallbacks.
     ///
@@ -550,6 +613,9 @@ actor RecordingService: RecordingServiceProtocol {
                         Task { [weak self] in await self?.captureAppStartHostTimeIfNeeded(hostTime) }
                     }
                 )
+                unified.onStreamStopped = { [weak self] error in
+                    Task { [weak self] in await self?.reportCaptureStreamFailure(error) }
+                }
                 try await unified.start()
                 self.unifiedCaptureSession = unified
                 self.appAudioURL = appFileURL
@@ -573,6 +639,9 @@ actor RecordingService: RecordingServiceProtocol {
                 },
                 liveAudioContinuation: liveAudioStreamTuple.continuation
             )
+            appSession.onStreamStopped = { [weak self] error in
+                Task { [weak self] in await self?.reportCaptureStreamFailure(error) }
+            }
             try await appSession.start()
             self.appAudioCaptureSession = appSession
             self.appAudioURL = appFileURL
@@ -626,6 +695,18 @@ actor RecordingService: RecordingServiceProtocol {
             return false
         }
 
+        // This path overwrites the audio files, which is safe only because it runs when nothing has
+        // been written. Once frames exist, overwriting destroys the recording it was meant to save;
+        // `restartAudioCaptureInPlace()` is the caller for that case.
+        let counts = await captureFrameCounts()
+        let framesWritten = (counts.mic ?? 0) + (counts.app ?? 0)
+        guard framesWritten == 0 else {
+            logger.error(
+                "Start-path restart refused: \(framesWritten, privacy: .public) frames already written. Mid-session recovery must use restartAudioCaptureInPlace()."
+            )
+            return false
+        }
+
         await stopAudioCaptureForRestart()
 
         // Re-anchor: the previous attempt contributed no samples, so the timeline reference must
@@ -647,6 +728,70 @@ actor RecordingService: RecordingServiceProtocol {
             )
             return false
         }
+    }
+
+    /// Restarts capture mid-recording, preserving every frame already captured.
+    ///
+    /// Distinct from `restartAudioCapture()` in the one way that matters: it does not touch the
+    /// writers. The `SCStream` and its output handlers are replaced, but the same
+    /// `AudioFileStreamer` instances carry over, so the files stay open, their accumulated timing
+    /// segments survive, and no `.timing` sidecar is written early.
+    ///
+    /// The timeline anchors are deliberately left in place. `captureMicStartHostTimeIfNeeded`
+    /// guards on nil, so the new handlers' first buffers do not re-anchor the recording — audio
+    /// captured after the restart lands at its true position against the reference established at
+    /// start, and the dead interval reads as silence of its real duration rather than a splice.
+    func restartAudioCaptureInPlace() async -> Bool {
+        guard isRecordingValue, let activeAppFileURL, let micFileURL else {
+            return false
+        }
+
+        // Mic-only recordings never take the unified path, and the engine path already has its own
+        // recovery in `mic-capture-resilience` — which likewise does not re-prepare the writer.
+        guard let existing = unifiedCaptureSession else {
+            logger.notice("Mid-session restart delegating to engine-path mic recovery.")
+            return await recoverMicCapture()
+        }
+
+        let startedAt = Date()
+        let framesBefore = (mic: existing.micFramesWritten, app: existing.appFramesWritten)
+        await existing.stopStreamPreservingOutput()
+        let reused = existing.streamers
+
+        let replacement = UnifiedCaptureSession(
+            micFileURL: micFileURL,
+            appFileURL: activeAppFileURL,
+            processID: activeAppProcessID ?? 0,
+            micDeviceUID: existing.currentMicDeviceUID,
+            liveAudioContinuation: liveAudioStreamTuple.continuation,
+            onMicFirstHostTime: { [weak self] hostTime in
+                Task { [weak self] in await self?.captureMicStartHostTimeIfNeeded(hostTime) }
+            },
+            onAppFirstHostTime: { [weak self] hostTime in
+                Task { [weak self] in await self?.captureAppStartHostTimeIfNeeded(hostTime) }
+            },
+            reusingStreamers: reused
+        )
+        replacement.onStreamStopped = { [weak self] error in
+            Task { [weak self] in await self?.reportCaptureStreamFailure(error) }
+        }
+
+        do {
+            try await replacement.start()
+        } catch {
+            logger.error(
+                "Mid-session capture restart failed: \(error.localizedDescription, privacy: .public). Captured audio is retained."
+            )
+            return false
+        }
+
+        unifiedCaptureSession = replacement
+        captureRestartCount += 1
+        let elapsedMs = Date().timeIntervalSince(startedAt) * 1_000
+        logger.notice(
+            "Capture restarted mid-session (restart #\(self.captureRestartCount, privacy: .public)). teardownAndStartMs=\(elapsedMs, privacy: .public) micFramesBefore=\(framesBefore.mic, privacy: .public) appFramesBefore=\(framesBefore.app, privacy: .public). The outage appears as silence in the timing sidecar gap."
+        )
+        return true
     }
 
     private func stopAudioCaptureForRestart() async {
@@ -745,6 +890,8 @@ actor RecordingService: RecordingServiceProtocol {
             self.isRecordingValue = true
             self.audioLevelValue = 0
             self.pendingError = nil
+            self.captureStreamFailureCount = 0
+            self.captureRestartCount = 0
             self.activeCapturedAppName = capturedAppName
             self.pendingTitle = title
 
@@ -909,6 +1056,7 @@ actor RecordingService: RecordingServiceProtocol {
             session.micAudioURL = finalRecordingURLs.mic.path
             session.appAudioURL = finalRecordingURLs.app?.path
             session.appAudioMissing = appAudioMissing ? true : nil
+            session.captureInterruptionCount = captureRestartCount > 0 ? captureRestartCount : nil
             session.status = .recorded
             if activeCaptureDisplayID != nil && !shouldRunScreenMux {
                 session.screenCaptureWarning = "Screen recording failed — the display may have been off, disconnected, or not capturable."

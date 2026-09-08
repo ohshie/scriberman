@@ -28,4 +28,20 @@ enum AudioSyncConfig {
         get { UserDefaults.standard.object(forKey: unifiedCaptureKey) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: unifiedCaptureKey) }
     }
+
+    private static let captureHealthRecoveryKey = "AudioSync.captureHealthRecoveryEnabled"
+
+    /// When true, a recording whose capture dies mid-session is restarted in place and, if that
+    /// does not help within the budget, stopped and reported. When false, capture health is still
+    /// evaluated and logged but nothing acts on it — behaviour is exactly as before.
+    ///
+    /// **Default ON** (unset ⇒ true), after validation on real hardware with a forced mid-session
+    /// stream kill. It shipped default-off first because two prior audio-sync changes passed their
+    /// tests and regressed on real hardware, and this one touches the timeline. Force off with
+    /// `defaults write <bundle> AudioSync.captureHealthRecoveryEnabled -bool NO`, which returns
+    /// capture health to evaluating and logging without acting.
+    static var isCaptureHealthRecoveryEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: captureHealthRecoveryKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: captureHealthRecoveryKey) }
+    }
 }

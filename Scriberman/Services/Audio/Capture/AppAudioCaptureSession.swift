@@ -11,7 +11,36 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Senda
     private let sampleQueue = DispatchQueue(label: "com.scriberman.app-audio.stream")
     private let notificationCenter: NotificationCenter
     private let logger = Logger(subsystem: "Scriberman", category: "AppAudioCaptureSession")
-    private var stream: SCStream?
+    /// Guards `_stream`, which is read and cleared from the nonisolated `SCStreamDelegate`
+    /// callback as well as from the async start/stop context.
+    private let streamLock = NSLock()
+    private var _stream: SCStream?
+
+    private var stream: SCStream? {
+        streamLock.lock()
+        defer { streamLock.unlock() }
+        return _stream
+    }
+
+    private func setStream(_ newValue: SCStream?) {
+        streamLock.lock()
+        _stream = newValue
+        streamLock.unlock()
+    }
+
+    /// Clears the retained stream and returns what it was, so a caller can stop it exactly once.
+    @discardableResult
+    private func takeStream() -> SCStream? {
+        streamLock.lock()
+        defer { streamLock.unlock() }
+        let existing = _stream
+        _stream = nil
+        return existing
+    }
+
+    /// Invoked for every error the stream delegate receives, TCC denials included, so the owning
+    /// recording can react instead of the failure ending in a log line. Set by `RecordingService`.
+    var onStreamStopped: (@Sendable (any Error) -> Void)?
 
     var audioLevel: Float {
         outputHandler.audioLevel
@@ -73,7 +102,7 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Senda
         for attempt in 0..<3 {
             do {
                 try await stream.startCapture()
-                self.stream = stream
+                setStream(stream)
                 return
             } catch {
                 lastError = error
@@ -87,26 +116,50 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Senda
     }
 
     func stop() async {
-        if let stream {
+        if let stream = takeStream() {
             try? await stream.stopCapture()
         }
-        self.stream = nil
         outputHandler.closeOutput()
     }
 
+    /// Stops the stream but leaves the output writer open, so the file stays open, no `.timing`
+    /// sidecar is written, and the accumulated timing segments survive. Used by the mid-session
+    /// restart; callers finishing a recording must use `stop()` instead.
+    func stopStreamPreservingOutput() async {
+        if let stream = takeStream() {
+            try? await stream.stopCapture()
+        }
+    }
+
     nonisolated func stream(_ stream: SCStream, didStopWithError error: any Error) {
+        handleStreamStopped(error)
+    }
+
+#if DEBUG
+    /// Test seam: drive the stream-stopped path without an `SCStream`, which cannot be constructed
+    /// in tests.
+    func handleStreamStoppedForTesting(_ error: any Error) {
+        handleStreamStopped(error)
+    }
+#endif
+
+    nonisolated private func handleStreamStopped(_ error: any Error) {
         logger.error("ScreenCaptureKit stream stopped with error: \(error.localizedDescription, privacy: .public)")
 
-        guard isTCCAccessDeniedError(error) else {
-            return
+        // The stream is gone; stop reporting it as an active capture before anyone reacts.
+        takeStream()
+
+        if isTCCAccessDeniedError(error) {
+            logger.error("Detected TCC access denial from stream delegate.")
+            notificationCenter.post(
+                name: .appAudioCaptureAccessDenied,
+                object: nil,
+                userInfo: ["errorDescription": error.localizedDescription]
+            )
         }
 
-        logger.error("Detected TCC access denial from stream delegate.")
-        notificationCenter.post(
-            name: .appAudioCaptureAccessDenied,
-            object: nil,
-            userInfo: ["errorDescription": error.localizedDescription]
-        )
+        // Reported for every error, not just TCC.
+        onStreamStopped?(error)
     }
 
     nonisolated private func isTCCAccessDeniedError(_ error: any Error) -> Bool {

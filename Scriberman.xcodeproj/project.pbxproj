@@ -62,6 +62,7 @@
 		6402AD8CA78146809D04D1E7 /* UnifiedCaptureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B31D758FF2004F3EA26EB66E /* UnifiedCaptureSession.swift */; };
 		EAD7461764CE4338B9D1DB84 /* SessionFailureLogWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A0000B1EA2549C2B1A4E5E4 /* SessionFailureLogWriter.swift */; };
 		E41BAA1A53B448A797F7B091 /* RecordingStartVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6BDA4EF08C84DB2ACEB5D94 /* RecordingStartVerifier.swift */; };
+		7A1C0E5B1B2F4A0C8D3E5F03 /* CaptureHealthMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1C0E5B1B2F4A0C8D3E5F04 /* CaptureHealthMonitor.swift */; };
 		79D95F45585046F8B9747B22 /* UnifiedCaptureStreaming.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8295019A27A4A14B901831A /* UnifiedCaptureStreaming.swift */; };
 		DC9E28C5381A4E4BB770DA58 /* SynchronizedAudioTimeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BB5F720213D4DCC8F8DE9C6 /* SynchronizedAudioTimeline.swift */; };
 		51131E24461C4A109A7F68C8 /* AudioDriftMeasurement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A635159875B424AAA52EBDB /* AudioDriftMeasurement.swift */; };
@@ -73,6 +74,9 @@
 		5BCED41384DF4A7EB2D579C9 /* SessionLogReadbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD8EC3033F374A55962CE98A /* SessionLogReadbackTests.swift */; };
 		2AA47A0946D44C36A800F089 /* MicStreamOutputHandlerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02FCFEC2A20E4BCF831D1E82 /* MicStreamOutputHandlerTests.swift */; };
 		0607AD184257468A97649CB4 /* UnifiedCaptureSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F896E5FC33E5481598E55D2F /* UnifiedCaptureSessionTests.swift */; };
+		7A1C0E5B1B2F4A0C8D3E5F07 /* CaptureRestartContinuityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1C0E5B1B2F4A0C8D3E5F08 /* CaptureRestartContinuityTests.swift */; };
+		7A1C0E5B1B2F4A0C8D3E5F05 /* CaptureHealthMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1C0E5B1B2F4A0C8D3E5F06 /* CaptureHealthMonitorTests.swift */; };
+		7A1C0E5B1B2F4A0C8D3E5F01 /* CaptureStreamFailureReportingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1C0E5B1B2F4A0C8D3E5F02 /* CaptureStreamFailureReportingTests.swift */; };
 		791009532F78184E00225294 /* AudioMixdownServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009522F78184E00225294 /* AudioMixdownServiceTests.swift */; };
 		791009552F78328500225294 /* M4AChannelExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009542F78328500225294 /* M4AChannelExtractor.swift */; };
 		791009572F7832AD00225294 /* M4AChannelExtractorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009562F7832AD00225294 /* M4AChannelExtractorTests.swift */; };
@@ -316,6 +320,7 @@
 		B31D758FF2004F3EA26EB66E /* UnifiedCaptureSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Capture/UnifiedCaptureSession.swift"; sourceTree = SOURCE_ROOT; };
 		8A0000B1EA2549C2B1A4E5E4 /* SessionFailureLogWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Capture/SessionFailureLogWriter.swift"; sourceTree = SOURCE_ROOT; };
 		C6BDA4EF08C84DB2ACEB5D94 /* RecordingStartVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Capture/RecordingStartVerifier.swift"; sourceTree = SOURCE_ROOT; };
+		7A1C0E5B1B2F4A0C8D3E5F04 /* CaptureHealthMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Capture/CaptureHealthMonitor.swift"; sourceTree = SOURCE_ROOT; };
 		D8295019A27A4A14B901831A /* UnifiedCaptureStreaming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Capture/UnifiedCaptureStreaming.swift"; sourceTree = SOURCE_ROOT; };
 		8BB5F720213D4DCC8F8DE9C6 /* SynchronizedAudioTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Sync/SynchronizedAudioTimeline.swift"; sourceTree = SOURCE_ROOT; };
 		9A635159875B424AAA52EBDB /* AudioDriftMeasurement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Sync/AudioDriftMeasurement.swift"; sourceTree = SOURCE_ROOT; };
@@ -327,6 +332,9 @@
 		CD8EC3033F374A55962CE98A /* SessionLogReadbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/SessionLogReadbackTests.swift"; sourceTree = SOURCE_ROOT; };
 		02FCFEC2A20E4BCF831D1E82 /* MicStreamOutputHandlerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/MicStreamOutputHandlerTests.swift"; sourceTree = SOURCE_ROOT; };
 		F896E5FC33E5481598E55D2F /* UnifiedCaptureSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/UnifiedCaptureSessionTests.swift"; sourceTree = SOURCE_ROOT; };
+		7A1C0E5B1B2F4A0C8D3E5F08 /* CaptureRestartContinuityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/CaptureRestartContinuityTests.swift"; sourceTree = SOURCE_ROOT; };
+		7A1C0E5B1B2F4A0C8D3E5F06 /* CaptureHealthMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/CaptureHealthMonitorTests.swift"; sourceTree = SOURCE_ROOT; };
+		7A1C0E5B1B2F4A0C8D3E5F02 /* CaptureStreamFailureReportingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/CaptureStreamFailureReportingTests.swift"; sourceTree = SOURCE_ROOT; };
 		791009522F78184E00225294 /* AudioMixdownServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioMixdownServiceTests.swift; sourceTree = "<group>"; };
 		791009542F78328500225294 /* M4AChannelExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = M4AChannelExtractor.swift; sourceTree = "<group>"; };
 		791009562F7832AD00225294 /* M4AChannelExtractorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = M4AChannelExtractorTests.swift; sourceTree = "<group>"; };
@@ -565,6 +573,9 @@
 				CD8EC3033F374A55962CE98A /* SessionLogReadbackTests.swift */,
 				02FCFEC2A20E4BCF831D1E82 /* MicStreamOutputHandlerTests.swift */,
 				F896E5FC33E5481598E55D2F /* UnifiedCaptureSessionTests.swift */,
+				7A1C0E5B1B2F4A0C8D3E5F08 /* CaptureRestartContinuityTests.swift */,
+				7A1C0E5B1B2F4A0C8D3E5F06 /* CaptureHealthMonitorTests.swift */,
+				7A1C0E5B1B2F4A0C8D3E5F02 /* CaptureStreamFailureReportingTests.swift */,
 				B1C2D3E4F5061728394A5B6D /* StatusTagViewTests.swift */,
 				98A016607CB87709B794542A /* TimeFormatterTests.swift */,
 				E6B44A3BD4A39AE7EB75ED6B /* TokenStitcherTests.swift */,
@@ -785,6 +796,7 @@
 				B31D758FF2004F3EA26EB66E /* UnifiedCaptureSession.swift */,
 				8A0000B1EA2549C2B1A4E5E4 /* SessionFailureLogWriter.swift */,
 				C6BDA4EF08C84DB2ACEB5D94 /* RecordingStartVerifier.swift */,
+				7A1C0E5B1B2F4A0C8D3E5F04 /* CaptureHealthMonitor.swift */,
 				D8295019A27A4A14B901831A /* UnifiedCaptureStreaming.swift */,
 				8BB5F720213D4DCC8F8DE9C6 /* SynchronizedAudioTimeline.swift */,
 				9A635159875B424AAA52EBDB /* AudioDriftMeasurement.swift */,
@@ -1196,6 +1208,7 @@
 				6402AD8CA78146809D04D1E7 /* UnifiedCaptureSession.swift in Sources */,
 				EAD7461764CE4338B9D1DB84 /* SessionFailureLogWriter.swift in Sources */,
 				E41BAA1A53B448A797F7B091 /* RecordingStartVerifier.swift in Sources */,
+				7A1C0E5B1B2F4A0C8D3E5F03 /* CaptureHealthMonitor.swift in Sources */,
 				79D95F45585046F8B9747B22 /* UnifiedCaptureStreaming.swift in Sources */,
 				DC9E28C5381A4E4BB770DA58 /* SynchronizedAudioTimeline.swift in Sources */,
 				51131E24461C4A109A7F68C8 /* AudioDriftMeasurement.swift in Sources */,
@@ -1350,6 +1363,9 @@
 				5BCED41384DF4A7EB2D579C9 /* SessionLogReadbackTests.swift in Sources */,
 				2AA47A0946D44C36A800F089 /* MicStreamOutputHandlerTests.swift in Sources */,
 				0607AD184257468A97649CB4 /* UnifiedCaptureSessionTests.swift in Sources */,
+				7A1C0E5B1B2F4A0C8D3E5F07 /* CaptureRestartContinuityTests.swift in Sources */,
+				7A1C0E5B1B2F4A0C8D3E5F05 /* CaptureHealthMonitorTests.swift in Sources */,
+				7A1C0E5B1B2F4A0C8D3E5F01 /* CaptureStreamFailureReportingTests.swift in Sources */,
 				79BE353B2F7EA92C00DB542F /* AudioPlayerViewModelTests.swift in Sources */,
 				A1F001111111111111111113 /* TranscriptSearchStateTests.swift in Sources */,
 				79155F252F84188C0082157E /* LiveTranscriptionPipelineSettingsTests.swift in Sources */,
