@@ -112,6 +112,18 @@ struct SynchronizedAudioTimeline {
 
     /// Append a buffer captured at `presentationTime` (seconds, monotonic). The first
     /// call establishes the reference (frame 0).
+    ///
+    /// Two gaps are expected on an ordinary microphone source, and both are correct:
+    ///
+    /// 1. The lead-in, when the microphone's first buffer arrives after the shared reference.
+    /// 2. A single small deficit from the format converter's initial priming. The first converted
+    ///    buffer yields fewer frames than its presentation interval spans, while presentation
+    ///    timestamps keep true wall-clock time, so the next buffer lands one deficit ahead of the
+    ///    frames accumulated so far. Measured at a constant 32 frames — 0.667 ms at 48 kHz —
+    ///    across recordings from 7.9 seconds to 71 minutes, after which every buffer is contiguous.
+    ///
+    /// So `gapCount == 2` on a healthy mic source is the gap-fill working, not a fault. Recorded
+    /// here so it is recognised rather than re-investigated.
     mutating func append(samples: [Float], at presentationTime: Double) {
         if referenceTime == nil {
             referenceTime = presentationTime

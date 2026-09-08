@@ -14,6 +14,8 @@ final class AudioFileStreamer: @unchecked Sendable {
     private var _currentLevel: Float = 0
     private var _framesWritten: Int64 = 0
     private var _writeFailureCount: Int = 0
+    /// Buffers discarded for having no usable presentation time (diagnostics).
+    private var _unplaceableBufferCount: Int = 0
     private var _url: URL?
     private var _sampleRate: Double = 0
     private var _segments: [AudioCaptureSegment] = []
@@ -38,6 +40,14 @@ final class AudioFileStreamer: @unchecked Sendable {
         stateLock.lock()
         defer { stateLock.unlock() }
         return _writeFailureCount
+    }
+
+    /// Buffers dropped since the last `prepare` because they carried no presentation time and
+    /// could not be positioned on the shared timeline (diagnostics).
+    var unplaceableBufferCount: Int {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return _unplaceableBufferCount
     }
 
     /// When this source last produced sustained audio activity. Stops advancing when
@@ -74,6 +84,7 @@ final class AudioFileStreamer: @unchecked Sendable {
             _currentLevel = 0
             _framesWritten = 0
             _writeFailureCount = 0
+            _unplaceableBufferCount = 0
             _url = url
             _sampleRate = format.sampleRate
             _segments = []
@@ -85,9 +96,17 @@ final class AudioFileStreamer: @unchecked Sendable {
     /// Writes a buffer to the audio file asynchronously.
     /// Peak level is calculated synchronously before the async write to ensure UI updates are responsive.
     ///
+    /// The timing segment is recorded inside the write, so a segment exists if and only if its
+    /// frames reached the file. That equality is an invariant, not a nicety: the mixdown compares
+    /// the sidecar's frame total against the decoded sample count exactly, and a mismatch of one
+    /// buffer makes it abandon presentation-timestamp alignment for the entire recording.
+    ///
     /// - Parameter hostTimeNanos: presentation host time (nanoseconds) of the buffer's first
-    ///   frame. When provided, a timing segment is recorded so the file can be re-placed onto a
-    ///   real-time timeline at mixdown (see `SynchronizedAudioTimeline`).
+    ///   frame. A buffer without one cannot be placed on the shared timeline and is dropped rather
+    ///   than written — writing it would shift every later sample in this file relative to real
+    ///   time, which is the failure timestamp anchoring exists to prevent. The cost is one
+    ///   conversion quantum, which the next buffer's presentation time turns into silence of its
+    ///   true duration.
     func write(buffer: AVAudioPCMBuffer, hostTimeNanos: UInt64? = nil) {
         let level = computeLevel(from: buffer)
 
@@ -96,10 +115,19 @@ final class AudioFileStreamer: @unchecked Sendable {
         // independent of the async file write.
         stateLock.lock()
         _activityTracker.record(level: level, at: Date())
-        if let hostTimeNanos {
-            _segments.append(AudioCaptureSegment(startHostTimeNanos: hostTimeNanos, frameCount: Int(frameLength)))
-        }
         stateLock.unlock()
+
+        guard let hostTimeNanos else {
+            stateLock.lock()
+            _unplaceableBufferCount += 1
+            let count = _unplaceableBufferCount
+            stateLock.unlock()
+            logger.error(
+                "Audio buffer dropped (\(self.label, privacy: .public), unplaceable #\(count, privacy: .public)): no presentation time, cannot be positioned on the timeline."
+            )
+            return
+        }
+
         queue.async { [weak self] in
             guard let self = self else { return }
             // Previously `try self._audioFile?.write(from: buffer)`: with no open file that is a
@@ -119,9 +147,15 @@ final class AudioFileStreamer: @unchecked Sendable {
             do {
                 try audioFile.write(from: buffer)
 
+                // Segment and frame count are recorded together, after the write succeeded, so the
+                // sidecar can only ever describe frames the file actually has. The queue is serial,
+                // so segments stay in write order.
                 self.stateLock.lock()
                 self._currentLevel = level
                 self._framesWritten += frameLength
+                self._segments.append(
+                    AudioCaptureSegment(startHostTimeNanos: hostTimeNanos, frameCount: Int(frameLength))
+                )
                 self.stateLock.unlock()
             } catch {
                 // Surface the failure so alignment problems are diagnosable rather than
@@ -140,6 +174,10 @@ final class AudioFileStreamer: @unchecked Sendable {
 
     /// Closes the audio file and, if timing segments were recorded, writes a `.timing`
     /// sidecar next to the audio file for timeline-anchored mixdown.
+    ///
+    /// The `queue.sync` is load-bearing: segments are now appended inside the write blocks on this
+    /// same serial queue, so syncing here guarantees every completed write is represented before
+    /// the sidecar is written.
     func close() {
         queue.sync {
             if #available(macOS 15.0, *) {
