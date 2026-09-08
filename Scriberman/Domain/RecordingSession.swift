@@ -25,6 +25,14 @@ final class RecordingSession {
     /// are materially different, and the count costs nothing to store. Stored as data, not a
     /// message — the wording belongs to the view, as with `appAudioMissing`.
     var captureInterruptionCount: Int?
+    /// How many audio write failures the recording's capture recorded, or `nil` when there were
+    /// none. The audio is intact; the failed intervals are silence of their real duration. Stored
+    /// as data, not a message — the wording belongs to the view.
+    var captureWriteFailureCount: Int?
+    /// Sources that covered materially less of the recording than the recording ran, as source
+    /// labels ("mic", "app"), or `nil` when every source covered it. The audio is real and
+    /// correctly placed; the uncovered interval is silence. Stored as data, not a message.
+    var partiallyCoveredSources: [String]?
     var mixdownAttemptCountValue: Int?
     var transcriptData: Data?
     var retranscriptData: Data?
@@ -41,6 +49,16 @@ final class RecordingSession {
     /// Whether this recording's capture was interrupted and restarted at least once, so it
     /// contains an interval of silence where capture was dead.
     var wasCaptureInterrupted: Bool { (captureInterruptionCount ?? 0) > 0 }
+
+    /// Whether the recording's capture recorded one or more failed writes.
+    var hadCaptureWriteFailures: Bool { (captureWriteFailureCount ?? 0) > 0 }
+
+    /// Whether any captured source stopped producing audio partway through the recording.
+    var hasPartiallyCoveredSource: Bool { !(partiallyCoveredSources ?? []).isEmpty }
+
+    /// Whether part of this recording's audio is missing — a source that stopped partway, or writes
+    /// that failed. Both leave an interval of silence, so the row reports them as one condition.
+    var hasIncompleteCapturedAudio: Bool { hasPartiallyCoveredSource || hadCaptureWriteFailures }
 
     var status: RecordingStatus {
         get { RecordingStatus(persistedValue: statusRawValue, errorMessage: errorMessage) }

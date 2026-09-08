@@ -63,4 +63,69 @@ struct RecordingStartVerifierTests {
         #expect(RecordingStartVerifier.verdict(micFrames: nil, appFrames: nil) == .unverifiable)
         #expect(RecordingStartVerifier.verdict(micFrames: nil, appFrames: 0) == .unverifiable)
     }
+    // MARK: - Source coverage
+
+    private let duration: TimeInterval = 600   // ten minutes
+    private let rate: Double = 48_000
+
+    @Test
+    func testFullyCoveredSourceIsNotMarked() {
+        let frames = Int64(duration * rate)
+        #expect(!RecordingStartVerifier.isSourcePartiallyCovered(frames: frames, duration: duration))
+    }
+
+    @Test
+    func testSourceThatStoppedPartwayIsMarked() {
+        // Covered four of ten minutes.
+        let frames = Int64(240 * rate)
+        #expect(RecordingStartVerifier.isSourcePartiallyCovered(frames: frames, duration: duration))
+    }
+
+    @Test
+    func testUncapturedSourceIsNotMarked() {
+        // nil means the source was not captured at all, or is unmeasurable under the recorder
+        // fallback. Neither is evidence of partial capture.
+        #expect(!RecordingStartVerifier.isSourcePartiallyCovered(frames: nil, duration: duration))
+    }
+
+    @Test
+    func testZeroCoverageIsMarked() {
+        #expect(RecordingStartVerifier.isSourcePartiallyCovered(frames: 0, duration: duration))
+    }
+
+    /// A recording legitimately starts before its owner joins a call. A short lead-in must not be
+    /// reported as a fault, which is what the uncovered-seconds floor is for.
+    @Test
+    func testShortLeadInOnAShortRecordingIsNotMarked() {
+        // 20 seconds missing from a 60-second recording: 67% covered, under the ratio, but only
+        // 20 seconds uncovered.
+        let shortDuration: TimeInterval = 60
+        let frames = Int64(40 * rate)
+        #expect(!RecordingStartVerifier.isSourcePartiallyCovered(frames: frames, duration: shortDuration))
+    }
+
+    @Test
+    func testLongLeadInOnALongRecordingIsMarked() {
+        // The same 67% coverage, but four minutes of a ten-minute recording are missing.
+        let frames = Int64(400 * rate)
+        #expect(RecordingStartVerifier.isSourcePartiallyCovered(frames: frames, duration: duration))
+    }
+
+    @Test
+    func testCoverageIsClampedAndHandlesZeroDuration() {
+        #expect(RecordingStartVerifier.sourceCoverage(frames: 0, duration: 0) == nil)
+        #expect(RecordingStartVerifier.sourceCoverage(frames: nil, duration: duration) == nil)
+        // Rounding can produce marginally more frames than the duration spans.
+        let overshoot = Int64(duration * rate) + 4_800
+        #expect(RecordingStartVerifier.sourceCoverage(frames: overshoot, duration: duration) == 1)
+    }
+
+    /// Zero coverage keeps its existing consequence: the recording is finalized microphone-only.
+    @Test
+    func testZeroFramesStillFinalizesWithoutAppAudio() {
+        #expect(RecordingStartVerifier.shouldFinalizeWithoutAppAudio(appFrames: 0))
+        #expect(!RecordingStartVerifier.shouldFinalizeWithoutAppAudio(appFrames: 1))
+        #expect(!RecordingStartVerifier.shouldFinalizeWithoutAppAudio(appFrames: nil))
+    }
+
 }

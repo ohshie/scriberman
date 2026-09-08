@@ -952,6 +952,83 @@ final class RecordingServiceTests {
     }
 
     @Test
+    func testStoppingAfterWriteFailuresPersistsTheMarker() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let service = await makeServiceForStop(workspace: workspace, container: container)
+
+        let sessionID = try await service.startRecording(
+            in: workspace, micDeviceID: nil, captureDisplayID: nil,
+            capturedAppName: nil, appProcessID: nil, title: "Failed writes"
+        )
+        await service.setWriteFailureOverrideForTesting(3)
+        _ = await service.stopRecording()
+
+        let context = ModelContext(container)
+        let session = try fetchRecordingSession(id: sessionID, from: context)
+        #expect(session.captureWriteFailureCount == 3)
+        #expect(session.hadCaptureWriteFailures)
+        // A caveat, not a failure: the audio it captured is intact.
+        #expect(session.status == .recorded)
+    }
+
+    @Test
+    func testStoppingWithoutWriteFailuresLeavesNoMarker() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let service = await makeServiceForStop(workspace: workspace, container: container)
+
+        let sessionID = try await service.startRecording(
+            in: workspace, micDeviceID: nil, captureDisplayID: nil,
+            capturedAppName: nil, appProcessID: nil, title: "Clean writes"
+        )
+        _ = await service.stopRecording()
+
+        let context = ModelContext(container)
+        let session = try fetchRecordingSession(id: sessionID, from: context)
+        #expect(session.captureWriteFailureCount == nil)
+        #expect(!session.hadCaptureWriteFailures)
+    }
+
+    /// Write failures must never reach the restart trigger set: a restart cannot repair a full
+    /// disk, and would destroy more audio than the failures did.
+    @Test
+    func testWriteFailuresAreNotPartOfTheCaptureHealthSnapshot() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let service = await makeServiceForStop(workspace: workspace, container: container)
+        _ = try await service.startRecording(
+            in: workspace, micDeviceID: nil, captureDisplayID: nil,
+            capturedAppName: nil, appProcessID: nil, title: "Health"
+        )
+
+        let snapshot = await service.captureHealthSnapshot()
+        var monitor = CaptureHealthMonitor()
+        let now = Date()
+        _ = monitor.update(now: now, snapshot: snapshot, isRecording: true)
+        // Frames do not advance, but no stream failure is reported, so nothing here can be driven
+        // by write failures — the snapshot carries no such field.
+        #expect(snapshot.streamFailureCount == 0)
+
+        _ = await service.stopRecording()
+    }
+
+    @Test
     func testStoppingACleanRecordingLeavesNoInterruptionMarker() async throws {
         let workspace = makeWorkspace()
         defer { removeWorkspace(at: workspace.rootURL) }
@@ -1007,6 +1084,53 @@ final class RecordingServiceTests {
         let second = try fetchRecordingSession(id: secondID, from: context)
         // A clean recording must not inherit the previous one's interruptions.
         #expect(second.captureInterruptionCount == nil)
+    }
+
+    @Test
+    func testNewMarkersRoundTripThroughAnOnDiskStore() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storeURL = root.appendingPathComponent("store.sqlite")
+
+        let markedID = UUID()
+        let cleanID = UUID()
+        do {
+            let container = try ModelContainer(
+                for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+                configurations: ModelConfiguration(url: storeURL)
+            )
+            let context = ModelContext(container)
+            let marked = RecordingSession(
+                id: markedID, duration: 600, micAudioURL: "/tmp/a.wav", title: "Marked"
+            )
+            marked.captureWriteFailureCount = 4
+            marked.partiallyCoveredSources = ["app"]
+            let clean = RecordingSession(
+                id: cleanID, duration: 600, micAudioURL: "/tmp/b.wav", title: "Clean"
+            )
+            context.insert(marked)
+            context.insert(clean)
+            try context.save()
+        }
+
+        let reopened = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(url: storeURL)
+        )
+        let context = ModelContext(reopened)
+        let sessions = try context.fetch(FetchDescriptor<RecordingSession>())
+        let marked = try #require(sessions.first { $0.id == markedID })
+        let clean = try #require(sessions.first { $0.id == cleanID })
+        #expect(marked.captureWriteFailureCount == 4)
+        #expect(marked.partiallyCoveredSources == ["app"])
+        #expect(marked.hasPartiallyCoveredSource)
+        // Rows written without the new attributes read back as nil, which is the half of
+        // lightweight migration a unit test can cover.
+        #expect(clean.captureWriteFailureCount == nil)
+        #expect(clean.partiallyCoveredSources == nil)
+        #expect(!clean.hasPartiallyCoveredSource)
     }
 
     /// Adding an optional attribute is SwiftData's lightweight-migration case. This exercises the

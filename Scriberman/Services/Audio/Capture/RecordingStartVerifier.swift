@@ -59,4 +59,58 @@ enum RecordingStartVerifier {
         guard let appFrames else { return false }
         return appFrames == 0
     }
+
+    /// How much of a recording a source has to cover before it is considered complete.
+    ///
+    /// Grouped as one rule rather than loose constants because the two values only make sense
+    /// together: the ratio is what "materially incomplete" means, and the floor is what stops a
+    /// short recording tripping on an ordinary lead-in.
+    ///
+    /// Neither is a correctness boundary. They are a judgement about what is worth telling someone,
+    /// and both are deliberately generous — a recording legitimately starts before its owner joins
+    /// a call, which is the same reason app audio is never judged during a recording's first
+    /// seconds.
+    enum SourceCoverageRule {
+        /// Below this fraction of the recording's duration, a source counts as incomplete.
+        static let minimumCoveredFraction: Double = 0.75
+        /// ...but only once this much of the recording is actually missing, so a 20-second lead-in
+        /// on a 60-second recording is not reported as a fault.
+        static let minimumUncoveredSeconds: TimeInterval = 30
+    }
+
+    /// The fraction of `duration` that a source's written frames account for.
+    ///
+    /// Returns `nil` when the source was not captured, or when the recording has no duration to
+    /// measure against. Values above 1 are possible from rounding on very short recordings and are
+    /// clamped, since "more than complete" is still complete.
+    static func sourceCoverage(
+        frames: Int64?,
+        duration: TimeInterval,
+        sampleRate: Double = 48_000
+    ) -> Double? {
+        guard let frames, duration > 0, sampleRate > 0 else { return nil }
+        let expected = duration * sampleRate
+        guard expected > 0 else { return nil }
+        return min(1, Double(frames) / expected)
+    }
+
+    /// Whether a source covered materially less of the recording than the recording ran, and should
+    /// therefore be marked.
+    ///
+    /// Zero coverage is the limiting case of the same rule: a source that never produced audio is
+    /// the extreme of one that stopped early. `shouldFinalizeWithoutAppAudio` continues to own what
+    /// *happens* at zero — the recording is finalized as microphone-only — while this decides what
+    /// is *reported*.
+    static func isSourcePartiallyCovered(
+        frames: Int64?,
+        duration: TimeInterval,
+        sampleRate: Double = 48_000
+    ) -> Bool {
+        guard let coverage = sourceCoverage(frames: frames, duration: duration, sampleRate: sampleRate) else {
+            return false
+        }
+        guard coverage < SourceCoverageRule.minimumCoveredFraction else { return false }
+        let uncoveredSeconds = duration * (1 - coverage)
+        return uncoveredSeconds >= SourceCoverageRule.minimumUncoveredSeconds
+    }
 }

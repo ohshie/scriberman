@@ -199,6 +199,63 @@ struct RecordingStatusTests {
         #expect(!between.contains("else"))
     }
 
+    // MARK: - Incomplete-capture marker
+
+    @Test
+    func testRecordingSessionRowShowsTheIncompleteCaptureMarker() throws {
+        let source = try sourceForFile(named: "RecordingSessionRow.swift")
+        #expect(source.contains("session.hasIncompleteCapturedAudio"))
+        #expect(source.contains("Recorded, but some segments may be missing"))
+    }
+
+    /// A recording with missing segments still succeeded, so it must not borrow the error look.
+    @Test
+    func testIncompleteCaptureIsNotShownAsAnError() throws {
+        let source = try sourceForFile(named: "RecordingSessionRow.swift")
+        let markerRange = try #require(source.range(of: "session.hasIncompleteCapturedAudio"))
+        let block = source[markerRange.lowerBound...].prefix(400)
+        #expect(!block.contains("xmark"))
+        #expect(!block.contains(".red"))
+    }
+
+    /// All four capture caveats are independent conditions, shown together rather than one
+    /// replacing another.
+    @Test
+    func testAllCaptureCaveatsCanAppearTogether() throws {
+        let source = try sourceForFile(named: "RecordingSessionRow.swift")
+        let screen = try #require(source.range(of: "session.screenCaptureWarning != nil"))
+        let interrupted = try #require(source.range(of: "session.wasCaptureInterrupted"))
+        let incomplete = try #require(source.range(of: "session.hasIncompleteCapturedAudio"))
+        #expect(screen.upperBound < interrupted.lowerBound)
+        #expect(interrupted.upperBound < incomplete.lowerBound)
+        let between = String(source[interrupted.upperBound..<incomplete.lowerBound])
+        #expect(!between.contains("else"))
+    }
+
+    @Test
+    func testIncompleteCaptureMarkerCoversBothConditions() {
+        let session = RecordingSession(duration: 600, micAudioURL: "/tmp/a.wav", title: "t")
+        #expect(!session.hasIncompleteCapturedAudio)
+
+        session.partiallyCoveredSources = ["app"]
+        #expect(session.hasIncompleteCapturedAudio)
+
+        session.partiallyCoveredSources = nil
+        session.captureWriteFailureCount = 2
+        #expect(session.hasIncompleteCapturedAudio)
+
+        session.captureWriteFailureCount = nil
+        #expect(!session.hasIncompleteCapturedAudio)
+    }
+
+    @Test
+    func testEmptyPartiallyCoveredListIsNotAMarker() {
+        let session = RecordingSession(duration: 600, micAudioURL: "/tmp/a.wav", title: "t")
+        session.partiallyCoveredSources = []
+        #expect(!session.hasPartiallyCoveredSource)
+        #expect(!session.hasIncompleteCapturedAudio)
+    }
+
     @Test
     func testInterruptedCaptureMarkerIsDrivenByThePersistedCount() {
         let session = RecordingSession(duration: 10, micAudioURL: "/tmp/a.wav", title: "t")
