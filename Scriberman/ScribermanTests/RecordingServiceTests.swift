@@ -901,6 +901,160 @@ final class RecordingServiceTests {
         #expect(fixture.micController.startCaptureCalls.last?.deviceID == 22)
     }
 
+    // MARK: - Interrupted-capture marker
+
+    private func makeServiceForStop(
+        workspace: Workspace,
+        container: ModelContainer
+    ) async -> RecordingService {
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        return RecordingService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            micCaptureController: MockMicCaptureController(),
+            mixdownCoordinator: MockRecordingMixdownCoordinator(),
+            screenVideoMuxer: MockScreenVideoMuxer(),
+            permissionChecker: {},
+            scopedAccessStarter: { _ in true },
+            scopedAccessStopper: { _ in }
+        )
+    }
+
+    @Test
+    func testStoppingAnInterruptedRecordingPersistsTheInterruptionCount() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let service = await makeServiceForStop(workspace: workspace, container: container)
+
+        let sessionID = try await service.startRecording(
+            in: workspace,
+            micDeviceID: nil,
+            captureDisplayID: nil,
+            capturedAppName: nil,
+            appProcessID: nil,
+            title: "Interrupted"
+        )
+        await service.setCaptureRestartCountForTesting(2)
+        _ = await service.stopRecording()
+
+        let context = ModelContext(container)
+        let session = try fetchRecordingSession(id: sessionID, from: context)
+        #expect(session.captureInterruptionCount == 2)
+        #expect(session.wasCaptureInterrupted)
+    }
+
+    @Test
+    func testStoppingACleanRecordingLeavesNoInterruptionMarker() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let service = await makeServiceForStop(workspace: workspace, container: container)
+
+        let sessionID = try await service.startRecording(
+            in: workspace,
+            micDeviceID: nil,
+            captureDisplayID: nil,
+            capturedAppName: nil,
+            appProcessID: nil,
+            title: "Clean"
+        )
+        _ = await service.stopRecording()
+
+        let context = ModelContext(container)
+        let session = try fetchRecordingSession(id: sessionID, from: context)
+        // nil rather than 0, matching how appAudioMissing stores "nothing to report".
+        #expect(session.captureInterruptionCount == nil)
+        #expect(!session.wasCaptureInterrupted)
+    }
+
+    @Test
+    func testTheInterruptionCountIsResetByTheNextRecording() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let service = await makeServiceForStop(workspace: workspace, container: container)
+
+        _ = try await service.startRecording(
+            in: workspace, micDeviceID: nil, captureDisplayID: nil,
+            capturedAppName: nil, appProcessID: nil, title: "First"
+        )
+        await service.setCaptureRestartCountForTesting(3)
+        _ = await service.stopRecording()
+
+        let secondID = try await service.startRecording(
+            in: workspace, micDeviceID: nil, captureDisplayID: nil,
+            capturedAppName: nil, appProcessID: nil, title: "Second"
+        )
+        _ = await service.stopRecording()
+
+        let context = ModelContext(container)
+        let second = try fetchRecordingSession(id: secondID, from: context)
+        // A clean recording must not inherit the previous one's interruptions.
+        #expect(second.captureInterruptionCount == nil)
+    }
+
+    /// Adding an optional attribute is SwiftData's lightweight-migration case. This exercises the
+    /// half that can be checked in a unit test: an on-disk store round-trips, and rows written
+    /// without the marker read back as nil rather than failing to load.
+    ///
+    /// Opening a store file created by a build that predates the attribute is verified by running
+    /// the app against an existing workspace (chapter 10's real-hardware validation).
+    @Test
+    func testMarkerRoundTripsThroughAnOnDiskStore() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storeURL = root.appendingPathComponent("store.sqlite")
+
+        let markedID = UUID()
+        let unmarkedID = UUID()
+        do {
+            let container = try ModelContainer(
+                for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+                configurations: ModelConfiguration(url: storeURL)
+            )
+            let context = ModelContext(container)
+            let marked = RecordingSession(
+                id: markedID, duration: 10, micAudioURL: "/tmp/a.wav", title: "Marked"
+            )
+            marked.captureInterruptionCount = 4
+            let unmarked = RecordingSession(
+                id: unmarkedID, duration: 10, micAudioURL: "/tmp/b.wav", title: "Unmarked"
+            )
+            context.insert(marked)
+            context.insert(unmarked)
+            try context.save()
+        }
+
+        let reopened = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(url: storeURL)
+        )
+        let context = ModelContext(reopened)
+        let sessions = try context.fetch(FetchDescriptor<RecordingSession>())
+        #expect(sessions.count == 2)
+        #expect(sessions.first { $0.id == markedID }?.captureInterruptionCount == 4)
+        #expect(sessions.first { $0.id == unmarkedID }?.captureInterruptionCount == nil)
+        #expect(sessions.first { $0.id == unmarkedID }?.wasCaptureInterrupted == false)
+    }
+
     private func makeWorkspace() -> Workspace {
         let rootURL = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

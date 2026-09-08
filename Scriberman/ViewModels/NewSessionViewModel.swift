@@ -35,6 +35,11 @@ final class NewSessionViewModel {
         idlePromptPreferencesProvider?() ?? .default
     }
     private var idlePromptMachine = IdlePromptStateMachine()
+    private var captureHealthMonitor = CaptureHealthMonitor()
+    /// When capture health was last evaluated. The recording monitor ticks every 50 ms for the
+    /// level meters; sampling frame counts that often would mean twenty extra actor hops a second
+    /// for a check that only needs to be as fine-grained as the stall threshold.
+    private var lastCaptureHealthEvaluationAt: Date?
     private let userInputIdleProvider: any UserInputIdleProviding
     /// True when this session captures both mic and app audio (the only case the prompt applies to).
     private var isIdlePromptApplicable = false
@@ -248,6 +253,9 @@ final class NewSessionViewModel {
         dismissIdlePrompt()
         isIdlePromptApplicable = false
         idlePromptMachine = IdlePromptStateMachine()
+        captureHealthMonitor = CaptureHealthMonitor(configuration: captureHealthConfiguration)
+        lastCaptureHealthEvaluationAt = nil
+        lastCaptureHealthEffect = .none
     }
 
     /// Tears the prompt down. Safe to call when it is not showing.
@@ -434,7 +442,22 @@ final class NewSessionViewModel {
             // The idle prompt only applies to mic + app sessions.
             isIdlePromptApplicable = selectedAppProcessID != nil
             idlePromptMachine = IdlePromptStateMachine()
+            captureHealthMonitor = CaptureHealthMonitor(configuration: captureHealthConfiguration)
+            lastCaptureHealthEvaluationAt = nil
+            lastCaptureHealthEffect = .none
             isIdlePromptVisible = false
+
+            // Scheduled here, immediately after capture started, and deliberately not after the
+            // live-transcription start below. That start loads ASR and diarizer models and takes
+            // an unbounded amount of time; sequencing verification behind it deferred the check by
+            // that duration, which defeats catching a dead recording before anything worth keeping
+            // was said.
+            verifyRecordingStart(
+                sessionID: recordingSessionID,
+                workspace: workspace,
+                context: context,
+                captureStartedAt: recordingStartedAt ?? Date()
+            )
 
             let descriptor = FetchDescriptor<RecordingSession>()
             let session = try? context.fetch(descriptor).first(where: { $0.id == recordingSessionID })
@@ -450,8 +473,7 @@ final class NewSessionViewModel {
                 errorMessage = "Live transcription unavailable: \(error.localizedDescription)"
             }
             
-            startRecordingMonitor()
-            verifyRecordingStart(sessionID: recordingSessionID, workspace: workspace, context: context)
+            startRecordingMonitor(workspace: workspace, context: context)
             return session
         } catch {
             errorMessage = error.localizedDescription
@@ -497,6 +519,9 @@ final class NewSessionViewModel {
         dismissIdlePrompt()
         isIdlePromptApplicable = false
         idlePromptMachine = IdlePromptStateMachine()
+        captureHealthMonitor = CaptureHealthMonitor(configuration: captureHealthConfiguration)
+        lastCaptureHealthEvaluationAt = nil
+        lastCaptureHealthEffect = .none
         
         var fetchedSession: RecordingSession?
         if let sessionID = sessionID {
@@ -603,17 +628,42 @@ final class NewSessionViewModel {
     /// Overridable so tests can exercise the verify/retry sequence without waiting real seconds.
     var startVerificationDelay: Duration = NewSessionViewModel.defaultStartVerificationDelay
 
+    /// How much of `delay` is left, measured from `start`. Zero once it has already elapsed.
+    ///
+    /// Pure so the anchoring is testable without a clock: the point of the verification delay is
+    /// that it is counted from the moment capture started, not from whenever the checking task got
+    /// around to running.
+    static func remainingDelay(_ delay: Duration, since start: Date, now: Date) -> Duration {
+        let elapsed = now.timeIntervalSince(start)
+        guard elapsed > 0 else { return delay }
+        let remaining = delay - .seconds(elapsed)
+        return remaining > .zero ? remaining : .zero
+    }
+
     /// Verifies, one second after start, that frames are being written; restarts capture once if
     /// not; and fails the session if the restart does not help.
     ///
     /// Runs detached so the UI shows the recording immediately rather than stalling a second on a
     /// check that almost always passes.
-    private func verifyRecordingStart(sessionID: UUID, workspace: Workspace, context: ModelContext) {
+    private func verifyRecordingStart(
+        sessionID: UUID,
+        workspace: Workspace,
+        context: ModelContext,
+        captureStartedAt: Date
+    ) {
         startVerificationTask?.cancel()
         startVerificationTask = Task { [weak self] in
             guard let self else { return }
 
-            try? await Task.sleep(for: startVerificationDelay)
+            // Anchored to when capture started, not to when this task happened to begin running,
+            // so unrelated start-up work cannot push the check later.
+            try? await Task.sleep(
+                for: Self.remainingDelay(
+                    startVerificationDelay,
+                    since: captureStartedAt,
+                    now: Date()
+                )
+            )
             guard !Task.isCancelled else { return }
 
             var counts = await recordingService.captureFrameCounts()
@@ -678,6 +728,9 @@ final class NewSessionViewModel {
         dismissIdlePrompt()
         isIdlePromptApplicable = false
         idlePromptMachine = IdlePromptStateMachine()
+        captureHealthMonitor = CaptureHealthMonitor(configuration: captureHealthConfiguration)
+        lastCaptureHealthEvaluationAt = nil
+        lastCaptureHealthEffect = .none
 
         // Mark the session failed rather than deleting it: this reuses the status vocabulary the
         // jobs pipeline already uses for failures, and leaves the row to point at its log.
@@ -703,16 +756,19 @@ final class NewSessionViewModel {
         onRecordingStartFailurePresentationChanged?(false)
     }
 
-    private func startRecordingMonitor() {
+    private func startRecordingMonitor(workspace: Workspace, context: ModelContext) {
         recordingMonitorTask?.cancel()
         recordingMonitorTask = Task { [weak self] in
             while let self, !Task.isCancelled {
                 let isRecording = await recordingService.isRecording()
                 guard isRecording else {
+                    // `state = .idle` used to sit inside the `if let pendingError`, and
+                    // `pendingError` was never assigned, so it was unreachable: capture ending
+                    // behind the view model's back left the UI showing a recording forever.
                     if let pendingError = await recordingService.consumePendingError() {
                         errorMessage = pendingError.localizedDescription
-                        state = .idle
                     }
+                    state = .idle
                     break
                 }
 
@@ -724,10 +780,135 @@ final class NewSessionViewModel {
                 state = .recording(duration: duration, level: max(levels.mic, levels.app))
 
                 await evaluateIdlePrompt(recordingStartedAt: startedAt)
+                await evaluateCaptureHealth(workspace: workspace, context: context)
 
                 try? await Task.sleep(for: .milliseconds(50))
             }
         }
+    }
+
+    // MARK: - Capture health
+
+    /// How this view model configures `CaptureHealthMonitor`. Overridable so tests can exercise
+    /// detection without waiting real seconds, mirroring `startVerificationDelay`.
+    var captureHealthConfiguration: CaptureHealthMonitor.Configuration = .default
+
+    /// How often capture health is evaluated. The recording monitor's own tick is 50 ms, which is
+    /// what the level meters need and far finer than a stall threshold measured in seconds.
+    var captureHealthEvaluationInterval: TimeInterval = 1
+
+    /// The effect the monitor produced on its most recent evaluation. Observed by tests; while
+    /// detection is observation-only this is also the only record of what it decided.
+    private(set) var lastCaptureHealthEffect: CaptureHealthMonitor.Effect = .none
+
+    /// Whether this recording's capture has been restarted at least once.
+    var wasCaptureInterrupted: Bool { captureHealthMonitor.wasInterrupted }
+
+    /// Whether a detected capture death is acted on, or only observed and logged.
+    ///
+    /// Overridable so tests can exercise both sides without touching user defaults.
+    var isCaptureHealthRecoveryEnabled: Bool = AudioSyncConfig.isCaptureHealthRecoveryEnabled
+
+    /// Set while a restart is in flight, so the 50 ms monitor loop cannot start a second one on top
+    /// of it. Mirrors `RecordingService.isRecoveringMicCapture`.
+    private var isRecoveringCapture = false
+
+    /// Evaluates capture health at most once per `captureHealthEvaluationInterval`, and applies the
+    /// resulting effect.
+    private func evaluateCaptureHealth(workspace: Workspace, context: ModelContext) async {
+        let now = Date()
+        if let last = lastCaptureHealthEvaluationAt,
+           now.timeIntervalSince(last) < captureHealthEvaluationInterval {
+            return
+        }
+        lastCaptureHealthEvaluationAt = now
+
+        guard !isRecoveringCapture else { return }
+
+        let snapshot = await recordingService.captureHealthSnapshot()
+        guard let sessionID = activeRecordingSessionID else {
+            _ = captureHealthMonitor.update(now: now, snapshot: snapshot, isRecording: false)
+            lastCaptureHealthEffect = .none
+            return
+        }
+        let effect = captureHealthMonitor.update(now: now, snapshot: snapshot, isRecording: true)
+        lastCaptureHealthEffect = effect
+
+        guard effect != .none else { return }
+        let mic = snapshot.micFrames.map(String.init) ?? "unavailable"
+        let app = snapshot.appFrames.map(String.init) ?? "not captured"
+        let failures = snapshot.streamFailureCount
+        let restarts = captureHealthMonitor.restartsIssued
+
+        guard isCaptureHealthRecoveryEnabled else {
+            let action = effect == .restart ? "restart capture" : "stop the recording"
+            logger.warning(
+                "Capture health would \(action, privacy: .public) (recovery disabled). micFrames=\(mic, privacy: .public) appFrames=\(app, privacy: .public) streamFailures=\(failures, privacy: .public) restartsIssued=\(restarts, privacy: .public)"
+            )
+            return
+        }
+
+        switch effect {
+        case .none:
+            return
+        case .restart:
+            logger.warning(
+                "Capture health restarting capture. micFrames=\(mic, privacy: .public) appFrames=\(app, privacy: .public) streamFailures=\(failures, privacy: .public) restartsIssued=\(restarts, privacy: .public)"
+            )
+            isRecoveringCapture = true
+            let didRestart = await recordingService.restartAudioCaptureInPlace()
+            isRecoveringCapture = false
+            if !didRestart {
+                // The monitor's budget still governs: a restart that would not start is simply not
+                // a recovery, and the next evaluation counts it against the consecutive limit.
+                logger.error("Capture restart did not take. Captured audio is retained.")
+            }
+        case .fail:
+            logger.error(
+                "Capture health stopping the recording; restarts exhausted. micFrames=\(mic, privacy: .public) appFrames=\(app, privacy: .public) streamFailures=\(failures, privacy: .public) restartsIssued=\(restarts, privacy: .public)"
+            )
+            await failRecordingAfterCaptureLoss(
+                sessionID: sessionID,
+                workspace: workspace,
+                context: context,
+                snapshot: snapshot
+            )
+        }
+    }
+
+    /// Ends a recording whose capture could not be recovered.
+    ///
+    /// Unlike a failed *start*, this recording captured audio, so it is finalized through the normal
+    /// stop path rather than discarded: `stopRecording` closes the writers, writes the timing
+    /// sidecars, and runs mixdown over everything that was captured on both sides of the outage.
+    private func failRecordingAfterCaptureLoss(
+        sessionID: UUID,
+        workspace: Workspace,
+        context: ModelContext,
+        snapshot: CaptureHealthMonitor.Snapshot
+    ) async {
+        startVerificationTask?.cancel()
+        startVerificationTask = nil
+
+        let startedAt = recordingStartedAt ?? Date()
+        let lastError = await recordingService.consumePendingError()
+        sessionFailureLogWriter.write(
+            SessionFailureLogWriter.Failure(
+                sessionID: sessionID,
+                startedAt: startedAt,
+                micFrames: snapshot.micFrames,
+                appFrames: snapshot.appFrames,
+                micWriteFailures: 0,
+                appWriteFailures: 0,
+                restartAttempted: captureHealthMonitor.restartsIssued > 0,
+                lastError: lastError?.diagnosticDetail ?? lastError?.localizedDescription
+            ),
+            in: workspace
+        )
+
+        _ = await stopRecording(context: context)
+        didFailToStartRecording = true
+        onRecordingStartFailurePresentationChanged?(true)
     }
 
     // MARK: - Idle session prompt

@@ -52,12 +52,38 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
         return (counts.mic, counts.app, 0, 0)
     }
 
+    /// Snapshots returned by `captureHealthSnapshot()`. Deliberately separate state from
+    /// `frameCountQueue`: capture-health evaluation and start verification run concurrently on the
+    /// same recording, and sharing a pop-once queue would make each one consume the other's
+    /// fixtures.
+    var captureHealthSnapshotQueue: [CaptureHealthMonitor.Snapshot] = [
+        CaptureHealthMonitor.Snapshot(micFrames: 512, appFrames: nil)
+    ]
+    private(set) var captureHealthSnapshotCallCount = 0
+
+    func captureHealthSnapshot() async -> CaptureHealthMonitor.Snapshot {
+        captureHealthSnapshotCallCount += 1
+        let fallback = CaptureHealthMonitor.Snapshot(micFrames: 512, appFrames: nil)
+        guard captureHealthSnapshotQueue.count > 1 else {
+            return captureHealthSnapshotQueue.first ?? fallback
+        }
+        return captureHealthSnapshotQueue.removeFirst()
+    }
+
     var restartAudioCaptureResult = true
     private(set) var restartAudioCaptureCallCount = 0
 
     func restartAudioCapture() async -> Bool {
         restartAudioCaptureCallCount += 1
         return restartAudioCaptureResult
+    }
+
+    var restartAudioCaptureInPlaceResult = true
+    private(set) var restartAudioCaptureInPlaceCallCount = 0
+
+    func restartAudioCaptureInPlace() async -> Bool {
+        restartAudioCaptureInPlaceCallCount += 1
+        return restartAudioCaptureInPlaceResult
     }
 
     func startRecording(

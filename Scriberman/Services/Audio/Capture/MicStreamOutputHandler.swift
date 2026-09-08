@@ -12,7 +12,9 @@ import ScreenCaptureKit
 /// @unchecked Sendable: mutable state is protected by `lock` and the streamer's queue.
 final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendable {
     private let lock = NSLock()
-    private let streamer = AudioFileStreamer(label: "mic")
+    /// Injected so a mid-session capture restart can rebuild the stream and its handlers while
+    /// continuing to write into the same file, with its accumulated timing segments intact.
+    let streamer: AudioFileStreamer
     private let liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation?
     private let targetFormat: AVAudioFormat
     private var fileURL: URL?
@@ -35,8 +37,12 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
     /// Write failures observed since capture started.
     var writeFailureCount: Int { streamer.writeFailureCount }
 
-    init(liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil) {
+    init(
+        liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil,
+        streamer: AudioFileStreamer = AudioFileStreamer(label: "mic")
+    ) {
         self.liveAudioContinuation = liveAudioContinuation
+        self.streamer = streamer
         self.targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: 48_000,
@@ -54,6 +60,19 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
         converterSourceFormat = nil
         firstBufferHostTime = nil
         hasPrepared = false
+    }
+
+    /// Adopts a writer that is already open and mid-recording, so a restart neither re-prepares
+    /// it (which would truncate the file and discard its timing segments) nor writes a
+    /// `.timing` sidecar early.
+    func adoptPreparedOutput(url: URL) {
+        lock.lock()
+        defer { lock.unlock() }
+        fileURL = url
+        converter = nil
+        converterSourceFormat = nil
+        firstBufferHostTime = nil
+        hasPrepared = true
     }
 
     func closeOutput() {
