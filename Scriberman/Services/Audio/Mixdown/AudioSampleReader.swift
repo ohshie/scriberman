@@ -70,6 +70,9 @@ actor AudioSampleReader {
             }
             return try readResampledMonoSamplesViaAVAudioFile(from: inputURL)
         } catch {
+            // Reaching the end of a file is no longer a failure, so this path now means the file
+            // could not be decoded. Seeing it in a log is evidence of a real problem rather than
+            // something every recording does.
             let nsError = error as NSError
             logger.error(
                 "\(label, privacy: .public) AVAudioFile read path failed. domain=\(nsError.domain, privacy: .public) code=\(nsError.code, privacy: .public) desc=\(nsError.localizedDescription, privacy: .public). Falling back to ExtAudioFile."
@@ -112,7 +115,12 @@ actor AudioSampleReader {
         }
 
         var monoSamplesAtSourceRate: [Float] = []
-        while true {
+        // Bounded by the file's own length rather than by a zero-length buffer at the end.
+        // `AVAudioFile.read(into:frameCount:)` throws when called at end of file instead of
+        // returning an empty buffer, so a loop that waits for `frameLength == 0` reads the file
+        // completely, throws on the following read, and discards the decode it had already
+        // produced — sending every healthy recording down the fallback path.
+        while inputFile.framePosition < inputFile.length {
             guard let buffer = AVAudioPCMBuffer(
                 pcmFormat: inputFormat,
                 frameCapacity: processingChunkSize
@@ -120,8 +128,11 @@ actor AudioSampleReader {
                 throw RecordingError.failedToStart("Failed to allocate direct-read buffer.")
             }
 
-            try inputFile.read(into: buffer, frameCount: processingChunkSize)
+            let remaining = inputFile.length - inputFile.framePosition
+            let framesToRead = AVAudioFrameCount(min(Int64(processingChunkSize), remaining))
+            try inputFile.read(into: buffer, frameCount: framesToRead)
             guard buffer.frameLength > 0 else {
+                // Defensive: a short read with frames still outstanding would otherwise spin.
                 break
             }
 
