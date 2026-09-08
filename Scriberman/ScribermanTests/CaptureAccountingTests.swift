@@ -202,12 +202,18 @@ struct CaptureAccountingTests {
 
         // Idle detection must see the microphone is alive whatever the disk does, and whatever
         // happens to buffers that cannot be placed. `CaptureActivityTracker` needs a sustained run
-        // (1s above the level floor) before it reports activity, so feed one — entirely from
-        // buffers that are dropped for having no presentation time.
-        let deadline = Date().addingTimeInterval(1.2)
-        while Date() < deadline {
-            streamer.write(buffer: try makeBuffer(), hostTimeNanos: nil)
-            try? await Task.sleep(for: .milliseconds(50))
+        // (1s above the level floor, with no quiet gap longer than 0.5s) before it reports
+        // activity, so feed one — entirely from buffers that are dropped for having no
+        // presentation time.
+        //
+        // Driven until the tracker reports rather than for a fixed wall-clock span: under parallel
+        // test load a sleep can overshoot the 0.5s gap tolerance, which restarts the run, so a
+        // fixed loop is flaky by construction.
+        let buffer = try makeBuffer()
+        let deadline = Date().addingTimeInterval(20)
+        while streamer.lastActivityAt == nil, Date() < deadline {
+            streamer.write(buffer: buffer, hostTimeNanos: nil)
+            try? await Task.sleep(for: .milliseconds(10))
         }
 
         #expect(streamer.lastActivityAt != nil)

@@ -43,6 +43,16 @@ struct RecordingSessionRow: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
+
+                // One line for both conditions: a source that stopped partway and a write that
+                // failed mean the same thing to a listener — an interval of the recording is
+                // silence. Like the caveats above, not the `.error` treatment: the recording
+                // succeeded and its audio is usable.
+                if session.hasIncompleteCapturedAudio {
+                    Label("Recorded, but some segments may be missing", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
 
             Spacer(minLength: 12)

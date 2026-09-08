@@ -56,6 +56,10 @@ final class RecordingSession {
     /// Whether any captured source stopped producing audio partway through the recording.
     var hasPartiallyCoveredSource: Bool { !(partiallyCoveredSources ?? []).isEmpty }
 
+    /// Whether part of this recording's audio is missing — a source that stopped partway, or writes
+    /// that failed. Both leave an interval of silence, so the row reports them as one condition.
+    var hasIncompleteCapturedAudio: Bool { hasPartiallyCoveredSource || hadCaptureWriteFailures }
+
     var status: RecordingStatus {
         get { RecordingStatus(persistedValue: statusRawValue, errorMessage: errorMessage) }
         set {
