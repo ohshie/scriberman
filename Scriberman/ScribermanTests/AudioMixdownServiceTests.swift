@@ -17,6 +17,89 @@ final class AudioMixdownServiceTests {
         try? FileManager.default.removeItem(at: tempDirectoryURL)
     }
 
+    // MARK: - Timeline path preconditions
+
+    /// Writes a `.timing` sidecar describing `segmentCount` contiguous 960-frame segments.
+    private func writeSidecar(for audioURL: URL, segmentCount: Int, framesPerSegment: Int = 960) throws {
+        let segments = (0..<segmentCount).map { index in
+            AudioCaptureSegment(
+                startHostTimeNanos: UInt64(index) * 20_000_000 + 1_000_000_000,
+                frameCount: framesPerSegment
+            )
+        }
+        let sidecar = CaptureTimingSidecar(sampleRate: 48_000, segments: segments)
+        let data = try JSONEncoder().encode(sidecar)
+        try data.write(to: AudioFileStreamer.timingSidecarURL(for: audioURL), options: .atomic)
+    }
+
+    /// A recording whose sidecar agrees with its file mixes on the presentation-timestamp path.
+    /// After the capture-time invariant, agreement is the normal case rather than the lucky one.
+    @Test
+    func testAgreeingSidecarProducesStereoOutput() async throws {
+        let service = AudioMixdownService(outputFormat: .linearPCMCaf)
+        let micURL = tempDirectoryURL.appendingPathComponent("mic-agree.wav")
+        let appURL = tempDirectoryURL.appendingPathComponent("app-agree.wav")
+        let outputURL = tempDirectoryURL.appendingPathComponent("agree.caf")
+
+        try writeMonoWAV(samples: Array(repeating: Float(0.25), count: 48_000), to: micURL)
+        try writeMonoWAV(samples: Array(repeating: Float(-0.55), count: 48_000), to: appURL)
+        try ensureReadableAudioFile(at: micURL)
+        try ensureReadableAudioFile(at: appURL)
+        try writeSidecar(for: micURL, segmentCount: 50)
+        try writeSidecar(for: appURL, segmentCount: 50)
+
+        do {
+            try await service.mix(
+                micURL: micURL,
+                appURL: appURL,
+                micStartHostTime: 1_000_000_000,
+                appStartHostTime: 1_000_000_000,
+                into: outputURL
+            )
+        } catch {
+            if shouldSkipForSandboxAudioIO(error) { return }
+            throw error
+        }
+
+        let decoded = try decodePCM(from: outputURL)
+        #expect(decoded.channelCount == 2)
+    }
+
+    /// A sidecar that genuinely disagrees with its file must still be refused, and the recording
+    /// must still be mixed by the fallback rather than failing. The guard is now an assertion on
+    /// the capture-time invariant, so it should never fire in practice — but it must keep working.
+    @Test
+    func testDisagreeingSidecarIsRefusedAndStillProducesOutput() async throws {
+        let service = AudioMixdownService(outputFormat: .linearPCMCaf)
+        let micURL = tempDirectoryURL.appendingPathComponent("mic-disagree.wav")
+        let appURL = tempDirectoryURL.appendingPathComponent("app-disagree.wav")
+        let outputURL = tempDirectoryURL.appendingPathComponent("disagree.caf")
+
+        try writeMonoWAV(samples: Array(repeating: Float(0.25), count: 48_000), to: micURL)
+        try writeMonoWAV(samples: Array(repeating: Float(-0.55), count: 48_000), to: appURL)
+        try ensureReadableAudioFile(at: micURL)
+        try ensureReadableAudioFile(at: appURL)
+        // Claims 60 segments (57_600 frames) for a 48_000-frame file.
+        try writeSidecar(for: micURL, segmentCount: 60)
+        try writeSidecar(for: appURL, segmentCount: 60)
+
+        do {
+            try await service.mix(
+                micURL: micURL,
+                appURL: appURL,
+                micStartHostTime: 1_000_000_000,
+                appStartHostTime: 1_000_000_000,
+                into: outputURL
+            )
+        } catch {
+            if shouldSkipForSandboxAudioIO(error) { return }
+            throw error
+        }
+
+        let decoded = try decodePCM(from: outputURL)
+        #expect(decoded.channelCount == 2)
+    }
+
     @Test
     func testMixWithTwoSourcesAndZeroOffsetProducesStereoOutput() async throws {
         let service = AudioMixdownService(outputFormat: .linearPCMCaf)

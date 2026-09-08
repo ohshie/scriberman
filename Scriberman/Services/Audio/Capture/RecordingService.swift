@@ -283,6 +283,10 @@ actor RecordingService: RecordingServiceProtocol {
     /// How many times capture was restarted mid-recording. Persisted onto the session at stop so
     /// an interrupted recording is discoverable when reviewed, not only in the log.
     private(set) var captureRestartCount = 0
+#if DEBUG
+    /// Overrides the write-failure total read at stop. Test seam only.
+    private var writeFailureOverrideForTesting: Int?
+#endif
     private var micRecoveryRetryTask: Task<Void, Never>?
     private let liveAudioStreamTuple: (stream: AsyncStream<([Float], AudioSource, Double)>, continuation: AsyncStream<([Float], AudioSource, Double)>.Continuation)
     // nonisolated(unsafe): written once in init on the actor; read only in deinit; lifetime matches the actor
@@ -450,6 +454,12 @@ actor RecordingService: RecordingServiceProtocol {
     /// `SCStream`.
     func setCaptureRestartCountForTesting(_ count: Int) {
         captureRestartCount = count
+    }
+
+    /// Test seam: write failures originate inside `AudioFileStreamer`'s private queue, so a test
+    /// cannot provoke them through the service.
+    func setWriteFailureOverrideForTesting(_ count: Int?) {
+        writeFailureOverrideForTesting = count
     }
 
     func setUnifiedCaptureSessionForTesting(_ session: UnifiedCaptureSession?) {
@@ -962,6 +972,23 @@ actor RecordingService: RecordingServiceProtocol {
         } else {
             appAudioCaptureSession?.framesWritten
         }
+        // Write failures are read here for the same reason: the counters live on the capture
+        // sessions, which are released below.
+        var writeFailuresAtStop: Int = if let unifiedCaptureSession {
+            unifiedCaptureSession.micWriteFailureCount + unifiedCaptureSession.appWriteFailureCount
+        } else {
+            micStreamer.writeFailureCount + (appAudioCaptureSession?.writeFailureCount ?? 0)
+        }
+#if DEBUG
+        if let writeFailureOverrideForTesting {
+            writeFailuresAtStop = writeFailureOverrideForTesting
+        }
+#endif
+        if writeFailuresAtStop > 0 {
+            logger.warning(
+                "Recording finished with \(writeFailuresAtStop, privacy: .public) audio write failure(s). Captured audio is intact; the failed intervals are silence."
+            )
+        }
 
         deregisterMicHardwareListeners()
         stopMicCapture()
@@ -1057,6 +1084,7 @@ actor RecordingService: RecordingServiceProtocol {
             session.appAudioURL = finalRecordingURLs.app?.path
             session.appAudioMissing = appAudioMissing ? true : nil
             session.captureInterruptionCount = captureRestartCount > 0 ? captureRestartCount : nil
+            session.captureWriteFailureCount = writeFailuresAtStop > 0 ? writeFailuresAtStop : nil
             session.status = .recorded
             if activeCaptureDisplayID != nil && !shouldRunScreenMux {
                 session.screenCaptureWarning = "Screen recording failed — the display may have been off, disconnected, or not capturable."

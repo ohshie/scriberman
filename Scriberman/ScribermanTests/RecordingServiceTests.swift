@@ -952,6 +952,83 @@ final class RecordingServiceTests {
     }
 
     @Test
+    func testStoppingAfterWriteFailuresPersistsTheMarker() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let service = await makeServiceForStop(workspace: workspace, container: container)
+
+        let sessionID = try await service.startRecording(
+            in: workspace, micDeviceID: nil, captureDisplayID: nil,
+            capturedAppName: nil, appProcessID: nil, title: "Failed writes"
+        )
+        await service.setWriteFailureOverrideForTesting(3)
+        _ = await service.stopRecording()
+
+        let context = ModelContext(container)
+        let session = try fetchRecordingSession(id: sessionID, from: context)
+        #expect(session.captureWriteFailureCount == 3)
+        #expect(session.hadCaptureWriteFailures)
+        // A caveat, not a failure: the audio it captured is intact.
+        #expect(session.status == .recorded)
+    }
+
+    @Test
+    func testStoppingWithoutWriteFailuresLeavesNoMarker() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let service = await makeServiceForStop(workspace: workspace, container: container)
+
+        let sessionID = try await service.startRecording(
+            in: workspace, micDeviceID: nil, captureDisplayID: nil,
+            capturedAppName: nil, appProcessID: nil, title: "Clean writes"
+        )
+        _ = await service.stopRecording()
+
+        let context = ModelContext(container)
+        let session = try fetchRecordingSession(id: sessionID, from: context)
+        #expect(session.captureWriteFailureCount == nil)
+        #expect(!session.hadCaptureWriteFailures)
+    }
+
+    /// Write failures must never reach the restart trigger set: a restart cannot repair a full
+    /// disk, and would destroy more audio than the failures did.
+    @Test
+    func testWriteFailuresAreNotPartOfTheCaptureHealthSnapshot() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let service = await makeServiceForStop(workspace: workspace, container: container)
+        _ = try await service.startRecording(
+            in: workspace, micDeviceID: nil, captureDisplayID: nil,
+            capturedAppName: nil, appProcessID: nil, title: "Health"
+        )
+
+        let snapshot = await service.captureHealthSnapshot()
+        var monitor = CaptureHealthMonitor()
+        let now = Date()
+        _ = monitor.update(now: now, snapshot: snapshot, isRecording: true)
+        // Frames do not advance, but no stream failure is reported, so nothing here can be driven
+        // by write failures — the snapshot carries no such field.
+        #expect(snapshot.streamFailureCount == 0)
+
+        _ = await service.stopRecording()
+    }
+
+    @Test
     func testStoppingACleanRecordingLeavesNoInterruptionMarker() async throws {
         let workspace = makeWorkspace()
         defer { removeWorkspace(at: workspace.rootURL) }

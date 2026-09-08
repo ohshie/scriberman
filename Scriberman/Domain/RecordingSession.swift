@@ -25,6 +25,10 @@ final class RecordingSession {
     /// are materially different, and the count costs nothing to store. Stored as data, not a
     /// message — the wording belongs to the view, as with `appAudioMissing`.
     var captureInterruptionCount: Int?
+    /// How many audio write failures the recording's capture recorded, or `nil` when there were
+    /// none. The audio is intact; the failed intervals are silence of their real duration. Stored
+    /// as data, not a message — the wording belongs to the view.
+    var captureWriteFailureCount: Int?
     var mixdownAttemptCountValue: Int?
     var transcriptData: Data?
     var retranscriptData: Data?
@@ -41,6 +45,9 @@ final class RecordingSession {
     /// Whether this recording's capture was interrupted and restarted at least once, so it
     /// contains an interval of silence where capture was dead.
     var wasCaptureInterrupted: Bool { (captureInterruptionCount ?? 0) > 0 }
+
+    /// Whether the recording's capture recorded one or more failed writes.
+    var hadCaptureWriteFailures: Bool { (captureWriteFailureCount ?? 0) > 0 }
 
     var status: RecordingStatus {
         get { RecordingStatus(persistedValue: statusRawValue, errorMessage: errorMessage) }

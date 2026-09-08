@@ -143,6 +143,10 @@ actor AudioMixdownService {
               let micFirstSegment = micSidecar.segments.first else {
             return false
         }
+        // Assertion, not a routine precondition. Timing segments are recorded inside the write, so
+        // a segment exists only for frames the file has; these totals should now always agree. A
+        // mismatch means the capture-time invariant broke somewhere new, and this warning is the
+        // only signal of it — so it stays, and stays loud.
         guard micSidecar.totalFrames == micSamples.count else {
             logger.warning(
                 "Mic timing frames (\(micSidecar.totalFrames, privacy: .public)) != decoded samples (\(micSamples.count, privacy: .public)); cannot trust timeline."
@@ -167,6 +171,7 @@ actor AudioMixdownService {
             return false
         }
         let appSamples = try await sampleReader.read(from: appURL, label: "app")
+        // See the mic guard above: this is an assertion on the capture-time invariant.
         guard appSidecar.totalFrames == appSamples.count else {
             logger.warning(
                 "App timing frames (\(appSidecar.totalFrames, privacy: .public)) != decoded samples (\(appSamples.count, privacy: .public)); cannot trust timeline."
