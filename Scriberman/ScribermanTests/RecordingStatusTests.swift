@@ -331,17 +331,148 @@ struct RecordingStatusTests {
         )
     }
 
+    // MARK: - Named tags in the row
+
+    private func tagLineSource() throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        return try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/SessionTagLineView.swift"),
+            encoding: .utf8
+        )
+    }
+
+    @Test
+    func testTagsAreNamedNotJustColoured() throws {
+        let source = try tagLineSource()
+        #expect(source.contains("Text(tag.name)"))
+        #expect(source.contains("Circle()"))
+    }
+
+    /// Without a backdrop the chip sits directly on the list's selection fill and a tag coloured
+    /// near the accent disappears into it. A `List` gives no way to cut its selection around a
+    /// subview, so the chip has to be drawn over it.
+    @Test
+    func testEachTagChipHasItsOwnBackdrop() throws {
+        let source = try tagLineSource()
+        #expect(source.contains("glassEffect(.regular, in: Capsule())"))
+        #expect(source.contains(".tint(Color(tagHex: tag.colorHex))"))
+    }
+
+    /// Tag colours are random and user-chosen, so some would be unreadable as text. Colour stays in
+    /// the dot and the tint.
+    @Test
+    func testTheTagNameIsNotDrawnInTheTagColour() throws {
+        let source = try tagLineSource()
+        let nameRange = try #require(source.range(of: "Text(tag.name)"))
+        let rest = source[nameRange.upperBound...].prefix(160)
+        #expect(!rest.contains("foregroundStyle(Color(tagHex"))
+    }
+
+    @Test
+    func testTheDefaultTagIsNeverNamed() throws {
+        let source = try tagLineSource()
+        #expect(source.contains("tags.filter { !$0.isDefault }"))
+    }
+
+    @Test
+    func testAnUntaggedRecordingShowsNoTagLine() throws {
+        let source = try tagLineSource()
+        // The whole line is conditional on there being a named tag.
+        #expect(source.contains("if !namedTags.isEmpty"))
+    }
+
+    @Test
+    func testNamesTruncateInOrderRatherThanWrapping() throws {
+        let source = try tagLineSource()
+        #expect(source.contains("lineLimit(1)"))
+        #expect(source.contains("truncationMode(.tail)"))
+        // Earlier tags outrank later ones, so the first keeps its name longest.
+        #expect(source.contains("layoutPriority(priority(for: tag))"))
+        #expect(source.contains("Double(namedTags.count - index)"))
+    }
+
+    /// The chip reads on both backgrounds because of its own backdrop, so the row still never needs
+    /// to know whether it is selected.
+    @Test
+    func testTheChipWorksWithoutKnowingAboutSelection() throws {
+        let source = try tagLineSource()
+        #expect(!source.contains("isSelected"))
+    }
+
+    @Test
+    func testTheRowRendersTheTagLine() throws {
+        let source = try sourceForFile(named: "RecordingSessionRow.swift")
+        #expect(source.contains("SessionTagLineView(tags: session.tags)"))
+    }
+
+    @Test
+    func testImportedRowsHaveNoTagLine() throws {
+        let source = try sourceForFile(named: "ImportedSessionRow.swift")
+        #expect(!source.contains("SessionTagLineView"))
+    }
+
+    // MARK: - Row layout
+
+    @Test
+    func testTheTimestampSharesTheDurationLine() throws {
+        for file in ["RecordingSessionRow.swift", "ImportedSessionRow.swift"] {
+            let source = try sourceForFile(named: file)
+            // The timestamp sits inside the caption HStack, after a Spacer, rather than in a
+            // Text of its own below it.
+            let captionRange = try #require(source.range(of: "Text(durationText(session.duration))"))
+            let rest = source[captionRange.upperBound...]
+            let hstackEnd = try #require(rest.range(of: "}"))
+            let sameLine = rest[..<hstackEnd.lowerBound]
+            #expect(sameLine.contains("Spacer(minLength:"))
+            #expect(sameLine.contains("relativeTimestampText(for: session.createdAt)"))
+        }
+    }
+
+    @Test
+    func testTheTimestampOccupiesNoLineOfItsOwn() throws {
+        for file in ["RecordingSessionRow.swift", "ImportedSessionRow.swift"] {
+            let source = try sourceForFile(named: file)
+            // Exactly one reference, and it is the one on the duration line.
+            let occurrences = source.components(separatedBy: "relativeTimestampText").count - 1
+            #expect(occurrences == 1)
+        }
+    }
+
+    /// The text column has to fill for a trailing alignment to resolve against anything.
+    @Test
+    func testTheTextColumnFillsAvailableWidth() throws {
+        for file in ["RecordingSessionRow.swift", "ImportedSessionRow.swift"] {
+            let source = try sourceForFile(named: file)
+            #expect(source.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+            #expect(!source.contains("Spacer(minLength: 12)"))
+        }
+    }
+
     // MARK: - Tag dots
 
     @Test
-    func testRecordingRowShowsTagDotsInsteadOfASourceGlyph() throws {
+    func testRecordingRowHasNoLeadingElement() throws {
         let source = try sourceForFile(named: "RecordingSessionRow.swift")
-        #expect(source.contains("tagDots"))
-        #expect(source.contains("TagDotsView"))
-        // The glyph is removed, not hidden behind a branch that a minimum of one tag makes dead.
+        // No glyph, and no dots either — the 24pt leading column is gone entirely.
         #expect(!source.contains("sourceGlyph"))
         #expect(!source.contains("mic.fill"))
         #expect(!source.contains("app.fill"))
+        #expect(!source.contains("tagDots"))
+        #expect(!source.contains("TagDotsView"))
+    }
+
+    @Test
+    func testDoneRowsRenderNoAccessory() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let statusTag = try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/StatusTagView.swift"),
+            encoding: .utf8
+        )
+        #expect(!statusTag.contains("Image(systemName: \"checkmark\")"))
+        // Two done sessions differing only in transcript/AI data cannot render differently, since
+        // the view no longer receives either fact.
+        #expect(!statusTag.contains("hasTranscript"))
+        #expect(!statusTag.contains("hasAITransformation"))
     }
 
     /// The source is not lost — it is already caption text on the line below.
@@ -356,23 +487,6 @@ struct RecordingStatusTests {
     func testImportedRowKeepsItsSourceGlyph() throws {
         let source = try sourceForFile(named: "ImportedSessionRow.swift")
         #expect(source.contains("sourceGlyph"))
-    }
-
-    @Test
-    func testAtMostThreeDotsAreShown() throws {
-        let source = try sourceForFile(named: "RecordingSessionRow.swift")
-        // A recording cannot carry more than three, but the row must not depend on that holding.
-        #expect(source.contains("prefix(3)"))
-    }
-
-    @Test
-    func testTagDotsArrangeOneTwoAndThree() throws {
-        let source = try sourceForFile(named: "TagDotsView.swift")
-        #expect(source.contains("case 1:"))
-        #expect(source.contains("case 2:"))
-        #expect(source.contains("VStack"))
-        #expect(source.contains("HStack"))
-        #expect(source.contains("alignment: .center"))
     }
 
     @Test

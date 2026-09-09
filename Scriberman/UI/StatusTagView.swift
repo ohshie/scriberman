@@ -2,8 +2,6 @@ import SwiftUI
 
 struct StatusTagView: View {
     let status: RecordingStatus
-    let hasTranscript: Bool
-    let hasAITransformation: Bool
 
     @ViewBuilder
     var body: some View {
@@ -11,15 +9,11 @@ struct StatusTagView: View {
         case .recording:
             EmptyView()
         case .done:
-            ZStack(alignment: .trailing) {
-                ForEach(0 ..< doneCheckmarkCount, id: \.self) { i in
-                    Image(systemName: "checkmark")
-                        .foregroundStyle(Color("StatusDoneMarkColor"))
-                        .font(.caption.weight(.semibold))
-                        .offset(x: CGFloat(-i) * 4)
-                }
-            }
-            .frame(width: 8, height: 8, alignment: .center)
+            // Only exceptional states are marked. `.done` is the resting state and most of the
+            // list, so it carries nothing — not even a checkmark, which would only repeat the
+            // status. Whether a session has a transcript or an AI transformation is no longer
+            // shown here; opening it shows both.
+            EmptyView()
         case .error:
             Image(systemName: "xmark")
                 .foregroundStyle(Color("StatusErrorColor"))
@@ -34,12 +28,5 @@ struct StatusTagView: View {
                 .glassEffect(.regular, in: Capsule())
                 .tint(Color("StatusPendingColor"))
         }
-    }
-
-    private var doneCheckmarkCount: Int {
-        var count = 1
-        if hasTranscript { count += 1 }
-        if hasAITransformation { count += 1 }
-        return count
     }
 }

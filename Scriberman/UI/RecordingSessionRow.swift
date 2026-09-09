@@ -8,25 +8,27 @@ struct RecordingSessionRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            tagDots
-
             VStack(alignment: .leading, spacing: 6) {
                 Text(session.title)
                     .font(.headline)
                     .lineLimit(1)
 
+                // The timestamp shares this line rather than taking one of its own. Its trailing
+                // edge is the text column's, which ends where the accessory begins — and accessory
+                // width varies with status, so timestamps are not aligned down the list. Accepted:
+                // the rows sitting furthest from the edge are the ones carrying a button.
                 HStack(spacing: 6) {
                     Text(sourceName)
                     Text("•")
                     Text(durationText(session.duration))
+                    Spacer(minLength: 8)
+                    Text(JobsViewModel.relativeTimestampText(for: session.createdAt))
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
-                Text(JobsViewModel.relativeTimestampText(for: session.createdAt))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                SessionTagLineView(tags: session.tags)
 
                 if session.screenCaptureWarning != nil {
                     Label("Screen recording failed", systemImage: "exclamationmark.triangle.fill")
@@ -54,8 +56,9 @@ struct RecordingSessionRow: View {
                         .foregroundStyle(.orange)
                 }
             }
-
-            Spacer(minLength: 12)
+            // Fills, so the timestamp's trailing alignment has an edge to resolve against. This is
+            // also what puts the accessory column against the row's right side without a Spacer.
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             VStack(alignment: .trailing, spacing: 8) {
                 if !statusIndicatorBelongsInAccessory {
@@ -66,13 +69,6 @@ struct RecordingSessionRow: View {
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
-    }
-
-    /// Tag dots stand where the source glyph used to. A recording always carries at least one tag,
-    /// so the glyph was unreachable and has been removed rather than left behind a dead branch.
-    @ViewBuilder
-    private var tagDots: some View {
-        TagDotsView(colors: session.tags.prefix(3).map { Color(tagHex: $0.colorHex) })
     }
 
     private var sourceName: String {
@@ -132,11 +128,7 @@ struct RecordingSessionRow: View {
     }
 
     private var statusIndicator: some View {
-        StatusTagView(
-            status: session.status,
-            hasTranscript: session.transcriptData != nil,
-            hasAITransformation: session.aiTransformationsData != nil
-        )
+        StatusTagView(status: session.status)
     }
 
     private func durationText(_ duration: TimeInterval) -> String {
