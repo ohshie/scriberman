@@ -14,22 +14,29 @@ struct StatusTagViewTests {
         #expect(!source.contains("case .recording:\n            Text(\"Recording\")"))
     }
 
+    /// `.done` is the resting state and most of the list, so it carries no marker at all. A
+    /// checkmark that is always present when the status is `.done` only repeats the status.
     @Test
-    func doneWithNoTranscriptOrAIShowsOneCheckmark() throws {
+    func doneRendersNothing() throws {
         let source = try statusTagViewSource()
-        #expect(source.contains("var count = 1"))
+        let doneRange = try #require(source.range(of: "case .done:"))
+        let rest = source[doneRange.upperBound...]
+        let nextCase = rest.range(of: "case .")?.lowerBound ?? rest.endIndex
+        let body = rest[..<nextCase]
+        #expect(body.contains("EmptyView()"))
+        // Matches the rendered symbol, not prose — the explanatory comment names it too.
+        #expect(!body.contains("Image(systemName: \"checkmark\")"))
     }
 
+    /// Transcript and AI-transformation presence are no longer shown in the list, so the view no
+    /// longer takes them. Leaving them as unused parameters would invite a caller to believe they
+    /// still mean something.
     @Test
-    func doneWithTranscriptShowsTwoCheckmarks() throws {
+    func doneCarriesNoTranscriptOrTransformationSignal() throws {
         let source = try statusTagViewSource()
-        #expect(source.contains("if hasTranscript { count += 1 }"))
-    }
-
-    @Test
-    func doneWithTranscriptAndAIShowsThreeCheckmarks() throws {
-        let source = try statusTagViewSource()
-        #expect(source.contains("if hasAITransformation { count += 1 }"))
+        #expect(!source.contains("hasTranscript"))
+        #expect(!source.contains("hasAITransformation"))
+        #expect(!source.contains("doneCheckmarkCount"))
     }
 
     @Test

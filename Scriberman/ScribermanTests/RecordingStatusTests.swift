@@ -331,17 +331,130 @@ struct RecordingStatusTests {
         )
     }
 
+    // MARK: - Named tags in the row
+
+    private func tagLineSource() throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        return try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/SessionTagLineView.swift"),
+            encoding: .utf8
+        )
+    }
+
+    @Test
+    func testTagsAreNamedNotJustColoured() throws {
+        let source = try tagLineSource()
+        #expect(source.contains("Text(tag.name)"))
+        #expect(source.contains("Circle()"))
+        // No capsule: the label is plain text so the list recolours it on selection.
+        #expect(!source.contains("Capsule()"))
+    }
+
+    @Test
+    func testTheDefaultTagIsNeverNamed() throws {
+        let source = try tagLineSource()
+        #expect(source.contains("tags.filter { !$0.isDefault }"))
+    }
+
+    @Test
+    func testAnUntaggedRecordingShowsNoTagLine() throws {
+        let source = try tagLineSource()
+        // The whole line is conditional on there being a named tag.
+        #expect(source.contains("if !namedTags.isEmpty"))
+    }
+
+    @Test
+    func testNamesTruncateInOrderRatherThanWrapping() throws {
+        let source = try tagLineSource()
+        #expect(source.contains("lineLimit(1)"))
+        #expect(source.contains("truncationMode(.tail)"))
+        // Earlier tags outrank later ones, so the first keeps its name longest.
+        #expect(source.contains("layoutPriority(priority(for: tag))"))
+        #expect(source.contains("Double(namedTags.count - index)"))
+    }
+
+    @Test
+    func testTheDotStaysDistinctWithoutKnowingAboutSelection() throws {
+        let source = try tagLineSource()
+        // A ring, applied unconditionally — the row cannot know whether it is selected.
+        #expect(source.contains("strokeBorder"))
+        #expect(!source.contains("isSelected"))
+    }
+
+    @Test
+    func testTheRowRendersTheTagLine() throws {
+        let source = try sourceForFile(named: "RecordingSessionRow.swift")
+        #expect(source.contains("SessionTagLineView(tags: session.tags)"))
+    }
+
+    @Test
+    func testImportedRowsHaveNoTagLine() throws {
+        let source = try sourceForFile(named: "ImportedSessionRow.swift")
+        #expect(!source.contains("SessionTagLineView"))
+    }
+
+    // MARK: - Row layout
+
+    @Test
+    func testTheTimestampSharesTheDurationLine() throws {
+        for file in ["RecordingSessionRow.swift", "ImportedSessionRow.swift"] {
+            let source = try sourceForFile(named: file)
+            // The timestamp sits inside the caption HStack, after a Spacer, rather than in a
+            // Text of its own below it.
+            let captionRange = try #require(source.range(of: "Text(durationText(session.duration))"))
+            let rest = source[captionRange.upperBound...]
+            let hstackEnd = try #require(rest.range(of: "}"))
+            let sameLine = rest[..<hstackEnd.lowerBound]
+            #expect(sameLine.contains("Spacer(minLength:"))
+            #expect(sameLine.contains("relativeTimestampText(for: session.createdAt)"))
+        }
+    }
+
+    @Test
+    func testTheTimestampOccupiesNoLineOfItsOwn() throws {
+        for file in ["RecordingSessionRow.swift", "ImportedSessionRow.swift"] {
+            let source = try sourceForFile(named: file)
+            // Exactly one reference, and it is the one on the duration line.
+            let occurrences = source.components(separatedBy: "relativeTimestampText").count - 1
+            #expect(occurrences == 1)
+        }
+    }
+
+    /// The text column has to fill for a trailing alignment to resolve against anything.
+    @Test
+    func testTheTextColumnFillsAvailableWidth() throws {
+        for file in ["RecordingSessionRow.swift", "ImportedSessionRow.swift"] {
+            let source = try sourceForFile(named: file)
+            #expect(source.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+            #expect(!source.contains("Spacer(minLength: 12)"))
+        }
+    }
+
     // MARK: - Tag dots
 
     @Test
-    func testRecordingRowShowsTagDotsInsteadOfASourceGlyph() throws {
+    func testRecordingRowHasNoLeadingElement() throws {
         let source = try sourceForFile(named: "RecordingSessionRow.swift")
-        #expect(source.contains("tagDots"))
-        #expect(source.contains("TagDotsView"))
-        // The glyph is removed, not hidden behind a branch that a minimum of one tag makes dead.
+        // No glyph, and no dots either — the 24pt leading column is gone entirely.
         #expect(!source.contains("sourceGlyph"))
         #expect(!source.contains("mic.fill"))
         #expect(!source.contains("app.fill"))
+        #expect(!source.contains("tagDots"))
+        #expect(!source.contains("TagDotsView"))
+    }
+
+    @Test
+    func testDoneRowsRenderNoAccessory() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let statusTag = try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/StatusTagView.swift"),
+            encoding: .utf8
+        )
+        #expect(!statusTag.contains("Image(systemName: \"checkmark\")"))
+        // Two done sessions differing only in transcript/AI data cannot render differently, since
+        // the view no longer receives either fact.
+        #expect(!statusTag.contains("hasTranscript"))
+        #expect(!statusTag.contains("hasAITransformation"))
     }
 
     /// The source is not lost — it is already caption text on the line below.
@@ -356,23 +469,6 @@ struct RecordingStatusTests {
     func testImportedRowKeepsItsSourceGlyph() throws {
         let source = try sourceForFile(named: "ImportedSessionRow.swift")
         #expect(source.contains("sourceGlyph"))
-    }
-
-    @Test
-    func testAtMostThreeDotsAreShown() throws {
-        let source = try sourceForFile(named: "RecordingSessionRow.swift")
-        // A recording cannot carry more than three, but the row must not depend on that holding.
-        #expect(source.contains("prefix(3)"))
-    }
-
-    @Test
-    func testTagDotsArrangeOneTwoAndThree() throws {
-        let source = try sourceForFile(named: "TagDotsView.swift")
-        #expect(source.contains("case 1:"))
-        #expect(source.contains("case 2:"))
-        #expect(source.contains("VStack"))
-        #expect(source.contains("HStack"))
-        #expect(source.contains("alignment: .center"))
     }
 
     @Test

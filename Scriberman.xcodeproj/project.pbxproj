@@ -64,7 +64,7 @@
 		E41BAA1A53B448A797F7B091 /* RecordingStartVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6BDA4EF08C84DB2ACEB5D94 /* RecordingStartVerifier.swift */; };
 		7B2D1F6C1C3A5B0D9E4F600B /* TagAssignmentMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D1F6C1C3A5B0D9E4F600C /* TagAssignmentMenu.swift */; };
 		7B2D1F6C1C3A5B0D9E4F6009 /* TagSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D1F6C1C3A5B0D9E4F600A /* TagSettingsView.swift */; };
-		7B2D1F6C1C3A5B0D9E4F6007 /* TagDotsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D1F6C1C3A5B0D9E4F6008 /* TagDotsView.swift */; };
+		7B2D1F6C1C3A5B0D9E4F6007 /* SessionTagLineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D1F6C1C3A5B0D9E4F6008 /* SessionTagLineView.swift */; };
 		7B2D1F6C1C3A5B0D9E4F6001 /* RecordingTag.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D1F6C1C3A5B0D9E4F6002 /* RecordingTag.swift */; };
 		7B2D1F6C1C3A5B0D9E4F6003 /* TagService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D1F6C1C3A5B0D9E4F6004 /* TagService.swift */; };
 		7A1C0E5B1B2F4A0C8D3E5F03 /* CaptureHealthMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1C0E5B1B2F4A0C8D3E5F04 /* CaptureHealthMonitor.swift */; };
@@ -329,7 +329,7 @@
 		C6BDA4EF08C84DB2ACEB5D94 /* RecordingStartVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Capture/RecordingStartVerifier.swift"; sourceTree = SOURCE_ROOT; };
 		7B2D1F6C1C3A5B0D9E4F600C /* TagAssignmentMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/TagAssignmentMenu.swift"; sourceTree = SOURCE_ROOT; };
 		7B2D1F6C1C3A5B0D9E4F600A /* TagSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/TagSettingsView.swift"; sourceTree = SOURCE_ROOT; };
-		7B2D1F6C1C3A5B0D9E4F6008 /* TagDotsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/TagDotsView.swift"; sourceTree = SOURCE_ROOT; };
+		7B2D1F6C1C3A5B0D9E4F6008 /* SessionTagLineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/SessionTagLineView.swift"; sourceTree = SOURCE_ROOT; };
 		7B2D1F6C1C3A5B0D9E4F6002 /* RecordingTag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Domain/RecordingTag.swift"; sourceTree = SOURCE_ROOT; };
 		7B2D1F6C1C3A5B0D9E4F6004 /* TagService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Tags/TagService.swift"; sourceTree = SOURCE_ROOT; };
 		7A1C0E5B1B2F4A0C8D3E5F04 /* CaptureHealthMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Capture/CaptureHealthMonitor.swift"; sourceTree = SOURCE_ROOT; };
@@ -814,7 +814,7 @@
 				C6BDA4EF08C84DB2ACEB5D94 /* RecordingStartVerifier.swift */,
 				7B2D1F6C1C3A5B0D9E4F600C /* TagAssignmentMenu.swift */,
 				7B2D1F6C1C3A5B0D9E4F600A /* TagSettingsView.swift */,
-				7B2D1F6C1C3A5B0D9E4F6008 /* TagDotsView.swift */,
+				7B2D1F6C1C3A5B0D9E4F6008 /* SessionTagLineView.swift */,
 				7B2D1F6C1C3A5B0D9E4F6002 /* RecordingTag.swift */,
 				7B2D1F6C1C3A5B0D9E4F6004 /* TagService.swift */,
 				7A1C0E5B1B2F4A0C8D3E5F04 /* CaptureHealthMonitor.swift */,
@@ -1231,7 +1231,7 @@
 				E41BAA1A53B448A797F7B091 /* RecordingStartVerifier.swift in Sources */,
 				7B2D1F6C1C3A5B0D9E4F600B /* TagAssignmentMenu.swift in Sources */,
 				7B2D1F6C1C3A5B0D9E4F6009 /* TagSettingsView.swift in Sources */,
-				7B2D1F6C1C3A5B0D9E4F6007 /* TagDotsView.swift in Sources */,
+				7B2D1F6C1C3A5B0D9E4F6007 /* SessionTagLineView.swift in Sources */,
 				7B2D1F6C1C3A5B0D9E4F6001 /* RecordingTag.swift in Sources */,
 				7B2D1F6C1C3A5B0D9E4F6003 /* TagService.swift in Sources */,
 				7A1C0E5B1B2F4A0C8D3E5F03 /* CaptureHealthMonitor.swift in Sources */,
