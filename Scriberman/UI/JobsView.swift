@@ -68,7 +68,7 @@ struct JobsView: View {
     /// clicking it again, and with none lit the list is unfiltered — so no separate clear control.
     @ViewBuilder
     private var tagFilterChips: some View {
-        let tags = (try? TagService().allTagsForFiltering(in: modelContext)) ?? []
+        let tags = (try? TagService().tagsInUse(in: modelContext)) ?? []
         if !tags.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {

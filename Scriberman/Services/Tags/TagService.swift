@@ -62,12 +62,19 @@ struct TagService {
         return try context.fetch(descriptor)
     }
 
-    /// Every tag, including the default. Used by the filter chips: the default tag's chip is the
-    /// one that finds untagged recordings, since the default is never alongside another tag.
-    func allTagsForFiltering(in context: ModelContext) throws -> [RecordingTag] {
+    /// Tags that at least one recording carries, including the default.
+    ///
+    /// Used by the filter chips. A tag no recording carries would produce a chip that filters the
+    /// list to nothing, so it is not offered — which is also why filtering can never yield an empty
+    /// list, and why there is no "nothing matched" state to explain.
+    ///
+    /// The default tag appears here whenever any recording is untagged, since the default is never
+    /// alongside another tag.
+    func tagsInUse(in context: ModelContext) throws -> [RecordingTag] {
         try context.fetch(
             FetchDescriptor<RecordingTag>(sortBy: [SortDescriptor(\.createdAt)])
         )
+        .filter { !$0.recordings.isEmpty }
     }
 
     // MARK: - Creating and editing

@@ -280,6 +280,59 @@ struct TagServiceTests {
         #expect(try service.backfillUntaggedRecordings(in: context) == 0)
     }
 
+    // MARK: - Tags offered for filtering
+
+    @Test
+    func testOnlyTagsSomeRecordingCarriesAreOfferedForFiltering() throws {
+        let context = try makeContext()
+        let service = service
+        let session = makeSession(in: context)
+        try service.applyDefaultTag(to: session, in: context)
+        let work = try service.createTag(name: "Work", in: context)
+        _ = try service.createTag(name: "Unused", in: context)
+        _ = try service.assign(work, to: session, in: context)
+        try context.save()
+
+        let offered = try service.tagsInUse(in: context)
+
+        // "Unused" would produce a chip that filters the list to nothing.
+        #expect(offered.map(\.name) == ["Work"])
+    }
+
+    @Test
+    func testTheDefaultTagIsOfferedWhileAnyRecordingIsUntagged() throws {
+        let context = try makeContext()
+        let service = service
+        let untagged = makeSession(in: context, title: "Untagged")
+        try service.applyDefaultTag(to: untagged, in: context)
+        let tagged = makeSession(in: context, title: "Tagged")
+        try service.applyDefaultTag(to: tagged, in: context)
+        let work = try service.createTag(name: "Work", in: context)
+        _ = try service.assign(work, to: tagged, in: context)
+        try context.save()
+
+        let offered = try service.tagsInUse(in: context)
+
+        #expect(Set(offered.map(\.name)) == ["recording", "Work"])
+    }
+
+    @Test
+    func testATagLosingItsLastRecordingIsNoLongerOffered() throws {
+        let context = try makeContext()
+        let service = service
+        let session = makeSession(in: context)
+        try service.applyDefaultTag(to: session, in: context)
+        let work = try service.createTag(name: "Work", in: context)
+        _ = try service.assign(work, to: session, in: context)
+        try context.save()
+        #expect(try service.tagsInUse(in: context).map(\.name) == ["Work"])
+
+        try service.unassign(work, from: session, in: context)
+
+        // The recording fell back to the default, so that is what is offered now.
+        #expect(try service.tagsInUse(in: context).map(\.name) == ["recording"])
+    }
+
     // MARK: - Scene wiring
 
     /// Settings is its own scene and does not inherit the WindowGroup's model container. Without an

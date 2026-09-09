@@ -184,9 +184,22 @@ final class JobsViewModel {
     /// out wins over keeping it visible.
     private func applyingTagFilter(to items: [SessionListItem]) -> [SessionListItem] {
         guard !selectedTagIDs.isEmpty else { return items }
+
+        // Only tags some recording actually carries can filter. A tag that lost its last recording
+        // has no chip any more, so leaving it in the selection would filter the list to nothing
+        // with no visible way to undo it. Ignoring it instead makes the selection self-healing.
+        var present: Set<UUID> = []
+        for item in items {
+            if case .recording(let session) = item {
+                for tag in session.tags { present.insert(tag.id) }
+            }
+        }
+        let effective = selectedTagIDs.intersection(present)
+        guard !effective.isEmpty else { return items }
+
         return items.filter { item in
             guard case .recording(let session) = item else { return false }
-            return session.tags.contains { selectedTagIDs.contains($0.id) }
+            return session.tags.contains { effective.contains($0.id) }
         }
     }
 

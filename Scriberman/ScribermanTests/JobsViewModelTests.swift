@@ -325,15 +325,67 @@ final class JobsViewModelTests {
         let work = RecordingTag(name: "Work", colorHex: "112233")
         let other = RecordingTag(name: "Other", colorHex: "445566")
         let selected = tagged(makeSession(createdAt: makeDate(year: 2026, month: 3, day: 20, hour: 8), status: RecordingStatus.done), [other])
+        // Another recording carries "Work", so it is a tag with a chip. Filtering by a tag nothing
+        // carries is ignored instead, which is covered separately.
+        let matching = tagged(makeSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 8), status: RecordingStatus.done), [work])
 
         viewModel.selectedTagIDs = [work.id]
         let items = viewModel.sessionItems(
-            recordingSessions: [selected],
+            recordingSessions: [selected, matching],
             importedSessions: [],
             preserving: .recording(selected)
         )
 
-        #expect(items.isEmpty)
+        // The selection-preserving branch does not override an explicit filter.
+        #expect(items.count == 1)
+        #expect(items.first?.id == "recording:\(matching.id.uuidString)")
+    }
+
+    /// A tag no recording carries has no chip, so a selection naming only such tags cannot be
+    /// undone through the UI. It is ignored instead, which leaves the list unfiltered.
+    @Test
+    func testASelectedTagNoRecordingCarriesIsIgnored() {
+        let orphan = RecordingTag(name: "Orphan", colorHex: "112233")
+        let work = RecordingTag(name: "Work", colorHex: "445566")
+        let recording = tagged(
+            makeSession(createdAt: makeDate(year: 2026, month: 3, day: 20, hour: 8), status: RecordingStatus.done),
+            [work]
+        )
+
+        viewModel.selectedTagIDs = [orphan.id]
+        let items = viewModel.sessionItems(
+            recordingSessions: [recording],
+            importedSessions: [],
+            preserving: nil
+        )
+
+        // Unfiltered rather than empty: an empty list with no matching chip is a dead end.
+        #expect(items.count == 1)
+    }
+
+    @Test
+    func testAStaleSelectionDoesNotSuppressALiveOne() {
+        let orphan = RecordingTag(name: "Orphan", colorHex: "112233")
+        let work = RecordingTag(name: "Work", colorHex: "445566")
+        let other = RecordingTag(name: "Other", colorHex: "778899")
+        let carries = tagged(
+            makeSession(createdAt: makeDate(year: 2026, month: 3, day: 20, hour: 8), status: RecordingStatus.done),
+            [work]
+        )
+        let doesNot = tagged(
+            makeSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 8), status: RecordingStatus.done),
+            [other]
+        )
+
+        viewModel.selectedTagIDs = [orphan.id, work.id]
+        let items = viewModel.sessionItems(
+            recordingSessions: [carries, doesNot],
+            importedSessions: [],
+            preserving: nil
+        )
+
+        #expect(items.count == 1)
+        #expect(items.first?.id == "recording:\(carries.id.uuidString)")
     }
 
     @Test
