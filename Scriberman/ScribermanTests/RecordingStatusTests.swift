@@ -221,23 +221,35 @@ struct RecordingStatusTests {
     @Test
     func testOnlyRecordingRowsProduceATagMenu() throws {
         let source = try jobsViewSource()
+        // Bounded to this function. A fixed-width window would spill into `deleteButton`, which
+        // legitimately switches over every case.
         let menuRange = try #require(source.range(of: "private func tagMenu(for item"))
-        let body = source[menuRange.lowerBound...].prefix(900)
+        let rest = source[menuRange.upperBound...]
+        let end = rest.range(of: "private func ")?.lowerBound ?? rest.endIndex
+        let body = rest[..<end]
         #expect(body.contains("if case .recording(let session) = item"))
         #expect(!body.contains("case .imported"))
         #expect(!body.contains("case .pending"))
     }
 
+    private func assignmentMenuSource() throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        return try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/TagAssignmentMenu.swift"),
+            encoding: .utf8
+        )
+    }
+
     @Test
     func testTheDefaultTagIsNotListedForAssignment() throws {
-        let source = try jobsViewSource()
+        let source = try assignmentMenuSource()
         // `assignableTags` excludes it; the menu does not filter separately.
         #expect(source.contains("assignableTags(in: modelContext)"))
     }
 
     @Test
     func testAtThreeTagsFurtherTagsAreDisabledRatherThanHidden() throws {
-        let source = try jobsViewSource()
+        let source = try assignmentMenuSource()
         #expect(source.contains(".disabled(!isCarried && realCount >= TagService.maximumTagsPerRecording)"))
         // Disabled, not filtered out of the list.
         #expect(!source.contains("assignable.filter"))
@@ -245,10 +257,37 @@ struct RecordingStatusTests {
 
     @Test
     func testCarriedTagsAreMarkedAndToggleBothWays() throws {
-        let source = try jobsViewSource()
+        let source = try assignmentMenuSource()
         #expect(source.contains("systemImage: \"checkmark\""))
         #expect(source.contains("try service.unassign(tag, from: session, in: modelContext)"))
         #expect(source.contains("try service.assign(tag, to: session, in: modelContext)"))
+    }
+
+    /// The list and the detail toolbar share one menu body, so they cannot drift on which tags are
+    /// offered or when they are unavailable.
+    @Test
+    func testTheListAndTheDetailToolbarShareOneAssignmentMenu() throws {
+        let jobs = try jobsViewSource()
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let detail = try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/TranscriptDetailView.swift"),
+            encoding: .utf8
+        )
+        #expect(jobs.contains("TagAssignmentMenuContent(session: session)"))
+        #expect(detail.contains("TagAssignmentMenuContent(session: recording)"))
+    }
+
+    /// Tags are a session action, so the control sits with Transform and Delete.
+    @Test
+    func testTheDetailToolbarCarriesATagsControl() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let detail = try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/TranscriptDetailView.swift"),
+            encoding: .utf8
+        )
+        #expect(detail.contains("Label(\"Tags\", systemImage: \"tag\")"))
+        // Only recordings carry tags; an imported session shows no control.
+        #expect(detail.contains("if let recording = session as? RecordingSession"))
     }
 
     // MARK: - Tag dots
