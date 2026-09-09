@@ -279,6 +279,128 @@ struct TagServiceTests {
         #expect(try service.backfillUntaggedRecordings(in: context) == 0)
     }
 
+    // MARK: - On-disk store
+
+    /// The in-memory tests above cannot show that a relationship survives a real store. This adds
+    /// a to-many relationship to a model that already exists on disk, which is heavier than the
+    /// optional attributes previous changes added.
+    @Test
+    func testTagsAndBackfillSurviveAnOnDiskStore() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storeURL = root.appendingPathComponent("store.sqlite")
+
+        func openStore() throws -> ModelContext {
+            let container = try ModelContainer(
+                for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+                SpeakerProfile.self, RecordingTag.self,
+                configurations: ModelConfiguration(url: storeURL)
+            )
+            return ModelContext(container)
+        }
+
+        let untaggedIDs = (1...3).map { _ in UUID() }
+        let taggedID = UUID()
+
+        // Recordings written before tags existed carry none.
+        do {
+            let context = try openStore()
+            for id in untaggedIDs {
+                context.insert(
+                    RecordingSession(id: id, duration: 60, micAudioURL: "/tmp/a.wav", title: "Old")
+                )
+            }
+            context.insert(
+                RecordingSession(id: taggedID, duration: 60, micAudioURL: "/tmp/b.wav", title: "Newer")
+            )
+            try context.save()
+        }
+
+        // Seed and backfill, as the app does at startup.
+        do {
+            let context = try openStore()
+            let service = TagService()
+            let work = try service.createTag(name: "Work", in: context)
+            let tagged = try #require(
+                try context.fetch(FetchDescriptor<RecordingSession>())
+                    .first { $0.id == taggedID }
+            )
+            try service.applyDefaultTag(to: tagged, in: context)
+            _ = try service.assign(work, to: tagged, in: context)
+            try context.save()
+
+            #expect(try service.backfillUntaggedRecordings(in: context) == 3)
+        }
+
+        // Reopen: the relationship and the backfill both survived.
+        do {
+            let context = try openStore()
+            let sessions = try context.fetch(FetchDescriptor<RecordingSession>())
+            #expect(sessions.count == 4)
+            #expect(sessions.allSatisfy { !$0.tags.isEmpty })
+
+            for id in untaggedIDs {
+                let session = try #require(sessions.first { $0.id == id })
+                #expect(session.tags.count == 1)
+                #expect(session.tags.first?.isDefault == true)
+            }
+            let tagged = try #require(sessions.first { $0.id == taggedID })
+            #expect(tagged.tags.map(\.name) == ["Work"])
+
+            // A second run over a store that is already correct changes nothing.
+            #expect(try TagService().backfillUntaggedRecordings(in: context) == 0)
+        }
+    }
+
+    /// Deleting a tag on a real store must leave both sides of the relationship consistent — this
+    /// is the case that failed before the inverse was declared.
+    @Test
+    func testDeletingATagOnAnOnDiskStoreLeavesTheRelationshipConsistent() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storeURL = root.appendingPathComponent("store.sqlite")
+
+        func openStore() throws -> ModelContext {
+            let container = try ModelContainer(
+                for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+                SpeakerProfile.self, RecordingTag.self,
+                configurations: ModelConfiguration(url: storeURL)
+            )
+            return ModelContext(container)
+        }
+
+        let sessionID = UUID()
+        do {
+            let context = try openStore()
+            let service = TagService()
+            let session = RecordingSession(
+                id: sessionID, duration: 60, micAudioURL: "/tmp/a.wav", title: "S"
+            )
+            context.insert(session)
+            try service.applyDefaultTag(to: session, in: context)
+            let work = try service.createTag(name: "Work", in: context)
+            let client = try service.createTag(name: "Client", in: context)
+            _ = try service.assign(work, to: session, in: context)
+            _ = try service.assign(client, to: session, in: context)
+            try context.save()
+
+            try service.delete(work, in: context)
+        }
+
+        do {
+            let context = try openStore()
+            let session = try #require(
+                try context.fetch(FetchDescriptor<RecordingSession>()).first { $0.id == sessionID }
+            )
+            #expect(session.tags.map(\.name) == ["Client"])
+            #expect(try context.fetch(FetchDescriptor<RecordingTag>()).allSatisfy { $0.name != "Work" })
+        }
+    }
+
     // MARK: - Colour
 
     @Test
