@@ -8,7 +8,7 @@ struct RecordingSessionRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            sourceGlyph
+            tagDots
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(session.title)
@@ -68,13 +68,11 @@ struct RecordingSessionRow: View {
         .contentShape(Rectangle())
     }
 
+    /// Tag dots stand where the source glyph used to. A recording always carries at least one tag,
+    /// so the glyph was unreachable and has been removed rather than left behind a dead branch.
     @ViewBuilder
-    private var sourceGlyph: some View {
-        Image(systemName: session.capturedAppName == nil ? "mic.fill" : "app.fill")
-            .font(.title3)
-            .foregroundStyle(.tint)
-            .frame(width: 24, height: 24, alignment: .center)
-            .accessibilityHidden(true)
+    private var tagDots: some View {
+        TagDotsView(colors: session.tags.prefix(3).map { Color(tagHex: $0.colorHex) })
     }
 
     private var sourceName: String {

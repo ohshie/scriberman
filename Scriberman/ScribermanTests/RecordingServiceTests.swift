@@ -901,6 +901,88 @@ final class RecordingServiceTests {
         #expect(fixture.micController.startCaptureCalls.last?.deviceID == 22)
     }
 
+    // MARK: - Default tag at creation
+
+    @Test
+    func testAStartedRecordingCarriesTheDefaultTag() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            SpeakerProfile.self, RecordingTag.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let service = await makeServiceForStop(workspace: workspace, container: container)
+
+        let sessionID = try await service.startRecording(
+            in: workspace, micDeviceID: nil, captureDisplayID: nil,
+            capturedAppName: nil, appProcessID: nil, title: "Tagged at birth"
+        )
+
+        let context = ModelContext(container)
+        let session = try fetchRecordingSession(id: sessionID, from: context)
+        // The bound holds from the moment the recording exists, not from first display.
+        #expect(session.tags.count == 1)
+        #expect(session.tags.first?.isDefault == true)
+
+        _ = await service.stopRecording()
+    }
+
+    @Test
+    func testTheDefaultTagSurvivesToStop() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            SpeakerProfile.self, RecordingTag.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let service = await makeServiceForStop(workspace: workspace, container: container)
+
+        let sessionID = try await service.startRecording(
+            in: workspace, micDeviceID: nil, captureDisplayID: nil,
+            capturedAppName: nil, appProcessID: nil, title: "Never tagged"
+        )
+        _ = await service.stopRecording()
+
+        let context = ModelContext(container)
+        let session = try fetchRecordingSession(id: sessionID, from: context)
+        #expect(session.tags.count == 1)
+        #expect(session.tags.first?.isDefault == true)
+    }
+
+    @Test
+    func testARecordingTaggedDuringCaptureKeepsTheUserTags() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            SpeakerProfile.self, RecordingTag.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let service = await makeServiceForStop(workspace: workspace, container: container)
+        let sessionID = try await service.startRecording(
+            in: workspace, micDeviceID: nil, captureDisplayID: nil,
+            capturedAppName: nil, appProcessID: nil, title: "Tagged mid-capture"
+        )
+
+        let context = ModelContext(container)
+        let tagService = TagService()
+        let session = try fetchRecordingSession(id: sessionID, from: context)
+        let work = try tagService.createTag(name: "Work", in: context)
+        _ = try tagService.assign(work, to: session, in: context)
+
+        _ = await service.stopRecording()
+
+        let afterStop = ModelContext(container)
+        let stopped = try fetchRecordingSession(id: sessionID, from: afterStop)
+        #expect(stopped.tags.map(\.name) == ["Work"])
+        #expect(!stopped.tags.contains { $0.isDefault })
+    }
+
     // MARK: - Interrupted-capture marker
 
     private func makeServiceForStop(

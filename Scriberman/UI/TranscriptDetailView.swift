@@ -71,6 +71,16 @@ struct TranscriptDetailView: View {
                     Label("Copy", systemImage: "doc.on.doc")
                 }
 
+                // Tags are a session action, so they live with the others rather than in the
+                // header. Only recordings carry tags.
+                if let recording = session as? RecordingSession {
+                    Menu {
+                        TagAssignmentMenuContent(session: recording)
+                    } label: {
+                        Label("Tags", systemImage: "tag")
+                    }
+                }
+
                 transformMenu
 
                 Button(role: .destructive) {
