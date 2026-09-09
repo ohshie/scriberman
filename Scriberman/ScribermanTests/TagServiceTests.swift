@@ -280,6 +280,38 @@ struct TagServiceTests {
         #expect(try service.backfillUntaggedRecordings(in: context) == 0)
     }
 
+    // MARK: - Scene wiring
+
+    /// Settings is its own scene and does not inherit the WindowGroup's model container. Without an
+    /// explicit one, every `@Query` and `@Environment(\.modelContext)` inside Settings resolves to a
+    /// throwaway context — reads return nothing and writes go nowhere, so tag management silently
+    /// does nothing.
+    @Test
+    func testTheSettingsSceneAttachesTheModelContainer() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let app = try String(
+            contentsOf: testsDirectory.appendingPathComponent("../ScribermanApp.swift"),
+            encoding: .utf8
+        )
+        let settingsRange = try #require(app.range(of: "Settings {"))
+        let afterSettings = app[settingsRange.upperBound...]
+        #expect(afterSettings.contains(".modelContainer(modelContainer)"))
+    }
+
+    @Test
+    func testTagFailuresAreLoggedRatherThanSwallowed() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        for file in ["../UI/TagSettingsView.swift", "../UI/TagAssignmentMenu.swift"] {
+            let source = try String(
+                contentsOf: testsDirectory.appendingPathComponent(file),
+                encoding: .utf8
+            )
+            // `try?` hid the reason nothing happened; every failure path logs now.
+            #expect(!source.contains("try? service."))
+            #expect(source.contains("logger.error"))
+        }
+    }
+
     // MARK: - Settings surface
 
     private func tagSettingsSource() throws -> String {

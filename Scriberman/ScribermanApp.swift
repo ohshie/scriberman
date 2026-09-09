@@ -78,6 +78,10 @@ struct ScribermanApp: App {
                 .environment(appState)
                 .environment(appState.aiProviderService)
         }
+        // Settings is its own scene and does not inherit the WindowGroup's container. Without this
+        // every `@Query` and `@Environment(\.modelContext)` inside Settings resolves to a throwaway
+        // context: reads return nothing and writes go nowhere.
+        .modelContainer(modelContainer)
     }
 }
 

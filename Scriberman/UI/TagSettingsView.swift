@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 import SwiftData
 import SwiftUI
 
@@ -13,6 +14,7 @@ struct TagSettingsView: View {
     @State private var pendingDeletion: RecordingTag?
 
     private let service = TagService()
+    private let logger = Logger(subsystem: "Scriberman", category: "TagSettingsView")
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -83,22 +85,40 @@ struct TagSettingsView: View {
     private func addTag() {
         // Created with a placeholder name and a random colour, then renamed in place. An empty
         // name is refused on the way back in, so the tag cannot be left nameless.
-        try? service.createTag(name: "Name", in: modelContext)
+        do {
+            try service.createTag(name: "Name", in: modelContext)
+        } catch {
+            logger.error("Creating a tag failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     private func rename(_ tag: RecordingTag, to name: String) {
         // A momentarily empty field is normal while typing; the service refuses to persist it and
-        // the previous name stands.
-        try? service.rename(tag, to: name, in: modelContext)
+        // the previous name stands. Only that case is expected, so anything else is logged.
+        do {
+            try service.rename(tag, to: name, in: modelContext)
+        } catch TagError.emptyName {
+            // Expected while typing.
+        } catch {
+            logger.error("Renaming a tag failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     private func recolor(_ tag: RecordingTag, to color: Color) {
         guard let hex = color.tagHexValue else { return }
-        try? service.recolor(tag, to: hex, in: modelContext)
+        do {
+            try service.recolor(tag, to: hex, in: modelContext)
+        } catch {
+            logger.error("Recolouring a tag failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     private func delete(_ tag: RecordingTag) {
-        try? service.delete(tag, in: modelContext)
+        do {
+            try service.delete(tag, in: modelContext)
+        } catch {
+            logger.error("Deleting a tag failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 }
 

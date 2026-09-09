@@ -1,3 +1,4 @@
+import OSLog
 import SwiftData
 import SwiftUI
 
@@ -10,10 +11,11 @@ struct TagAssignmentMenuContent: View {
     @Environment(\.modelContext) private var modelContext
 
     private let service = TagService()
+    private let logger = Logger(subsystem: "Scriberman", category: "TagAssignmentMenu")
 
     var body: some View {
         // The default tag is applied and removed by rule, never chosen, so it is not listed.
-        let assignable = (try? service.assignableTags(in: modelContext)) ?? []
+        let assignable = assignableTags
         let carried = Set(session.tags.map(\.id))
         let realCount = session.tags.filter { !$0.isDefault }.count
 
@@ -34,6 +36,17 @@ struct TagAssignmentMenuContent: View {
         }
     }
 
+    /// Falls back to an empty list so the menu degrades to showing nothing rather than failing,
+    /// but the reason is logged rather than lost.
+    private var assignableTags: [RecordingTag] {
+        do {
+            return try service.assignableTags(in: modelContext)
+        } catch {
+            logger.error("Reading assignable tags failed: \(error.localizedDescription, privacy: .public)")
+            return []
+        }
+    }
+
     private func toggle(_ tag: RecordingTag, isCarried: Bool) {
         do {
             if isCarried {
@@ -42,7 +55,7 @@ struct TagAssignmentMenuContent: View {
                 _ = try service.assign(tag, to: session, in: modelContext)
             }
         } catch {
-            // Not worth interrupting the view for; the row simply does not change.
+            logger.error("Changing a recording's tags failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 }
