@@ -13,21 +13,24 @@ struct ImportedSessionRow: View {
                     .font(.headline)
                     .lineLimit(1)
 
+                // The timestamp shares this line rather than taking one of its own. Its trailing
+                // edge is the text column's, which ends where the accessory begins — and accessory
+                // width varies with status, so timestamps are not aligned down the list. Accepted:
+                // the rows sitting furthest from the edge are the ones carrying a button.
                 HStack(spacing: 6) {
                     Text(sourceName)
                     Text("•")
                     Text(durationText(session.duration))
+                    Spacer(minLength: 8)
+                    Text(JobsViewModel.relativeTimestampText(for: session.createdAt))
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-
-                Text(JobsViewModel.relativeTimestampText(for: session.createdAt))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
-
-            Spacer(minLength: 12)
+            // Fills, so the timestamp's trailing alignment has an edge to resolve against. This is
+            // also what puts the accessory column against the row's right side without a Spacer.
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             VStack(alignment: .trailing, spacing: 8) {
                 if !statusIndicatorBelongsInAccessory {
@@ -93,11 +96,7 @@ struct ImportedSessionRow: View {
     }
 
     private var statusIndicator: some View {
-        StatusTagView(
-            status: session.status,
-            hasTranscript: session.transcriptData != nil,
-            hasAITransformation: session.aiTransformationsData != nil
-        )
+        StatusTagView(status: session.status)
     }
 
     private func durationText(_ duration: TimeInterval) -> String {
