@@ -72,6 +72,9 @@ struct JobsView: View {
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 deleteButton(for: item)
                             }
+                            .contextMenu {
+                                tagMenu(for: item)
+                            }
                     }
                 }
             }
@@ -108,6 +111,48 @@ struct JobsView: View {
                 session: session,
                 onRetry: { viewModel.retryImported(session: session, context: modelContext) }
             )
+        }
+    }
+
+    /// Tag assignment on right-click.
+    ///
+    /// Only recordings carry tags, so pending and imported rows produce nothing — an empty
+    /// `contextMenu` shows no menu at all, which is the wanted behaviour for those rows.
+    @ViewBuilder
+    private func tagMenu(for item: JobsViewModel.SessionListItem) -> some View {
+        if case .recording(let session) = item {
+            let assignable = (try? TagService().assignableTags(in: modelContext)) ?? []
+            let carried = Set(session.tags.map(\.id))
+            // The default tag is applied and removed by rule, never chosen, so it is not listed.
+            let realCount = session.tags.filter { !$0.isDefault }.count
+            ForEach(assignable) { tag in
+                let isCarried = carried.contains(tag.id)
+                Button {
+                    toggle(tag, on: session, isCarried: isCarried)
+                } label: {
+                    if isCarried {
+                        Label(tag.name, systemImage: "checkmark")
+                    } else {
+                        Text(tag.name)
+                    }
+                }
+                // Shown but unavailable at three, so the reason is visible rather than the tag
+                // silently missing from the menu.
+                .disabled(!isCarried && realCount >= TagService.maximumTagsPerRecording)
+            }
+        }
+    }
+
+    private func toggle(_ tag: RecordingTag, on session: RecordingSession, isCarried: Bool) {
+        let service = TagService()
+        do {
+            if isCarried {
+                try service.unassign(tag, from: session, in: modelContext)
+            } else {
+                _ = try service.assign(tag, to: session, in: modelContext)
+            }
+        } catch {
+            // Assignment is not worth interrupting the list for; the row simply does not change.
         }
     }
 

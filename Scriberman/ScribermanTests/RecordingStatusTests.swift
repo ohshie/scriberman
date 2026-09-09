@@ -199,6 +199,58 @@ struct RecordingStatusTests {
         #expect(!between.contains("else"))
     }
 
+    // MARK: - Tag assignment menu
+
+    private func jobsViewSource() throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        return try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/JobsView.swift"),
+            encoding: .utf8
+        )
+    }
+
+    @Test
+    func testTheListOffersTagAssignmentOnRightClick() throws {
+        let source = try jobsViewSource()
+        #expect(source.contains(".contextMenu"))
+        #expect(source.contains("tagMenu(for: item)"))
+    }
+
+    /// Only recordings carry tags. An empty `contextMenu` body shows no menu, which is what pending
+    /// and imported rows should do.
+    @Test
+    func testOnlyRecordingRowsProduceATagMenu() throws {
+        let source = try jobsViewSource()
+        let menuRange = try #require(source.range(of: "private func tagMenu(for item"))
+        let body = source[menuRange.lowerBound...].prefix(900)
+        #expect(body.contains("if case .recording(let session) = item"))
+        #expect(!body.contains("case .imported"))
+        #expect(!body.contains("case .pending"))
+    }
+
+    @Test
+    func testTheDefaultTagIsNotListedForAssignment() throws {
+        let source = try jobsViewSource()
+        // `assignableTags` excludes it; the menu does not filter separately.
+        #expect(source.contains("assignableTags(in: modelContext)"))
+    }
+
+    @Test
+    func testAtThreeTagsFurtherTagsAreDisabledRatherThanHidden() throws {
+        let source = try jobsViewSource()
+        #expect(source.contains(".disabled(!isCarried && realCount >= TagService.maximumTagsPerRecording)"))
+        // Disabled, not filtered out of the list.
+        #expect(!source.contains("assignable.filter"))
+    }
+
+    @Test
+    func testCarriedTagsAreMarkedAndToggleBothWays() throws {
+        let source = try jobsViewSource()
+        #expect(source.contains("systemImage: \"checkmark\""))
+        #expect(source.contains("try service.unassign(tag, from: session, in: modelContext)"))
+        #expect(source.contains("try service.assign(tag, to: session, in: modelContext)"))
+    }
+
     // MARK: - Tag dots
 
     @Test
