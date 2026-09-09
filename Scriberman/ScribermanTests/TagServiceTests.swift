@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import SwiftUI
 import Testing
 @testable import Scriberman
 
@@ -277,6 +278,61 @@ struct TagServiceTests {
 
         #expect(try service.backfillUntaggedRecordings(in: context) == 1)
         #expect(try service.backfillUntaggedRecordings(in: context) == 0)
+    }
+
+    // MARK: - Settings surface
+
+    private func tagSettingsSource() throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        return try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/TagSettingsView.swift"),
+            encoding: .utf8
+        )
+    }
+
+    @Test
+    func testSettingsOffersTagManagement() throws {
+        let source = try tagSettingsSource()
+        #expect(source.contains("Add new tag"))
+        #expect(source.contains("TextField("))
+        #expect(source.contains("ColorPicker("))
+    }
+
+    @Test
+    func testTheDefaultTagHasNoDeleteAction() throws {
+        let source = try tagSettingsSource()
+        #expect(source.contains("if !tag.isDefault"))
+    }
+
+    @Test
+    func testDeletionIsConfirmedBeforeAnythingIsRemoved() throws {
+        let source = try tagSettingsSource()
+        #expect(source.contains("confirmationDialog"))
+        #expect(source.contains("Are you sure you want to remove"))
+        // The delete only runs from the confirming button, never from the trash button directly.
+        let trashRange = try #require(source.range(of: "pendingDeletion = tag"))
+        let afterTrash = source[trashRange.upperBound...].prefix(120)
+        #expect(!afterTrash.contains("service.delete"))
+    }
+
+    @Test
+    func testSettingsIsWiredIntoTheGeneralTab() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let settings = try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/SettingsView.swift"),
+            encoding: .utf8
+        )
+        #expect(settings.contains("Section(\"Tags\")"))
+        #expect(settings.contains("TagSettingsView()"))
+    }
+
+    /// A colour chosen in the picker has to survive the round trip to storage.
+    @Test
+    func testColorRoundTripsThroughHex() throws {
+        for hex in ["0A84FF", "FF0000", "00FF00", "123456"] {
+            let color = Color(tagHex: hex)
+            #expect(color.tagHexValue == hex)
+        }
     }
 
     // MARK: - On-disk store
