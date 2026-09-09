@@ -62,6 +62,14 @@ struct TagService {
         return try context.fetch(descriptor)
     }
 
+    /// Every tag, including the default. Used by the filter chips: the default tag's chip is the
+    /// one that finds untagged recordings, since the default is never alongside another tag.
+    func allTagsForFiltering(in context: ModelContext) throws -> [RecordingTag] {
+        try context.fetch(
+            FetchDescriptor<RecordingTag>(sortBy: [SortDescriptor(\.createdAt)])
+        )
+    }
+
     // MARK: - Creating and editing
 
     /// Creates a tag with a random usable colour.

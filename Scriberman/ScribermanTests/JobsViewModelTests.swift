@@ -213,6 +213,139 @@ final class JobsViewModelTests {
         #expect(!(shouldDiscardWhenPendingSelected))
     }
 
+    // MARK: - Tag filtering
+
+    private func tagged(_ session: RecordingSession, _ tags: [RecordingTag]) -> RecordingSession {
+        session.tags = tags
+        return session
+    }
+
+    @Test
+    func testNoSelectedTagsLeavesTheListUnfiltered() {
+        let recording = makeSession(createdAt: makeDate(year: 2026, month: 3, day: 20, hour: 8), status: RecordingStatus.done)
+        let imported = makeImportedSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 9))
+
+        let items = viewModel.sessionItems(
+            recordingSessions: [recording],
+            importedSessions: [imported],
+            preserving: nil
+        )
+
+        #expect(items.count == 2)
+    }
+
+    @Test
+    func testOneSelectedTagFiltersToRecordingsCarryingIt() {
+        let work = RecordingTag(name: "Work", colorHex: "112233")
+        let client = RecordingTag(name: "Client", colorHex: "445566")
+        let carries = tagged(
+            makeSession(createdAt: makeDate(year: 2026, month: 3, day: 20, hour: 8), status: RecordingStatus.done),
+            [work]
+        )
+        let doesNot = tagged(
+            makeSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 8), status: RecordingStatus.done),
+            [client]
+        )
+
+        viewModel.selectedTagIDs = [work.id]
+        let items = viewModel.sessionItems(
+            recordingSessions: [carries, doesNot],
+            importedSessions: [],
+            preserving: nil
+        )
+
+        #expect(items.count == 1)
+        #expect(items.first?.id == "recording:\(carries.id.uuidString)")
+    }
+
+    /// Union, not intersection: a recording carrying either selected tag matches, and one carrying
+    /// both appears once.
+    @Test
+    func testTwoSelectedTagsMatchEitherWithoutDuplicating() {
+        let work = RecordingTag(name: "Work", colorHex: "112233")
+        let client = RecordingTag(name: "Client", colorHex: "445566")
+        let other = RecordingTag(name: "Other", colorHex: "778899")
+        let onlyWork = tagged(makeSession(createdAt: makeDate(year: 2026, month: 3, day: 20, hour: 8), status: RecordingStatus.done), [work])
+        let both = tagged(makeSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 8), status: RecordingStatus.done), [work, client])
+        let neither = tagged(makeSession(createdAt: makeDate(year: 2026, month: 3, day: 22, hour: 8), status: RecordingStatus.done), [other])
+
+        viewModel.selectedTagIDs = [work.id, client.id]
+        let items = viewModel.sessionItems(
+            recordingSessions: [onlyWork, both, neither],
+            importedSessions: [],
+            preserving: nil
+        )
+
+        #expect(items.count == 2)
+        #expect(!items.contains { $0.id == "recording:\(neither.id.uuidString)" })
+    }
+
+    /// The default tag is never alongside another, so its chip finds exactly the recordings the
+    /// user has not tagged.
+    @Test
+    func testTheDefaultTagsChipFindsUntaggedRecordings() {
+        let defaultTag = RecordingTag(name: "recording", colorHex: "0A84FF", isDefault: true)
+        let work = RecordingTag(name: "Work", colorHex: "112233")
+        let untagged = tagged(makeSession(createdAt: makeDate(year: 2026, month: 3, day: 20, hour: 8), status: RecordingStatus.done), [defaultTag])
+        let userTagged = tagged(makeSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 8), status: RecordingStatus.done), [work])
+
+        viewModel.selectedTagIDs = [defaultTag.id]
+        let items = viewModel.sessionItems(
+            recordingSessions: [untagged, userTagged],
+            importedSessions: [],
+            preserving: nil
+        )
+
+        #expect(items.count == 1)
+        #expect(items.first?.id == "recording:\(untagged.id.uuidString)")
+    }
+
+    /// Imported and pending sessions carry no tags, so a filtered list cannot contain them.
+    @Test
+    func testFilteringHidesSessionsThatCarryNoTags() {
+        let work = RecordingTag(name: "Work", colorHex: "112233")
+        let recording = tagged(makeSession(createdAt: makeDate(year: 2026, month: 3, day: 20, hour: 8), status: RecordingStatus.done), [work])
+        let imported = makeImportedSession(createdAt: makeDate(year: 2026, month: 3, day: 21, hour: 9))
+
+        viewModel.selectedTagIDs = [work.id]
+        let items = viewModel.sessionItems(
+            recordingSessions: [recording],
+            importedSessions: [imported],
+            preserving: nil
+        )
+
+        #expect(items.count == 1)
+        #expect(!items.contains { if case .imported = $0 { return true } else { return false } })
+    }
+
+    /// Filtering wins over keeping the selected row visible: an explicit filter should not be
+    /// silently overridden.
+    @Test
+    func testFilteringRemovesASelectedRecordingThatDoesNotMatch() {
+        let work = RecordingTag(name: "Work", colorHex: "112233")
+        let other = RecordingTag(name: "Other", colorHex: "445566")
+        let selected = tagged(makeSession(createdAt: makeDate(year: 2026, month: 3, day: 20, hour: 8), status: RecordingStatus.done), [other])
+
+        viewModel.selectedTagIDs = [work.id]
+        let items = viewModel.sessionItems(
+            recordingSessions: [selected],
+            importedSessions: [],
+            preserving: .recording(selected)
+        )
+
+        #expect(items.isEmpty)
+    }
+
+    @Test
+    func testTogglingAChipAddsThenRemovesIt() {
+        let id = UUID()
+        viewModel.toggleTagFilter(id)
+        #expect(viewModel.selectedTagIDs == [id])
+        // A second click is the clear; there is no separate clear control.
+        viewModel.toggleTagFilter(id)
+        #expect(viewModel.selectedTagIDs.isEmpty)
+    }
+
     @Test
     func testSessionItemsReturnsEmptyForEmptyInputs() {
         let items = viewModel.sessionItems(

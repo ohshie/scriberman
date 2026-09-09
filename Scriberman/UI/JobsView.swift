@@ -57,7 +57,59 @@ struct JobsView: View {
         }
     }
 
+    /// Tag chips above the list. The chips are the tag names themselves; a lit chip is unlit by
+    /// clicking it again, and with none lit the list is unfiltered — so no separate clear control.
+    @ViewBuilder
+    private var tagFilterChips: some View {
+        let tags = (try? TagService().allTagsForFiltering(in: modelContext)) ?? []
+        if !tags.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(tags) { tag in
+                        let isSelected = viewModel.selectedTagIDs.contains(tag.id)
+                        Button {
+                            viewModel.toggleTagFilter(tag.id)
+                        } label: {
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(Color(tagHex: tag.colorHex))
+                                    .frame(width: 7, height: 7)
+                                Text(tag.name)
+                                    .font(.caption)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule().fill(
+                                    isSelected
+                                        ? Color(tagHex: tag.colorHex).opacity(0.25)
+                                        : Color.secondary.opacity(0.12)
+                                )
+                            )
+                            .overlay(
+                                Capsule().strokeBorder(
+                                    isSelected ? Color(tagHex: tag.colorHex) : .clear,
+                                    lineWidth: 1
+                                )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+            }
+        }
+    }
+
     private var listContent: some View {
+        VStack(spacing: 0) {
+            tagFilterChips
+            sessionList
+        }
+    }
+
+    private var sessionList: some View {
         List(selection: $selection) {
             if let pendingSession {
                 row(for: .pending(pendingSession))
