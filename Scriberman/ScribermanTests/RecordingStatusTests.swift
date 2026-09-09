@@ -346,8 +346,26 @@ struct RecordingStatusTests {
         let source = try tagLineSource()
         #expect(source.contains("Text(tag.name)"))
         #expect(source.contains("Circle()"))
-        // No capsule: the label is plain text so the list recolours it on selection.
-        #expect(!source.contains("Capsule()"))
+    }
+
+    /// Without a backdrop the chip sits directly on the list's selection fill and a tag coloured
+    /// near the accent disappears into it. A `List` gives no way to cut its selection around a
+    /// subview, so the chip has to be drawn over it.
+    @Test
+    func testEachTagChipHasItsOwnBackdrop() throws {
+        let source = try tagLineSource()
+        #expect(source.contains("glassEffect(.regular, in: Capsule())"))
+        #expect(source.contains(".tint(Color(tagHex: tag.colorHex))"))
+    }
+
+    /// Tag colours are random and user-chosen, so some would be unreadable as text. Colour stays in
+    /// the dot and the tint.
+    @Test
+    func testTheTagNameIsNotDrawnInTheTagColour() throws {
+        let source = try tagLineSource()
+        let nameRange = try #require(source.range(of: "Text(tag.name)"))
+        let rest = source[nameRange.upperBound...].prefix(160)
+        #expect(!rest.contains("foregroundStyle(Color(tagHex"))
     }
 
     @Test
@@ -373,11 +391,11 @@ struct RecordingStatusTests {
         #expect(source.contains("Double(namedTags.count - index)"))
     }
 
+    /// The chip reads on both backgrounds because of its own backdrop, so the row still never needs
+    /// to know whether it is selected.
     @Test
-    func testTheDotStaysDistinctWithoutKnowingAboutSelection() throws {
+    func testTheChipWorksWithoutKnowingAboutSelection() throws {
         let source = try tagLineSource()
-        // A ring, applied unconditionally — the row cannot know whether it is selected.
-        #expect(source.contains("strokeBorder"))
         #expect(!source.contains("isSelected"))
     }
 

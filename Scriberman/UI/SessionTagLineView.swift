@@ -5,16 +5,23 @@ import SwiftUI
 /// Replaces `TagDotsView`, which showed colour in the row's leading column with no label — you could
 /// see that a recording was tagged, not what with.
 ///
-/// Each tag is a coloured dot followed by plain `Text`. The label being plain text is the point: the
-/// list recolours it for selection exactly as it does the row's other captions, so the row never has
-/// to know whether it is selected. Only the dot is a fixed colour, and it carries a hairline ring so
-/// it stays distinct on both an unselected row and an accent-filled one.
+/// Each tag is a coloured dot and its name inside a capsule with the same glass treatment the
+/// Pending status capsule uses.
+///
+/// The capsule is not decoration. Without a backdrop the chip sits directly on the list's selection
+/// fill, and a bare dot plus text does not survive that — a tag coloured near the accent disappears
+/// into it. Drawing the chip over the selection is also the only way to get this effect: a `List`
+/// gives no way to cut its selection around a subview.
+///
+/// The name stays plain text rather than taking the tag's colour, because tag colours are random
+/// and user-chosen; some would be unreadable as text. The colour lives in the dot and the capsule's
+/// tint, where it cannot hurt legibility.
 struct SessionTagLineView: View {
     let tags: [RecordingTag]
 
     private static let dotSize: CGFloat = 7
     private static let dotLabelSpacing: CGFloat = 5
-    private static let tagSpacing: CGFloat = 10
+    private static let tagSpacing: CGFloat = 6
 
     /// The default tag is never named. Every untagged recording carries it, so naming it would mark
     /// most of the list with a label meaning "untagged" — which absence expresses better.
@@ -29,15 +36,20 @@ struct SessionTagLineView: View {
                     HStack(spacing: Self.dotLabelSpacing) {
                         Circle()
                             .fill(Color(tagHex: tag.colorHex))
-                            .overlay(
-                                Circle().strokeBorder(.background.opacity(0.6), lineWidth: 0.5)
-                            )
                             .frame(width: Self.dotSize, height: Self.dotSize)
 
                         Text(tag.name)
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    // The chip needs its own backdrop. Without one it sits directly on the list's
+                    // selection fill, and a plain dot plus text does not survive that — a tag
+                    // coloured near the accent disappears into it. The same treatment the Pending
+                    // capsule already uses, so the chip reads over whatever is behind it.
+                    .glassEffect(.regular, in: Capsule())
+                    .tint(Color(tagHex: tag.colorHex))
                     // Later tags give up space before earlier ones, so the first tag stays legible
                     // instead of every name being shortened equally.
                     .layoutPriority(priority(for: tag))
