@@ -199,6 +199,58 @@ struct RecordingStatusTests {
         #expect(!between.contains("else"))
     }
 
+    // MARK: - Tag dots
+
+    @Test
+    func testRecordingRowShowsTagDotsInsteadOfASourceGlyph() throws {
+        let source = try sourceForFile(named: "RecordingSessionRow.swift")
+        #expect(source.contains("tagDots"))
+        #expect(source.contains("TagDotsView"))
+        // The glyph is removed, not hidden behind a branch that a minimum of one tag makes dead.
+        #expect(!source.contains("sourceGlyph"))
+        #expect(!source.contains("mic.fill"))
+        #expect(!source.contains("app.fill"))
+    }
+
+    /// The source is not lost — it is already caption text on the line below.
+    @Test
+    func testRecordingRowStillNamesItsSource() throws {
+        let source = try sourceForFile(named: "RecordingSessionRow.swift")
+        #expect(source.contains("Text(sourceName)"))
+        #expect(source.contains("capturedAppName ?? \"Microphone\""))
+    }
+
+    @Test
+    func testImportedRowKeepsItsSourceGlyph() throws {
+        let source = try sourceForFile(named: "ImportedSessionRow.swift")
+        #expect(source.contains("sourceGlyph"))
+    }
+
+    @Test
+    func testAtMostThreeDotsAreShown() throws {
+        let source = try sourceForFile(named: "RecordingSessionRow.swift")
+        // A recording cannot carry more than three, but the row must not depend on that holding.
+        #expect(source.contains("prefix(3)"))
+    }
+
+    @Test
+    func testTagDotsArrangeOneTwoAndThree() throws {
+        let source = try sourceForFile(named: "TagDotsView.swift")
+        #expect(source.contains("case 1:"))
+        #expect(source.contains("case 2:"))
+        #expect(source.contains("VStack"))
+        #expect(source.contains("HStack"))
+        #expect(source.contains("alignment: .center"))
+    }
+
+    @Test
+    func testTagColourFallsBackRatherThanRenderingNothing() {
+        // An unparseable hex must not make a dot invisible.
+        #expect(TagColor.components(fromHex: "zzzzzz") == nil)
+        let fallback = TagColor.components(fromHex: RecordingTag.Defaults.colorHex)
+        #expect(fallback != nil)
+    }
+
     // MARK: - Incomplete-capture marker
 
     @Test

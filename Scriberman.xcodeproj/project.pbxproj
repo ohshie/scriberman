@@ -62,6 +62,7 @@
 		6402AD8CA78146809D04D1E7 /* UnifiedCaptureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B31D758FF2004F3EA26EB66E /* UnifiedCaptureSession.swift */; };
 		EAD7461764CE4338B9D1DB84 /* SessionFailureLogWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A0000B1EA2549C2B1A4E5E4 /* SessionFailureLogWriter.swift */; };
 		E41BAA1A53B448A797F7B091 /* RecordingStartVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6BDA4EF08C84DB2ACEB5D94 /* RecordingStartVerifier.swift */; };
+		7B2D1F6C1C3A5B0D9E4F6007 /* TagDotsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D1F6C1C3A5B0D9E4F6008 /* TagDotsView.swift */; };
 		7B2D1F6C1C3A5B0D9E4F6001 /* RecordingTag.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D1F6C1C3A5B0D9E4F6002 /* RecordingTag.swift */; };
 		7B2D1F6C1C3A5B0D9E4F6003 /* TagService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D1F6C1C3A5B0D9E4F6004 /* TagService.swift */; };
 		7A1C0E5B1B2F4A0C8D3E5F03 /* CaptureHealthMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1C0E5B1B2F4A0C8D3E5F04 /* CaptureHealthMonitor.swift */; };
@@ -324,6 +325,7 @@
 		B31D758FF2004F3EA26EB66E /* UnifiedCaptureSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Capture/UnifiedCaptureSession.swift"; sourceTree = SOURCE_ROOT; };
 		8A0000B1EA2549C2B1A4E5E4 /* SessionFailureLogWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Capture/SessionFailureLogWriter.swift"; sourceTree = SOURCE_ROOT; };
 		C6BDA4EF08C84DB2ACEB5D94 /* RecordingStartVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Capture/RecordingStartVerifier.swift"; sourceTree = SOURCE_ROOT; };
+		7B2D1F6C1C3A5B0D9E4F6008 /* TagDotsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/TagDotsView.swift"; sourceTree = SOURCE_ROOT; };
 		7B2D1F6C1C3A5B0D9E4F6002 /* RecordingTag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Domain/RecordingTag.swift"; sourceTree = SOURCE_ROOT; };
 		7B2D1F6C1C3A5B0D9E4F6004 /* TagService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Tags/TagService.swift"; sourceTree = SOURCE_ROOT; };
 		7A1C0E5B1B2F4A0C8D3E5F04 /* CaptureHealthMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Capture/CaptureHealthMonitor.swift"; sourceTree = SOURCE_ROOT; };
@@ -806,6 +808,7 @@
 				B31D758FF2004F3EA26EB66E /* UnifiedCaptureSession.swift */,
 				8A0000B1EA2549C2B1A4E5E4 /* SessionFailureLogWriter.swift */,
 				C6BDA4EF08C84DB2ACEB5D94 /* RecordingStartVerifier.swift */,
+				7B2D1F6C1C3A5B0D9E4F6008 /* TagDotsView.swift */,
 				7B2D1F6C1C3A5B0D9E4F6002 /* RecordingTag.swift */,
 				7B2D1F6C1C3A5B0D9E4F6004 /* TagService.swift */,
 				7A1C0E5B1B2F4A0C8D3E5F04 /* CaptureHealthMonitor.swift */,
@@ -1220,6 +1223,7 @@
 				6402AD8CA78146809D04D1E7 /* UnifiedCaptureSession.swift in Sources */,
 				EAD7461764CE4338B9D1DB84 /* SessionFailureLogWriter.swift in Sources */,
 				E41BAA1A53B448A797F7B091 /* RecordingStartVerifier.swift in Sources */,
+				7B2D1F6C1C3A5B0D9E4F6007 /* TagDotsView.swift in Sources */,
 				7B2D1F6C1C3A5B0D9E4F6001 /* RecordingTag.swift in Sources */,
 				7B2D1F6C1C3A5B0D9E4F6003 /* TagService.swift in Sources */,
 				7A1C0E5B1B2F4A0C8D3E5F03 /* CaptureHealthMonitor.swift in Sources */,
