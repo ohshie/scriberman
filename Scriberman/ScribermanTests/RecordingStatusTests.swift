@@ -411,6 +411,32 @@ struct RecordingStatusTests {
         #expect(!source.contains("SessionTagLineView"))
     }
 
+    // MARK: - Deletion surfaces
+
+    /// Deletion is done to a session you have opened and looked at, not flicked past in a list.
+    @Test
+    func testTheSessionListOffersNoDeletion() throws {
+        let source = try jobsViewSource()
+        #expect(!source.contains("swipeActions"))
+        #expect(!source.contains("deleteButton"))
+        #expect(!source.contains("Clear All"))
+        #expect(!source.contains("clearAll"))
+        #expect(!source.contains("showClearAllConfirmation"))
+    }
+
+    /// The detail toolbar keeps the confirmation it already had, and is now the only route.
+    @Test
+    func testTheDetailToolbarStillConfirmsBeforeDeleting() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let detail = try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/TranscriptDetailView.swift"),
+            encoding: .utf8
+        )
+        #expect(detail.contains("showingDeleteConfirmation = true"))
+        #expect(detail.contains("alert(\"Delete Entry\", isPresented: $showingDeleteConfirmation)"))
+        #expect(detail.contains("role: .destructive"))
+    }
+
     // MARK: - Row layout
 
     @Test
