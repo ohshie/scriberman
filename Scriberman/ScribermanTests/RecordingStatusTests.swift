@@ -199,6 +199,190 @@ struct RecordingStatusTests {
         #expect(!between.contains("else"))
     }
 
+    // MARK: - Tag assignment menu
+
+    private func jobsViewSource() throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        return try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/JobsView.swift"),
+            encoding: .utf8
+        )
+    }
+
+    @Test
+    func testTheListOffersTagAssignmentOnRightClick() throws {
+        let source = try jobsViewSource()
+        #expect(source.contains(".contextMenu"))
+        #expect(source.contains("tagMenu(for: item)"))
+    }
+
+    /// Only recordings carry tags. An empty `contextMenu` body shows no menu, which is what pending
+    /// and imported rows should do.
+    @Test
+    func testOnlyRecordingRowsProduceATagMenu() throws {
+        let source = try jobsViewSource()
+        // Bounded to this function. A fixed-width window would spill into `deleteButton`, which
+        // legitimately switches over every case.
+        let menuRange = try #require(source.range(of: "private func tagMenu(for item"))
+        let rest = source[menuRange.upperBound...]
+        let end = rest.range(of: "private func ")?.lowerBound ?? rest.endIndex
+        let body = rest[..<end]
+        #expect(body.contains("if case .recording(let session) = item"))
+        #expect(!body.contains("case .imported"))
+        #expect(!body.contains("case .pending"))
+    }
+
+    private func assignmentMenuSource() throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        return try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/TagAssignmentMenu.swift"),
+            encoding: .utf8
+        )
+    }
+
+    @Test
+    func testTheDefaultTagIsNotListedForAssignment() throws {
+        let source = try assignmentMenuSource()
+        // `assignableTags` excludes it; the menu does not filter separately.
+        #expect(source.contains("assignableTags(in: modelContext)"))
+    }
+
+    @Test
+    func testAtThreeTagsFurtherTagsAreDisabledRatherThanHidden() throws {
+        let source = try assignmentMenuSource()
+        #expect(source.contains(".disabled(!isCarried && realCount >= TagService.maximumTagsPerRecording)"))
+        // Disabled, not filtered out of the list.
+        #expect(!source.contains("assignable.filter"))
+    }
+
+    @Test
+    func testCarriedTagsAreMarkedAndToggleBothWays() throws {
+        let source = try assignmentMenuSource()
+        #expect(source.contains("systemImage: \"checkmark\""))
+        #expect(source.contains("try service.unassign(tag, from: session, in: modelContext)"))
+        #expect(source.contains("try service.assign(tag, to: session, in: modelContext)"))
+    }
+
+    /// The list and the detail toolbar share one menu body, so they cannot drift on which tags are
+    /// offered or when they are unavailable.
+    @Test
+    func testTheListAndTheDetailToolbarShareOneAssignmentMenu() throws {
+        let jobs = try jobsViewSource()
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let detail = try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/TranscriptDetailView.swift"),
+            encoding: .utf8
+        )
+        #expect(jobs.contains("TagAssignmentMenuContent(session: session)"))
+        #expect(detail.contains("TagAssignmentMenuContent(session: recording)"))
+    }
+
+    /// Tags are a session action, so the control sits with Transform and Delete.
+    @Test
+    func testTheDetailToolbarCarriesATagsControl() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let detail = try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/TranscriptDetailView.swift"),
+            encoding: .utf8
+        )
+        #expect(detail.contains("Label(\"Tags\", systemImage: \"tag\")"))
+        // Only recordings carry tags; an imported session shows no control.
+        #expect(detail.contains("if let recording = session as? RecordingSession"))
+    }
+
+    /// The chips must survive a filter that matches nothing. They used to live inside the branch
+    /// that the empty state replaces, so filtering to zero removed the only way to unfilter.
+    @Test
+    func testFilterChipsRenderOutsideTheEmptyStateBranch() throws {
+        let source = try jobsViewSource()
+        let chipsRange = try #require(source.range(of: "tagFilterChips"))
+        let emptyStateRange = try #require(source.range(of: "if items.isEmpty && pendingSession == nil"))
+        // Chips are placed before the branch, not inside its else.
+        #expect(chipsRange.lowerBound < emptyStateRange.lowerBound)
+        #expect(!source.contains("private var listContent"))
+    }
+
+    /// A recording carrying only the default tag has nothing assignable, so without this the menu
+    /// is empty and looks broken.
+    @Test
+    func testTheAssignmentMenuIsNeverEmpty() throws {
+        let source = try assignmentMenuSource()
+        #expect(source.contains("Button(\"Add new tag\")"))
+        #expect(source.contains("openSettings()"))
+        // Outside the ForEach, so it is present whatever the tag list contains.
+        let forEachRange = try #require(source.range(of: "ForEach(assignable)"))
+        let buttonRange = try #require(source.range(of: "Button(\"Add new tag\")"))
+        #expect(buttonRange.lowerBound > forEachRange.lowerBound)
+    }
+
+    @Test
+    func testTheNameFieldLosesFocusOnAClickElsewhere() throws {
+        let source = try tagSettingsSourceForRow()
+        #expect(source.contains("@FocusState private var focusedTagID"))
+        #expect(source.contains(".focused($focusedTagID, equals: tag.id)"))
+        #expect(source.contains("focusedTagID = nil"))
+    }
+
+    private func tagSettingsSourceForRow() throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        return try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/TagSettingsView.swift"),
+            encoding: .utf8
+        )
+    }
+
+    // MARK: - Tag dots
+
+    @Test
+    func testRecordingRowShowsTagDotsInsteadOfASourceGlyph() throws {
+        let source = try sourceForFile(named: "RecordingSessionRow.swift")
+        #expect(source.contains("tagDots"))
+        #expect(source.contains("TagDotsView"))
+        // The glyph is removed, not hidden behind a branch that a minimum of one tag makes dead.
+        #expect(!source.contains("sourceGlyph"))
+        #expect(!source.contains("mic.fill"))
+        #expect(!source.contains("app.fill"))
+    }
+
+    /// The source is not lost — it is already caption text on the line below.
+    @Test
+    func testRecordingRowStillNamesItsSource() throws {
+        let source = try sourceForFile(named: "RecordingSessionRow.swift")
+        #expect(source.contains("Text(sourceName)"))
+        #expect(source.contains("capturedAppName ?? \"Microphone\""))
+    }
+
+    @Test
+    func testImportedRowKeepsItsSourceGlyph() throws {
+        let source = try sourceForFile(named: "ImportedSessionRow.swift")
+        #expect(source.contains("sourceGlyph"))
+    }
+
+    @Test
+    func testAtMostThreeDotsAreShown() throws {
+        let source = try sourceForFile(named: "RecordingSessionRow.swift")
+        // A recording cannot carry more than three, but the row must not depend on that holding.
+        #expect(source.contains("prefix(3)"))
+    }
+
+    @Test
+    func testTagDotsArrangeOneTwoAndThree() throws {
+        let source = try sourceForFile(named: "TagDotsView.swift")
+        #expect(source.contains("case 1:"))
+        #expect(source.contains("case 2:"))
+        #expect(source.contains("VStack"))
+        #expect(source.contains("HStack"))
+        #expect(source.contains("alignment: .center"))
+    }
+
+    @Test
+    func testTagColourFallsBackRatherThanRenderingNothing() {
+        // An unparseable hex must not make a dot invisible.
+        #expect(TagColor.components(fromHex: "zzzzzz") == nil)
+        let fallback = TagColor.components(fromHex: RecordingTag.Defaults.colorHex)
+        #expect(fallback != nil)
+    }
+
     // MARK: - Incomplete-capture marker
 
     @Test

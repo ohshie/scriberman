@@ -241,6 +241,7 @@ actor RecordingService: RecordingServiceProtocol {
     private let makeScreenCaptureSession: ScreenCaptureSessionFactory
     // Injected for testing; nil uses the real setVoiceProcessingEnabled(_:)
     private let voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)?
+    private let tagService = TagService()
 
     private var audioEngine: AVAudioEngine?
     private let micStreamer = AudioFileStreamer(label: "mic")
@@ -939,6 +940,9 @@ actor RecordingService: RecordingServiceProtocol {
             )
             let context = ModelContext(modelContainer)
             context.insert(session)
+            // Applied here so the recording satisfies the one-to-three tag bound from the moment it
+            // exists, rather than from the moment it is first displayed or first tagged.
+            try tagService.applyDefaultTag(to: session, in: context)
             try context.save()
             self.currentSessionID = session.id
             registerMicHardwareListeners()

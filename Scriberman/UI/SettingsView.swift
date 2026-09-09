@@ -106,6 +106,10 @@ struct SettingsView: View {
                     Section("App Icon") {
                         AppIconPickerView(preferences: appState.appIconPreferences)
                     }
+
+                    Section("Tags") {
+                        TagSettingsView()
+                    }
                 }
                 .formStyle(.grouped)
                 .tabItem {

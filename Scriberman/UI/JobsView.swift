@@ -17,15 +17,22 @@ struct JobsView: View {
     }
 
     var body: some View {
-        Group {
-            if items.isEmpty && pendingSession == nil {
-                emptyState(
-                    title: "No Sessions Yet",
-                    systemImage: "list.bullet.rectangle",
-                    message: "Record or import audio to start building your session history."
-                )
-            } else {
-                listContent
+        // The chips sit outside this branch on purpose. They used to live inside `listContent`,
+        // so filtering down to nothing replaced them with the empty state and left no way to
+        // unfilter.
+        VStack(spacing: 0) {
+            tagFilterChips
+
+            Group {
+                if items.isEmpty && pendingSession == nil {
+                    emptyState(
+                        title: "No Sessions Yet",
+                        systemImage: "list.bullet.rectangle",
+                        message: "Record or import audio to start building your session history."
+                    )
+                } else {
+                    sessionList
+                }
             }
         }
         .navigationTitle("Jobs")
@@ -57,7 +64,52 @@ struct JobsView: View {
         }
     }
 
-    private var listContent: some View {
+    /// Tag chips above the list. The chips are the tag names themselves; a lit chip is unlit by
+    /// clicking it again, and with none lit the list is unfiltered — so no separate clear control.
+    @ViewBuilder
+    private var tagFilterChips: some View {
+        let tags = (try? TagService().tagsInUse(in: modelContext)) ?? []
+        if !tags.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(tags) { tag in
+                        let isSelected = viewModel.selectedTagIDs.contains(tag.id)
+                        Button {
+                            viewModel.toggleTagFilter(tag.id)
+                        } label: {
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(Color(tagHex: tag.colorHex))
+                                    .frame(width: 7, height: 7)
+                                Text(tag.name)
+                                    .font(.caption)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule().fill(
+                                    isSelected
+                                        ? Color(tagHex: tag.colorHex).opacity(0.25)
+                                        : Color.secondary.opacity(0.12)
+                                )
+                            )
+                            .overlay(
+                                Capsule().strokeBorder(
+                                    isSelected ? Color(tagHex: tag.colorHex) : .clear,
+                                    lineWidth: 1
+                                )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+            }
+        }
+    }
+
+    private var sessionList: some View {
         List(selection: $selection) {
             if let pendingSession {
                 row(for: .pending(pendingSession))
@@ -71,6 +123,9 @@ struct JobsView: View {
                             .tag(item)
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 deleteButton(for: item)
+                            }
+                            .contextMenu {
+                                tagMenu(for: item)
                             }
                     }
                 }
@@ -108,6 +163,17 @@ struct JobsView: View {
                 session: session,
                 onRetry: { viewModel.retryImported(session: session, context: modelContext) }
             )
+        }
+    }
+
+    /// Tag assignment on right-click.
+    ///
+    /// Only recordings carry tags, so pending and imported rows produce nothing — an empty
+    /// `contextMenu` shows no menu at all, which is the wanted behaviour for those rows.
+    @ViewBuilder
+    private func tagMenu(for item: JobsViewModel.SessionListItem) -> some View {
+        if case .recording(let session) = item {
+            TagAssignmentMenuContent(session: session)
         }
     }
 

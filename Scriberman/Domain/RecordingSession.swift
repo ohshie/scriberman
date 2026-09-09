@@ -38,6 +38,12 @@ final class RecordingSession {
     var retranscriptData: Data?
     var aiTransformationsData: Data?
     var transcriptSegments: [RecordingTranscriptSegment] = []
+    /// Tags carried by this recording — one to three, never zero.
+    ///
+    /// `RecordingTag.recordings` is the declared inverse. It is needed, not decorative: without it
+    /// deleting a tag emptied this whole relationship instead of removing the one element.
+    /// `TagService` still owns the bounds, which SwiftData cannot express either way.
+    @Relationship var tags: [RecordingTag] = []
     var originalMixdownURL: String?
     var originalScreenVideoURL: String?
     var originalTranscriptData: Data?

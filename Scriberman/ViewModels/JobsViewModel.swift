@@ -167,7 +167,55 @@ final class JobsViewModel {
             recordingItems.append(selectedItem)
         }
 
-        return (recordingItems + importedItems).sorted { $0.createdAt > $1.createdAt }
+        let combined = (recordingItems + importedItems).sorted { $0.createdAt > $1.createdAt }
+        return applyingTagFilter(to: combined)
+    }
+
+    /// Narrows the list to recordings carrying any of the selected tags.
+    ///
+    /// Union rather than intersection: intersecting two tags over a personal archive returns almost
+    /// nothing, which would make multi-selection useless.
+    ///
+    /// While a filter is active, imported and pending sessions drop out. They carry no tags, so
+    /// they cannot match — and showing them anyway would mean a filtered list still contains rows
+    /// the filter says nothing about.
+    ///
+    /// Applied here, after the selection-preserving branch above, so filtering the selected item
+    /// out wins over keeping it visible.
+    private func applyingTagFilter(to items: [SessionListItem]) -> [SessionListItem] {
+        guard !selectedTagIDs.isEmpty else { return items }
+
+        // Only tags some recording actually carries can filter. A tag that lost its last recording
+        // has no chip any more, so leaving it in the selection would filter the list to nothing
+        // with no visible way to undo it. Ignoring it instead makes the selection self-healing.
+        var present: Set<UUID> = []
+        for item in items {
+            if case .recording(let session) = item {
+                for tag in session.tags { present.insert(tag.id) }
+            }
+        }
+        let effective = selectedTagIDs.intersection(present)
+        guard !effective.isEmpty else { return items }
+
+        return items.filter { item in
+            guard case .recording(let session) = item else { return false }
+            return session.tags.contains { effective.contains($0.id) }
+        }
+    }
+
+    /// Tags whose chips are lit. Empty means unfiltered.
+    ///
+    /// Held here alongside the item construction it affects, rather than in a separate filtering
+    /// layer, because the list is already composed in memory from `@Query` results — there is no
+    /// fetch predicate to push this into.
+    var selectedTagIDs: Set<UUID> = []
+
+    func toggleTagFilter(_ tagID: UUID) {
+        if selectedTagIDs.contains(tagID) {
+            selectedTagIDs.remove(tagID)
+        } else {
+            selectedTagIDs.insert(tagID)
+        }
     }
 
     func sessionDateGroup(
