@@ -17,15 +17,22 @@ struct JobsView: View {
     }
 
     var body: some View {
-        Group {
-            if items.isEmpty && pendingSession == nil {
-                emptyState(
-                    title: "No Sessions Yet",
-                    systemImage: "list.bullet.rectangle",
-                    message: "Record or import audio to start building your session history."
-                )
-            } else {
-                listContent
+        // The chips sit outside this branch on purpose. They used to live inside `listContent`,
+        // so filtering down to nothing replaced them with the empty state and left no way to
+        // unfilter.
+        VStack(spacing: 0) {
+            tagFilterChips
+
+            Group {
+                if items.isEmpty && pendingSession == nil {
+                    emptyState(
+                        title: "No Sessions Yet",
+                        systemImage: "list.bullet.rectangle",
+                        message: "Record or import audio to start building your session history."
+                    )
+                } else {
+                    sessionList
+                }
             }
         }
         .navigationTitle("Jobs")
@@ -99,13 +106,6 @@ struct JobsView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
             }
-        }
-    }
-
-    private var listContent: some View {
-        VStack(spacing: 0) {
-            tagFilterChips
-            sessionList
         }
     }
 

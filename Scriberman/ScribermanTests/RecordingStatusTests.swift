@@ -290,6 +290,47 @@ struct RecordingStatusTests {
         #expect(detail.contains("if let recording = session as? RecordingSession"))
     }
 
+    /// The chips must survive a filter that matches nothing. They used to live inside the branch
+    /// that the empty state replaces, so filtering to zero removed the only way to unfilter.
+    @Test
+    func testFilterChipsRenderOutsideTheEmptyStateBranch() throws {
+        let source = try jobsViewSource()
+        let chipsRange = try #require(source.range(of: "tagFilterChips"))
+        let emptyStateRange = try #require(source.range(of: "if items.isEmpty && pendingSession == nil"))
+        // Chips are placed before the branch, not inside its else.
+        #expect(chipsRange.lowerBound < emptyStateRange.lowerBound)
+        #expect(!source.contains("private var listContent"))
+    }
+
+    /// A recording carrying only the default tag has nothing assignable, so without this the menu
+    /// is empty and looks broken.
+    @Test
+    func testTheAssignmentMenuIsNeverEmpty() throws {
+        let source = try assignmentMenuSource()
+        #expect(source.contains("Button(\"Add new tag\")"))
+        #expect(source.contains("openSettings()"))
+        // Outside the ForEach, so it is present whatever the tag list contains.
+        let forEachRange = try #require(source.range(of: "ForEach(assignable)"))
+        let buttonRange = try #require(source.range(of: "Button(\"Add new tag\")"))
+        #expect(buttonRange.lowerBound > forEachRange.lowerBound)
+    }
+
+    @Test
+    func testTheNameFieldLosesFocusOnAClickElsewhere() throws {
+        let source = try tagSettingsSourceForRow()
+        #expect(source.contains("@FocusState private var focusedTagID"))
+        #expect(source.contains(".focused($focusedTagID, equals: tag.id)"))
+        #expect(source.contains("focusedTagID = nil"))
+    }
+
+    private func tagSettingsSourceForRow() throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        return try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/TagSettingsView.swift"),
+            encoding: .utf8
+        )
+    }
+
     // MARK: - Tag dots
 
     @Test

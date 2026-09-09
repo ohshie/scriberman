@@ -12,6 +12,10 @@ struct TagSettingsView: View {
     @Query(sort: \RecordingTag.createdAt) private var tags: [RecordingTag]
 
     @State private var pendingDeletion: RecordingTag?
+    /// Which name field holds focus. Clicking away clears it; the name is already persisted on
+    /// every keystroke, so losing focus commits nothing new — it just stops the field looking
+    /// half-edited.
+    @FocusState private var focusedTagID: UUID?
 
     private let service = TagService()
     private let logger = Logger(subsystem: "Scriberman", category: "TagSettingsView")
@@ -25,6 +29,12 @@ struct TagSettingsView: View {
             Button("Add new tag") {
                 addTag()
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        // Clicking anywhere that is not a name field drops focus.
+        .onTapGesture {
+            focusedTagID = nil
         }
         .confirmationDialog(
             pendingDeletion.map { "Are you sure you want to remove \($0.name)?" } ?? "",
@@ -67,6 +77,8 @@ struct TagSettingsView: View {
                 )
             )
             .textFieldStyle(.roundedBorder)
+            .focused($focusedTagID, equals: tag.id)
+            .onSubmit { focusedTagID = nil }
 
             // The default tag is the lower bound on a recording's tag count, so it has no delete
             // action — removing it would leave the bound with no rule to fall back on.

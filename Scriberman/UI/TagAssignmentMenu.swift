@@ -9,6 +9,7 @@ import SwiftUI
 struct TagAssignmentMenuContent: View {
     let session: RecordingSession
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.openSettings) private var openSettings
 
     private let service = TagService()
     private let logger = Logger(subsystem: "Scriberman", category: "TagAssignmentMenu")
@@ -33,6 +34,17 @@ struct TagAssignmentMenuContent: View {
             // Shown but unavailable at three, so the reason is visible rather than the tag silently
             // missing from the menu.
             .disabled(!isCarried && realCount >= TagService.maximumTagsPerRecording)
+        }
+
+        // Always present, so the menu is never empty. Without it a recording carrying only the
+        // default tag produced no items at all, and an empty menu is indistinguishable from a
+        // broken one. Tags are created in Settings, so this goes there rather than creating one
+        // unnamed on the spot.
+        if !assignable.isEmpty {
+            Divider()
+        }
+        Button("Add new tag") {
+            openSettings()
         }
     }
 
