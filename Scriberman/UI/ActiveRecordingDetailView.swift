@@ -18,11 +18,12 @@ struct ActiveRecordingDetailView: View {
         self.modelContext = modelContext
     }
 
-    /// Below this the area stops shrinking. It is what the height used to be fixed at, kept as the
-    /// floor rather than as the answer.
-    static let minimumSegmentAreaHeight: CGFloat = 120
+    /// Marks the end of the content, so following the transcript scrolls to the foot of the view —
+    /// which is where the Stop button is.
+    private static let bottomAnchor = "recording-view-bottom"
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 TextField("Title", text: editingTitle)
@@ -47,33 +48,14 @@ struct ActiveRecordingDetailView: View {
                     .foregroundStyle(.secondary)
 
                 if !viewModel.liveSegments.isEmpty {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 10) {
-                                ForEach(viewModel.liveSegments, id: \.id) { segment in
-                                    liveSegmentRow(for: segment)
-                                        .id(segment.id)
-                                }
-                            }
-                            .padding(.vertical, 8)
-                        }
-                        // Grows with the window instead of staying 120 points tall, with a floor so
-                        // a short window still shows the transcript arriving.
-                        .containerRelativeFrame(.vertical, alignment: .top) { height, _ in
-                            max(Self.minimumSegmentAreaHeight, height * 0.4)
-                        }
-                        // Auto-scroll gives way while the pointer is in here. SwiftUI cannot report
-                        // whether text is selected, so this is the closest honest signal: someone
-                        // with the pointer in the transcript is reading or selecting, and a segment
-                        // arriving must not pull the text out from under them.
-                        .onHover { hovering in
-                            isPointerOverSegments = hovering
-                        }
-                        .onChange(of: viewModel.liveSegments.count) {
-                            guard !isPointerOverSegments else { return }
-                            if let last = viewModel.liveSegments.last {
-                                proxy.scrollTo(last.id, anchor: .bottom)
-                            }
+                    // In the flow, not in a scroll view of their own. Two scrolling regions in one
+                    // window means the wrong one moves under the pointer half the time; and a
+                    // transcript penned into 120 points while the window has room is the smaller
+                    // half of the problem. Arriving segments push the controls below them down.
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(viewModel.liveSegments, id: \.id) { segment in
+                            liveSegmentRow(for: segment)
+                                .id(segment.id)
                         }
                     }
                 }
@@ -108,6 +90,10 @@ struct ActiveRecordingDetailView: View {
                         systemImage: "app.fill"
                     )
                 }
+
+                Color.clear
+                    .frame(height: 1)
+                    .id(Self.bottomAnchor)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(28)
@@ -117,6 +103,19 @@ struct ActiveRecordingDetailView: View {
             if titleFocused {
                 titleFocused = false
             }
+        }
+        // Following the transcript means scrolling to the foot of the view, so the newest text and
+        // the Stop button stay together. Suspended while the pointer is in the window: SwiftUI
+        // cannot report a selection, and a pointer in here is someone reading or selecting.
+        .onHover { hovering in
+            isPointerOverSegments = hovering
+        }
+        .onChange(of: viewModel.liveSegments.count) {
+            guard !isPointerOverSegments else { return }
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+            }
+        }
         }
     }
 
