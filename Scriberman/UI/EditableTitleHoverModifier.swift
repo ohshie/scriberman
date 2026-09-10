@@ -2,11 +2,14 @@ import SwiftUI
 
 /// Shared hover treatment for editable session titles.
 ///
-/// On hover it reveals a soft "card" affordance — an `.ultraThinMaterial`
-/// background, a tint stroke, and a trailing pencil "Edit" icon — animated with a
-/// gentle ease (no scale "jump"). It intentionally imposes neither a font nor a
-/// text alignment so each caller keeps its own (centered vs leading, title2 vs
-/// largeTitle).
+/// The pencil is present at rest, faintly. A cue that appears only under the pointer tells nobody
+/// anything, and a session named after its own timestamp is the title most worth renaming — so the
+/// one field a user would want to change was the one the app never offered to change.
+///
+/// On hover it reveals the rest of the affordance — an `.ultraThinMaterial` background, a tint
+/// stroke, and the pencil at full strength — animated with a gentle ease (no scale "jump"). It
+/// intentionally imposes neither a font nor a text alignment so each caller keeps its own (centered
+/// vs leading, title2 vs largeTitle).
 struct EditableTitleHoverModifier: ViewModifier {
     @Binding var isHovering: Bool
     var cornerRadius: CGFloat = 12
@@ -14,14 +17,13 @@ struct EditableTitleHoverModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .overlay(alignment: .trailing) {
-                if isHovering {
-                    Label("Edit", systemImage: "pencil")
-                        .labelStyle(.iconOnly)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tint)
-                        .padding(.trailing, 12)
-                        .transition(.opacity)
-                }
+                Label("Edit", systemImage: "pencil")
+                    .labelStyle(.iconOnly)
+                    .font(.caption.weight(.semibold))
+                    // Quiet at rest, so the title still reads as a title; the tint is the hover.
+                    .foregroundStyle(isHovering ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                    .opacity(isHovering ? 1 : 0.45)
+                    .padding(.trailing, 12)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)

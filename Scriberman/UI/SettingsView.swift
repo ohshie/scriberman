@@ -1,13 +1,19 @@
 import SwiftUI
 
+/// The tabs Settings offers.
+///
+/// Declared outside the view because other parts of the app send people here — the tag assignment
+/// menu's "Add new tag" is a request for one particular tab, not for Settings in general.
+enum SettingsTab {
+    case general
+    case menuBar
+    case ai
+    case tags
+    case hotkeys
+    case advanced
+}
+
 struct SettingsView: View {
-    private enum SettingsTab {
-        case general
-        case menuBar
-        case ai
-        case hotkeys
-        case advanced
-    }
 
     var viewModel: SettingsViewModel
     var updateService: UpdateService
@@ -107,9 +113,6 @@ struct SettingsView: View {
                         AppIconPickerView(preferences: appState.appIconPreferences)
                     }
 
-                    Section("Tags") {
-                        TagSettingsView()
-                    }
                 }
                 .formStyle(.grouped)
                 .tabItem {
@@ -141,6 +144,20 @@ struct SettingsView: View {
                         Label("AI", systemImage: "sparkles")
                     }
                     .tag(SettingsTab.ai)
+
+                // Its own tab rather than the fifth section of General. Tags are a collection the
+                // user maintains, like prompts — and the assignment menu sends people here, so
+                // arriving where tags sit below the fold reads as arriving at the wrong page.
+                Form {
+                    Section("Tags") {
+                        TagSettingsView()
+                    }
+                }
+                .formStyle(.grouped)
+                .tabItem {
+                    Label("Tags", systemImage: "tag")
+                }
+                .tag(SettingsTab.tags)
 
                 Form {
                     Section("Audio Processing") {
@@ -369,6 +386,20 @@ struct SettingsView: View {
                     .tag(SettingsTab.hotkeys)
             }
             .navigationTitle("Settings")
+        }
+        // A request to open Settings for one particular thing lands on that thing. Cleared once
+        // honoured, so reopening Settings later returns to wherever the user last was.
+        .onAppear {
+            if let requested = appState.requestedSettingsTab {
+                selectedTab = requested
+                appState.requestedSettingsTab = nil
+            }
+        }
+        .onChange(of: appState.requestedSettingsTab) { _, requested in
+            if let requested {
+                selectedTab = requested
+                appState.requestedSettingsTab = nil
+            }
         }
         .task(id: aiProviderService.isConfigured) {
             if aiProviderService.isConfigured && aiProviderService.availableModels.isEmpty {

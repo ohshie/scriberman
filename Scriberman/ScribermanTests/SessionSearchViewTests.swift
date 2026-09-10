@@ -77,6 +77,41 @@ struct SessionSearchViewTests {
         #expect(source.contains("await viewModel.updateSearchMatches(for: items)"))
     }
 
+    /// The count sits outside the branch the empty state replaces, so a query matching nothing
+    /// still says how much is being withheld.
+    @Test
+    func testTheListCountIsOutsideTheEmptyStateBranch() throws {
+        let source = try jobsViewSource()
+        let branch = try #require(source.range(of: "if items.isEmpty && pendingSession == nil"))
+        let count = try #require(source.range(of: "            listCount"))
+
+        #expect(count.lowerBound > branch.lowerBound)
+        #expect(source.contains("JobsViewModel.listCountText(shown: items.count, total: totalSessionCount)"))
+    }
+
+    // MARK: - Motion
+
+    /// One moment, not three. Rows and the selection fill are drawn by AppKit, so a SwiftUI
+    /// animation over them animates the whole table re-rendering — a wobble on every keystroke.
+    @Test
+    func testOnlyTheEmptyStateSwapIsAnimated() throws {
+        let source = try jobsViewSource()
+
+        #expect(source.contains(".animation(listMotion, value: items.isEmpty)"))
+        #expect(!source.contains(".animation(listMotion, value: items)"))
+        #expect(!source.contains(".animation(listMotion, value: selection)"))
+        #expect(source.components(separatedBy: ".animation(").count - 1 == 1)
+        #expect(!source.contains("withAnimation"))
+    }
+
+    @Test
+    func testMotionIsShortAndHonoursReduceMotion() throws {
+        let source = try jobsViewSource()
+
+        #expect(source.contains("@Environment(\\.accessibilityReduceMotion) private var reduceMotion"))
+        #expect(source.contains("reduceMotion ? nil : .easeOut(duration: 0.22)"))
+    }
+
     // MARK: - Helpers
 
     /// The source from a declaration up to the next one at the same indentation, so an assertion

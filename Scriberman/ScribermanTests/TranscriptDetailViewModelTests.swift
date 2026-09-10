@@ -255,7 +255,8 @@ struct TranscriptDetailViewModelTests {
             aiProviderService: makeService(defaults: defaults)
         )
 
-        #expect(viewModel.durationText == TimeFormatter.format(seconds: 10))
+        // The header shows the display form — `0:10`, not the export's zero-padded `00:10`.
+        #expect(viewModel.durationText == "0:10")
     }
 
     @MainActor

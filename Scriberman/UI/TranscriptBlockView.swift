@@ -54,7 +54,7 @@ struct TranscriptBlockView: View {
                         }
                 }
 
-                Text(timeRange)
+                Text(startTimeText)
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
 
@@ -94,8 +94,11 @@ struct TranscriptBlockView: View {
         }
     }
 
-    private var timeRange: String {
-        "\(TimeFormatter.formatWithMilliseconds(seconds: block.startTime)) - \(TimeFormatter.formatWithMilliseconds(seconds: block.endTime))"
+    private var startTimeText: String {
+        // The block's start, and only that. Its end is the next block's start, one line below, so
+        // showing both states the same boundary twice — and millisecond precision serves a subtitle
+        // tool, not someone reading. The export still writes full precision.
+        TimeFormatter.displayFormat(seconds: block.startTime)
     }
 
     private var speakerColor: Color {
