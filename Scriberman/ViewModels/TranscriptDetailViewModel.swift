@@ -47,7 +47,7 @@ final class TranscriptDetailViewModel {
     // MARK: - Header facts (design D2)
 
     var durationText: String {
-        TimeFormatter.format(seconds: Float(session.duration))
+        TimeFormatter.displayFormat(seconds: Float(session.duration))
     }
 
     var sourcesText: String {
