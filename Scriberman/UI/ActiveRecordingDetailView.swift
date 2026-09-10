@@ -8,12 +8,19 @@ struct ActiveRecordingDetailView: View {
 
     @FocusState private var titleFocused: Bool
     @State private var isTitleHovering = false
+    /// Whether the pointer is inside the live transcript, which suspends the scroll to the newest
+    /// segment.
+    @State private var isPointerOverSegments = false
 
     init(session: RecordingSession, viewModel: NewSessionViewModel, modelContext: ModelContext) {
         self.session = session
         self.viewModel = viewModel
         self.modelContext = modelContext
     }
+
+    /// Below this the area stops shrinking. It is what the height used to be fixed at, kept as the
+    /// floor rather than as the answer.
+    static let minimumSegmentAreaHeight: CGFloat = 120
 
     var body: some View {
         ScrollView {
@@ -42,27 +49,28 @@ struct ActiveRecordingDetailView: View {
                 if !viewModel.liveSegments.isEmpty {
                     ScrollViewReader { proxy in
                         ScrollView {
-                            VStack(alignment: .leading, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 10) {
                                 ForEach(viewModel.liveSegments, id: \.id) { segment in
-                                    HStack(alignment: .top, spacing: 8) {
-                                        Text(segment.audioSource == .mic ? "Mic" : "App")
-                                            .font(.caption2.bold())
-                                            .foregroundStyle(.secondary)
-                                            .padding(.horizontal, 4)
-                                            .padding(.vertical, 2)
-                                            .background(Capsule().stroke(.secondary.opacity(0.3)))
-
-                                        Text(segment.text)
-                                            .font(.callout)
-                                            .foregroundStyle(segment.isFinal ? .primary : .secondary)
-                                    }
-                                    .id(segment.id)
+                                    liveSegmentRow(for: segment)
+                                        .id(segment.id)
                                 }
                             }
                             .padding(.vertical, 8)
                         }
-                        .frame(height: 120)
+                        // Grows with the window instead of staying 120 points tall, with a floor so
+                        // a short window still shows the transcript arriving.
+                        .containerRelativeFrame(.vertical, alignment: .top) { height, _ in
+                            max(Self.minimumSegmentAreaHeight, height * 0.4)
+                        }
+                        // Auto-scroll gives way while the pointer is in here. SwiftUI cannot report
+                        // whether text is selected, so this is the closest honest signal: someone
+                        // with the pointer in the transcript is reading or selecting, and a segment
+                        // arriving must not pull the text out from under them.
+                        .onHover { hovering in
+                            isPointerOverSegments = hovering
+                        }
                         .onChange(of: viewModel.liveSegments.count) {
+                            guard !isPointerOverSegments else { return }
                             if let last = viewModel.liveSegments.last {
                                 proxy.scrollTo(last.id, anchor: .bottom)
                             }
@@ -118,6 +126,31 @@ struct ActiveRecordingDetailView: View {
         }
 
         return session.duration
+    }
+
+    /// A live segment, drawn in the same card as a finished one.
+    ///
+    /// No speaker: diarization runs after the recording, so the source the audio came from occupies
+    /// the position a speaker will later hold. Showing an empty speaker, or inventing "Speaker 1",
+    /// would state something the app does not yet know.
+    @ViewBuilder
+    private func liveSegmentRow(for segment: TranscriptSegment) -> some View {
+        TranscriptRowView(copyText: segment.text) {
+            Text(segment.audioSource == .mic ? "Mic" : "App")
+                .font(.caption2.bold())
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(Capsule().stroke(.secondary.opacity(0.3)))
+        } content: {
+            Text(segment.text)
+                .font(.body)
+                // Text on screen that cannot be copied until the recording ends is a worse
+                // restriction than text that could not be seen at all.
+                .textSelection(.enabled)
+                .foregroundStyle(segment.isFinal ? .primary : .secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private func durationText(_ duration: TimeInterval) -> String {

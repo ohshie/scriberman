@@ -28,69 +28,64 @@ struct TranscriptBlockView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Circle()
-                    .fill(speakerColor)
-                    .frame(width: 10, height: 10)
-
-                if isEditingSpeaker {
-                    TextField("Speaker Name", text: $speakerNameDraft)
-                        .textFieldStyle(.plain)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(speakerColor)
-                        .onSubmit {
-                            commitRename()
-                        }
-                } else {
-                    Text(block.speaker.label)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(speakerColor)
-                        .onTapGesture {
-                            if onSpeakerRename != nil {
-                                speakerNameDraft = block.speaker.label
-                                isEditingSpeaker = true
-                            }
-                        }
-                }
-
-                Text(startTimeText)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-
-                Spacer()
-
-                Image(systemName: block.audioSource == .app ? "speaker.wave.2.fill" : "mic.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if searchRanges.isEmpty {
-                Text(block.text)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                Text(highlightedText())
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+        TranscriptRowView(
+            timeText: startTimeText,
+            audioSource: block.audioSource,
+            copyText: block.text,
+            isActive: isActive,
+            activeColor: speakerColor
+        ) {
+            speakerIdentity
+        } content: {
+            transcriptText
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(isActive ? speakerColor.opacity(0.4) : .clear, lineWidth: 1.5)
-        }
-        .scaleEffect(isActive ? 1.01 : 1)
-        .shadow(color: isActive ? Color("ActiveBlockShadow") : .clear, radius: 6, x: 0, y: 3)
-        .animation(.easeOut(duration: 0.15), value: isActive)
         .onTapGesture {
             onTap()
+        }
+    }
+
+    /// The speaker's dot and name, which double as the rename control.
+    @ViewBuilder
+    private var speakerIdentity: some View {
+        Circle()
+            .fill(speakerColor)
+            .frame(width: 10, height: 10)
+
+        if isEditingSpeaker {
+            TextField("Speaker Name", text: $speakerNameDraft)
+                .textFieldStyle(.plain)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(speakerColor)
+                .onSubmit {
+                    commitRename()
+                }
+        } else {
+            Text(block.speaker.label)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(speakerColor)
+                .onTapGesture {
+                    if onSpeakerRename != nil {
+                        speakerNameDraft = block.speaker.label
+                        isEditingSpeaker = true
+                    }
+                }
+        }
+    }
+
+    @ViewBuilder
+    private var transcriptText: some View {
+        if searchRanges.isEmpty {
+            Text(block.text)
+                .font(.body)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text(highlightedText())
+                .font(.body)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
