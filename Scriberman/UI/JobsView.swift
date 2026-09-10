@@ -48,8 +48,6 @@ struct JobsView: View {
         // chips inside `listContent`, so filtering down to nothing replaced them with the empty
         // state and left no way to unfilter.
         VStack(spacing: 0) {
-            searchBar
-
             Group {
                 if items.isEmpty && pendingSession == nil {
                     if viewModel.activeSearchQuery != nil {
@@ -73,6 +71,15 @@ struct JobsView: View {
             .animation(listMotion, value: items.isEmpty)
 
             listCount
+        }
+        // The search row is a safe-area inset rather than a sibling in the stack. As a sibling the
+        // list still scrolled its content up behind it — rows and the section header would slide
+        // under the field and stay there until the list was dragged back down. An inset makes the
+        // scroll view reserve the space, and the material keeps anything passing beneath it hidden
+        // rather than showing through.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            searchBar
+                .background(.bar)
         }
         .navigationTitle("Jobs")
         .task {

@@ -57,13 +57,66 @@ struct NativeSearchField: NSViewRepresentable {
         Coordinator(parent: self)
     }
 
+    static func dismantleNSView(_ field: NSSearchField, coordinator: Coordinator) {
+        coordinator.stopWatchingForEscape()
+    }
+
     final class Coordinator: NSObject, NSSearchFieldDelegate {
         var parent: NativeSearchField
         var lastFocusRequest: Int
+        /// Watches for Escape while this field is being edited.
+        ///
+        /// The delegate's `doCommandBy` is not enough on its own: SwiftUI shortcuts are handled at
+        /// the window level, so a view elsewhere binding Escape — the transcript find bar does —
+        /// takes the key before the field's own editor ever sees it. A local monitor runs first and
+        /// consumes it, but only while the field is actually being edited.
+        private var escapeMonitor: Any?
 
         init(parent: NativeSearchField) {
             self.parent = parent
             self.lastFocusRequest = parent.focusRequest
+        }
+
+        deinit {
+            if let escapeMonitor {
+                NSEvent.removeMonitor(escapeMonitor)
+            }
+        }
+
+        func controlTextDidBeginEditing(_ notification: Notification) {
+            startWatchingForEscape(in: notification.object as? NSSearchField)
+        }
+
+        func controlTextDidEndEditing(_ notification: Notification) {
+            stopWatchingForEscape()
+        }
+
+        func stopWatchingForEscape() {
+            guard let escapeMonitor else { return }
+            NSEvent.removeMonitor(escapeMonitor)
+            self.escapeMonitor = nil
+        }
+
+        private func startWatchingForEscape(in field: NSSearchField?) {
+            stopWatchingForEscape()
+            escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak field] event in
+                guard let self, event.keyCode == 53 else { return event }
+                // Only ours to handle while this field holds the keyboard.
+                guard let field, field.currentEditor() != nil else { return event }
+
+                self.handleEscape(in: field)
+                return nil
+            }
+        }
+
+        private func handleEscape(in field: NSSearchField) {
+            if parent.text.isEmpty {
+                parent.onEscapeWhileEmpty()
+                field.window?.makeFirstResponder(nil)
+            } else {
+                parent.text = ""
+                field.stringValue = ""
+            }
         }
 
         func controlTextDidChange(_ notification: Notification) {
@@ -81,11 +134,9 @@ struct NativeSearchField: NSViewRepresentable {
         ) -> Bool {
             guard commandSelector == #selector(NSResponder.cancelOperation(_:)) else { return false }
 
-            if parent.text.isEmpty {
-                parent.onEscapeWhileEmpty()
-            } else {
-                parent.text = ""
-                control.stringValue = ""
+            // Kept as well as the monitor: this is the path when nothing else claims the key.
+            if let field = control as? NSSearchField {
+                handleEscape(in: field)
             }
             return true
         }

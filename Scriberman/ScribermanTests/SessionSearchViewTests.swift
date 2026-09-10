@@ -41,6 +41,22 @@ struct SessionSearchViewTests {
         #expect(source.contains("parent.text = \"\""))
     }
 
+    /// SwiftUI shortcuts are handled at the window level, so the transcript find bar's Escape took
+    /// the key before the field's own editor saw it — Escape in the search field did nothing while
+    /// a transcript was open.
+    @Test
+    func testEscapeIsInterceptedWhileTheFieldIsBeingEdited() throws {
+        let source = try readSourceFile(relativePathFromTests: "../UI/NativeSearchField.swift")
+
+        #expect(source.contains("NSEvent.addLocalMonitorForEvents(matching: .keyDown)"))
+        #expect(source.contains("event.keyCode == 53"))
+        // Only while this field holds the keyboard, and torn down when it stops.
+        #expect(source.contains("guard let field, field.currentEditor() != nil else { return event }"))
+        #expect(source.contains("func controlTextDidEndEditing"))
+        #expect(source.contains("stopWatchingForEscape()"))
+        #expect(source.contains("static func dismantleNSView"))
+    }
+
     /// One handler owns ⌘F, so what it means is decided in one place rather than by whichever of
     /// two views holds focus.
     @Test
@@ -62,10 +78,24 @@ struct SessionSearchViewTests {
     @Test
     func testTheSearchFieldIsOutsideTheEmptyStateBranch() throws {
         let source = try jobsViewSource()
-        let barRange = try #require(source.range(of: "            searchBar"))
-        let branchRange = try #require(source.range(of: "if items.isEmpty && pendingSession == nil"))
 
-        #expect(barRange.lowerBound < branchRange.lowerBound)
+        // An inset applied to the whole stack, not a view inside the branch the empty state
+        // replaces.
+        #expect(source.contains(".safeAreaInset(edge: .top, spacing: 0) {"))
+        let insetRange = try #require(source.range(of: ".safeAreaInset(edge: .top, spacing: 0) {"))
+        let branchRange = try #require(source.range(of: "if items.isEmpty && pendingSession == nil"))
+        #expect(insetRange.lowerBound > branchRange.lowerBound)
+    }
+
+    /// Rows scrolled up behind the field and stayed there until the list was dragged back down. As
+    /// a sibling in the stack the scroll view never reserved the space; as an inset it does, and
+    /// the material hides whatever passes beneath.
+    @Test
+    func testTheSearchRowReservesItsSpaceAndIsOpaque() throws {
+        let source = try jobsViewSource()
+
+        #expect(source.contains(".safeAreaInset(edge: .top, spacing: 0) {"))
+        #expect(source.contains("searchBar\n                .background(.bar)"))
     }
 
     /// The filter narrows the same set the query searches, so it stays in the search row.
