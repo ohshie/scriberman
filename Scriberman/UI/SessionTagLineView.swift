@@ -44,10 +44,12 @@ struct SessionTagLineView: View {
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    // The chip needs its own backdrop. Without one it sits directly on the list's
-                    // selection fill, and a plain dot plus text does not survive that — a tag
-                    // coloured near the accent disappears into it. The same treatment the Pending
-                    // capsule already uses, so the chip reads over whatever is behind it.
+                    // The chip needs its own backdrop, and glass alone does not give it one: it
+                    // takes its material from what is behind it, so the chip reads on a selected
+                    // row and disappears on a plain one — the same tag drawn two ways in one list.
+                    // A faint tint of the tag's own colour sits under the glass, so the capsule is
+                    // there in both states and the glass still does its work over the selection.
+                    .background(Capsule().fill(Color(tagHex: tag.colorHex).opacity(0.18)))
                     .glassEffect(.regular, in: Capsule())
                     .tint(Color(tagHex: tag.colorHex))
                     // Later tags give up space before earlier ones, so the first tag stays legible

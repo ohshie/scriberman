@@ -6,7 +6,22 @@ enum TranscriptGrouper {
     static func makeBlocks(from transcript: Transcript) -> [TranscriptBlock] {
         guard transcript.segments.isEmpty == false else { return [] }
 
-        let speakersByID = Dictionary(uniqueKeysWithValues: transcript.speakers.map { ($0.id, $0) })
+        // Colour comes from the speaker's position here rather than from what was stored with it.
+        // Every transcript recorded before this was written gave all its speakers one colour, and a
+        // conversation drawn in a single colour spends the dot and the coloured label on nothing.
+        // Deriving at display time fixes those without rewriting anything on disk.
+        let speakersByID = Dictionary(
+            uniqueKeysWithValues: transcript.speakers.enumerated().map { index, speaker in
+                (
+                    speaker.id,
+                    TranscriptSpeaker(
+                        id: speaker.id,
+                        label: speaker.label,
+                        colorHex: SpeakerPalette.colorHex(at: index)
+                    )
+                )
+            }
+        )
         var blocks: [TranscriptBlock] = []
 
         for segment in transcript.segments {

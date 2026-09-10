@@ -201,6 +201,41 @@ struct RecordingStatusTests {
 
     // MARK: - Tag assignment menu
 
+    // MARK: - One duration, one formatter
+
+    /// The row and the detail header disagreed — 01:35 against 01:34 for the same recording —
+    /// because each had its own formatter and they rounded differently.
+    @Test
+    func testTheRowAndTheHeaderCannotDisagreeAboutDuration() throws {
+        let row = try readSource(relativePathFromTests: "../UI/RecordingSessionRow.swift")
+        let imported = try readSource(relativePathFromTests: "../UI/ImportedSessionRow.swift")
+        let viewModel = try readSource(relativePathFromTests: "../ViewModels/TranscriptDetailViewModel.swift")
+
+        for source in [row, imported] {
+            #expect(!source.contains("private func durationText"))
+            #expect(source.contains("TimeFormatter.displayFormat(seconds: Float(session.duration))"))
+        }
+        #expect(viewModel.contains("TimeFormatter.displayFormat(seconds: Float(session.duration))"))
+    }
+
+    /// Glass takes its material from what is behind it, so without a fill of its own the chip read
+    /// on a selected row and vanished on a plain one.
+    @Test
+    func testTheTagChipCarriesItsOwnBackdrop() throws {
+        let source = try readSource(relativePathFromTests: "../UI/SessionTagLineView.swift")
+
+        #expect(source.contains(".background(Capsule().fill(Color(tagHex: tag.colorHex).opacity(0.18)))"))
+        #expect(source.contains(".glassEffect(.regular, in: Capsule())"))
+    }
+
+    private func readSource(relativePathFromTests: String) throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        return try String(
+            contentsOf: testsDirectory.appendingPathComponent(relativePathFromTests),
+            encoding: .utf8
+        )
+    }
+
     private func jobsViewSource() throws -> String {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         return try String(
@@ -446,7 +481,7 @@ struct RecordingStatusTests {
             let source = try sourceForFile(named: file)
             // The timestamp sits inside the caption HStack, after a Spacer, rather than in a
             // Text of its own below it.
-            let captionRange = try #require(source.range(of: "Text(durationText(session.duration))"))
+            let captionRange = try #require(source.range(of: "Text(TimeFormatter.displayFormat(seconds: Float(session.duration)))"))
             let rest = source[captionRange.upperBound...]
             let hstackEnd = try #require(rest.range(of: "}"))
             let sameLine = rest[..<hstackEnd.lowerBound]

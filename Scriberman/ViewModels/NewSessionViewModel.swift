@@ -587,7 +587,7 @@ final class NewSessionViewModel {
             return TranscriptSpeaker(
                 id: id,
                 label: isInternalId ? "Speaker \(index + 1)" : id,
-                colorHex: "#007AFF"
+                colorHex: SpeakerPalette.colorHex(at: index)
             )
         }
 

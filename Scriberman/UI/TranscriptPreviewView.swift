@@ -27,8 +27,23 @@ struct TranscriptPreviewView: View {
                     TranscriptBlockView(block: block)
                 }
 
-                if hasMore {
-                    Text("Showing \(previewBlocks.count) of \(blocks.count) sections")
+                // The card opens the study view when clicked, and used to say so only by way of a
+                // hover ring over a line reporting what it was withholding. The control is what
+                // makes that path findable — and reachable by keyboard; the count keeps it company
+                // rather than standing in its place.
+                if let onTap {
+                    HStack(spacing: 10) {
+                        Button("Read full transcript", action: onTap)
+                            .buttonStyle(.link)
+
+                        if hasMore {
+                            Text("\(blocks.count) sections")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } else if hasMore {
+                    Text("\(blocks.count) sections")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

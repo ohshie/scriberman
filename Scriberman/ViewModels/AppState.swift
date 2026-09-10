@@ -32,6 +32,9 @@ final class AppState {
     @ObservationIgnored let dictationHUD = DictationHUDController()
 
     var pendingSession: PendingSession?
+    /// The Settings tab a request to open Settings was actually asking for, or `nil` for whichever
+    /// was last shown. Set by the places that send people to Settings for one specific thing.
+    var requestedSettingsTab: SettingsTab?
     var sessionToTrim: RecordingSession?
     private var shouldFocusPendingSessionFromMenuBar = false
     private(set) var workspace: Workspace?

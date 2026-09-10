@@ -145,8 +145,7 @@ struct TranscriptAligner {
     }
 
     func speakerColorHex(at index: Int) -> String {
-        let palette = ["#4F46E5", "#16A34A", "#EA580C", "#0891B2", "#DC2626", "#7C3AED"]
-        return palette[index % palette.count]
+        SpeakerPalette.colorHex(at: index)
     }
 }
 

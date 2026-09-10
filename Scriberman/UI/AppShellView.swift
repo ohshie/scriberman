@@ -40,6 +40,7 @@ struct AppShellView: View {
                     preserving: selectedSession
                 ),
                 pendingSession: appState.pendingSession,
+                totalSessionCount: recordingSessions.count + importedSessions.count,
                 isNewSessionIdle: appState.newSessionViewModel.isIdle,
                 selection: $selectedSession,
                 onDiscardPendingSession: { appState.discardPendingSession() },
