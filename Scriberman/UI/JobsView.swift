@@ -8,6 +8,10 @@ struct JobsView: View {
     let isNewSessionIdle: Bool
     @Binding var selection: JobsViewModel.SessionListItem?
     let onDiscardPendingSession: () -> Void
+    /// Called when a row is clicked while a search is active, including when that row is already
+    /// selected — a selection binding that does not change reports nothing, and clicking a result
+    /// again still has to move the view to its match.
+    var onOpenSearchResult: (JobsViewModel.SessionListItem) -> Void = { _ in }
 
     @Environment(\.modelContext) private var modelContext
     @State private var isShowingTagFilter = false
@@ -165,6 +169,10 @@ struct JobsView: View {
                             .contextMenu {
                                 tagMenu(for: item)
                             }
+                            .simultaneousGesture(TapGesture().onEnded {
+                                guard viewModel.activeSearchQuery != nil else { return }
+                                onOpenSearchResult(item)
+                            })
                     }
                 }
             }

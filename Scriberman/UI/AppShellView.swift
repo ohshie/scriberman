@@ -22,6 +22,13 @@ struct AppShellView: View {
     @State private var studyActionErrorMessage: String?
     @State private var audioPlayerViewModel = AudioPlayerViewModel()
     @State private var transcriptAutoScrollEnabled = true
+    /// The search to open the study view with, set when a search result is clicked and cleared on
+    /// any other navigation.
+    @State private var studySearchSeed: TranscriptStudySearchSeed?
+    /// Which item the seed belongs to. Selecting a result changes the selection, and the change
+    /// handler would otherwise clear the seed it was just given and send the view back to the
+    /// standard detail.
+    @State private var studySearchSeedItemID: String?
 
     var body: some View {
         NavigationSplitView {
@@ -35,7 +42,8 @@ struct AppShellView: View {
                 pendingSession: appState.pendingSession,
                 isNewSessionIdle: appState.newSessionViewModel.isIdle,
                 selection: $selectedSession,
-                onDiscardPendingSession: { appState.discardPendingSession() }
+                onDiscardPendingSession: { appState.discardPendingSession() },
+                onOpenSearchResult: { item in openSearchResult(item) }
             )
             .toolbar(removing: .sidebarToggle)
             .navigationSplitViewColumnWidth(min: 380, ideal: 460)
@@ -115,6 +123,10 @@ struct AppShellView: View {
                 return
             }
 
+            // A selection made by opening a search result arrives here carrying its seed. Resetting
+            // to the standard detail then would undo the navigation that caused this change.
+            let isOpeningSearchResult = newValue != nil && newValue?.id == studySearchSeedItemID
+
             transcriptAutoScrollEnabled = true
             audioPlayerViewModel.stop()
             if let url = audioURL(for: newValue) {
@@ -123,8 +135,12 @@ struct AppShellView: View {
                 audioPlayerViewModel.clear()
             }
 
-            detailMode = .standard
             selectedTransformationID = nil
+            guard !isOpeningSearchResult else { return }
+
+            studySearchSeed = nil
+            studySearchSeedItemID = nil
+            detailMode = .standard
         }
         .onChange(of: detailMode) { _, newValue in
             if newValue != .study {
@@ -208,7 +224,8 @@ struct AppShellView: View {
                     audioPlayerViewModel: audioPlayerViewModel,
                     autoScrollEnabled: $transcriptAutoScrollEnabled,
                     transcript: transcript,
-                    store: appState.backgroundServices.speakerEmbeddingStore
+                    store: appState.backgroundServices.speakerEmbeddingStore,
+                    searchSeed: studySearchSeed
                 )
             } else if detailMode == .transformation {
                 AITransformationDetailView(
@@ -245,7 +262,8 @@ struct AppShellView: View {
                     audioPlayerViewModel: audioPlayerViewModel,
                     autoScrollEnabled: $transcriptAutoScrollEnabled,
                     transcript: transcript,
-                    store: appState.backgroundServices.speakerEmbeddingStore
+                    store: appState.backgroundServices.speakerEmbeddingStore,
+                    searchSeed: studySearchSeed
                 )
             } else if detailMode == .transformation {
                 AITransformationDetailView(
@@ -451,6 +469,30 @@ struct AppShellView: View {
         case .pending:
             return nil
         }
+    }
+
+    /// Opens a search result: the study view, with the query applied and the matched block
+    /// selected, so it scrolls there and highlights it.
+    ///
+    /// A title-only result has no match to seed, so it opens the session as any other selection
+    /// would. Nothing here starts playback.
+    private func openSearchResult(_ item: JobsViewModel.SessionListItem) {
+        guard let query = appState.jobsViewModel.activeSearchQuery else { return }
+
+        // The seed is set before the selection, so the selection's change handler already sees
+        // which item it belongs to.
+        guard let match = appState.jobsViewModel.searchMatches[item.id] else {
+            studySearchSeed = nil
+            studySearchSeedItemID = nil
+            selectedSession = item
+            detailMode = .standard
+            return
+        }
+
+        studySearchSeedItemID = item.id
+        studySearchSeed = TranscriptStudySearchSeed(query: query, blockID: match.blockID)
+        selectedSession = item
+        detailMode = .study
     }
 
     private func displayedTranscript(for session: any TranscribableSession) -> Transcript? {

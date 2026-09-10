@@ -46,6 +46,17 @@ final class TranscriptSearchState {
         currentIndex = 0
     }
 
+    /// Selects the first match inside `blockID`, leaving the selection alone when that block holds
+    /// none.
+    ///
+    /// How an app-wide search result opens the session it points at: the result already knows which
+    /// block matched, and this puts the find bar on that match rather than on the first one in the
+    /// transcript.
+    func selectFirstMatch(inBlock blockID: UUID) {
+        guard let index = matches.firstIndex(where: { $0.blockID == blockID }) else { return }
+        currentIndex = index
+    }
+
     func next() {
         guard matches.isEmpty == false else {
             return
