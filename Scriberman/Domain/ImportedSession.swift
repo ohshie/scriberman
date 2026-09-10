@@ -15,6 +15,10 @@ final class ImportedSession {
     var transcriptData: Data?
     var retranscriptData: Data?
     var aiTransformationsData: Data?
+    /// Plain text this session can be searched by — the displayed transcript pass, kept current by
+    /// the transcript setters. Optional and absent from the initialiser: existing sessions have it
+    /// backfilled at startup rather than through a migration.
+    var searchableText: String?
 
     var status: RecordingStatus {
         get { RecordingStatus(persistedValue: statusRawValue, errorMessage: errorMessage) }
@@ -40,6 +44,7 @@ final class ImportedSession {
             } else {
                 transcriptData = nil
             }
+            refreshSearchableText()
         }
     }
 
@@ -54,6 +59,7 @@ final class ImportedSession {
             } else {
                 retranscriptData = nil
             }
+            refreshSearchableText()
         }
     }
 
@@ -86,6 +92,7 @@ final class ImportedSession {
         if case .error = status {
             self.status = status
         }
+        refreshSearchableText()
     }
 }
 

@@ -239,6 +239,7 @@
 		B1C2D3E4F5061728394A5B6C /* StatusTagViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E4F5061728394A5B6D /* StatusTagViewTests.swift */; };
 		B2FBF1E99346D1C849214837 /* TranscriptionServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A2AEE3DB783526C01DF1552 /* TranscriptionServiceProtocol.swift */; };
 		B72B82B2F929E58EEF71508F /* AudioTrimServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE7D1E5C8F3850B4506BBA36 /* AudioTrimServiceTests.swift */; };
+		B1F9993B85454929AFEF104B /* SessionSearchableTextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B7D264DAD924ED39DC9FA0B /* SessionSearchableTextTests.swift */; };
 		BBDF7C9B39514CB1CAFE28C5 /* TokenStitcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6B44A3BD4A39AE7EB75ED6B /* TokenStitcherTests.swift */; };
 		BE05D8275352276E509B5A6A /* WorkspacePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA65604F12187C96E37A1413 /* WorkspacePicker.swift */; };
 		C16E1FE0441F3C95A965E4C0 /* RecordingServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A52CE181E590B26D3C4E9A5D /* RecordingServiceProtocol.swift */; };
@@ -542,6 +543,7 @@
 		F2A3B4C5D6E7F8091A2B3C4D /* FlowingWaveView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FlowingWaveView.swift; sourceTree = "<group>"; };
 		FE66D533306023D68A010DCE /* TrimFocusedValues.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrimFocusedValues.swift; sourceTree = "<group>"; };
 		FE7D1E5C8F3850B4506BBA36 /* AudioTrimServiceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AudioTrimServiceTests.swift; sourceTree = "<group>"; };
+		5B7D264DAD924ED39DC9FA0B /* SessionSearchableTextTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionSearchableTextTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -646,6 +648,7 @@
 				F1A7E002B2C3D4E5F6AA0001 /* WaveBallisticsTests.swift */,
 				79AF5DC92F92DCD30075AA88 /* RecordingTranscriptPersistenceTests.swift */,
 				FE7D1E5C8F3850B4506BBA36 /* AudioTrimServiceTests.swift */,
+				5B7D264DAD924ED39DC9FA0B /* SessionSearchableTextTests.swift */,
 			);
 			path = ScribermanTests;
 			sourceTree = "<group>";
@@ -1450,6 +1453,7 @@
 				791009762F7F0A4000225294 /* ScreenVideoMuxerTests.swift in Sources */,
 				7987328E2F7DBC2800570A03 /* SettingsViewModelTests.swift in Sources */,
 				B72B82B2F929E58EEF71508F /* AudioTrimServiceTests.swift in Sources */,
+				B1F9993B85454929AFEF104B /* SessionSearchableTextTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
