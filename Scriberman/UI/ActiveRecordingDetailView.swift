@@ -8,6 +8,9 @@ struct ActiveRecordingDetailView: View {
 
     @FocusState private var titleFocused: Bool
     @State private var isTitleHovering = false
+    /// Whether the pointer is inside the live transcript, which suspends the scroll to the newest
+    /// segment.
+    @State private var isPointerOverSegments = false
 
     init(session: RecordingSession, viewModel: NewSessionViewModel, modelContext: ModelContext) {
         self.session = session
@@ -15,7 +18,12 @@ struct ActiveRecordingDetailView: View {
         self.modelContext = modelContext
     }
 
+    /// Marks the end of the content, so following the transcript scrolls to the foot of the view —
+    /// which is where the Stop button is.
+    private static let bottomAnchor = "recording-view-bottom"
+
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 TextField("Title", text: editingTitle)
@@ -40,32 +48,14 @@ struct ActiveRecordingDetailView: View {
                     .foregroundStyle(.secondary)
 
                 if !viewModel.liveSegments.isEmpty {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 8) {
-                                ForEach(viewModel.liveSegments, id: \.id) { segment in
-                                    HStack(alignment: .top, spacing: 8) {
-                                        Text(segment.audioSource == .mic ? "Mic" : "App")
-                                            .font(.caption2.bold())
-                                            .foregroundStyle(.secondary)
-                                            .padding(.horizontal, 4)
-                                            .padding(.vertical, 2)
-                                            .background(Capsule().stroke(.secondary.opacity(0.3)))
-
-                                        Text(segment.text)
-                                            .font(.callout)
-                                            .foregroundStyle(segment.isFinal ? .primary : .secondary)
-                                    }
-                                    .id(segment.id)
-                                }
-                            }
-                            .padding(.vertical, 8)
-                        }
-                        .frame(height: 120)
-                        .onChange(of: viewModel.liveSegments.count) {
-                            if let last = viewModel.liveSegments.last {
-                                proxy.scrollTo(last.id, anchor: .bottom)
-                            }
+                    // In the flow, not in a scroll view of their own. Two scrolling regions in one
+                    // window means the wrong one moves under the pointer half the time; and a
+                    // transcript penned into 120 points while the window has room is the smaller
+                    // half of the problem. Arriving segments push the controls below them down.
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(viewModel.liveSegments, id: \.id) { segment in
+                            liveSegmentRow(for: segment)
+                                .id(segment.id)
                         }
                     }
                 }
@@ -100,6 +90,10 @@ struct ActiveRecordingDetailView: View {
                         systemImage: "app.fill"
                     )
                 }
+
+                Color.clear
+                    .frame(height: 1)
+                    .id(Self.bottomAnchor)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(28)
@@ -110,6 +104,19 @@ struct ActiveRecordingDetailView: View {
                 titleFocused = false
             }
         }
+        // Following the transcript means scrolling to the foot of the view, so the newest text and
+        // the Stop button stay together. Suspended while the pointer is in the window: SwiftUI
+        // cannot report a selection, and a pointer in here is someone reading or selecting.
+        .onHover { hovering in
+            isPointerOverSegments = hovering
+        }
+        .onChange(of: viewModel.liveSegments.count) {
+            guard !isPointerOverSegments else { return }
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+            }
+        }
+        }
     }
 
     private var currentDuration: TimeInterval {
@@ -118,6 +125,34 @@ struct ActiveRecordingDetailView: View {
         }
 
         return session.duration
+    }
+
+    /// A live segment, drawn in the same card as a finished one.
+    ///
+    /// No speaker: diarization runs after the recording, so the source the audio came from occupies
+    /// the position a speaker will later hold. Showing an empty speaker, or inventing "Speaker 1",
+    /// would state something the app does not yet know.
+    @ViewBuilder
+    private func liveSegmentRow(for segment: TranscriptSegment) -> some View {
+        TranscriptRowView(
+            timeText: TimeFormatter.displayFormat(seconds: segment.startTime),
+            copyText: segment.text
+        ) {
+            Text(segment.audioSource == .mic ? "Mic" : "App")
+                .font(.caption2.bold())
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(Capsule().stroke(.secondary.opacity(0.3)))
+        } content: {
+            Text(segment.text)
+                .font(.body)
+                // Text on screen that cannot be copied until the recording ends is a worse
+                // restriction than text that could not be seen at all.
+                .textSelection(.enabled)
+                .foregroundStyle(segment.isFinal ? .primary : .secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private func durationText(_ duration: TimeInterval) -> String {

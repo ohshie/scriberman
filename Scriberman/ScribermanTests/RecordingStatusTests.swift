@@ -889,10 +889,15 @@ struct RecordingSessionTests {
     @Test
     func testTranscriptConversationViewsUseAdaptiveStylesForLightDarkMode() throws {
         let blockSource = try sourceForFile(named: "TranscriptBlockView.swift")
+        let rowSource = try sourceForFile(named: "TranscriptRowView.swift")
         let previewSource = try sourceForFile(named: "TranscriptPreviewView.swift")
         let studySource = try sourceForFile(named: "TranscriptStudyView.swift")
 
-        #expect(blockSource.contains(".background(.thinMaterial"))
+        // The card lives in the shared row now, drawn the same way for a finished block and a live
+        // segment. The block still owns the text inside it.
+        #expect(rowSource.contains(".background(.thinMaterial"))
+        #expect(!(rowSource.contains("Color.white")))
+        #expect(!(rowSource.contains("Color.black")))
         #expect(blockSource.contains(".foregroundStyle(.primary)"))
         #expect(!(blockSource.contains("Color.white")))
         #expect(!(blockSource.contains("Color.black")))
