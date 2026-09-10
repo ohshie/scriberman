@@ -942,6 +942,29 @@ final class JobsViewModelTests {
         #expect(match?.snippet.text.contains("second pass") == true)
     }
 
+    // MARK: - What the list says about its size
+
+    @Test
+    func testAnUnfilteredListStatesItsSize() {
+        #expect(JobsViewModel.listCountText(shown: 6, total: 6) == "6 recordings")
+    }
+
+    @Test
+    func testASingleRecordingIsNotPluralised() {
+        #expect(JobsViewModel.listCountText(shown: 1, total: 1) == "1 recording")
+    }
+
+    /// A filtered list and a short library look identical once the last row has scrolled past.
+    @Test
+    func testANarrowedListStatesHowManyMatch() {
+        #expect(JobsViewModel.listCountText(shown: 2, total: 6) == "2 of 6 match")
+    }
+
+    @Test
+    func testAQueryMatchingNothingStillStatesTheCount() {
+        #expect(JobsViewModel.listCountText(shown: 0, total: 6) == "0 of 6 match")
+    }
+
     private func makeSession(
         createdAt: Date = Date(timeIntervalSince1970: 0),
         status: RecordingStatus

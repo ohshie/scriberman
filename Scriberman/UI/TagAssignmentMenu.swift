@@ -10,6 +10,7 @@ struct TagAssignmentMenuContent: View {
     let session: RecordingSession
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openSettings) private var openSettings
+    @Environment(AppState.self) private var appState
 
     private let service = TagService()
     private let logger = Logger(subsystem: "Scriberman", category: "TagAssignmentMenu")
@@ -44,6 +45,9 @@ struct TagAssignmentMenuContent: View {
             Divider()
         }
         Button("Add new tag") {
+            // Naming the destination, not just the window: tags have their own tab, and landing on
+            // whichever tab was last open would send the user hunting for what they asked for.
+            appState.requestedSettingsTab = .tags
             openSettings()
         }
     }
