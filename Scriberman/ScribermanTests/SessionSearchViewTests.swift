@@ -91,17 +91,16 @@ struct SessionSearchViewTests {
 
     // MARK: - Motion
 
-    /// Three moments, each of them a change the user did not make directly: a query removes rows,
-    /// a search result moves the selection, a query matching nothing replaces the list.
+    /// One moment, not three. Rows and the selection fill are drawn by AppKit, so a SwiftUI
+    /// animation over them animates the whole table re-rendering — a wobble on every keystroke.
     @Test
-    func testTheListAnimatesExactlyThreeThings() throws {
+    func testOnlyTheEmptyStateSwapIsAnimated() throws {
         let source = try jobsViewSource()
 
-        #expect(source.contains(".animation(listMotion, value: items)"))
-        #expect(source.contains(".animation(listMotion, value: selection)"))
         #expect(source.contains(".animation(listMotion, value: items.isEmpty)"))
-        // Nothing else animates: no fourth call, and no `withAnimation` sprinkled through actions.
-        #expect(source.components(separatedBy: ".animation(").count - 1 == 3)
+        #expect(!source.contains(".animation(listMotion, value: items)"))
+        #expect(!source.contains(".animation(listMotion, value: selection)"))
+        #expect(source.components(separatedBy: ".animation(").count - 1 == 1)
         #expect(!source.contains("withAnimation"))
     }
 

@@ -19,12 +19,17 @@ struct JobsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isShowingTagFilter = false
 
-    /// The three moments the list animates, and nothing else.
+    /// The one moment the list animates.
     ///
-    /// Each of them changes what is on screen without the user having touched the thing that
-    /// changed: a query removes rows, a search result moves the selection, a query matching nothing
-    /// replaces the whole list. Everything else here changes because someone clicked it, and needs
-    /// no explaining.
+    /// It was three. Rows leaving under a query and the selection moving are both drawn by AppKit —
+    /// `List` is an `NSTableView`, and its selection fill is the table's, not ours. A SwiftUI
+    /// animation wrapped around that does not animate rows leaving; it animates the whole table
+    /// re-rendering, which reads as a wobble on every keystroke and on every click.
+    ///
+    /// What is left is the container swap: the list being replaced by the empty state, and back.
+    /// That is a genuine SwiftUI transition between two views, it is the largest region of the
+    /// window, and a cut there reads as the window having been redrawn rather than as a search
+    /// having found nothing.
     private var listMotion: Animation? {
         reduceMotion ? nil : .easeOut(duration: 0.22)
     }
@@ -225,10 +230,6 @@ struct JobsView: View {
             }
         }
         .listStyle(.sidebar)
-        // Rows leaving as a query narrows the list, and the selection moving — including when a
-        // search result moves it, which the user did not do by clicking a row.
-        .animation(listMotion, value: items)
-        .animation(listMotion, value: selection)
     }
 
     @ViewBuilder
