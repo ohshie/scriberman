@@ -130,9 +130,10 @@ struct TranscriptStudySearchSeedTests {
     func testAClickOnAResultIsReportedEvenWithoutASelectionChange() throws {
         let source = try readSourceFile(relativePathFromTests: "../UI/JobsView.swift")
 
-        #expect(source.contains(".simultaneousGesture(TapGesture().onEnded {"))
-        #expect(source.contains("onOpenSearchResult(item)"))
-        #expect(source.contains("guard viewModel.activeSearchQuery != nil else { return }"))
+        #expect(source.contains("TapGesture().onEnded { onOpenSearchResult(item) }"))
+        // Masked off when nothing is being searched, so it cannot compete with the row's own
+        // click-to-select.
+        #expect(source.contains("including: viewModel.activeSearchQuery != nil ? .all : .none"))
     }
 
     /// The selection change handler resets the detail view. Without this guard it would undo the

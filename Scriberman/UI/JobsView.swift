@@ -70,35 +70,39 @@ struct JobsView: View {
     /// Always present, with or without sessions: it is how the list is searched, so it cannot be
     /// the thing that disappears when the list empties.
     private var searchBar: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 6) {
+        HStack(alignment: .center, spacing: 8) {
+            HStack(alignment: .center, spacing: 6) {
                 Image(systemName: "magnifyingglass")
-                    .font(.caption)
+                    .imageScale(.small)
                     .foregroundStyle(.secondary)
 
                 TextField("Search", text: $viewModel.searchQuery)
                     .textFieldStyle(.plain)
-                    .font(.callout)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity)
 
                 if !viewModel.searchQuery.isEmpty {
                     Button {
                         viewModel.searchQuery = ""
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.caption)
+                            .imageScale(.small)
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
                 }
             }
+            // One line, fixed. Left to itself the plain field grows to whatever height is going,
+            // and the glyph and the text end up on separate lines inside the capsule.
+            .frame(height: 22)
             .padding(.horizontal, 8)
-            .padding(.vertical, 5)
             .background(Capsule().fill(Color.secondary.opacity(0.12)))
 
             tagFilterButton
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.leading, 12)
+        .padding(.trailing, 14)
+        .padding(.vertical, 8)
     }
 
     /// Tag filtering, behind a control rather than permanently on screen.
@@ -116,8 +120,13 @@ struct JobsView: View {
                 : "line.3.horizontal.decrease.circle")
                 .font(.body)
                 .foregroundStyle(isFiltering ? Color.accentColor : Color.secondary)
+                // A fixed box, so the glyph is not squeezed against the sidebar edge by a search
+                // field that would otherwise take every point available.
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .layoutPriority(1)
         .help("Tags")
         .popover(isPresented: $isShowingTagFilter, arrowEdge: .bottom) {
             tagFilterList
@@ -169,10 +178,13 @@ struct JobsView: View {
                             .contextMenu {
                                 tagMenu(for: item)
                             }
-                            .simultaneousGesture(TapGesture().onEnded {
-                                guard viewModel.activeSearchQuery != nil else { return }
-                                onOpenSearchResult(item)
-                            })
+                            // Inert unless a search is running. A tap recogniser attached to a
+                            // list row competes with the row's own click-to-select, so it is masked
+                            // off entirely when there is no result to open.
+                            .simultaneousGesture(
+                                TapGesture().onEnded { onOpenSearchResult(item) },
+                                including: viewModel.activeSearchQuery != nil ? .all : .none
+                            )
                     }
                 }
             }
