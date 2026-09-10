@@ -331,10 +331,12 @@ struct RecordingStatusTests {
     @Test
     func testTheSearchBarRendersOutsideTheEmptyStateBranch() throws {
         let source = try jobsViewSource()
-        let searchBarRange = try #require(source.range(of: "            searchBar"))
-        let emptyStateRange = try #require(source.range(of: "if items.isEmpty && pendingSession == nil"))
-        // Placed before the branch, not inside its else.
-        #expect(searchBarRange.lowerBound < emptyStateRange.lowerBound)
+        // An inset on the whole stack, so it is there whatever the branch inside renders. It is
+        // also what stops rows scrolling up behind the field and staying there.
+        #expect(source.contains(".safeAreaInset(edge: .top, spacing: 0) {"))
+        let branch = try #require(source.range(of: "if items.isEmpty && pendingSession == nil"))
+        let insetBody = source[branch.upperBound...]
+        #expect(insetBody.contains("searchBar"))
         #expect(!source.contains("private var listContent"))
     }
 

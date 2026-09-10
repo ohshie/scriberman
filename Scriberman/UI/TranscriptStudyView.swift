@@ -151,15 +151,6 @@ struct TranscriptStudyView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .overlay {
-            Button("Find") {
-                presentSearch()
-            }
-            .keyboardShortcut("f", modifiers: .command)
-            .frame(width: 0, height: 0)
-            .opacity(0.001)
-            .accessibilityHidden(true)
-        }
     }
 
     private var blocks: [TranscriptBlock] {
