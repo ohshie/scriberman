@@ -29,7 +29,8 @@ struct TranscriptRowTests {
         let live = try liveViewSource()
 
         #expect(block.contains("TranscriptRowView("))
-        #expect(live.contains("TranscriptRowView(copyText: segment.text)"))
+        #expect(live.contains("TranscriptRowView("))
+        #expect(live.contains("copyText: segment.text"))
         // The live view's own hand-rolled row is gone.
         #expect(!live.contains("Text(segment.text)\n                                            .font(.callout)"))
     }
@@ -135,15 +136,32 @@ struct TranscriptRowTests {
         #expect(!row.contains(".play()"))
     }
 
-    /// A live segment has nothing to seek to, so it carries no time and no source icon — its
-    /// identity already says where the audio came from.
+    /// A live segment carries the time it starts, as a finished block does. It carries no source
+    /// icon: its identity pill already says where the audio came from.
     @Test
-    func testALiveRowCarriesNoTimeOrDuplicateSourceIcon() throws {
+    func testALiveRowCarriesItsStartTimeAndNoDuplicateSourceIcon() throws {
         let row = try rowSource()
+        let live = try liveViewSource()
 
         #expect(row.contains("var timeText: String?"))
         #expect(row.contains("var audioSource: AudioSource?"))
         #expect(row.contains("if let timeText {"))
         #expect(row.contains("if let audioSource {"))
+        #expect(live.contains("timeText: TimeFormatter.displayFormat(seconds: segment.startTime)"))
+        // No audioSource passed — the pill is the identity.
+        #expect(!live.contains("audioSource: segment.audioSource"))
+    }
+
+    /// The bar used to float a spinner and "Getting recording ready…" over a recording still being
+    /// made — a progress report on a file nobody had asked for, in the place the player would go.
+    @Test
+    func testThePlayerBarIsAbsentUntilThereIsSomethingToPlay() throws {
+        let bar = try source("../UI/AudioPlayerBar.swift")
+
+        #expect(bar.contains("if sessionHasAudio, viewModel.isReady {"))
+        // Assert on what it draws, not on words a comment can also contain.
+        #expect(!bar.contains("Text(\"Getting recording ready…\")"))
+        #expect(!bar.contains("ProgressView()"))
+        #expect(!bar.contains("private var loadingContent"))
     }
 }

@@ -134,7 +134,10 @@ struct ActiveRecordingDetailView: View {
     /// would state something the app does not yet know.
     @ViewBuilder
     private func liveSegmentRow(for segment: TranscriptSegment) -> some View {
-        TranscriptRowView(copyText: segment.text) {
+        TranscriptRowView(
+            timeText: TimeFormatter.displayFormat(seconds: segment.startTime),
+            copyText: segment.text
+        ) {
             Text(segment.audioSource == .mic ? "Mic" : "App")
                 .font(.caption2.bold())
                 .foregroundStyle(.secondary)
