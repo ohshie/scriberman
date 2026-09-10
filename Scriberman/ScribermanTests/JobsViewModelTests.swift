@@ -699,6 +699,249 @@ final class JobsViewModelTests {
         }
     }
 
+    // MARK: - Search
+
+    private func titled(_ session: RecordingSession, _ title: String) -> RecordingSession {
+        session.title = title
+        return session
+    }
+
+    private func spoken(_ session: RecordingSession, _ text: String) -> RecordingSession {
+        session.transcript = Transcript(
+            fullText: text,
+            segments: [TranscriptSegment(speakerId: "A", text: text, startTime: 0, endTime: 1)],
+            speakers: []
+        )
+        return session
+    }
+
+    private func makeSearchableSession(
+        day: Int,
+        title: String,
+        spokenText: String? = nil
+    ) -> RecordingSession {
+        let session = titled(
+            makeSession(createdAt: makeDate(year: 2026, month: 3, day: day, hour: 8), status: RecordingStatus.done),
+            title
+        )
+        guard let spokenText else { return session }
+        return spoken(session, spokenText)
+    }
+
+    @Test
+    func testAQueryMatchesASessionTitle() {
+        let match = makeSearchableSession(day: 20, title: "Migration planning")
+        let other = makeSearchableSession(day: 21, title: "Standup")
+
+        viewModel.searchQuery = "migration"
+        let items = viewModel.sessionItems(recordingSessions: [match, other], importedSessions: [], preserving: nil)
+
+        #expect(items.count == 1)
+        #expect(items.first?.id == "recording:\(match.id.uuidString)")
+    }
+
+    @Test
+    func testAQueryMatchesTranscriptTextTheTitleDoesNotContain() {
+        let match = makeSearchableSession(day: 20, title: "Standup", spokenText: "we should postpone the migration")
+        let other = makeSearchableSession(day: 21, title: "Retro", spokenText: "nothing to report")
+
+        viewModel.searchQuery = "migration"
+        let items = viewModel.sessionItems(recordingSessions: [match, other], importedSessions: [], preserving: nil)
+
+        #expect(items.count == 1)
+        #expect(items.first?.id == "recording:\(match.id.uuidString)")
+    }
+
+    @Test
+    func testAnImportedSessionIsSearchableByItsTranscript() {
+        let imported = makeImportedSession(createdAt: makeDate(year: 2026, month: 3, day: 20, hour: 8))
+        imported.transcript = Transcript(
+            fullText: "the conference talk about migration",
+            segments: [],
+            speakers: []
+        )
+
+        viewModel.searchQuery = "migration"
+        let items = viewModel.sessionItems(recordingSessions: [], importedSessions: [imported], preserving: nil)
+
+        #expect(items.count == 1)
+        #expect(items.first?.id == "imported:\(imported.id.uuidString)")
+    }
+
+    /// A session matching on both is still one row, reported as a transcript match — the one a
+    /// snippet can be built from.
+    @Test
+    func testASessionMatchingTitleAndTranscriptAppearsOnce() {
+        let both = makeSearchableSession(day: 20, title: "Migration planning", spokenText: "the migration is next week")
+
+        viewModel.searchQuery = "migration"
+        let items = viewModel.sessionItems(recordingSessions: [both], importedSessions: [], preserving: nil)
+
+        #expect(items.count == 1)
+        #expect(JobsViewModel.matches(query: "migration", item: items[0]) == .transcript)
+    }
+
+    @Test
+    func testATitleOnlyMatchIsReportedAsATitleMatch() {
+        let session = makeSearchableSession(day: 20, title: "Migration planning", spokenText: "nothing relevant")
+
+        #expect(JobsViewModel.matches(query: "migration", item: .recording(session)) == .title)
+    }
+
+    @Test
+    func testMatchingIgnoresCaseAndDiacritics() {
+        let session = makeSearchableSession(day: 20, title: "Standup", spokenText: "the café was closed")
+
+        viewModel.searchQuery = "CAFE"
+        let items = viewModel.sessionItems(recordingSessions: [session], importedSessions: [], preserving: nil)
+
+        #expect(items.count == 1)
+    }
+
+    @Test
+    func testAnEmptyQueryAppliesNoSearch() {
+        let first = makeSearchableSession(day: 20, title: "Migration planning")
+        let second = makeSearchableSession(day: 21, title: "Standup")
+
+        viewModel.searchQuery = "   "
+        let items = viewModel.sessionItems(recordingSessions: [first, second], importedSessions: [], preserving: nil)
+
+        #expect(items.count == 2)
+        #expect(viewModel.activeSearchQuery == nil)
+    }
+
+    /// The list goes empty rather than falling back to everything: a list that ignored the query
+    /// would look like a search that found the whole library.
+    @Test
+    func testAQueryMatchingNothingProducesAnEmptyList() {
+        let first = makeSearchableSession(day: 20, title: "Migration planning")
+        let second = makeSearchableSession(day: 21, title: "Standup")
+
+        viewModel.searchQuery = "kubernetes"
+        let items = viewModel.sessionItems(recordingSessions: [first, second], importedSessions: [], preserving: nil)
+
+        #expect(items.isEmpty)
+    }
+
+    @Test
+    func testTagsNarrowAndTheQuerySearchesWithin() {
+        let work = RecordingTag(name: "Work", colorHex: "112233")
+        let personal = RecordingTag(name: "Personal", colorHex: "445566")
+        let taggedAndMatching = tagged(makeSearchableSession(day: 20, title: "Migration planning"), [work])
+        let taggedNotMatching = tagged(makeSearchableSession(day: 21, title: "Standup"), [work])
+        let matchingWrongTag = tagged(makeSearchableSession(day: 22, title: "Migration retro"), [personal])
+
+        viewModel.selectedTagIDs = [work.id]
+        viewModel.searchQuery = "migration"
+        let items = viewModel.sessionItems(
+            recordingSessions: [taggedAndMatching, taggedNotMatching, matchingWrongTag],
+            importedSessions: [],
+            preserving: nil
+        )
+
+        #expect(items.count == 1)
+        #expect(items.first?.id == "recording:\(taggedAndMatching.id.uuidString)")
+    }
+
+    /// The same AND from the other direction: a query alone reaches sessions the tag filter would
+    /// have excluded, so the filter is genuinely narrowing rather than being ignored.
+    @Test
+    func testTheQueryAloneReachesSessionsTheTagFilterWouldExclude() {
+        let work = RecordingTag(name: "Work", colorHex: "112233")
+        let personal = RecordingTag(name: "Personal", colorHex: "445566")
+        let workMatch = tagged(makeSearchableSession(day: 20, title: "Migration planning"), [work])
+        let personalMatch = tagged(makeSearchableSession(day: 21, title: "Migration retro"), [personal])
+
+        viewModel.searchQuery = "migration"
+        let items = viewModel.sessionItems(
+            recordingSessions: [workMatch, personalMatch],
+            importedSessions: [],
+            preserving: nil
+        )
+
+        #expect(items.count == 2)
+    }
+
+    // MARK: - Search: snippets and match locations
+
+    @Test
+    func testATranscriptResultCarriesASnippetAndABlockID() async {
+        let session = makeSearchableSession(
+            day: 20,
+            title: "Standup",
+            spokenText: "we should postpone the migration until the audit clears"
+        )
+
+        viewModel.searchQuery = "migration"
+        let items = viewModel.sessionItems(recordingSessions: [session], importedSessions: [], preserving: nil)
+        await viewModel.updateSearchMatches(for: items, debounce: .zero)
+
+        let match = viewModel.searchMatches["recording:\(session.id.uuidString)"]
+        #expect(match != nil)
+        #expect(match?.snippet.text.contains("migration") == true)
+    }
+
+    @Test
+    func testATitleOnlyResultCarriesNoSnippet() async {
+        let session = makeSearchableSession(day: 20, title: "Migration planning", spokenText: "nothing relevant")
+
+        viewModel.searchQuery = "migration"
+        let items = viewModel.sessionItems(recordingSessions: [session], importedSessions: [], preserving: nil)
+        await viewModel.updateSearchMatches(for: items, debounce: .zero)
+
+        #expect(items.count == 1)
+        #expect(viewModel.searchMatches.isEmpty)
+    }
+
+    @Test
+    func testClearingTheQueryClearsTheMatches() async {
+        let session = makeSearchableSession(day: 20, title: "Standup", spokenText: "the migration is next week")
+
+        viewModel.searchQuery = "migration"
+        let items = viewModel.sessionItems(recordingSessions: [session], importedSessions: [], preserving: nil)
+        await viewModel.updateSearchMatches(for: items, debounce: .zero)
+        #expect(!viewModel.searchMatches.isEmpty)
+
+        viewModel.searchQuery = ""
+        await viewModel.updateSearchMatches(for: items, debounce: .zero)
+        #expect(viewModel.searchMatches.isEmpty)
+    }
+
+    /// Stage two is cancellable: a debounce the user types through is discarded rather than
+    /// decoding for a query they have already moved past.
+    @Test
+    func testACancelledDebounceDecodesNothing() async {
+        let session = makeSearchableSession(day: 20, title: "Standup", spokenText: "the migration is next week")
+
+        viewModel.searchQuery = "migration"
+        let items = viewModel.sessionItems(recordingSessions: [session], importedSessions: [], preserving: nil)
+
+        let task = Task { await viewModel.updateSearchMatches(for: items, debounce: .seconds(30)) }
+        task.cancel()
+        await task.value
+
+        #expect(viewModel.searchMatches.isEmpty)
+    }
+
+    @Test
+    func testTheSnippetComesFromTheDisplayedPass() async {
+        let session = makeSearchableSession(day: 20, title: "Standup", spokenText: "the first pass says migration")
+        session.retranscript = Transcript(
+            fullText: "the second pass says migration too",
+            segments: [
+                TranscriptSegment(speakerId: "A", text: "the second pass says migration too", startTime: 0, endTime: 1),
+            ],
+            speakers: []
+        )
+
+        viewModel.searchQuery = "migration"
+        let items = viewModel.sessionItems(recordingSessions: [session], importedSessions: [], preserving: nil)
+        await viewModel.updateSearchMatches(for: items, debounce: .zero)
+
+        let match = viewModel.searchMatches["recording:\(session.id.uuidString)"]
+        #expect(match?.snippet.text.contains("second pass") == true)
+    }
+
     private func makeSession(
         createdAt: Date = Date(timeIntervalSince1970: 0),
         status: RecordingStatus

@@ -3,6 +3,8 @@ import SwiftUI
 struct ImportedSessionRow: View {
     let session: ImportedSession
     let onRetry: () -> Void
+    /// The line a search matched inside this session's transcript, when it was reached by search.
+    var searchSnippet: SessionSearchSnippet? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -27,6 +29,10 @@ struct ImportedSessionRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+
+                if let searchSnippet {
+                    SearchSnippetView(snippet: searchSnippet)
+                }
             }
             // Fills, so the timestamp's trailing alignment has an edge to resolve against. This is
             // also what puts the accessory column against the row's right side without a Spacer.

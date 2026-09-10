@@ -8,6 +8,24 @@ protocol TranscriptPlaybackControlling: AnyObject {
 
 extension AudioPlayerViewModel: TranscriptPlaybackControlling {}
 
+/// A search to open the study view with: the query typed in the session list, and the block whose
+/// match was selected.
+///
+/// `token` makes two otherwise identical seeds different values. Opening the same match twice — the
+/// user clicking the result again — has to move the view again, and a seed that compared equal to
+/// the one already applied would do nothing.
+struct TranscriptStudySearchSeed: Equatable {
+    let query: String
+    let blockID: UUID?
+    let token: UUID
+
+    init(query: String, blockID: UUID?, token: UUID = UUID()) {
+        self.query = query
+        self.blockID = blockID
+        self.token = token
+    }
+}
+
 struct TranscriptStudyView: View {
     let session: any TranscribableSession
     let audioPlayerViewModel: AudioPlayerViewModel
@@ -15,6 +33,9 @@ struct TranscriptStudyView: View {
     @State private var transcript: Transcript
     let store: SpeakerEmbeddingStore?
     let showRawMarkdownToggle: Bool
+    /// A search to apply on opening, or `nil` to open as the view always has — empty find bar, no
+    /// match selected.
+    let searchSeed: TranscriptStudySearchSeed?
 
     @State private var showRawMarkdown = false
     @State private var isSearchVisible = false
@@ -29,7 +50,8 @@ struct TranscriptStudyView: View {
         autoScrollEnabled: Binding<Bool>,
         transcript: Transcript,
         store: SpeakerEmbeddingStore? = nil,
-        showRawMarkdownToggle: Bool = true
+        showRawMarkdownToggle: Bool = true,
+        searchSeed: TranscriptStudySearchSeed? = nil
     ) {
         self.session = session
         self.audioPlayerViewModel = audioPlayerViewModel
@@ -37,6 +59,7 @@ struct TranscriptStudyView: View {
         self._transcript = State(initialValue: transcript)
         self.store = store
         self.showRawMarkdownToggle = showRawMarkdownToggle
+        self.searchSeed = searchSeed
     }
 
     var body: some View {
@@ -80,6 +103,11 @@ struct TranscriptStudyView: View {
                 return
             }
             scrollTargetID = activeBlock?.id
+        }
+        // Keyed on the seed, so opening the same match again re-applies it: selecting a result
+        // whose session is already open changes no binding the view could otherwise notice.
+        .task(id: searchSeed) {
+            applySearchSeed()
         }
         .onChange(of: searchState.query) {
             searchState.update(blocks: blocks)
@@ -212,6 +240,25 @@ struct TranscriptStudyView: View {
                 Label("Find", systemImage: "magnifyingglass")
             }
         }
+    }
+
+    /// Opens the find bar on the seeded query with the seeded match selected, and scrolls to it.
+    ///
+    /// Auto-scroll is turned off for the same reason presenting the find bar does: playback
+    /// position must not drag the view away from the match the user came here to read. No playback
+    /// is started — locating text and listening to it are separate intentions.
+    private func applySearchSeed() {
+        guard let searchSeed, !searchSeed.query.isEmpty else { return }
+
+        searchState.query = searchSeed.query
+        searchState.update(blocks: blocks)
+        if let blockID = searchSeed.blockID {
+            searchState.selectFirstMatch(inBlock: blockID)
+        }
+
+        autoScrollEnabled = false
+        isSearchVisible = true
+        scrollTargetID = searchState.currentMatch?.blockID
     }
 
     private func presentSearch() {
