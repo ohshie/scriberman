@@ -862,6 +862,86 @@ final class JobsViewModelTests {
         #expect(items.count == 2)
     }
 
+    // MARK: - Search: snippets and match locations
+
+    @Test
+    func testATranscriptResultCarriesASnippetAndABlockID() async {
+        let session = makeSearchableSession(
+            day: 20,
+            title: "Standup",
+            spokenText: "we should postpone the migration until the audit clears"
+        )
+
+        viewModel.searchQuery = "migration"
+        let items = viewModel.sessionItems(recordingSessions: [session], importedSessions: [], preserving: nil)
+        await viewModel.updateSearchMatches(for: items, debounce: .zero)
+
+        let match = viewModel.searchMatches["recording:\(session.id.uuidString)"]
+        #expect(match != nil)
+        #expect(match?.snippet.text.contains("migration") == true)
+    }
+
+    @Test
+    func testATitleOnlyResultCarriesNoSnippet() async {
+        let session = makeSearchableSession(day: 20, title: "Migration planning", spokenText: "nothing relevant")
+
+        viewModel.searchQuery = "migration"
+        let items = viewModel.sessionItems(recordingSessions: [session], importedSessions: [], preserving: nil)
+        await viewModel.updateSearchMatches(for: items, debounce: .zero)
+
+        #expect(items.count == 1)
+        #expect(viewModel.searchMatches.isEmpty)
+    }
+
+    @Test
+    func testClearingTheQueryClearsTheMatches() async {
+        let session = makeSearchableSession(day: 20, title: "Standup", spokenText: "the migration is next week")
+
+        viewModel.searchQuery = "migration"
+        let items = viewModel.sessionItems(recordingSessions: [session], importedSessions: [], preserving: nil)
+        await viewModel.updateSearchMatches(for: items, debounce: .zero)
+        #expect(!viewModel.searchMatches.isEmpty)
+
+        viewModel.searchQuery = ""
+        await viewModel.updateSearchMatches(for: items, debounce: .zero)
+        #expect(viewModel.searchMatches.isEmpty)
+    }
+
+    /// Stage two is cancellable: a debounce the user types through is discarded rather than
+    /// decoding for a query they have already moved past.
+    @Test
+    func testACancelledDebounceDecodesNothing() async {
+        let session = makeSearchableSession(day: 20, title: "Standup", spokenText: "the migration is next week")
+
+        viewModel.searchQuery = "migration"
+        let items = viewModel.sessionItems(recordingSessions: [session], importedSessions: [], preserving: nil)
+
+        let task = Task { await viewModel.updateSearchMatches(for: items, debounce: .seconds(30)) }
+        task.cancel()
+        await task.value
+
+        #expect(viewModel.searchMatches.isEmpty)
+    }
+
+    @Test
+    func testTheSnippetComesFromTheDisplayedPass() async {
+        let session = makeSearchableSession(day: 20, title: "Standup", spokenText: "the first pass says migration")
+        session.retranscript = Transcript(
+            fullText: "the second pass says migration too",
+            segments: [
+                TranscriptSegment(speakerId: "A", text: "the second pass says migration too", startTime: 0, endTime: 1),
+            ],
+            speakers: []
+        )
+
+        viewModel.searchQuery = "migration"
+        let items = viewModel.sessionItems(recordingSessions: [session], importedSessions: [], preserving: nil)
+        await viewModel.updateSearchMatches(for: items, debounce: .zero)
+
+        let match = viewModel.searchMatches["recording:\(session.id.uuidString)"]
+        #expect(match?.snippet.text.contains("second pass") == true)
+    }
+
     private func makeSession(
         createdAt: Date = Date(timeIntervalSince1970: 0),
         status: RecordingStatus

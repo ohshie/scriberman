@@ -67,6 +67,7 @@
 		7B2D1F6C1C3A5B0D9E4F6007 /* SessionTagLineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D1F6C1C3A5B0D9E4F6008 /* SessionTagLineView.swift */; };
 		7B2D1F6C1C3A5B0D9E4F6001 /* RecordingTag.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D1F6C1C3A5B0D9E4F6002 /* RecordingTag.swift */; };
 		7B2D1F6C1C3A5B0D9E4F6003 /* TagService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D1F6C1C3A5B0D9E4F6004 /* TagService.swift */; };
+		A05177444CA54BAB8A64F1D9 /* SessionSearchSnippet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92AEBC33667240FD8FAD9138 /* SessionSearchSnippet.swift */; };
 		2F56ECF7A57D40F6B14E216A /* SessionSearchTextBackfill.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42C1DBE7B7E9418796B90CC5 /* SessionSearchTextBackfill.swift */; };
 		7A1C0E5B1B2F4A0C8D3E5F03 /* CaptureHealthMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1C0E5B1B2F4A0C8D3E5F04 /* CaptureHealthMonitor.swift */; };
 		79D95F45585046F8B9747B22 /* UnifiedCaptureStreaming.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8295019A27A4A14B901831A /* UnifiedCaptureStreaming.swift */; };
@@ -240,6 +241,7 @@
 		B1C2D3E4F5061728394A5B6C /* StatusTagViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E4F5061728394A5B6D /* StatusTagViewTests.swift */; };
 		B2FBF1E99346D1C849214837 /* TranscriptionServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A2AEE3DB783526C01DF1552 /* TranscriptionServiceProtocol.swift */; };
 		B72B82B2F929E58EEF71508F /* AudioTrimServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE7D1E5C8F3850B4506BBA36 /* AudioTrimServiceTests.swift */; };
+		59F9B3644A21433E886C92A1 /* SessionSearchSnippetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96D9B16FC334FD5845F12B2 /* SessionSearchSnippetTests.swift */; };
 		E6B169F3EBE54AE8A92C9960 /* SessionSearchTextBackfillTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1441119B7B6430894862BF5 /* SessionSearchTextBackfillTests.swift */; };
 		B1F9993B85454929AFEF104B /* SessionSearchableTextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B7D264DAD924ED39DC9FA0B /* SessionSearchableTextTests.swift */; };
 		BBDF7C9B39514CB1CAFE28C5 /* TokenStitcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6B44A3BD4A39AE7EB75ED6B /* TokenStitcherTests.swift */; };
@@ -335,6 +337,7 @@
 		7B2D1F6C1C3A5B0D9E4F6008 /* SessionTagLineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/SessionTagLineView.swift"; sourceTree = SOURCE_ROOT; };
 		7B2D1F6C1C3A5B0D9E4F6002 /* RecordingTag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Domain/RecordingTag.swift"; sourceTree = SOURCE_ROOT; };
 		7B2D1F6C1C3A5B0D9E4F6004 /* TagService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Tags/TagService.swift"; sourceTree = SOURCE_ROOT; };
+		92AEBC33667240FD8FAD9138 /* SessionSearchSnippet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Search/SessionSearchSnippet.swift"; sourceTree = SOURCE_ROOT; };
 		42C1DBE7B7E9418796B90CC5 /* SessionSearchTextBackfill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Search/SessionSearchTextBackfill.swift"; sourceTree = SOURCE_ROOT; };
 		7A1C0E5B1B2F4A0C8D3E5F04 /* CaptureHealthMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Capture/CaptureHealthMonitor.swift"; sourceTree = SOURCE_ROOT; };
 		D8295019A27A4A14B901831A /* UnifiedCaptureStreaming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Capture/UnifiedCaptureStreaming.swift"; sourceTree = SOURCE_ROOT; };
@@ -546,6 +549,7 @@
 		F2A3B4C5D6E7F8091A2B3C4D /* FlowingWaveView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FlowingWaveView.swift; sourceTree = "<group>"; };
 		FE66D533306023D68A010DCE /* TrimFocusedValues.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrimFocusedValues.swift; sourceTree = "<group>"; };
 		FE7D1E5C8F3850B4506BBA36 /* AudioTrimServiceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AudioTrimServiceTests.swift; sourceTree = "<group>"; };
+		F96D9B16FC334FD5845F12B2 /* SessionSearchSnippetTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionSearchSnippetTests.swift; sourceTree = "<group>"; };
 		C1441119B7B6430894862BF5 /* SessionSearchTextBackfillTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionSearchTextBackfillTests.swift; sourceTree = "<group>"; };
 		5B7D264DAD924ED39DC9FA0B /* SessionSearchableTextTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionSearchableTextTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -652,6 +656,7 @@
 				F1A7E002B2C3D4E5F6AA0001 /* WaveBallisticsTests.swift */,
 				79AF5DC92F92DCD30075AA88 /* RecordingTranscriptPersistenceTests.swift */,
 				FE7D1E5C8F3850B4506BBA36 /* AudioTrimServiceTests.swift */,
+				F96D9B16FC334FD5845F12B2 /* SessionSearchSnippetTests.swift */,
 				C1441119B7B6430894862BF5 /* SessionSearchTextBackfillTests.swift */,
 				5B7D264DAD924ED39DC9FA0B /* SessionSearchableTextTests.swift */,
 			);
@@ -825,6 +830,7 @@
 				7B2D1F6C1C3A5B0D9E4F6008 /* SessionTagLineView.swift */,
 				7B2D1F6C1C3A5B0D9E4F6002 /* RecordingTag.swift */,
 				7B2D1F6C1C3A5B0D9E4F6004 /* TagService.swift */,
+				92AEBC33667240FD8FAD9138 /* SessionSearchSnippet.swift */,
 				42C1DBE7B7E9418796B90CC5 /* SessionSearchTextBackfill.swift */,
 				7A1C0E5B1B2F4A0C8D3E5F04 /* CaptureHealthMonitor.swift */,
 				D8295019A27A4A14B901831A /* UnifiedCaptureStreaming.swift */,
@@ -1243,6 +1249,7 @@
 				7B2D1F6C1C3A5B0D9E4F6007 /* SessionTagLineView.swift in Sources */,
 				7B2D1F6C1C3A5B0D9E4F6001 /* RecordingTag.swift in Sources */,
 				7B2D1F6C1C3A5B0D9E4F6003 /* TagService.swift in Sources */,
+				A05177444CA54BAB8A64F1D9 /* SessionSearchSnippet.swift in Sources */,
 				2F56ECF7A57D40F6B14E216A /* SessionSearchTextBackfill.swift in Sources */,
 				7A1C0E5B1B2F4A0C8D3E5F03 /* CaptureHealthMonitor.swift in Sources */,
 				79D95F45585046F8B9747B22 /* UnifiedCaptureStreaming.swift in Sources */,
@@ -1460,6 +1467,7 @@
 				791009762F7F0A4000225294 /* ScreenVideoMuxerTests.swift in Sources */,
 				7987328E2F7DBC2800570A03 /* SettingsViewModelTests.swift in Sources */,
 				B72B82B2F929E58EEF71508F /* AudioTrimServiceTests.swift in Sources */,
+				59F9B3644A21433E886C92A1 /* SessionSearchSnippetTests.swift in Sources */,
 				E6B169F3EBE54AE8A92C9960 /* SessionSearchTextBackfillTests.swift in Sources */,
 				B1F9993B85454929AFEF104B /* SessionSearchableTextTests.swift in Sources */,
 			);

@@ -272,6 +272,66 @@ final class JobsViewModel {
         return nil
     }
 
+    /// Where the query matched inside each transcript result, keyed by list item id.
+    ///
+    /// Stage two of the search, and the expensive half: it decodes transcripts. Only sessions that
+    /// survived narrowing are in here, and only after the query has settled.
+    private(set) var searchMatches: [String: SessionSearchMatch] = [:]
+
+    /// How long the query must hold still before transcripts are decoded.
+    ///
+    /// Narrowing runs per keystroke — it reads a stored string. Locating does not: every keystroke
+    /// would decode every surviving transcript again.
+    static let searchMatchDebounce: Duration = .milliseconds(200)
+
+    /// Recomputes `searchMatches` for the current query once it settles.
+    ///
+    /// Cancellable by design: called from a `.task(id:)` that restarts on every keystroke, so an
+    /// in-flight debounce is discarded rather than decoding for a query the user has moved past.
+    func updateSearchMatches(
+        for items: [SessionListItem],
+        debounce: Duration = JobsViewModel.searchMatchDebounce
+    ) async {
+        guard let query = activeSearchQuery else {
+            searchMatches = [:]
+            return
+        }
+
+        try? await Task.sleep(for: debounce)
+        guard !Task.isCancelled else { return }
+
+        searchMatches = Self.searchMatches(query: query, items: items)
+    }
+
+    /// Decodes the transcript of every item that matched on transcript text, and locates the query
+    /// in it. Title-only matches are absent, which is what leaves their rows without a snippet.
+    static func searchMatches(query: String, items: [SessionListItem]) -> [String: SessionSearchMatch] {
+        var located: [String: SessionSearchMatch] = [:]
+        for item in items where matches(query: query, item: item) == .transcript {
+            guard let transcript = displayedTranscript(for: item),
+                  let match = SessionSearchSnippetBuilder.match(query: query, in: transcript) else {
+                continue
+            }
+            located[item.id] = match
+        }
+        return located
+    }
+
+    /// The pass a session displays, for the items the list is built from.
+    ///
+    /// The same `retranscript ?? transcript` the study view opens with — the snippet has to come
+    /// from the text the user will see there, or the match would not be found again.
+    static func displayedTranscript(for item: SessionListItem) -> Transcript? {
+        switch item {
+        case .pending:
+            return nil
+        case .recording(let session):
+            return session.retranscript ?? session.transcript
+        case .imported(let session):
+            return session.retranscript ?? session.transcript
+        }
+    }
+
     /// Tags whose chips are lit. Empty means unfiltered.
     ///
     /// Held here alongside the item construction it affects, rather than in a separate filtering
