@@ -10,10 +10,51 @@ struct SessionSearchViewTests {
     }
 
     @Test
-    func testTheSearchFieldIsBoundToTheViewModelQuery() throws {
+    func testTheSearchFieldIsTheSystemsOwn() throws {
         let source = try jobsViewSource()
 
-        #expect(source.contains("TextField(\"Search\", text: $viewModel.searchQuery)"))
+        #expect(source.contains("NativeSearchField("))
+        #expect(source.contains("text: $viewModel.searchQuery"))
+        #expect(source.contains("prompt: \"Search\""))
+        // The capsule we drew, and the height we had to pin to stop it laying out on two lines.
+        #expect(!source.contains("TextField(\"Search\""))
+        #expect(!source.contains("Capsule().fill(Color.secondary.opacity(0.12))"))
+    }
+
+    @Test
+    func testTheWrapperUsesAnNSSearchField() throws {
+        let source = try readSourceFile(relativePathFromTests: "../UI/NativeSearchField.swift")
+
+        #expect(source.contains("NSViewRepresentable"))
+        #expect(source.contains("NSSearchField()"))
+        #expect(source.contains("field.placeholderString = prompt"))
+    }
+
+    /// Escape clears the query; Escape on an already empty field hands focus back, so the key
+    /// belongs to the window rather than to the control.
+    @Test
+    func testEscapeClearsThenReleasesFocus() throws {
+        let source = try readSourceFile(relativePathFromTests: "../UI/NativeSearchField.swift")
+
+        #expect(source.contains("#selector(NSResponder.cancelOperation(_:))"))
+        #expect(source.contains("parent.onEscapeWhileEmpty()"))
+        #expect(source.contains("parent.text = \"\""))
+    }
+
+    /// One handler owns ⌘F, so what it means is decided in one place rather than by whichever of
+    /// two views holds focus.
+    @Test
+    func testOneHandlerOwnsTheFindShortcut() throws {
+        let shell = try readSourceFile(relativePathFromTests: "../UI/AppShellView.swift")
+        let study = try readSourceFile(relativePathFromTests: "../UI/TranscriptStudyView.swift")
+
+        #expect(shell.contains("if detailMode == .study {"))
+        #expect(shell.contains("NotificationCenter.default.post(name: .transcriptSearchRequested"))
+        #expect(shell.contains("searchFocusRequest += 1"))
+        #expect(shell.contains(".keyboardShortcut(\"f\", modifiers: .command)"))
+        // The study view keeps its observer and its toolbar action, but no longer claims the key.
+        #expect(!study.contains(".keyboardShortcut(\"f\", modifiers: .command)"))
+        #expect(study.contains("publisher(for: .transcriptSearchRequested)"))
     }
 
     /// Present whether or not the list has anything in it: it is how the list is searched, so it
@@ -25,6 +66,16 @@ struct SessionSearchViewTests {
         let branchRange = try #require(source.range(of: "if items.isEmpty && pendingSession == nil"))
 
         #expect(barRange.lowerBound < branchRange.lowerBound)
+    }
+
+    /// The filter narrows the same set the query searches, so it stays in the search row.
+    @Test
+    func testTheFilterStaysBesideTheField() throws {
+        let source = try jobsViewSource()
+        let bar = try #require(functionBody(named: "private var searchBar: some View {", in: source))
+
+        #expect(bar.contains("NativeSearchField("))
+        #expect(bar.contains("tagFilterButton"))
     }
 
     @Test

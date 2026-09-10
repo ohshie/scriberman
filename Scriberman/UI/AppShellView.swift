@@ -29,6 +29,10 @@ struct AppShellView: View {
     /// handler would otherwise clear the seed it was just given and send the view back to the
     /// standard detail.
     @State private var studySearchSeedItemID: String?
+    /// Bumped to ask the sidebar's search field for focus. The window owns the find shortcut, so
+    /// there is one place that decides what ⌘F means at any moment.
+    @State private var searchFocusRequest = 0
+    @FocusState private var isSessionListFocused: Bool
 
     var body: some View {
         NavigationSplitView {
@@ -44,8 +48,11 @@ struct AppShellView: View {
                 isNewSessionIdle: appState.newSessionViewModel.isIdle,
                 selection: $selectedSession,
                 onDiscardPendingSession: { appState.discardPendingSession() },
+                searchFocusRequest: searchFocusRequest,
+                onSearchEscape: { isSessionListFocused = true },
                 onOpenSearchResult: { item in openSearchResult(item) }
             )
+            .focused($isSessionListFocused)
             .toolbar(removing: .sidebarToggle)
             .navigationSplitViewColumnWidth(min: 380, ideal: 460)
         } detail: {
@@ -142,6 +149,23 @@ struct AppShellView: View {
             studySearchSeed = nil
             studySearchSeedItemID = nil
             detailMode = .standard
+        }
+        // One handler owns the find shortcut, so what ⌘F means is decided in one place rather than
+        // by whichever of two views happens to hold focus. With a transcript open it belongs to the
+        // find bar — that is the text you came to search. Otherwise the session list is the only
+        // thing there is to search, so it focuses the sidebar's field.
+        .background {
+            Button("Find") {
+                if detailMode == .study {
+                    NotificationCenter.default.post(name: .transcriptSearchRequested, object: nil)
+                } else {
+                    searchFocusRequest += 1
+                }
+            }
+            .keyboardShortcut("f", modifiers: .command)
+            .frame(width: 0, height: 0)
+            .opacity(0.001)
+            .accessibilityHidden(true)
         }
         .onChange(of: detailMode) { _, newValue in
             if newValue != .study {
