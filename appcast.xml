@@ -3,27 +3,25 @@
     <channel>
         <title>Scriberman</title>
         <item>
-            <title>1.0.5</title>
-            <pubDate>Wed, 09 Sep 2026 18:14:46 +0200</pubDate>
-            <sparkle:version>6</sparkle:version>
-            <sparkle:shortVersionString>1.0.5</sparkle:shortVersionString>
+            <title>1.0.6</title>
+            <pubDate>Thu, 10 Sep 2026 13:35:49 +0200</pubDate>
+            <sparkle:version>7</sparkle:version>
+            <sparkle:shortVersionString>1.0.6</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<h2>Scriberman 1.0.5</h2>
+            <description><![CDATA[<h2>Scriberman 1.0.6</h2>
 <h3>What’s new</h3>
 <ul>
-  <li>Organize recordings with customizable color tags.</li>
-  <li>Assign tags from a recording’s context menu or detail toolbar, then filter the recording list with tag chips.</li>
-  <li>Interrupted audio capture now resumes automatically without losing audio already recorded.</li>
-  <li>Recording rows now warn when capture was interrupted or some audio segments may be missing.</li>
+  <li>Search sessions by title or transcript, preview matching text, and jump straight to the matching passage.</li>
+  <li>Identify recordings more easily with readable tag names in the session list.</li>
 </ul>
 <h3>Fixes</h3>
 <ul>
-  <li>Improved audio alignment when capture buffers are dropped or fail to write.</li>
-  <li>Fixed tag controls that could appear empty, do nothing, or leave users stuck in a filtered list.</li>
+  <li>Deleting a session now removes leftover media and backups, freeing disk space.</li>
+  <li>Session deletion now requires confirmation from the detail view, helping prevent accidental deletion.</li>
 </ul>
 ]]></description>
-            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.0.5/Scriberman-1.0.5-6-arm64.dmg" length="7971466" type="application/octet-stream" sparkle:edSignature="HN0GY2eSY3v9SPG9JpwnAjMwzSURJe4C25x9tuxTvEAa+2xjDHpdNz0FEZLdbKwduZEplGatdRULPJ2x7vOsAQ=="/>
+            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.0.6/Scriberman-1.0.6-7-arm64.dmg" length="8008031" type="application/octet-stream" sparkle:edSignature="1Ui6W/RIfyruh2pziahrJFN6/YOG3XbR1rUAQF70DHBsTGqZmuWOF8+miB70ag5IVEzQpiDQuVg4JJ+pf6HgDw=="/>
         </item>
     </channel>
 </rss>
