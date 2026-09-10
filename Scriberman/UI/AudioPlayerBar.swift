@@ -22,13 +22,12 @@ struct AudioPlayerBar: View {
 
     var body: some View {
         Group {
-            if sessionHasAudio {
+            // Nothing until there is something to play. The bar used to float a spinner and
+            // "Getting recording ready…" over the recording, which is a progress report on a file
+            // nobody asked for yet — the recording itself is what the window is showing.
+            if sessionHasAudio, viewModel.isReady {
                 HStack(spacing: 12) {
-                    if viewModel.isReady == false {
-                        loadingContent
-                    } else {
-                        readyContent
-                    }
+                    readyContent
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -45,18 +44,6 @@ struct AudioPlayerBar: View {
         .onChange(of: mixdownURL) {
             previousMixdownURL = mixdownURL
             loadMixdownIfAvailable()
-        }
-    }
-
-    private var loadingContent: some View {
-        HStack(spacing: 10) {
-            ProgressView()
-
-            Text("Getting recording ready…")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-            Spacer(minLength: 0)
         }
     }
 
