@@ -3,25 +3,28 @@
     <channel>
         <title>Scriberman</title>
         <item>
-            <title>1.0.6</title>
-            <pubDate>Thu, 10 Sep 2026 13:35:49 +0200</pubDate>
-            <sparkle:version>7</sparkle:version>
-            <sparkle:shortVersionString>1.0.6</sparkle:shortVersionString>
+            <title>1.0.7</title>
+            <pubDate>Thu, 10 Sep 2026 19:30:10 +0200</pubDate>
+            <sparkle:version>8</sparkle:version>
+            <sparkle:shortVersionString>1.0.7</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<h2>Scriberman 1.0.6</h2>
+            <description><![CDATA[<h2>Scriberman 1.0.7</h2>
 <h3>What’s new</h3>
 <ul>
-  <li>Search sessions by title or transcript, preview matching text, and jump straight to the matching passage.</li>
-  <li>Identify recordings more easily with readable tag names in the session list.</li>
+  <li>Copy individual passages from live or finished transcripts, with timestamps now shown during recording.</li>
+  <li>Open full transcripts more easily with a dedicated “Read full transcript” button.</li>
+  <li>Manage tags in a dedicated Settings tab, opened directly by “Add new tag”.</li>
 </ul>
 <h3>Fixes</h3>
 <ul>
-  <li>Deleting a session now removes leftover media and backups, freeing disk space.</li>
-  <li>Session deletion now requires confirmation from the detail view, helping prevent accidental deletion.</li>
+  <li>Speakers now have distinct colors, including in existing transcripts.</li>
+  <li>Live transcripts use one scrolling area and pause automatic scrolling while you read or select text.</li>
+  <li>Session rows no longer slide behind the search field, and Escape reliably clears the search.</li>
+  <li>Tag labels remain readable on both selected and unselected session rows.</li>
 </ul>
 ]]></description>
-            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.0.6/Scriberman-1.0.6-7-arm64.dmg" length="8008031" type="application/octet-stream" sparkle:edSignature="1Ui6W/RIfyruh2pziahrJFN6/YOG3XbR1rUAQF70DHBsTGqZmuWOF8+miB70ag5IVEzQpiDQuVg4JJ+pf6HgDw=="/>
+            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.0.7/Scriberman-1.0.7-8-arm64.dmg" length="8021713" type="application/octet-stream" sparkle:edSignature="ejLOU48ujupOhVIStqYYy5D7abrw12SIvl3AhslB/AVkC2T8aR8OdPNEEoT11pdOYOfT/cZQsl8txJa7303CDA=="/>
         </item>
     </channel>
 </rss>
