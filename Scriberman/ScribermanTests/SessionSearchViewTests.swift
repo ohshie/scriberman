@@ -77,6 +77,42 @@ struct SessionSearchViewTests {
         #expect(source.contains("await viewModel.updateSearchMatches(for: items)"))
     }
 
+    /// The count sits outside the branch the empty state replaces, so a query matching nothing
+    /// still says how much is being withheld.
+    @Test
+    func testTheListCountIsOutsideTheEmptyStateBranch() throws {
+        let source = try jobsViewSource()
+        let branch = try #require(source.range(of: "if items.isEmpty && pendingSession == nil"))
+        let count = try #require(source.range(of: "            listCount"))
+
+        #expect(count.lowerBound > branch.lowerBound)
+        #expect(source.contains("JobsViewModel.listCountText(shown: items.count, total: totalSessionCount)"))
+    }
+
+    // MARK: - Motion
+
+    /// Three moments, each of them a change the user did not make directly: a query removes rows,
+    /// a search result moves the selection, a query matching nothing replaces the list.
+    @Test
+    func testTheListAnimatesExactlyThreeThings() throws {
+        let source = try jobsViewSource()
+
+        #expect(source.contains(".animation(listMotion, value: items)"))
+        #expect(source.contains(".animation(listMotion, value: selection)"))
+        #expect(source.contains(".animation(listMotion, value: items.isEmpty)"))
+        // Nothing else animates: no fourth call, and no `withAnimation` sprinkled through actions.
+        #expect(source.components(separatedBy: ".animation(").count - 1 == 3)
+        #expect(!source.contains("withAnimation"))
+    }
+
+    @Test
+    func testMotionIsShortAndHonoursReduceMotion() throws {
+        let source = try jobsViewSource()
+
+        #expect(source.contains("@Environment(\\.accessibilityReduceMotion) private var reduceMotion"))
+        #expect(source.contains("reduceMotion ? nil : .easeOut(duration: 0.22)"))
+    }
+
     // MARK: - Helpers
 
     /// The source from a declaration up to the next one at the same indentation, so an assertion

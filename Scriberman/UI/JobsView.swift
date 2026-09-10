@@ -5,6 +5,8 @@ struct JobsView: View {
     @Bindable var viewModel: JobsViewModel
     let items: [JobsViewModel.SessionListItem]
     let pendingSession: PendingSession?
+    /// How many sessions exist before the query and the tag filter narrow them.
+    let totalSessionCount: Int
     let isNewSessionIdle: Bool
     @Binding var selection: JobsViewModel.SessionListItem?
     let onDiscardPendingSession: () -> Void
@@ -14,7 +16,18 @@ struct JobsView: View {
     var onOpenSearchResult: (JobsViewModel.SessionListItem) -> Void = { _ in }
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isShowingTagFilter = false
+
+    /// The three moments the list animates, and nothing else.
+    ///
+    /// Each of them changes what is on screen without the user having touched the thing that
+    /// changed: a query removes rows, a search result moves the selection, a query matching nothing
+    /// replaces the whole list. Everything else here changes because someone clicked it, and needs
+    /// no explaining.
+    private var listMotion: Animation? {
+        reduceMotion ? nil : .easeOut(duration: 0.22)
+    }
 
     private var sections: [JobsViewModel.SessionDateSection] {
         viewModel.groupedSections(for: items)
@@ -31,17 +44,25 @@ struct JobsView: View {
                 if items.isEmpty && pendingSession == nil {
                     if viewModel.activeSearchQuery != nil {
                         emptyState(title: "No Results", systemImage: "magnifyingglass")
+                            .transition(.opacity)
                     } else {
                         emptyState(
                             title: "No Sessions Yet",
                             systemImage: "list.bullet.rectangle",
                             message: "Record or import audio to start building your session history."
                         )
+                        .transition(.opacity)
                     }
                 } else {
                     sessionList
+                        .transition(.opacity)
                 }
             }
+            // The empty state replaces the largest region of the window; a cut there reads as the
+            // window having been redrawn rather than as a search having found nothing.
+            .animation(listMotion, value: items.isEmpty)
+
+            listCount
         }
         .navigationTitle("Jobs")
         .task {
@@ -63,6 +84,20 @@ struct JobsView: View {
 
             onDiscardPendingSession()
         }
+    }
+
+    /// What the list holds, under the list.
+    ///
+    /// Under it rather than in the search row: it summarises what is above it, and the search row
+    /// already carries the two controls that cause it to change.
+    private var listCount: some View {
+        Text(JobsViewModel.listCountText(shown: items.count, total: totalSessionCount))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .overlay(alignment: .top) { Divider() }
     }
 
     /// The search field, with the tag filter beside it.
@@ -190,6 +225,10 @@ struct JobsView: View {
             }
         }
         .listStyle(.sidebar)
+        // Rows leaving as a query narrows the list, and the selection moving — including when a
+        // search result moves it, which the user did not do by clicking a row.
+        .animation(listMotion, value: items)
+        .animation(listMotion, value: selection)
     }
 
     @ViewBuilder

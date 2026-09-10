@@ -332,6 +332,18 @@ final class JobsViewModel {
         }
     }
 
+    /// What the list says about its own size, given what it holds and what is being shown.
+    ///
+    /// A filtered list and a short library look identical once the last row has scrolled past, and
+    /// the conclusion a user draws from a list shorter than they remember is that recordings are
+    /// missing. Narrowed or not, the list states which it is.
+    static func listCountText(shown: Int, total: Int) -> String {
+        guard shown != total else {
+            return "\(total) recording\(total == 1 ? "" : "s")"
+        }
+        return "\(shown) of \(total) match"
+    }
+
     /// Tags whose chips are lit. Empty means unfiltered.
     ///
     /// Held here alongside the item construction it affects, rather than in a separate filtering
