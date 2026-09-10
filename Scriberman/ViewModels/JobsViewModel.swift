@@ -44,6 +44,15 @@ final class JobsViewModel {
         }
     }
 
+    /// What a search query matched a session on.
+    ///
+    /// A distinction the results have to keep: only a transcript match has a line to quote, so only
+    /// a transcript match carries a snippet.
+    enum SessionSearchMatchKind: Hashable {
+        case title
+        case transcript
+    }
+
     enum SessionDateGroup: CaseIterable, Identifiable, Hashable {
         case today
         case yesterday
@@ -168,7 +177,7 @@ final class JobsViewModel {
         }
 
         let combined = (recordingItems + importedItems).sorted { $0.createdAt > $1.createdAt }
-        return applyingTagFilter(to: combined)
+        return applyingSearchQuery(to: applyingTagFilter(to: combined))
     }
 
     /// Narrows the list to recordings carrying any of the selected tags.
@@ -200,6 +209,126 @@ final class JobsViewModel {
         return items.filter { item in
             guard case .recording(let session) = item else { return false }
             return session.tags.contains { effective.contains($0.id) }
+        }
+    }
+
+    /// What the search field holds. Empty, or nothing but whitespace, means no search.
+    ///
+    /// Beside `selectedTagIDs` rather than in a layer of its own: the two narrow the same list and
+    /// combine with AND, and keeping them together is what makes that composition visible.
+    var searchQuery: String = ""
+
+    /// The query with its surrounding whitespace removed, or `nil` when there is nothing to search
+    /// for. Every search path goes through this, so "    " and "" behave identically.
+    var activeSearchQuery: String? {
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Narrows the list to sessions whose title or transcript contains the query.
+    ///
+    /// Applied after the tag filter, which is what makes the two AND: tags narrow the set, the
+    /// query searches within it.
+    ///
+    /// A query that matches nothing yields an empty list. It deliberately does not fall back to
+    /// showing everything — a list that ignores the query looks like a search that found the whole
+    /// library.
+    ///
+    /// Matching is `localizedStandardContains`, which is case- and diacritic-insensitive, the same
+    /// comparison the in-transcript find bar uses. A pending session drops out while a query is
+    /// active: it has no transcript and no title of its own yet, so it cannot match, and leaving it
+    /// in would put a row in the results the query says nothing about.
+    private func applyingSearchQuery(to items: [SessionListItem]) -> [SessionListItem] {
+        guard let query = activeSearchQuery else { return items }
+        return items.filter { Self.matches(query: query, item: $0) != nil }
+    }
+
+    /// How an item matched a query, or `nil` when it did not.
+    ///
+    /// A session can match on both; the transcript wins, because that is the match a snippet can be
+    /// built from.
+    static func matches(query: String, item: SessionListItem) -> SessionSearchMatchKind? {
+        switch item {
+        case .pending:
+            return nil
+        case .recording(let session):
+            return matches(query: query, title: session.title, searchableText: session.searchableText)
+        case .imported(let session):
+            return matches(query: query, title: session.title, searchableText: session.searchableText)
+        }
+    }
+
+    private static func matches(
+        query: String,
+        title: String,
+        searchableText: String?
+    ) -> SessionSearchMatchKind? {
+        if searchableText?.localizedStandardContains(query) == true {
+            return .transcript
+        }
+        if title.localizedStandardContains(query) {
+            return .title
+        }
+        return nil
+    }
+
+    /// Where the query matched inside each transcript result, keyed by list item id.
+    ///
+    /// Stage two of the search, and the expensive half: it decodes transcripts. Only sessions that
+    /// survived narrowing are in here, and only after the query has settled.
+    private(set) var searchMatches: [String: SessionSearchMatch] = [:]
+
+    /// How long the query must hold still before transcripts are decoded.
+    ///
+    /// Narrowing runs per keystroke — it reads a stored string. Locating does not: every keystroke
+    /// would decode every surviving transcript again.
+    static let searchMatchDebounce: Duration = .milliseconds(200)
+
+    /// Recomputes `searchMatches` for the current query once it settles.
+    ///
+    /// Cancellable by design: called from a `.task(id:)` that restarts on every keystroke, so an
+    /// in-flight debounce is discarded rather than decoding for a query the user has moved past.
+    func updateSearchMatches(
+        for items: [SessionListItem],
+        debounce: Duration = JobsViewModel.searchMatchDebounce
+    ) async {
+        guard let query = activeSearchQuery else {
+            searchMatches = [:]
+            return
+        }
+
+        try? await Task.sleep(for: debounce)
+        guard !Task.isCancelled else { return }
+
+        searchMatches = Self.searchMatches(query: query, items: items)
+    }
+
+    /// Decodes the transcript of every item that matched on transcript text, and locates the query
+    /// in it. Title-only matches are absent, which is what leaves their rows without a snippet.
+    static func searchMatches(query: String, items: [SessionListItem]) -> [String: SessionSearchMatch] {
+        var located: [String: SessionSearchMatch] = [:]
+        for item in items where matches(query: query, item: item) == .transcript {
+            guard let transcript = displayedTranscript(for: item),
+                  let match = SessionSearchSnippetBuilder.match(query: query, in: transcript) else {
+                continue
+            }
+            located[item.id] = match
+        }
+        return located
+    }
+
+    /// The pass a session displays, for the items the list is built from.
+    ///
+    /// The same `retranscript ?? transcript` the study view opens with — the snippet has to come
+    /// from the text the user will see there, or the match would not be found again.
+    static func displayedTranscript(for item: SessionListItem) -> Transcript? {
+        switch item {
+        case .pending:
+            return nil
+        case .recording(let session):
+            return session.retranscript ?? session.transcript
+        case .imported(let session):
+            return session.retranscript ?? session.transcript
         }
     }
 

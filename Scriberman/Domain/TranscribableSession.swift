@@ -45,6 +45,7 @@ protocol TranscribableSession: AnyObject {
     var transcriptData: Data? { get set }
     var retranscriptData: Data? { get set }
     var aiTransformationsData: Data? { get set }
+    var searchableText: String? { get set }
 
     var status: RecordingStatus { get set }
     var transcript: Transcript? { get set }
@@ -52,6 +53,29 @@ protocol TranscribableSession: AnyObject {
 }
 
 extension TranscribableSession {
+    /// Recomputes the stored searchable text from the transcript pass the app displays.
+    ///
+    /// `retranscript ?? transcript`, the same choice `displayedTranscript` makes everywhere else,
+    /// so a session is findable by the text it shows when opened rather than by a superseded pass.
+    /// Called by the transcript setters; no call site has to remember it.
+    func refreshSearchableText() {
+        searchableText = (retranscript ?? transcript)?.fullText
+    }
+
+    /// Restores both transcript passes from previously stored blobs, keeping the searchable text
+    /// in step.
+    ///
+    /// Assigning the blobs is deliberate: routing a restore through the `Transcript` setters would
+    /// decode and re-encode, and a blob that failed to decode would be silently replaced by `nil` —
+    /// losing the original transcript exactly when it is being recovered. The rule that keeps the
+    /// searchable text current is preserved by keeping the assignment here, in the model layer,
+    /// where the refresh is guaranteed to follow.
+    func restoreTranscripts(transcriptData restoredTranscript: Data?, retranscriptData restoredRetranscript: Data?) {
+        transcriptData = restoredTranscript
+        retranscriptData = restoredRetranscript
+        refreshSearchableText()
+    }
+
     var aiTransformations: [AITransformation] {
         get {
             guard let aiTransformationsData else { return [] }

@@ -136,8 +136,10 @@ final class AudioTrimService {
         }
 
         // Restore transcript blobs
-        session.transcriptData = session.originalTranscriptData
-        session.retranscriptData = session.originalRetranscriptData
+        session.restoreTranscripts(
+            transcriptData: session.originalTranscriptData,
+            retranscriptData: session.originalRetranscriptData
+        )
 
         // Clear all trim state
         session.originalMixdownURL = nil
