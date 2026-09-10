@@ -10,10 +10,15 @@ struct JobsView: View {
     let isNewSessionIdle: Bool
     @Binding var selection: JobsViewModel.SessionListItem?
     let onDiscardPendingSession: () -> Void
+    /// Bumped by the window when something asks for the search field — the find shortcut, for now.
+    var searchFocusRequest: Int = 0
+    /// Called when Escape is pressed on an already empty field, so focus can go back to the list.
+    var onSearchEscape: () -> Void = {}
     /// Called when a row is clicked while a search is active, including when that row is already
     /// selected — a selection binding that does not change reports nothing, and clicking a result
     /// again still has to move the view to its match.
     var onOpenSearchResult: (JobsViewModel.SessionListItem) -> Void = { _ in }
+
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -43,8 +48,6 @@ struct JobsView: View {
         // chips inside `listContent`, so filtering down to nothing replaced them with the empty
         // state and left no way to unfilter.
         VStack(spacing: 0) {
-            searchBar
-
             Group {
                 if items.isEmpty && pendingSession == nil {
                     if viewModel.activeSearchQuery != nil {
@@ -68,6 +71,15 @@ struct JobsView: View {
             .animation(listMotion, value: items.isEmpty)
 
             listCount
+        }
+        // The search row is a safe-area inset rather than a sibling in the stack. As a sibling the
+        // list still scrolled its content up behind it — rows and the section header would slide
+        // under the field and stay there until the list was dragged back down. An inset makes the
+        // scroll view reserve the space, and the material keeps anything passing beneath it hidden
+        // rather than showing through.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            searchBar
+                .background(.bar)
         }
         .navigationTitle("Jobs")
         .task {
@@ -111,32 +123,15 @@ struct JobsView: View {
     /// the thing that disappears when the list empties.
     private var searchBar: some View {
         HStack(alignment: .center, spacing: 8) {
-            HStack(alignment: .center, spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .imageScale(.small)
-                    .foregroundStyle(.secondary)
-
-                TextField("Search", text: $viewModel.searchQuery)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity)
-
-                if !viewModel.searchQuery.isEmpty {
-                    Button {
-                        viewModel.searchQuery = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .imageScale(.small)
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            // One line, fixed. Left to itself the plain field grows to whatever height is going,
-            // and the glyph and the text end up on separate lines inside the capsule.
-            .frame(height: 22)
-            .padding(.horizontal, 8)
-            .background(Capsule().fill(Color.secondary.opacity(0.12)))
+            // The system's own search field: its metrics, placeholder, clear button and focus ring,
+            // rather than ours. The filter sits beside it because it narrows the same set.
+            NativeSearchField(
+                text: $viewModel.searchQuery,
+                prompt: "Search",
+                focusRequest: searchFocusRequest,
+                onEscapeWhileEmpty: onSearchEscape
+            )
+            .frame(height: 24)
 
             tagFilterButton
         }
