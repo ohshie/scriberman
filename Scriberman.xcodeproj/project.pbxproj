@@ -67,6 +67,7 @@
 		7B2D1F6C1C3A5B0D9E4F6007 /* SessionTagLineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D1F6C1C3A5B0D9E4F6008 /* SessionTagLineView.swift */; };
 		7B2D1F6C1C3A5B0D9E4F6001 /* RecordingTag.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D1F6C1C3A5B0D9E4F6002 /* RecordingTag.swift */; };
 		7B2D1F6C1C3A5B0D9E4F6003 /* TagService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D1F6C1C3A5B0D9E4F6004 /* TagService.swift */; };
+		9B693FF53CA84B20B9CF2510 /* NativeSearchField.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2A28D94B39347CB97062D11 /* NativeSearchField.swift */; };
 		D250B80EF8534B979CFDB1FF /* SpeakerPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71C9878777924FCDAE9968D5 /* SpeakerPalette.swift */; };
 		D5BD529FEF9C4809A92C211A /* SearchSnippetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04CABF824A9C402A8CDC6F5E /* SearchSnippetView.swift */; };
 		A05177444CA54BAB8A64F1D9 /* SessionSearchSnippet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92AEBC33667240FD8FAD9138 /* SessionSearchSnippet.swift */; };
@@ -342,6 +343,7 @@
 		7B2D1F6C1C3A5B0D9E4F6008 /* SessionTagLineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/SessionTagLineView.swift"; sourceTree = SOURCE_ROOT; };
 		7B2D1F6C1C3A5B0D9E4F6002 /* RecordingTag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Domain/RecordingTag.swift"; sourceTree = SOURCE_ROOT; };
 		7B2D1F6C1C3A5B0D9E4F6004 /* TagService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Tags/TagService.swift"; sourceTree = SOURCE_ROOT; };
+		F2A28D94B39347CB97062D11 /* NativeSearchField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/NativeSearchField.swift"; sourceTree = SOURCE_ROOT; };
 		71C9878777924FCDAE9968D5 /* SpeakerPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Helpers/SpeakerPalette.swift"; sourceTree = SOURCE_ROOT; };
 		04CABF824A9C402A8CDC6F5E /* SearchSnippetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/SearchSnippetView.swift"; sourceTree = SOURCE_ROOT; };
 		92AEBC33667240FD8FAD9138 /* SessionSearchSnippet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Search/SessionSearchSnippet.swift"; sourceTree = SOURCE_ROOT; };
@@ -843,6 +845,7 @@
 				7B2D1F6C1C3A5B0D9E4F6008 /* SessionTagLineView.swift */,
 				7B2D1F6C1C3A5B0D9E4F6002 /* RecordingTag.swift */,
 				7B2D1F6C1C3A5B0D9E4F6004 /* TagService.swift */,
+				F2A28D94B39347CB97062D11 /* NativeSearchField.swift */,
 				71C9878777924FCDAE9968D5 /* SpeakerPalette.swift */,
 				04CABF824A9C402A8CDC6F5E /* SearchSnippetView.swift */,
 				92AEBC33667240FD8FAD9138 /* SessionSearchSnippet.swift */,
@@ -1264,6 +1267,7 @@
 				7B2D1F6C1C3A5B0D9E4F6007 /* SessionTagLineView.swift in Sources */,
 				7B2D1F6C1C3A5B0D9E4F6001 /* RecordingTag.swift in Sources */,
 				7B2D1F6C1C3A5B0D9E4F6003 /* TagService.swift in Sources */,
+				9B693FF53CA84B20B9CF2510 /* NativeSearchField.swift in Sources */,
 				D250B80EF8534B979CFDB1FF /* SpeakerPalette.swift in Sources */,
 				D5BD529FEF9C4809A92C211A /* SearchSnippetView.swift in Sources */,
 				A05177444CA54BAB8A64F1D9 /* SessionSearchSnippet.swift in Sources */,
