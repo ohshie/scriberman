@@ -45,6 +45,19 @@ struct ScribermanApp: App {
         }
     }
 
+    /// Gives existing sessions the text app-wide search narrows on.
+    ///
+    /// Separate from `prepareTags` because it fails differently: a failure here costs search over
+    /// old sessions until the next launch, and nothing else.
+    private static func prepareSearchText(in context: ModelContext) {
+        let logger = Logger(subsystem: "Scriberman", category: "ScribermanApp")
+        do {
+            _ = try SessionSearchTextBackfill().backfill(in: context)
+        } catch {
+            logger.error("Backfilling search text failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -57,6 +70,7 @@ struct ScribermanApp: App {
                     // macOS resets to the bundle icon on every launch, so re-apply the choice.
                     appState.appIconPreferences.apply()
                     ScribermanApp.prepareTags(in: modelContainer.mainContext)
+                    ScribermanApp.prepareSearchText(in: modelContainer.mainContext)
                     await appState.bootstrapWorkspace()
                 }
                 .onChange(of: appState.dictationService.state) { _, _ in

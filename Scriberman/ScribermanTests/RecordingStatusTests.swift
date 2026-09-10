@@ -290,15 +290,16 @@ struct RecordingStatusTests {
         #expect(detail.contains("if let recording = session as? RecordingSession"))
     }
 
-    /// The chips must survive a filter that matches nothing. They used to live inside the branch
-    /// that the empty state replaces, so filtering to zero removed the only way to unfilter.
+    /// The search field and the filter control must survive a filter or query that matches
+    /// nothing. They used to be chips inside the branch that the empty state replaces, so filtering
+    /// to zero removed the only way to unfilter.
     @Test
-    func testFilterChipsRenderOutsideTheEmptyStateBranch() throws {
+    func testTheSearchBarRendersOutsideTheEmptyStateBranch() throws {
         let source = try jobsViewSource()
-        let chipsRange = try #require(source.range(of: "tagFilterChips"))
+        let searchBarRange = try #require(source.range(of: "            searchBar"))
         let emptyStateRange = try #require(source.range(of: "if items.isEmpty && pendingSession == nil"))
-        // Chips are placed before the branch, not inside its else.
-        #expect(chipsRange.lowerBound < emptyStateRange.lowerBound)
+        // Placed before the branch, not inside its else.
+        #expect(searchBarRange.lowerBound < emptyStateRange.lowerBound)
         #expect(!source.contains("private var listContent"))
     }
 

@@ -4,6 +4,9 @@ struct RecordingSessionRow: View {
     let session: RecordingSession
     let onTranscribe: () -> Void
     let onRetry: () -> Void
+    /// The line a search matched inside this session's transcript, when it was reached by search.
+    /// Absent for a title match — there is no transcript hit to show — and for an unsearched list.
+    var searchSnippet: SessionSearchSnippet? = nil
     @State private var isPulsing = false
 
     var body: some View {
@@ -29,6 +32,10 @@ struct RecordingSessionRow: View {
                 .lineLimit(1)
 
                 SessionTagLineView(tags: session.tags)
+
+                if let searchSnippet {
+                    SearchSnippetView(snippet: searchSnippet)
+                }
 
                 if session.screenCaptureWarning != nil {
                     Label("Screen recording failed", systemImage: "exclamationmark.triangle.fill")
