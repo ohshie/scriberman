@@ -319,13 +319,63 @@ final class JobsViewModel {
         try? context.save()
     }
 
-    func delete(session: RecordingSession, context: ModelContext) {
-        let micAudioURL = URL(fileURLWithPath: session.micAudioURL)
-        if FileManager.default.fileExists(atPath: micAudioURL.path) {
-            try? FileManager.default.removeItem(at: micAudioURL)
-        }
+    /// Deletes a recording and everything it produced.
+    ///
+    /// The whole folder goes, not a list of known file names. That list has grown twice already —
+    /// `.timing` sidecars, then trim backups — and each addition would have leaked silently until
+    /// somebody remembered to extend it. Removing the container has no such failure mode.
+    ///
+    /// The record is deleted even when the folder cannot be, so a session never becomes
+    /// undeletable because of something wrong with its path.
+    func delete(session: RecordingSession, context: ModelContext) async {
+        let folder = URL(fileURLWithPath: session.micAudioURL).deletingLastPathComponent()
+        await removeSessionFolder(folder)
         context.delete(session)
         try? context.save()
+    }
+
+    /// Removes a session's folder, if it is one this application is allowed to remove.
+    ///
+    /// A refusal is not a failure of the delete: the caller still drops the record. A session whose
+    /// stored path is wrong should stop appearing in the list, not become permanent.
+    private func removeSessionFolder(_ folder: URL) async {
+        guard let workspace = await workspaceService.currentWorkspace() else {
+            logger.error("Refusing to remove a session folder with no workspace available.")
+            return
+        }
+        guard Self.isRemovableSessionFolder(folder, in: workspace) else {
+            logger.error(
+                "Refusing to remove a session folder outside the workspace: \(folder.path, privacy: .public)"
+            )
+            return
+        }
+        do {
+            try FileManager.default.removeItem(at: folder)
+        } catch CocoaError.fileNoSuchFile {
+            // Already gone. Nothing to report.
+        } catch {
+            logger.error(
+                "Failed to remove session folder \(folder.path, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    /// Whether `folder` sits strictly inside one of the workspace areas sessions live in.
+    ///
+    /// This exists because the input is a path from the store and the operation is a recursive
+    /// directory delete. A truncated or hand-edited path could resolve its parent to the workspace
+    /// root, a home directory, or `/`. Paths are standardised and symlink-resolved first, so `..`
+    /// segments and symlinks cannot step outside a prefix that merely matches textually.
+    ///
+    /// The area roots themselves are excluded: `recordings/` is never a session folder, and
+    /// removing it would take every session with it.
+    static func isRemovableSessionFolder(_ folder: URL, in workspace: Workspace) -> Bool {
+        let resolved = folder.standardizedFileURL.resolvingSymlinksInPath()
+        return [workspace.recordingsURL, workspace.importsURL].contains { root in
+            let resolvedRoot = root.standardizedFileURL.resolvingSymlinksInPath()
+            guard resolved != resolvedRoot else { return false }
+            return resolved.path.hasPrefix(resolvedRoot.path + "/")
+        }
     }
 
     func importAudio(urls: [URL], context: ModelContext) async {
@@ -428,16 +478,16 @@ final class JobsViewModel {
         try transcriptExportService.write(markdown, to: destinationURL)
     }
 
-    func deleteImported(session: ImportedSession, context: ModelContext) {
+    /// Deletes an imported session and its folder.
+    ///
+    /// Unconditionally, where this previously removed the folder only when it happened to be empty
+    /// afterwards. Two rules for two session types would be a distinction with nothing behind it,
+    /// and the old one was not even conservative — an unexpected file quietly preserved a folder
+    /// nobody would look in again.
+    func deleteImported(session: ImportedSession, context: ModelContext) async {
         if let mixdownPath = session.mixdownURL {
-            let mixdownURL = URL(fileURLWithPath: mixdownPath)
-            if FileManager.default.fileExists(atPath: mixdownURL.path) {
-                try? FileManager.default.removeItem(at: mixdownURL)
-            }
-            let folderURL = mixdownURL.deletingLastPathComponent()
-            if let remaining = try? FileManager.default.contentsOfDirectory(atPath: folderURL.path), remaining.isEmpty {
-                try? FileManager.default.removeItem(at: folderURL)
-            }
+            let folder = URL(fileURLWithPath: mixdownPath).deletingLastPathComponent()
+            await removeSessionFolder(folder)
         }
         context.delete(session)
         try? context.save()

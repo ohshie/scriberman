@@ -213,6 +213,173 @@ final class JobsViewModelTests {
         #expect(!(shouldDiscardWhenPendingSelected))
     }
 
+    // MARK: - Deletion
+
+    /// A workspace rooted in a fresh temporary directory, with the two areas sessions live in.
+    private func makeTemporaryWorkspace() throws -> Workspace {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspace = Workspace(rootURL: root)
+        try FileManager.default.createDirectory(at: workspace.recordingsURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: workspace.importsURL, withIntermediateDirectories: true)
+        return workspace
+    }
+
+    /// A session folder holding everything a real recording leaves behind.
+    @discardableResult
+    private func makePopulatedSessionFolder(in parent: URL, named name: String) throws -> URL {
+        let folder = parent.appendingPathComponent(name, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for file in ["mic.wav", "app.wav", "recording.m4a", "mic.wav.timing", "app.wav.timing", "screen.mov"] {
+            try Data("x".utf8).write(to: folder.appendingPathComponent(file))
+        }
+        return folder
+    }
+
+    // MARK: Containment guard
+
+    @Test
+    func testAFolderInsideTheRecordingsAreaIsRemovable() throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
+        let folder = workspace.recordingsURL.appendingPathComponent("Recording Jan 01 at 10-00 ab")
+        #expect(JobsViewModel.isRemovableSessionFolder(folder, in: workspace))
+    }
+
+    @Test
+    func testAFolderInsideTheImportsAreaIsRemovable() throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
+        let folder = workspace.importsURL.appendingPathComponent("some-import")
+        #expect(JobsViewModel.isRemovableSessionFolder(folder, in: workspace))
+    }
+
+    /// The area roots are not session folders. Removing `recordings/` would take every session.
+    @Test
+    func testTheAreaRootsThemselvesAreNotRemovable() throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
+        #expect(!JobsViewModel.isRemovableSessionFolder(workspace.recordingsURL, in: workspace))
+        #expect(!JobsViewModel.isRemovableSessionFolder(workspace.importsURL, in: workspace))
+        #expect(!JobsViewModel.isRemovableSessionFolder(workspace.rootURL, in: workspace))
+    }
+
+    @Test
+    func testAFolderOutsideTheWorkspaceIsNotRemovable() throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
+        #expect(!JobsViewModel.isRemovableSessionFolder(URL(fileURLWithPath: "/"), in: workspace))
+        #expect(!JobsViewModel.isRemovableSessionFolder(
+            URL(fileURLWithPath: NSHomeDirectory()), in: workspace
+        ))
+    }
+
+    /// The reason the check resolves paths rather than comparing strings: a prefix can match
+    /// textually while pointing somewhere else entirely.
+    @Test
+    func testAPathEscapingWithDotDotIsNotRemovable() throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
+        let escaping = workspace.recordingsURL
+            .appendingPathComponent("..")
+            .appendingPathComponent("..")
+            .appendingPathComponent("somewhere-else")
+        #expect(!JobsViewModel.isRemovableSessionFolder(escaping, in: workspace))
+    }
+
+    // MARK: Recording deletion
+
+    @Test
+    func testDeletingARecordingRemovesItsWholeFolder() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
+        workspaceService.currentWorkspaceResult = workspace
+        let folder = try makePopulatedSessionFolder(in: workspace.recordingsURL, named: "Recording A")
+
+        let session = RecordingSession(
+            duration: 60,
+            micAudioURL: folder.appendingPathComponent("mic.wav").path,
+            title: "A"
+        )
+        context.insert(session)
+        try context.save()
+
+        await viewModel.delete(session: session, context: context)
+
+        // The folder goes, not just mic.wav — app audio, the mixdown, both sidecars and the screen
+        // recording used to survive a delete forever.
+        #expect(!FileManager.default.fileExists(atPath: folder.path))
+        #expect(try context.fetch(FetchDescriptor<RecordingSession>()).isEmpty)
+    }
+
+    @Test
+    func testDeletingARecordingWithNoFilesLeftStillRemovesTheRecord() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
+        workspaceService.currentWorkspaceResult = workspace
+
+        let session = RecordingSession(
+            duration: 60,
+            micAudioURL: workspace.recordingsURL
+                .appendingPathComponent("Gone").appendingPathComponent("mic.wav").path,
+            title: "Gone"
+        )
+        context.insert(session)
+        try context.save()
+
+        await viewModel.delete(session: session, context: context)
+
+        #expect(try context.fetch(FetchDescriptor<RecordingSession>()).isEmpty)
+    }
+
+    /// A refusal must not make the session undeletable — the row goes, the directory stays.
+    @Test
+    func testARecordingPointingOutsideTheWorkspaceKeepsItsFolderButLosesItsRecord() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
+        workspaceService.currentWorkspaceResult = workspace
+
+        let outside = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: outside) }
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: outside.appendingPathComponent("mic.wav"))
+
+        let session = RecordingSession(
+            duration: 60,
+            micAudioURL: outside.appendingPathComponent("mic.wav").path,
+            title: "Outside"
+        )
+        context.insert(session)
+        try context.save()
+
+        await viewModel.delete(session: session, context: context)
+
+        #expect(FileManager.default.fileExists(atPath: outside.path))
+        #expect(try context.fetch(FetchDescriptor<RecordingSession>()).isEmpty)
+    }
+
+    // MARK: Imported deletion
+
+    @Test
+    func testDeletingAnImportedSessionRemovesItsFolderEvenWithOtherFilesInIt() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
+        workspaceService.currentWorkspaceResult = workspace
+        let folder = try makePopulatedSessionFolder(in: workspace.importsURL, named: "Imported A")
+
+        let session = makeImportedSession(createdAt: makeDate(year: 2026, month: 3, day: 20, hour: 8))
+        session.mixdownURL = folder.appendingPathComponent("recording.m4a").path
+        context.insert(session)
+        try context.save()
+
+        await viewModel.deleteImported(session: session, context: context)
+
+        // Previously the folder survived unless it happened to be empty afterwards.
+        #expect(!FileManager.default.fileExists(atPath: folder.path))
+        #expect(try context.fetch(FetchDescriptor<ImportedSession>()).isEmpty)
+    }
+
     // MARK: - Tag filtering
 
     private func tagged(_ session: RecordingSession, _ tags: [RecordingTag]) -> RecordingSession {

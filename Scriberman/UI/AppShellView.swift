@@ -224,7 +224,7 @@ struct AppShellView: View {
                         appState.jobsViewModel.reprocess(session: session, context: modelContext)
                     },
                     onDelete: {
-                        appState.jobsViewModel.delete(session: session, context: modelContext)
+                        Task { await appState.jobsViewModel.delete(session: session, context: modelContext) }
                         selectedSession = nil
                     },
                     onOpenStudy: {
@@ -261,7 +261,7 @@ struct AppShellView: View {
                         appState.jobsViewModel.reprocess(session: session, context: modelContext)
                     },
                     onDelete: {
-                        appState.jobsViewModel.deleteImported(session: session, context: modelContext)
+                        Task { await appState.jobsViewModel.deleteImported(session: session, context: modelContext) }
                         selectedSession = nil
                     },
                     onOpenStudy: {

@@ -10,7 +10,6 @@ struct JobsView: View {
     let onDiscardPendingSession: () -> Void
 
     @Environment(\.modelContext) private var modelContext
-    @State private var showClearAllConfirmation = false
 
     private var sections: [JobsViewModel.SessionDateSection] {
         viewModel.groupedSections(for: items)
@@ -36,18 +35,6 @@ struct JobsView: View {
             }
         }
         .navigationTitle("Jobs")
-        .confirmationDialog(
-            "Clear All Sessions",
-            isPresented: $showClearAllConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Clear All", role: .destructive) {
-                clearAll()
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This permanently deletes every session from the workspace.")
-        }
         .task {
             await viewModel.refresh()
         }
@@ -121,26 +108,10 @@ struct JobsView: View {
                     ForEach(section.items) { item in
                         row(for: item)
                             .tag(item)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                deleteButton(for: item)
-                            }
                             .contextMenu {
                                 tagMenu(for: item)
                             }
                     }
-                }
-            }
-
-            if !items.isEmpty {
-                Section {
-                    Button(role: .destructive) {
-                        showClearAllConfirmation = true
-                    } label: {
-                        Label("Clear All", systemImage: "trash")
-                    }
-                    .disabled(items.isEmpty)
-                } footer: {
-                    Text("Deletes every session after confirmation.")
                 }
             }
         }
@@ -178,32 +149,6 @@ struct JobsView: View {
     }
 
     @ViewBuilder
-    private func deleteButton(for item: JobsViewModel.SessionListItem) -> some View {
-        switch item {
-        case .pending:
-            EmptyView()
-        case .recording(let session):
-            Button(role: .destructive) {
-                viewModel.delete(session: session, context: modelContext)
-                if selection == item {
-                    selection = nil
-                }
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
-        case .imported(let session):
-            Button(role: .destructive) {
-                viewModel.deleteImported(session: session, context: modelContext)
-                if selection == item {
-                    selection = nil
-                }
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
-        }
-    }
-
-    @ViewBuilder
     private func emptyState(title: String, systemImage: String, message: String) -> some View {
         VStack {
             Spacer()
@@ -213,17 +158,4 @@ struct JobsView: View {
         }
     }
 
-    private func clearAll() {
-        for item in items {
-            switch item {
-            case .pending:
-                continue
-            case .recording(let session):
-                viewModel.delete(session: session, context: modelContext)
-            case .imported(let session):
-                viewModel.deleteImported(session: session, context: modelContext)
-            }
-        }
-        selection = nil
-    }
 }
