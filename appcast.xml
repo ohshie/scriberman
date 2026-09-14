@@ -3,28 +3,20 @@
     <channel>
         <title>Scriberman</title>
         <item>
-            <title>1.0.7</title>
-            <pubDate>Thu, 10 Sep 2026 19:30:10 +0200</pubDate>
-            <sparkle:version>8</sparkle:version>
-            <sparkle:shortVersionString>1.0.7</sparkle:shortVersionString>
+            <title>1.0.8</title>
+            <pubDate>Mon, 14 Sep 2026 18:26:44 +0200</pubDate>
+            <sparkle:version>9</sparkle:version>
+            <sparkle:shortVersionString>1.0.8</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<h2>Scriberman 1.0.7</h2>
-<h3>What’s new</h3>
-<ul>
-  <li>Copy individual passages from live or finished transcripts, with timestamps now shown during recording.</li>
-  <li>Open full transcripts more easily with a dedicated “Read full transcript” button.</li>
-  <li>Manage tags in a dedicated Settings tab, opened directly by “Add new tag”.</li>
-</ul>
+            <description><![CDATA[<h2>Scriberman 1.0.8</h2>
 <h3>Fixes</h3>
 <ul>
-  <li>Speakers now have distinct colors, including in existing transcripts.</li>
-  <li>Live transcripts use one scrolling area and pause automatic scrolling while you read or select text.</li>
-  <li>Session rows no longer slide behind the search field, and Escape reliably clears the search.</li>
-  <li>Tag labels remain readable on both selected and unselected session rows.</li>
+  <li>Copying a full transcript now includes speaker labels and timestamps, matching the exported text.</li>
+  <li>The microphone picker now excludes devices that cannot capture audio, preventing silent recordings caused by selecting speakers.</li>
 </ul>
 ]]></description>
-            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.0.7/Scriberman-1.0.7-8-arm64.dmg" length="8021713" type="application/octet-stream" sparkle:edSignature="ejLOU48ujupOhVIStqYYy5D7abrw12SIvl3AhslB/AVkC2T8aR8OdPNEEoT11pdOYOfT/cZQsl8txJa7303CDA=="/>
+            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.0.8/Scriberman-1.0.8-9-arm64.dmg" length="16103502" type="application/octet-stream" sparkle:edSignature="20udTlwWrxt+HJLUTdlmxZvl3gP7cM98tUsE8qk4mxyj4GG5ZwavtCY4hV9cnLb8JSB+iwEdkRGtKGk1r3RWCA=="/>
         </item>
     </channel>
 </rss>
