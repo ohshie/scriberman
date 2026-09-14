@@ -524,14 +524,24 @@ struct AppShellView: View {
         session.retranscript ?? session.transcript
     }
 
+    /// Copies the transcript as the export writes it — the same rendering, speakers and times
+    /// included.
+    ///
+    /// It used to copy `transcript.fullText`: the words with nothing around them. Two actions beside
+    /// each other in one toolbar, apparently doing the same thing to the same transcript, quietly
+    /// yielding different text — a difference nobody could see until after they had pasted. A
+    /// conversation between several people is barely usable without knowing who said what.
+    ///
+    /// The copy control on an individual block stays unattributed: its subject is a quotation, where
+    /// the speaker and the time are what the quoter would delete.
     private func copyTranscript(for session: any TranscribableSession) {
-        guard let transcript = displayedTranscript(for: session) else {
+        guard let markdown = appState.jobsViewModel.renderedTranscript(for: session) else {
             return
         }
 
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(transcript.fullText, forType: .string)
+        pasteboard.setString(markdown, forType: .string)
     }
 
     private func exportTranscript(for session: any TranscribableSession) {

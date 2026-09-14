@@ -626,6 +626,59 @@ final class JobsViewModelTests {
         #expect(items.first?.id == JobsViewModel.SessionListItem.recording(refreshedRecording).id)
     }
 
+    // MARK: - Copy and export are one rendering
+
+    /// Copying a transcript used to put `transcript.fullText` on the clipboard — the words with
+    /// nothing around them — while exporting the same transcript wrote it attributed and timed.
+    @Test
+    func testTheRenderedTranscriptNamesSpeakersAndTimes() throws {
+        let session = makeSession(status: RecordingStatus.done)
+        session.transcript = makeTranscript()
+
+        let rendered = try #require(viewModel.renderedTranscript(for: session))
+
+        #expect(rendered.hasPrefix("# Session"))
+        #expect(rendered.contains("Date: "))
+        #expect(rendered.contains("Duration: "))
+        #expect(rendered.contains("**Speaker 1** [00:00 – 00:02]"))
+        // Not the bare run of words the clipboard used to get.
+        #expect(rendered != session.transcript?.fullText)
+    }
+
+    /// The same rendering serves both, so the two cannot drift apart again.
+    @Test
+    func testCopyingAndExportingProduceTheSameText() async throws {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("md")
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+
+        let exportViewModel = JobsViewModel(
+            workspaceService: workspaceService,
+            transcriptionService: transcriptionService,
+            retranscriptionService: retranscriptionService,
+            audioImportService: audioImportService,
+            transcriptExportService: TranscriptExportService(),
+            savePanelPresenter: { _ in outputURL }
+        )
+
+        let session = makeSession(status: RecordingStatus.done)
+        session.transcript = makeTranscript()
+
+        let copied = try #require(exportViewModel.renderedTranscript(for: session))
+        try await exportViewModel.exportTranscript(for: session)
+        let written = try String(contentsOf: outputURL, encoding: .utf8)
+
+        #expect(copied == written)
+    }
+
+    @Test
+    func testASessionWithNoTranscriptRendersNothing() throws {
+        let session = makeSession(status: RecordingStatus.recorded)
+
+        #expect(viewModel.renderedTranscript(for: session) == nil)
+    }
+
     @Test
     func testExportTranscriptWritesMarkdownWhenDestinationSelected() async throws {
         let outputURL = FileManager.default.temporaryDirectory
