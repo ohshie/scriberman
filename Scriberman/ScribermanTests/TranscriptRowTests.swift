@@ -105,6 +105,26 @@ struct TranscriptRowTests {
         #expect(anchor.lowerBound > stop.lowerBound)
     }
 
+    // MARK: - Copying the whole transcript
+
+    /// The toolbar's Copy and the block's copy answer different questions: "put this conversation
+    /// somewhere else" and "let me quote this line".
+    @Test
+    func testTheToolbarCopiesTheRenderedTranscript() throws {
+        let shell = try source("../UI/AppShellView.swift")
+
+        #expect(shell.contains("appState.jobsViewModel.renderedTranscript(for: session)"))
+        #expect(!shell.contains("setString(transcript.fullText, forType: .string)"))
+    }
+
+    @Test
+    func testTheBlockControlStillCopiesThePassageAlone() throws {
+        let row = try rowSource()
+
+        #expect(row.contains("pasteboard.setString(copyText, forType: .string)"))
+        #expect(!row.contains("renderMarkdown"))
+    }
+
     // MARK: - Copying one passage
 
     @Test

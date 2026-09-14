@@ -604,12 +604,24 @@ final class JobsViewModel {
         }
     }
 
+    /// A session's transcript as text, for anything that takes it out of the app.
+    ///
+    /// One rendering, because two call sites each deciding what a transcript looks like as text is
+    /// how copying and exporting came to disagree: the export grew a format and the copy went on
+    /// assigning the transcript's plain words, and nothing connected them.
+    ///
+    /// Returns `nil` when there is no transcript to render, which the caller reports in its own
+    /// terms — a thrown error for an export, nothing at all for a copy.
+    func renderedTranscript(for session: any TranscribableSession) -> String? {
+        guard let transcript = displayedTranscript(for: session) else { return nil }
+        return markdownRenderer.renderMarkdown(session: session, transcript: transcript)
+    }
+
     func exportTranscript(for session: any TranscribableSession) async throws {
-        guard let transcript = displayedTranscript(for: session) else {
+        guard let markdown = renderedTranscript(for: session) else {
             throw TranscriptExportError.transcriptUnavailable
         }
 
-        let markdown = markdownRenderer.renderMarkdown(session: session, transcript: transcript)
         let suggestedName = markdownRenderer.defaultFileName(for: session.title)
 
         guard let destinationURL = savePanelPresenter(suggestedName) else {
