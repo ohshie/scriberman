@@ -2,11 +2,11 @@ import CoreAudio
 import Foundation
 
 private let audioObjectSystemObjectID = AudioObjectID(kAudioObjectSystemObject)
-private let audioStreamDirectionInput: UInt32 = 1
 
 protocol AudioDeviceHardwareProviding {
     func allDeviceIDs() throws -> [AudioDeviceID]
-    func hasInputStream(deviceID: AudioDeviceID) -> Bool
+    /// How many channels the device can capture. Zero means it is not a microphone.
+    func inputChannelCount(deviceID: AudioDeviceID) -> Int
     func deviceUID(deviceID: AudioDeviceID) -> String?
     func deviceName(deviceID: AudioDeviceID) -> String?
     func defaultInputDeviceID() -> AudioDeviceID?
@@ -55,26 +55,45 @@ struct CoreAudioDeviceHardware: AudioDeviceHardwareProviding {
         return deviceIDs
     }
 
-    func hasInputStream(deviceID: AudioDeviceID) -> Bool {
+    /// How many channels the device can capture, summed across its input buffers.
+    ///
+    /// Channels rather than streams, and input scope rather than global. The previous check asked
+    /// `kAudioDevicePropertyStreams` in **global** scope and passed a direction as qualifier data,
+    /// which that property ignores — so it counted every stream the device owned, in both
+    /// directions, and answered "has any stream at all". Built-in speakers passed it, were offered
+    /// as a microphone, and a recording that selected them captured nothing for its whole duration.
+    ///
+    /// Channel count rather than stream count because a device can expose an input stream carrying
+    /// no channels — an aggregate device mid-configuration does exactly that, and this application
+    /// builds aggregate devices.
+    func inputChannelCount(deviceID: AudioDeviceID) -> Int {
         var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyStreams,
-            mScope: kAudioObjectPropertyScopeGlobal,
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: kAudioObjectPropertyScopeInput,
             mElement: kAudioObjectPropertyElementMain
         )
-        var direction = audioStreamDirectionInput
         var dataSize: UInt32 = 0
 
-        let status = withUnsafePointer(to: &direction) { directionPointer in
-            AudioObjectGetPropertyDataSize(
-                deviceID,
-                &address,
-                UInt32(MemoryLayout<UInt32>.size),
-                directionPointer,
-                &dataSize
-            )
+        guard AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &dataSize) == noErr,
+              dataSize > 0
+        else {
+            return 0
         }
 
-        return status == noErr && dataSize >= UInt32(MemoryLayout<AudioStreamID>.size)
+        let buffer = UnsafeMutableRawPointer.allocate(
+            byteCount: Int(dataSize),
+            alignment: MemoryLayout<AudioBufferList>.alignment
+        )
+        defer { buffer.deallocate() }
+
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &dataSize, buffer) == noErr else {
+            return 0
+        }
+
+        let bufferList = UnsafeMutableAudioBufferListPointer(
+            buffer.assumingMemoryBound(to: AudioBufferList.self)
+        )
+        return bufferList.reduce(0) { $0 + Int($1.mNumberChannels) }
     }
 
     func deviceUID(deviceID: AudioDeviceID) -> String? {
