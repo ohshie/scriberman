@@ -71,7 +71,10 @@ final class AudioDeviceService: AudioDeviceServiceProtocol {
     func enumerateInputDevices() -> [AudioInputDevice] {
         do {
             let devices = try hardware.allDeviceIDs().compactMap { deviceID -> AudioInputDevice? in
-                guard hardware.hasInputStream(deviceID: deviceID),
+                // Offered only if it can actually capture. A device with no input channels is not a
+                // microphone in any state, so it is absent from the list rather than present and
+                // unavailable — there is nothing a user could do to make it one.
+                guard hardware.inputChannelCount(deviceID: deviceID) > 0,
                       let uid = hardware.deviceUID(deviceID: deviceID),
                       let name = hardware.deviceName(deviceID: deviceID)
                 else {

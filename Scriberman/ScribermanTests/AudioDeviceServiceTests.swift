@@ -141,6 +141,85 @@ final class AudioDeviceServiceTests {
         #expect(service.selectedDevice?.uid == "uid-2")
     }
 
+    // MARK: - Only devices that can capture
+
+    /// Built-in speakers used to reach the picker: the old predicate asked for streams in global
+    /// scope, which counts both directions. A recording that selected them captured nothing for its
+    /// whole duration while the watchdog restarted capture ten times.
+    @Test
+    func testAnOutputOnlyDeviceIsNotOffered() {
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "mic", name: "Built-in Microphone", inputChannels: 1),
+            MockAudioDevice(id: 2, uid: "speakers", name: "Built-in Speakers", inputChannels: 0)
+        ]
+        hardware.defaultInputID = 1
+
+        service = AudioDeviceService(
+            hardware: hardware,
+            userDefaults: userDefaults,
+            notificationCenter: notificationCenter
+        )
+
+        #expect(service.availableDevices.map(\.uid) == ["mic"])
+    }
+
+    /// Channels rather than streams: a device can expose an input stream that carries none, which is
+    /// what a half-configured aggregate device looks like — and this application builds aggregates.
+    @Test
+    func testADeviceWithAnInputStreamButNoChannelsIsNotOffered() {
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "mic", name: "Built-in Microphone", inputChannels: 1),
+            MockAudioDevice(id: 2, uid: "aggregate", name: "Half-built Aggregate", inputChannels: 0)
+        ]
+        hardware.defaultInputID = 1
+
+        service = AudioDeviceService(
+            hardware: hardware,
+            userDefaults: userDefaults,
+            notificationCenter: notificationCenter
+        )
+
+        #expect(!service.availableDevices.contains { $0.uid == "aggregate" })
+    }
+
+    @Test
+    func testAMultiChannelInterfaceIsOffered() {
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "interface", name: "Audio Interface", inputChannels: 8)
+        ]
+        hardware.defaultInputID = 1
+
+        service = AudioDeviceService(
+            hardware: hardware,
+            userDefaults: userDefaults,
+            notificationCenter: notificationCenter
+        )
+
+        #expect(service.availableDevices.map(\.uid) == ["interface"])
+    }
+
+    /// The fix arriving for someone who already has the speakers stored: the existing fallback drops
+    /// a saved UID that no longer matches anything offered. It never ran for this case, because the
+    /// device stayed in the list.
+    @Test
+    func testAStoredOutputOnlySelectionFallsBackAndClears() {
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "mic", name: "Built-in Microphone", inputChannels: 1),
+            MockAudioDevice(id: 2, uid: "speakers", name: "Built-in Speakers", inputChannels: 0)
+        ]
+        hardware.defaultInputID = 1
+        userDefaults.set("speakers", forKey: "selectedMicUID")
+
+        service = AudioDeviceService(
+            hardware: hardware,
+            userDefaults: userDefaults,
+            notificationCenter: notificationCenter
+        )
+
+        #expect(service.selectedDevice?.uid == "mic")
+        #expect(userDefaults.string(forKey: "selectedMicUID") == nil)
+    }
+
     @Test
 
     func testMissingSavedUIDClearsPersistenceAndFallsBackToDefaultInput() {
@@ -290,7 +369,20 @@ private struct MockAudioDevice {
     let id: AudioDeviceID
     let uid: String
     let name: String
-    let hasInput: Bool
+    /// What the device can capture. Zero is an output-only device — speakers, a display — which is
+    /// what used to reach the picker and record nothing.
+    let inputChannels: Int
+
+    init(id: AudioDeviceID, uid: String, name: String, hasInput: Bool) {
+        self.init(id: id, uid: uid, name: name, inputChannels: hasInput ? 1 : 0)
+    }
+
+    init(id: AudioDeviceID, uid: String, name: String, inputChannels: Int) {
+        self.id = id
+        self.uid = uid
+        self.name = name
+        self.inputChannels = inputChannels
+    }
 }
 
 private final class MockAudioDeviceHardware: AudioDeviceHardwareProviding {
@@ -301,8 +393,8 @@ private final class MockAudioDeviceHardware: AudioDeviceHardwareProviding {
         devices.map(\.id)
     }
 
-    func hasInputStream(deviceID: AudioDeviceID) -> Bool {
-        devices.first(where: { $0.id == deviceID })?.hasInput ?? false
+    func inputChannelCount(deviceID: AudioDeviceID) -> Int {
+        devices.first(where: { $0.id == deviceID })?.inputChannels ?? 0
     }
 
     func deviceUID(deviceID: AudioDeviceID) -> String? {

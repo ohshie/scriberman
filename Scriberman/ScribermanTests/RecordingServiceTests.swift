@@ -1770,8 +1770,8 @@ private final class MockRecoveryAudioDeviceHardware: AudioDeviceHardwareProvidin
         devices.map(\.id)
     }
 
-    func hasInputStream(deviceID _: AudioDeviceID) -> Bool {
-        true
+    func inputChannelCount(deviceID _: AudioDeviceID) -> Int {
+        1
     }
 
     func deviceUID(deviceID: AudioDeviceID) -> String? {
