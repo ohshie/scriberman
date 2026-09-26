@@ -917,8 +917,7 @@ struct LiveTranscriptionServiceTests {
         #expect(await service.pendingAttributionCountForTesting(source: .mic) == 1)
 
         await service.process(samples: Array(repeating: Float(0), count: 4096), source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        let segments = await box.values()
+        let segments = await box.values(atLeast: 1)
         #expect(segments.count == 1)
         #expect(segments.first?.speakerId == "speaker_mic_0")
         #expect(await service.pendingAttributionCountForTesting(source: .mic) == 0)
@@ -942,8 +941,7 @@ struct LiveTranscriptionServiceTests {
         #expect(await service.pendingAttributionCountForTesting(source: .mic) == 2)
 
         await service.process(samples: Array(repeating: Float(0), count: 4096), source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        #expect(await box.values().map(\.text) == ["first", "second"])
+        #expect(await box.values(atLeast: 2).map(\.text) == ["first", "second"])
     }
 
     @Test
@@ -982,8 +980,7 @@ struct LiveTranscriptionServiceTests {
         #expect(await service.pendingAttributionCountForTesting(source: .mic) == 1)
 
         await service.process(samples: Array(repeating: Float(0), count: 4096), source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        let segments = await box.values()
+        let segments = await box.values(atLeast: 1)
         #expect(segments.count == 1)
         #expect(segments.first?.speakerId == "unknown")
     }
@@ -1342,6 +1339,15 @@ private actor SegmentBox {
     private var segments: [TranscriptSegment] = []
     func append(_ segment: TranscriptSegment) { segments.append(segment) }
     func values() -> [TranscriptSegment] { segments }
+
+    /// Segments once at least `count` have arrived, or whatever arrived by the timeout.
+    func values(atLeast count: Int, timeout: Duration = .seconds(5)) async -> [TranscriptSegment] {
+        let deadline = ContinuousClock.now + timeout
+        while segments.count < count, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return segments
+    }
 }
 
 private actor FlushProbe {
