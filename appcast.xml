@@ -3,20 +3,25 @@
     <channel>
         <title>Scriberman</title>
         <item>
-            <title>1.0.8</title>
-            <pubDate>Mon, 14 Sep 2026 18:26:44 +0200</pubDate>
-            <sparkle:version>9</sparkle:version>
-            <sparkle:shortVersionString>1.0.8</sparkle:shortVersionString>
+            <title>1.0.9</title>
+            <pubDate>Sat, 26 Sep 2026 21:14:35 +0200</pubDate>
+            <sparkle:version>10</sparkle:version>
+            <sparkle:shortVersionString>1.0.9</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<h2>Scriberman 1.0.8</h2>
+            <description><![CDATA[<h2>Scriberman 1.0.9</h2>
+<h3>What’s new</h3>
+<ul>
+  <li>Updated speech recognition for dictation, live transcription, and saved recordings.</li>
+  <li>Live transcripts wait for speaker labels before finalizing passages, including when recording stops.</li>
+  <li>Replaced speech and speaker models are automatically removed after successful installation to reclaim disk space.</li>
+</ul>
 <h3>Fixes</h3>
 <ul>
-  <li>Copying a full transcript now includes speaker labels and timestamps, matching the exported text.</li>
-  <li>The microphone picker now excludes devices that cannot capture audio, preventing silent recordings caused by selecting speakers.</li>
+  <li>Avoided unnecessary re-downloads of existing speaker-identification models after upgrading.</li>
 </ul>
 ]]></description>
-            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.0.8/Scriberman-1.0.8-9-arm64.dmg" length="16103502" type="application/octet-stream" sparkle:edSignature="20udTlwWrxt+HJLUTdlmxZvl3gP7cM98tUsE8qk4mxyj4GG5ZwavtCY4hV9cnLb8JSB+iwEdkRGtKGk1r3RWCA=="/>
+            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.0.9/Scriberman-1.0.9-10-arm64.dmg" length="16372897" type="application/octet-stream" sparkle:edSignature="4SLuszCCU2Kde5p8v/m5W94fs63Dnk+Hw3hauho4fH+MU68/8d5KznBjGcNlhIWKx2vP7GXnaPBEMta1bjEfCw=="/>
         </item>
     </channel>
 </rss>
