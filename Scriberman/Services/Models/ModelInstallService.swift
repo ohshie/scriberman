@@ -88,9 +88,9 @@ actor ModelInstallService: ModelInstallServicing {
                 mlConfig.computeUnits = .cpuAndNeuralEngine
                 _ = try await MLModel.load(contentsOf: vadModelURL, configuration: mlConfig)
             },
-            warmUpLSEEND: {
-                let modelURL = try self.modelPathResolver.lseendModelURL(in: workspace)
-                _ = try LSEENDModel(modelURL: modelURL)
+            warmUpTurnDiarizer: {
+                let repoDirectory = try self.modelPathResolver.modelDirectory(for: .nemotron3Diarization, in: workspace)
+                _ = try await Nemotron3Models.load(config: ModelPathResolver.nemotron3LoadConfig, directory: repoDirectory)
             }
         )
     }
@@ -99,7 +99,7 @@ actor ModelInstallService: ModelInstallServicing {
         warmUpASR: () async throws -> Void,
         warmUpDiarizer: () async throws -> Void,
         warmUpVAD: () async throws -> Void,
-        warmUpLSEEND: () async throws -> Void
+        warmUpTurnDiarizer: () async throws -> Void
     ) async {
         do {
             try await warmUpASR()
@@ -112,9 +112,9 @@ actor ModelInstallService: ModelInstallServicing {
             }
 
             do {
-                try await warmUpLSEEND()
+                try await warmUpTurnDiarizer()
             } catch {
-                NSLog("[ModelInstallService] LS-EEND CoreML warm-up failed (non-fatal): %@", String(describing: error))
+                NSLog("[ModelInstallService] Turn diarizer CoreML warm-up failed (non-fatal): %@", String(describing: error))
             }
         } catch {
             NSLog("[ModelInstallService] CoreML warm-up failed (non-fatal): %@", String(describing: error))
@@ -198,7 +198,7 @@ actor ModelInstallService: ModelInstallServicing {
     // in [0, 1]. Normalize by the per-API weight so a completed download
     // always reports 1.0.
     static func downloadPhaseWeight(for group: ModelGroup) -> Double {
-        group == .lseendDiarization ? 1.0 : 0.5
+        group == .nemotron3Diarization ? 1.0 : 0.5
     }
 
     static func makeDownloadProgressHandler(
@@ -238,14 +238,32 @@ actor ModelInstallService: ModelInstallServicing {
             try await ModelHub.download(.diarizer, to: directory, progressHandler: progressHandler)
             try await ModelHub.download(.diarizer, to: directory, variant: "offline")
 
-        case .lseendDiarization:
-            // Only the pinned variant/step is installed; a full repo download
-            // would pull every LS-EEND variant × step size in the repo.
+        case .nemotron3Diarization:
+            // Only the pinned preset's bundle and the root assets it loads; the repo
+            // carries every preset. Same layout as Nemotron3Models.loadFromHuggingFace.
+            let repoDirectory = directory.appendingPathComponent(
+                ModelGroup.nemotron3Diarization.repoFolderName,
+                isDirectory: true
+            )
             try await ModelHub.download(
-                .lseendDihard3,
-                subdirectory: ModelPathResolver.lseendModelRelativePath,
-                to: directory.appendingPathComponent(ModelGroup.lseendDiarization.repoFolderName, isDirectory: true),
+                .nemotron3Diarization,
+                subdirectory: ModelPathResolver.nemotron3BundleRelativePath,
+                to: repoDirectory,
                 progressHandler: progressHandler
+            )
+            let assets = ModelPathResolver.nemotron3RequiredAssets
+            try await ModelHub.download(
+                .nemotron3Diarization,
+                subdirectory: "",
+                to: repoDirectory,
+                progressHandler: nil,
+                shouldSkip: { !assets.contains($0) }
+            )
+            // Written last, as FluidAudio does: its presence means bundle and assets are
+            // one complete copy of this weights version.
+            try Data((ModelNames.Nemotron3.weightsVersion + "\n").utf8).write(
+                to: repoDirectory.appendingPathComponent(ModelNames.Nemotron3.weightsVersionFile),
+                options: .atomic
             )
         }
     }
@@ -258,7 +276,9 @@ actor ModelInstallService: ModelInstallServicing {
         switch group {
         case .asrParakeetUltra:
             return ["parakeet-tdt-0.6b-v3"]
-        case .vadSilero, .offlineDiarization, .lseendDiarization:
+        case .nemotron3Diarization:
+            return ["ls-eend"]
+        case .vadSilero, .offlineDiarization:
             return []
         }
     }
@@ -337,8 +357,18 @@ actor ModelInstallService: ModelInstallServicing {
             return requiredFilesExist(in: repoURL, required: ModelNames.Diarizer.requiredModels)
                 && requiredFilesExist(in: repoURL, required: ModelNames.OfflineDiarizer.requiredModels)
 
-        case .lseendDiarization:
-            return requiredFilesExist(in: repoURL, required: [ModelPathResolver.lseendModelRelativePath])
+        case .nemotron3Diarization:
+            // A compiled bundle is complete once its manifest is on disk (FluidAudio's own check).
+            let manifestPath = repoURL
+                .appendingPathComponent(ModelPathResolver.nemotron3BundleRelativePath, isDirectory: true)
+                .appendingPathComponent("coremldata.bin", isDirectory: false)
+                .path
+            let weightsURL = repoURL.appendingPathComponent(ModelNames.Nemotron3.weightsVersionFile, isDirectory: false)
+            let installedWeights = (try? String(contentsOf: weightsURL, encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return fileManager.fileExists(atPath: manifestPath)
+                && requiredFilesExist(in: repoURL, required: ModelPathResolver.nemotron3RequiredAssets)
+                && installedWeights == ModelNames.Nemotron3.weightsVersion
         }
     }
 
@@ -365,13 +395,13 @@ extension ModelInstallService {
         warmUpASR: () async throws -> Void,
         warmUpDiarizer: () async throws -> Void,
         warmUpVAD: () async throws -> Void,
-        warmUpLSEEND: () async throws -> Void
+        warmUpTurnDiarizer: () async throws -> Void
     ) async {
         await warmUpModelsInternal(
             warmUpASR: warmUpASR,
             warmUpDiarizer: warmUpDiarizer,
             warmUpVAD: warmUpVAD,
-            warmUpLSEEND: warmUpLSEEND
+            warmUpTurnDiarizer: warmUpTurnDiarizer
         )
     }
 }

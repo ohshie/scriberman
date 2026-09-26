@@ -817,44 +817,50 @@ struct LiveTranscriptionServiceTests {
         #expect(await flushProbe.callCount() == 1)
     }
 
-    // MARK: - LS-EEND Turn Attribution (task 5.1)
+    // MARK: - Turn Attribution
 
-    /// Timeline built from raw frame predictions (0.1s frames, pass-through
-    /// thresholding) — the same structure a live LS-EEND session produces.
-    private func makeTurnTimeline(frameSpeakers: [Int?], numSpeakers: Int) throws -> DiarizerTimeline {
-        var predictions: [Float] = []
+    /// One committed chunk from frame speakers given at 0.1s resolution,
+    /// expanded to the diarizer's 10ms frames (one-hot probabilities).
+    private func makeTurnTimeline(frameSpeakers: [Int?], numSpeakers: Int) throws -> TurnDiarizerChunk {
+        var probabilities: [Float] = []
         for active in frameSpeakers {
-            for speaker in 0..<numSpeakers {
-                predictions.append(speaker == active ? 1.0 : 0.0)
+            for _ in 0..<10 {
+                for speaker in 0..<numSpeakers {
+                    probabilities.append(speaker == active ? 1.0 : 0.0)
+                }
             }
         }
-        return try DiarizerTimeline(
-            allPredictions: predictions,
-            config: .default(numSpeakers: numSpeakers, frameDurationSeconds: 0.1)
-        )
+        return TurnDiarizerChunk(probabilities: probabilities, frameCount: frameSpeakers.count * 10)
+    }
+
+    /// `timeline` is committed on the first feed; nil commits 10s of silence,
+    /// so the buffer is covered but has no speaker activity.
+    private func makeAttributionService(
+        text: String,
+        timeline: TurnDiarizerChunk?
+    ) async -> LiveTranscriptionService {
+        let chunk = timeline ?? TurnDiarizerChunk(probabilities: Array(repeating: 0, count: 1000 * 2), frameCount: 1000)
+        let diarizer = ScriptedTurnDiarizer(numSpeakers: 2, feedResponses: [.success([chunk])])
+        return await makeAttributionService(texts: [text], diarizer: diarizer)
     }
 
     private func makeAttributionService(
-        text: String,
-        timeline: DiarizerTimeline?
+        texts: [String],
+        diarizer: ScriptedTurnDiarizer
     ) async -> LiveTranscriptionService {
         let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
         await service.setStoredConfigForTesting(.defaults)
         await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+        let textProbe = TextSequenceProbe(texts)
         await service.setAsrTranscribeHookForTesting { samples, _, _ in
             ASRResult(
-                text: text,
+                text: textProbe.next(),
                 confidence: 1.0,
                 duration: TimeInterval(samples.count) / 16_000,
                 processingTime: 0.1
             )
         }
-
-        let lseend = LSEENDDiarizer()
-        if let timeline {
-            lseend.timeline = timeline
-        }
-        await service.setLSEENDDiarizersForTesting([.mic: lseend])
+        await service.setTurnDiarizersForTesting([.mic: diarizer])
         return service
     }
 
@@ -880,6 +886,106 @@ struct LiveTranscriptionServiceTests {
         try? await Task.sleep(for: .milliseconds(50))
         collectTask.cancel()
         return receivedSegments
+    }
+
+    /// Collects every segment the service yields until cancelled.
+    private func startCollecting(from service: LiveTranscriptionService) -> (task: Task<Void, Never>, box: SegmentBox) {
+        let box = SegmentBox()
+        let task = Task {
+            for await segment in await service.transcriptStream {
+                await box.append(segment)
+            }
+        }
+        return (task, box)
+    }
+
+    @Test
+    func bufferIsHeldUntilTurnTimelineCoversIt() async throws {
+        let covering = try makeTurnTimeline(frameSpeakers: Array(repeating: 0, count: 10), numSpeakers: 2)
+        let diarizer = ScriptedTurnDiarizer(numSpeakers: 2, feedResponses: [.success([]), .success([covering])])
+        let service = await makeAttributionService(texts: ["hello there"], diarizer: diarizer)
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+        let (task, box) = startCollecting(from: service)
+        defer { task.cancel() }
+
+        await service.process(samples: Array(repeating: Float(0.1), count: 8192), source: .mic, sampleRate: 16_000)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(await box.values().isEmpty)
+        #expect(await service.pendingAttributionCountForTesting(source: .mic) == 1)
+
+        await service.process(samples: Array(repeating: Float(0), count: 4096), source: .mic, sampleRate: 16_000)
+        try? await Task.sleep(for: .milliseconds(50))
+        let segments = await box.values()
+        #expect(segments.count == 1)
+        #expect(segments.first?.speakerId == "speaker_mic_0")
+        #expect(await service.pendingAttributionCountForTesting(source: .mic) == 0)
+    }
+
+    @Test
+    func heldBuffersAreEmittedInOrder() async throws {
+        let covering = try makeTurnTimeline(frameSpeakers: Array(repeating: 0, count: 20), numSpeakers: 2)
+        let diarizer = ScriptedTurnDiarizer(numSpeakers: 2, feedResponses: [.success([]), .success([covering])])
+        let service = await makeAttributionService(texts: ["first", "second"], diarizer: diarizer)
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+        let (task, box) = startCollecting(from: service)
+        defer { task.cancel() }
+
+        await service.process(samples: Array(repeating: Float(0.1), count: 16_384), source: .mic, sampleRate: 16_000)
+        #expect(await service.pendingAttributionCountForTesting(source: .mic) == 2)
+
+        await service.process(samples: Array(repeating: Float(0), count: 4096), source: .mic, sampleRate: 16_000)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(await box.values().map(\.text) == ["first", "second"])
+    }
+
+    @Test
+    func heldBufferIsReleasedAtStop() async throws {
+        let covering = try makeTurnTimeline(frameSpeakers: Array(repeating: 1, count: 10), numSpeakers: 2)
+        let diarizer = ScriptedTurnDiarizer(numSpeakers: 2, feedResponses: [], finishResponse: [covering])
+        let service = await makeAttributionService(texts: ["hello there"], diarizer: diarizer)
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        await service.process(samples: Array(repeating: Float(0.1), count: 8192), source: .mic, sampleRate: 16_000)
+        #expect(await service.pendingAttributionCountForTesting(source: .mic) == 1)
+
+        let segments = await service.stop()
+        #expect(segments.count == 1)
+        #expect(segments.first?.speakerId == "speaker_mic_1")
+    }
+
+    @Test
+    func heldBufferFallsBackToEmbeddingsWhenTurnDiarizerFails() async {
+        let diarizer = ScriptedTurnDiarizer(
+            numSpeakers: 2,
+            feedResponses: [.success([]), .failure(TestError.turnDiarizerFailed)]
+        )
+        let service = await makeAttributionService(texts: ["hello there"], diarizer: diarizer)
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+        let (task, box) = startCollecting(from: service)
+        defer { task.cancel() }
+
+        await service.process(samples: Array(repeating: Float(0.1), count: 8192), source: .mic, sampleRate: 16_000)
+        #expect(await service.pendingAttributionCountForTesting(source: .mic) == 1)
+
+        await service.process(samples: Array(repeating: Float(0), count: 4096), source: .mic, sampleRate: 16_000)
+        try? await Task.sleep(for: .milliseconds(50))
+        let segments = await box.values()
+        #expect(segments.count == 1)
+        #expect(segments.first?.speakerId == "unknown")
     }
 
     @Test
@@ -987,10 +1093,52 @@ struct LiveTranscriptionServiceTests {
 
 @Suite
 struct LiveSpeakerTimelineTests {
-    /// 0.125s frames: exactly representable in Float, so times on the
-    /// 0.125 grid survive the segment's frame quantization untouched.
-    private func segment(_ speaker: Int, _ start: Float, _ end: Float) -> DiarizerSegment {
-        DiarizerSegment(speakerIndex: speaker, startTime: start, endTime: end, frameDurationSeconds: 0.125)
+    private func segment(_ speaker: Int, _ start: Float, _ end: Float) -> TurnSegment {
+        TurnSegment(speakerIndex: speaker, start: start, end: end)
+    }
+
+    /// Frame-major one-hot probabilities, 0.125s frames (exact in Float).
+    private func probabilities(_ frameSpeakers: [Int?], numSpeakers: Int = 2) -> [Float] {
+        frameSpeakers.flatMap { active in
+            (0..<numSpeakers).map { $0 == active ? Float(1) : Float(0) }
+        }
+    }
+
+    @Test
+    func turnTimelineCoverageFollowsCommittedFrames() {
+        var timeline = TurnTimeline(numSpeakers: 2, frameSeconds: 0.125)
+        #expect(timeline.coveredUntil == 0)
+        timeline.append(probabilities: probabilities([0, 0, nil, nil]), frameCount: 4)
+        #expect(timeline.coveredUntil == 0.5)
+    }
+
+    @Test
+    func turnTimelineJoinsRunAcrossChunks() {
+        var timeline = TurnTimeline(numSpeakers: 2, frameSeconds: 0.125)
+        timeline.append(probabilities: probabilities([0, 0]), frameCount: 2)
+        timeline.append(probabilities: probabilities([0, 0, 1, 1, 1, 1]), frameCount: 6)
+        #expect(timeline.segments == [segment(0, 0.0, 0.5), segment(1, 0.5, 1.0)])
+    }
+
+    @Test
+    func turnTimelineDropsRunsShorterThanMinimum() {
+        var timeline = TurnTimeline(numSpeakers: 2, frameSeconds: 0.125)
+        timeline.append(probabilities: probabilities([0, nil, 1, 1, nil]), frameCount: 5)
+        #expect(timeline.segments == [segment(1, 0.25, 0.5)])
+    }
+
+    @Test
+    func turnTimelineIncludesRunOpenAtCommittedEdge() {
+        var timeline = TurnTimeline(numSpeakers: 2, frameSeconds: 0.125)
+        timeline.append(probabilities: probabilities([nil, 1, 1, 1]), frameCount: 4)
+        #expect(timeline.segments == [segment(1, 0.125, 0.5)])
+    }
+
+    @Test
+    func turnTimelineTracksEightSpeakers() {
+        var timeline = TurnTimeline(numSpeakers: 8, frameSeconds: 0.125)
+        timeline.append(probabilities: probabilities([7, 7, 7, 3, 3, 3], numSpeakers: 8), frameCount: 6)
+        #expect(timeline.segments == [segment(7, 0.0, 0.375), segment(3, 0.375, 0.75)])
     }
 
     @Test
@@ -1156,6 +1304,44 @@ extension LiveTranscriptionService {
 private enum TestError: Error {
     case vadInitializationFailed
     case decoderStateCreationFailed
+    case turnDiarizerFailed
+}
+
+/// Turn diarizer that commits scripted chunks: one `feedResponses` entry per
+/// feed call (nothing once they run out), `finishResponse` on finish.
+private final class ScriptedTurnDiarizer: StreamingTurnDiarizing, @unchecked Sendable {
+    let numSpeakers: Int
+    let frameSeconds: Float = 0.01
+    private let lock = NSLock()
+    private var feedResponses: [Result<[TurnDiarizerChunk], TestError>]
+    private let finishResponse: [TurnDiarizerChunk]
+
+    init(
+        numSpeakers: Int,
+        feedResponses: [Result<[TurnDiarizerChunk], TestError>],
+        finishResponse: [TurnDiarizerChunk] = []
+    ) {
+        self.numSpeakers = numSpeakers
+        self.feedResponses = feedResponses
+        self.finishResponse = finishResponse
+    }
+
+    func feed(_ samples: [Float]) throws -> [TurnDiarizerChunk] {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !feedResponses.isEmpty else { return [] }
+        return try feedResponses.removeFirst().get()
+    }
+
+    func finish() throws -> [TurnDiarizerChunk] { finishResponse }
+
+    func reset() {}
+}
+
+private actor SegmentBox {
+    private var segments: [TranscriptSegment] = []
+    func append(_ segment: TranscriptSegment) { segments.append(segment) }
+    func values() -> [TranscriptSegment] { segments }
 }
 
 private actor FlushProbe {

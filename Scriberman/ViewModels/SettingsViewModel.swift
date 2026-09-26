@@ -165,7 +165,7 @@ final class SettingsViewModel {
             (.asrParakeetUltra, "Downloading ASR…", 0.0),
             (.vadSilero, "Downloading VAD…", 0.2),
             (.offlineDiarization, "Downloading Diarizer…", 0.4),
-            (.lseendDiarization, "Downloading Turn Diarizer…", 0.6)
+            (.nemotron3Diarization, "Downloading Turn Diarizer…", 0.6)
         ]
         let segmentWidth = 0.2
         var activeGroup: ModelGroup?
