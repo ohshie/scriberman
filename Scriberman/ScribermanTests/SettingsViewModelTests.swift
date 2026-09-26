@@ -58,7 +58,7 @@ final class SettingsViewModelTests {
         #expect(viewModel.bundlePhase == .allReady)
 
         let installOrder = await mockService.installOrder()
-        #expect(installOrder == [.asrParakeetV3, .vadSilero, .offlineDiarization, .lseendDiarization])
+        #expect(installOrder == [.asrParakeetUltra, .vadSilero, .offlineDiarization, .nemotron3Diarization])
         let warmedUp = await mockService.didWarmUp()
         #expect(warmedUp)
     }
@@ -119,14 +119,14 @@ final class SettingsViewModelTests {
     }
 
     @Test
-    func testRefreshReportsLSEENDMissingAfterLegacyThreeGroupInstall() async throws {
+    func testRefreshReportsTurnDiarizationMissingAfterLegacyThreeGroupInstall() async throws {
         let workspaceService = MockWorkspaceService()
         let mockService = MockModelInstallService()
         await mockService.setCanInstallModels(true)
-        await mockService.setState(.ready, for: .asrParakeetV3)
+        await mockService.setState(.ready, for: .asrParakeetUltra)
         await mockService.setState(.ready, for: .vadSilero)
         await mockService.setState(.ready, for: .offlineDiarization)
-        await mockService.setState(.missing, for: .lseendDiarization)
+        await mockService.setState(.missing, for: .nemotron3Diarization)
 
         let viewModel = SettingsViewModel(
             workspaceService: workspaceService,
@@ -137,7 +137,7 @@ final class SettingsViewModelTests {
         await viewModel.refresh()
 
         #expect(viewModel.bundlePhase == .idle)
-        #expect(viewModel.modelStates[.lseendDiarization] == .missing)
+        #expect(viewModel.modelStates[.nemotron3Diarization] == .missing)
     }
 
     private func makeTempRoot() throws -> URL {
