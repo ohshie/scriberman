@@ -75,29 +75,73 @@ final class ModelInstallServiceTests {
     }
 
     @Test
-    func testValidateInstalledRepoLSEENDAcceptsInstalledModelFile() async throws {
+    func testValidateInstalledRepoNemotron3AcceptsPresetBundleAssetsAndWeightsMarker() async throws {
         let service = makeService()
         let tempRoot = try makeTempRoot()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-        let repoURL = tempRoot.appendingPathComponent(ModelGroup.lseendDiarization.repoFolderName, isDirectory: true)
-        try createRequiredFiles([ModelPathResolver.lseendModelRelativePath], in: repoURL)
+        let repoURL = tempRoot.appendingPathComponent(ModelGroup.nemotron3Diarization.repoFolderName, isDirectory: true)
+        try createNemotron3Install(in: repoURL, weightsVersion: ModelNames.Nemotron3.weightsVersion)
 
-        let isValid = try await service.validateInstalledRepoForTesting(for: .lseendDiarization, at: repoURL)
+        let isValid = try await service.validateInstalledRepoForTesting(for: .nemotron3Diarization, at: repoURL)
         #expect(isValid)
     }
 
     @Test
-    func testValidateInstalledRepoLSEENDRejectsEmptyFolder() async throws {
+    func testValidateInstalledRepoNemotron3RejectsStaleWeightsMarker() async throws {
         let service = makeService()
         let tempRoot = try makeTempRoot()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-        let repoURL = tempRoot.appendingPathComponent(ModelGroup.lseendDiarization.repoFolderName, isDirectory: true)
-        try FileManager.default.createDirectory(at: repoURL, withIntermediateDirectories: true)
+        let repoURL = tempRoot.appendingPathComponent(ModelGroup.nemotron3Diarization.repoFolderName, isDirectory: true)
+        try createNemotron3Install(in: repoURL, weightsVersion: "an-earlier-release")
 
-        let isValid = try await service.validateInstalledRepoForTesting(for: .lseendDiarization, at: repoURL)
+        let isValid = try await service.validateInstalledRepoForTesting(for: .nemotron3Diarization, at: repoURL)
         #expect(!isValid)
+    }
+
+    @Test
+    func testValidateInstalledRepoNemotron3RejectsMissingWeightsMarker() async throws {
+        let service = makeService()
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let repoURL = tempRoot.appendingPathComponent(ModelGroup.nemotron3Diarization.repoFolderName, isDirectory: true)
+        try createNemotron3Install(in: repoURL, weightsVersion: nil)
+
+        let isValid = try await service.validateInstalledRepoForTesting(for: .nemotron3Diarization, at: repoURL)
+        #expect(!isValid)
+    }
+
+    @Test
+    func testValidateInstalledRepoNemotron3RejectsLegacyLSEENDFolder() async throws {
+        let service = makeService()
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        try createFile("ls-eend/dih3/100ms/model.mlmodelc/coremldata.bin", in: tempRoot)
+
+        let repoURL = tempRoot.appendingPathComponent(ModelGroup.nemotron3Diarization.repoFolderName, isDirectory: true)
+        let isValid = try await service.validateInstalledRepoForTesting(for: .nemotron3Diarization, at: repoURL)
+        #expect(!isValid)
+    }
+
+    @Test
+    func testNemotron3FolderMatchesFluidAudioRepoFolder() {
+        #expect(ModelGroup.nemotron3Diarization.repoFolderName == Repo.nemotron3Diarization.folderName)
+        #expect(ModelPathResolver.nemotron3LoadConfig.modelFileName == ModelPathResolver.nemotron3BundleRelativePath)
+    }
+
+    @Test
+    func testReplacedLSEENDFolderRemovedAfterNemotron3Install() async throws {
+        let service = makeService()
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let legacyURL = tempRoot.appendingPathComponent("ls-eend", isDirectory: true)
+        try createFile("dih3/100ms/model.mlmodelc/coremldata.bin", in: legacyURL)
+
+        await service.removeReplacedInstallForTesting(of: .nemotron3Diarization, in: tempRoot)
+
+        #expect(!FileManager.default.fileExists(atPath: legacyURL.path))
     }
 
     @Test
@@ -116,20 +160,20 @@ final class ModelInstallServiceTests {
             warmUpVAD: {
                 await probe.markVADAttempted()
             },
-            warmUpLSEEND: {
-                await probe.markLSEENDAttempted()
+            warmUpTurnDiarizer: {
+                await probe.markTurnDiarizerAttempted()
             }
         )
 
         let didRunASR = await probe.didRunASR()
         let didRunDiarizer = await probe.didRunDiarizer()
         let didAttemptVAD = await probe.didAttemptVAD()
-        let didAttemptLSEEND = await probe.didAttemptLSEEND()
+        let didAttemptTurnDiarizer = await probe.didAttemptTurnDiarizer()
 
         #expect(didRunASR)
         #expect(didRunDiarizer)
         #expect(didAttemptVAD)
-        #expect(didAttemptLSEEND)
+        #expect(didAttemptTurnDiarizer)
     }
 
     @Test
@@ -149,25 +193,25 @@ final class ModelInstallServiceTests {
                 await probe.markVADAttempted()
                 throw TestWarmUpError.vadFailed
             },
-            warmUpLSEEND: {
-                await probe.markLSEENDAttempted()
+            warmUpTurnDiarizer: {
+                await probe.markTurnDiarizerAttempted()
             }
         )
 
         let didRunASR = await probe.didRunASR()
         let didRunDiarizer = await probe.didRunDiarizer()
         let didAttemptVAD = await probe.didAttemptVAD()
-        let didAttemptLSEEND = await probe.didAttemptLSEEND()
+        let didAttemptTurnDiarizer = await probe.didAttemptTurnDiarizer()
 
         #expect(didRunASR)
         #expect(didRunDiarizer)
         #expect(didAttemptVAD)
-        #expect(didAttemptLSEEND)
+        #expect(didAttemptTurnDiarizer)
     }
 
     @Test
 
-    func testWarmUpModelsLSEENDFailureIsNonFatal() async {
+    func testWarmUpModelsTurnDiarizerFailureIsNonFatal() async {
         let service = makeService()
         let probe = WarmUpProbe()
 
@@ -181,21 +225,21 @@ final class ModelInstallServiceTests {
             warmUpVAD: {
                 await probe.markVADAttempted()
             },
-            warmUpLSEEND: {
-                await probe.markLSEENDAttempted()
-                throw TestWarmUpError.lseendFailed
+            warmUpTurnDiarizer: {
+                await probe.markTurnDiarizerAttempted()
+                throw TestWarmUpError.turnDiarizerFailed
             }
         )
 
         let didRunASR = await probe.didRunASR()
         let didRunDiarizer = await probe.didRunDiarizer()
         let didAttemptVAD = await probe.didAttemptVAD()
-        let didAttemptLSEEND = await probe.didAttemptLSEEND()
+        let didAttemptTurnDiarizer = await probe.didAttemptTurnDiarizer()
 
         #expect(didRunASR)
         #expect(didRunDiarizer)
         #expect(didAttemptVAD)
-        #expect(didAttemptLSEEND)
+        #expect(didAttemptTurnDiarizer)
     }
 
     @Test
@@ -306,6 +350,15 @@ final class ModelInstallServiceTests {
         }
     }
 
+    private func createNemotron3Install(in repoURL: URL, weightsVersion: String?) throws {
+        try createFile(ModelPathResolver.nemotron3BundleRelativePath + "/coremldata.bin", in: repoURL)
+        try createRequiredFiles(ModelPathResolver.nemotron3RequiredAssets, in: repoURL)
+        if let weightsVersion {
+            let markerURL = repoURL.appendingPathComponent(ModelNames.Nemotron3.weightsVersionFile)
+            try Data((weightsVersion + "\n").utf8).write(to: markerURL)
+        }
+    }
+
     private func createFile(_ relativePath: String, in repoURL: URL) throws {
         let fileURL = repoURL.appendingPathComponent(relativePath, isDirectory: false)
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -320,21 +373,21 @@ private struct InMemoryBookmarkStore: BookmarkStore {
 
 private enum TestWarmUpError: Error {
     case vadFailed
-    case lseendFailed
+    case turnDiarizerFailed
 }
 
 private actor WarmUpProbe {
     private var asr = false
     private var diarizer = false
     private var vad = false
-    private var lseend = false
+    private var turnDiarizer = false
 
     func markASR() { asr = true }
     func markDiarizer() { diarizer = true }
     func markVADAttempted() { vad = true }
-    func markLSEENDAttempted() { lseend = true }
+    func markTurnDiarizerAttempted() { turnDiarizer = true }
     func didRunASR() -> Bool { asr }
     func didRunDiarizer() -> Bool { diarizer }
     func didAttemptVAD() -> Bool { vad }
-    func didAttemptLSEEND() -> Bool { lseend }
+    func didAttemptTurnDiarizer() -> Bool { turnDiarizer }
 }
