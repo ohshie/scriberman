@@ -249,6 +249,40 @@ actor ModelInstallService: ModelInstallServicing {
         }
     }
 
+    // MARK: - Diarizer revision marker
+
+    /// FluidAudio's per-folder revision marker (`ModelCache.revisionMarkerName`, private upstream).
+    static let revisionMarkerFileName = ".fluidaudio-revision"
+
+    /// Marks a diarizer install made before FluidAudio pinned the diarizer's Hugging Face revision
+    /// (#939) as holding that revision. Without the marker, FluidAudio's loader deletes the folder
+    /// and downloads it again on the first batch pass. No bytes change: the model files at the
+    /// pinned revision are the ones every existing install downloaded (openspec fluidaudio-0-17-4, D5).
+    func stampDiarizerRevisionIfMissing() async {
+        guard let workspace = try? await ensureWorkspaceWriteAccess() else { return }
+        let repoURL = workspace.modelsURL.appendingPathComponent(
+            ModelGroup.offlineDiarization.repoFolderName,
+            isDirectory: true
+        )
+        do {
+            guard try validateInstalledRepo(for: .offlineDiarization, at: repoURL) else { return }
+            if try Self.stampRevisionMarkerIfMissing(at: repoURL, revision: Repo.diarizer.revision) {
+                NSLog("[ModelInstallService] Stamped diarizer install with revision %@", Repo.diarizer.revision)
+            }
+        } catch {
+            NSLog("[ModelInstallService] Stamping diarizer revision failed (non-fatal): %@", String(describing: error))
+        }
+    }
+
+    /// Writes `revision` into `repoURL`'s marker in FluidAudio's format, unless a marker exists.
+    /// - Returns: whether a marker was written.
+    static func stampRevisionMarkerIfMissing(at repoURL: URL, revision: String) throws -> Bool {
+        let markerURL = repoURL.appendingPathComponent(revisionMarkerFileName, isDirectory: false)
+        guard !FileManager.default.fileExists(atPath: markerURL.path) else { return false }
+        try Data((revision + "\n").utf8).write(to: markerURL, options: .atomic)
+        return true
+    }
+
     private func removeIfExists(_ url: URL) throws {
         if fileManager.fileExists(atPath: url.path) {
             try fileManager.removeItem(at: url)
