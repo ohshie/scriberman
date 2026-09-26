@@ -219,6 +219,9 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
     }
 }
 
+typealias SendableAudioObjectPropertyListenerBlock =
+    @Sendable @convention(block) (UInt32, UnsafePointer<AudioObjectPropertyAddress>) -> Void
+
 actor RecordingService: RecordingServiceProtocol {
     typealias PermissionChecker = @Sendable () async throws(RecordingError) -> Void
     typealias ScopedAccessStarter = @Sendable (URL) -> Bool
@@ -293,7 +296,9 @@ actor RecordingService: RecordingServiceProtocol {
     // nonisolated(unsafe): written once in init on the actor; read only in deinit; lifetime matches the actor
     nonisolated(unsafe) private var engineConfigurationObserver: NSObjectProtocol?
     // nonisolated(unsafe): initialized once and used for CoreAudio C callback registration/removal lifecycle.
-    nonisolated(unsafe) private var hardwarePropertyListener: AudioObjectPropertyListenerBlock?
+    // @Sendable: the macOS 27 SDK takes the listener as `sending`; the block only captures a weak
+    // reference to this actor and hops onto it, so sharing it with CoreAudio's queue is safe.
+    nonisolated(unsafe) private var hardwarePropertyListener: SendableAudioObjectPropertyListenerBlock?
     nonisolated(unsafe) private var hasRegisteredHardwareListeners = false
     private let hardwareListenerQueue: DispatchQueue
 

@@ -27,33 +27,41 @@ struct ModelPathResolver: @unchecked Sendable {
         return url
     }
 
-    // MARK: - LS-EEND
+    // MARK: - ASR
 
-    /// LS-EEND variant/step installed by `ModelInstallService` and loaded by
-    /// live transcription. Only this one variant is downloaded; the HF repo
-    /// carries 4 variants × 5 step sizes.
-    static let lseendVariant: LSEENDVariant = .dihard3
-    static let lseendStepSize: LSEENDStepSize = .step100ms
+    /// Parakeet version installed by `ModelInstallService` and loaded by every ASR path.
+    /// `AsrModels.load(from:)` resolves the repo folder from this version, so each load call
+    /// must pass it; omitting it resolves (and downloads) v3.
+    static let asrModelVersion: AsrModelVersion = .ultra
 
-    /// Path of the LS-EEND `.mlmodelc` relative to the group's repo folder,
-    /// mirroring the layout `LSEENDModel.loadFromHuggingFace` uses.
-    static var lseendModelRelativePath: String {
-        let relative = lseendVariant.fileName(forStep: lseendStepSize)
-        guard let subPath = Repo.lseendDihard3.subPath else {
-            return relative
-        }
-        return "\(subPath)/\(relative)"
+    // MARK: - Turn diarization (Nemotron 3)
+
+    /// Nemotron 3 preset installed by `ModelInstallService` and run by live transcription.
+    /// Only this preset's bundle is downloaded. `low` until the recording comparison picks
+    /// between `low` and `fast` (openspec nemotron3-live-turns, D2).
+    static let nemotron3Preset: Nemotron3Config = .low
+
+    /// Bundle path relative to the group's repo folder, mirroring the hub layout
+    /// (`monolithic/v2/<bundle>.mlmodelc`) that `Nemotron3Models.loadFromHuggingFace` uses.
+    static var nemotron3BundleRelativePath: String {
+        "\(nemotron3Preset.hubSubdirectory)/\(nemotron3Preset.modelFileName)"
     }
 
-    /// Returns the validated LS-EEND `.mlmodelc` URL within `workspace`.
-    ///
-    /// - Throws: `TranscriptionError.missingWorkspaceModels` if the model is not installed.
-    func lseendModelURL(in workspace: Workspace) throws -> URL {
-        let directory = try modelDirectory(for: .lseendDiarization, in: workspace)
-        let url = directory.appendingPathComponent(Self.lseendModelRelativePath, isDirectory: true)
-        guard fileManager.fileExists(atPath: url.path) else {
-            throw TranscriptionError.missingWorkspaceModels([ModelGroup.lseendDiarization.repoFolderName])
+    /// Root-level assets the pinned preset loads next to its bundle.
+    static var nemotron3RequiredAssets: Set<String> {
+        var assets: Set<String> = [ModelNames.Nemotron3.silenceEmbeddingFile]
+        if nemotron3Preset.splitGraph {
+            assets.insert(ModelNames.Nemotron3.preEncodeProjectionFile)
         }
-        return url
+        return assets
+    }
+
+    /// The preset with `modelFileName` pointing into the hub layout, so
+    /// `Nemotron3Models.load(config:directory:)` finds the bundle and the root assets
+    /// from the one repo folder. Chunking parameters are the preset's.
+    static var nemotron3LoadConfig: Nemotron3Config {
+        var config = nemotron3Preset
+        config.modelFileName = nemotron3BundleRelativePath
+        return config
     }
 }

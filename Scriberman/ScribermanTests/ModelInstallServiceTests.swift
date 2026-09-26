@@ -5,30 +5,30 @@ import Testing
 
 final class ModelInstallServiceTests {
     @Test
-    func testValidateInstalledRepoASRParakeetV3UsesV3RequiredModels() async throws {
+    func testValidateInstalledRepoASRParakeetUltraUsesV3FileSet() async throws {
         let service = makeService()
         let tempRoot = try makeTempRoot()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-        let repoURL = tempRoot.appendingPathComponent(ModelGroup.asrParakeetV3.repoFolderName, isDirectory: true)
-        try createRequiredFiles(ModelNames.ASR.requiredModelsV3(precision: .int8), in: repoURL)
+        let repoURL = tempRoot.appendingPathComponent(ModelGroup.asrParakeetUltra.repoFolderName, isDirectory: true)
+        try createRequiredFiles(ModelNames.ASR.requiredModelsV3(), in: repoURL)
         try createFile(ModelNames.ASR.vocabulary(for: .parakeetV3), in: repoURL)
 
-        let isValid = try await service.validateInstalledRepoForTesting(for: .asrParakeetV3, at: repoURL)
+        let isValid = try await service.validateInstalledRepoForTesting(for: .asrParakeetUltra, at: repoURL)
         #expect(isValid)
     }
 
     @Test
-    func testValidateInstalledRepoASRParakeetV3RejectsLegacyJointModelSet() async throws {
+    func testValidateInstalledRepoASRParakeetUltraRejectsLegacyJointModelSet() async throws {
         let service = makeService()
         let tempRoot = try makeTempRoot()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-        let repoURL = tempRoot.appendingPathComponent(ModelGroup.asrParakeetV3.repoFolderName, isDirectory: true)
+        let repoURL = tempRoot.appendingPathComponent(ModelGroup.asrParakeetUltra.repoFolderName, isDirectory: true)
         try createRequiredFiles(ModelNames.ASR.requiredModels, in: repoURL)
         try createFile(ModelNames.ASR.vocabulary(for: .parakeetV3), in: repoURL)
 
-        let isValid = try await service.validateInstalledRepoForTesting(for: .asrParakeetV3, at: repoURL)
+        let isValid = try await service.validateInstalledRepoForTesting(for: .asrParakeetUltra, at: repoURL)
         #expect(!isValid)
     }
 
@@ -75,29 +75,73 @@ final class ModelInstallServiceTests {
     }
 
     @Test
-    func testValidateInstalledRepoLSEENDAcceptsInstalledModelFile() async throws {
+    func testValidateInstalledRepoNemotron3AcceptsPresetBundleAssetsAndWeightsMarker() async throws {
         let service = makeService()
         let tempRoot = try makeTempRoot()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-        let repoURL = tempRoot.appendingPathComponent(ModelGroup.lseendDiarization.repoFolderName, isDirectory: true)
-        try createRequiredFiles([ModelPathResolver.lseendModelRelativePath], in: repoURL)
+        let repoURL = tempRoot.appendingPathComponent(ModelGroup.nemotron3Diarization.repoFolderName, isDirectory: true)
+        try createNemotron3Install(in: repoURL, weightsVersion: ModelNames.Nemotron3.weightsVersion)
 
-        let isValid = try await service.validateInstalledRepoForTesting(for: .lseendDiarization, at: repoURL)
+        let isValid = try await service.validateInstalledRepoForTesting(for: .nemotron3Diarization, at: repoURL)
         #expect(isValid)
     }
 
     @Test
-    func testValidateInstalledRepoLSEENDRejectsEmptyFolder() async throws {
+    func testValidateInstalledRepoNemotron3RejectsStaleWeightsMarker() async throws {
         let service = makeService()
         let tempRoot = try makeTempRoot()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-        let repoURL = tempRoot.appendingPathComponent(ModelGroup.lseendDiarization.repoFolderName, isDirectory: true)
-        try FileManager.default.createDirectory(at: repoURL, withIntermediateDirectories: true)
+        let repoURL = tempRoot.appendingPathComponent(ModelGroup.nemotron3Diarization.repoFolderName, isDirectory: true)
+        try createNemotron3Install(in: repoURL, weightsVersion: "an-earlier-release")
 
-        let isValid = try await service.validateInstalledRepoForTesting(for: .lseendDiarization, at: repoURL)
+        let isValid = try await service.validateInstalledRepoForTesting(for: .nemotron3Diarization, at: repoURL)
         #expect(!isValid)
+    }
+
+    @Test
+    func testValidateInstalledRepoNemotron3RejectsMissingWeightsMarker() async throws {
+        let service = makeService()
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let repoURL = tempRoot.appendingPathComponent(ModelGroup.nemotron3Diarization.repoFolderName, isDirectory: true)
+        try createNemotron3Install(in: repoURL, weightsVersion: nil)
+
+        let isValid = try await service.validateInstalledRepoForTesting(for: .nemotron3Diarization, at: repoURL)
+        #expect(!isValid)
+    }
+
+    @Test
+    func testValidateInstalledRepoNemotron3RejectsLegacyLSEENDFolder() async throws {
+        let service = makeService()
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        try createFile("ls-eend/dih3/100ms/model.mlmodelc/coremldata.bin", in: tempRoot)
+
+        let repoURL = tempRoot.appendingPathComponent(ModelGroup.nemotron3Diarization.repoFolderName, isDirectory: true)
+        let isValid = try await service.validateInstalledRepoForTesting(for: .nemotron3Diarization, at: repoURL)
+        #expect(!isValid)
+    }
+
+    @Test
+    func testNemotron3FolderMatchesFluidAudioRepoFolder() {
+        #expect(ModelGroup.nemotron3Diarization.repoFolderName == Repo.nemotron3Diarization.folderName)
+        #expect(ModelPathResolver.nemotron3LoadConfig.modelFileName == ModelPathResolver.nemotron3BundleRelativePath)
+    }
+
+    @Test
+    func testReplacedLSEENDFolderRemovedAfterNemotron3Install() async throws {
+        let service = makeService()
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let legacyURL = tempRoot.appendingPathComponent("ls-eend", isDirectory: true)
+        try createFile("dih3/100ms/model.mlmodelc/coremldata.bin", in: legacyURL)
+
+        await service.removeReplacedInstallForTesting(of: .nemotron3Diarization, in: tempRoot)
+
+        #expect(!FileManager.default.fileExists(atPath: legacyURL.path))
     }
 
     @Test
@@ -116,20 +160,20 @@ final class ModelInstallServiceTests {
             warmUpVAD: {
                 await probe.markVADAttempted()
             },
-            warmUpLSEEND: {
-                await probe.markLSEENDAttempted()
+            warmUpTurnDiarizer: {
+                await probe.markTurnDiarizerAttempted()
             }
         )
 
         let didRunASR = await probe.didRunASR()
         let didRunDiarizer = await probe.didRunDiarizer()
         let didAttemptVAD = await probe.didAttemptVAD()
-        let didAttemptLSEEND = await probe.didAttemptLSEEND()
+        let didAttemptTurnDiarizer = await probe.didAttemptTurnDiarizer()
 
         #expect(didRunASR)
         #expect(didRunDiarizer)
         #expect(didAttemptVAD)
-        #expect(didAttemptLSEEND)
+        #expect(didAttemptTurnDiarizer)
     }
 
     @Test
@@ -149,25 +193,25 @@ final class ModelInstallServiceTests {
                 await probe.markVADAttempted()
                 throw TestWarmUpError.vadFailed
             },
-            warmUpLSEEND: {
-                await probe.markLSEENDAttempted()
+            warmUpTurnDiarizer: {
+                await probe.markTurnDiarizerAttempted()
             }
         )
 
         let didRunASR = await probe.didRunASR()
         let didRunDiarizer = await probe.didRunDiarizer()
         let didAttemptVAD = await probe.didAttemptVAD()
-        let didAttemptLSEEND = await probe.didAttemptLSEEND()
+        let didAttemptTurnDiarizer = await probe.didAttemptTurnDiarizer()
 
         #expect(didRunASR)
         #expect(didRunDiarizer)
         #expect(didAttemptVAD)
-        #expect(didAttemptLSEEND)
+        #expect(didAttemptTurnDiarizer)
     }
 
     @Test
 
-    func testWarmUpModelsLSEENDFailureIsNonFatal() async {
+    func testWarmUpModelsTurnDiarizerFailureIsNonFatal() async {
         let service = makeService()
         let probe = WarmUpProbe()
 
@@ -181,21 +225,110 @@ final class ModelInstallServiceTests {
             warmUpVAD: {
                 await probe.markVADAttempted()
             },
-            warmUpLSEEND: {
-                await probe.markLSEENDAttempted()
-                throw TestWarmUpError.lseendFailed
+            warmUpTurnDiarizer: {
+                await probe.markTurnDiarizerAttempted()
+                throw TestWarmUpError.turnDiarizerFailed
             }
         )
 
         let didRunASR = await probe.didRunASR()
         let didRunDiarizer = await probe.didRunDiarizer()
         let didAttemptVAD = await probe.didAttemptVAD()
-        let didAttemptLSEEND = await probe.didAttemptLSEEND()
+        let didAttemptTurnDiarizer = await probe.didAttemptTurnDiarizer()
 
         #expect(didRunASR)
         #expect(didRunDiarizer)
         #expect(didAttemptVAD)
-        #expect(didAttemptLSEEND)
+        #expect(didAttemptTurnDiarizer)
+    }
+
+    @Test
+    func testUltraGroupIsNotSatisfiedByLegacyV3Folder() async throws {
+        let service = makeService()
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let legacyURL = tempRoot.appendingPathComponent("parakeet-tdt-0.6b-v3", isDirectory: true)
+        try createRequiredFiles(ModelNames.ASR.requiredModelsV3(), in: legacyURL)
+        try createFile(ModelNames.ASR.vocabulary(for: .parakeetV3), in: legacyURL)
+
+        let ultraURL = tempRoot.appendingPathComponent(ModelGroup.asrParakeetUltra.repoFolderName, isDirectory: true)
+        let isValid = try await service.validateInstalledRepoForTesting(for: .asrParakeetUltra, at: ultraURL)
+        #expect(!isValid)
+    }
+
+    @Test
+    func testUltraFolderMatchesFluidAudioRepoFolder() {
+        // AsrModels.load(from:version:) resolves the repo by this name next to the given directory.
+        #expect(ModelGroup.asrParakeetUltra.repoFolderName == Repo.parakeetUltra.folderName)
+        #expect(ModelPathResolver.asrModelVersion == .ultra)
+    }
+
+    @Test
+    func testReplacedV3FolderRemovedAfterUltraInstall() async throws {
+        let service = makeService()
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let legacyURL = tempRoot.appendingPathComponent("parakeet-tdt-0.6b-v3", isDirectory: true)
+        try createRequiredFiles(ModelNames.ASR.requiredModelsV3(), in: legacyURL)
+
+        await service.removeReplacedInstallForTesting(of: .asrParakeetUltra, in: tempRoot)
+
+        #expect(!FileManager.default.fileExists(atPath: legacyURL.path))
+    }
+
+    @Test
+    func testReplacedFolderRemovalLeavesOtherGroupsAlone() async throws {
+        let service = makeService()
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let legacyURL = tempRoot.appendingPathComponent("parakeet-tdt-0.6b-v3", isDirectory: true)
+        try createRequiredFiles(ModelNames.ASR.requiredModelsV3(), in: legacyURL)
+
+        await service.removeReplacedInstallForTesting(of: .vadSilero, in: tempRoot)
+
+        #expect(FileManager.default.fileExists(atPath: legacyURL.path))
+    }
+
+    @Test
+    func testReplacedFolderRemovalIsNonFatalWhenFolderMissing() async throws {
+        let service = makeService()
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        await service.removeReplacedInstallForTesting(of: .asrParakeetUltra, in: tempRoot)
+    }
+
+    @Test
+    func testStampRevisionMarkerWritesPinnedRevisionWhenMissing() throws {
+        let repoURL = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: repoURL) }
+
+        let didStamp = try ModelInstallService.stampRevisionMarkerIfMissing(at: repoURL, revision: Repo.diarizer.revision)
+
+        #expect(didStamp)
+        let markerURL = repoURL.appendingPathComponent(ModelInstallService.revisionMarkerFileName)
+        let stored = try String(contentsOf: markerURL, encoding: .utf8)
+        #expect(stored == Repo.diarizer.revision + "\n")
+    }
+
+    @Test
+    func testStampRevisionMarkerLeavesExistingMarkerUntouched() throws {
+        let repoURL = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: repoURL) }
+        let markerURL = repoURL.appendingPathComponent(ModelInstallService.revisionMarkerFileName)
+        try Data("older-revision\n".utf8).write(to: markerURL)
+
+        let didStamp = try ModelInstallService.stampRevisionMarkerIfMissing(at: repoURL, revision: Repo.diarizer.revision)
+
+        #expect(!didStamp)
+        #expect(try String(contentsOf: markerURL, encoding: .utf8) == "older-revision\n")
+    }
+
+    @Test
+    func testDiarizerRevisionIsPinned() {
+        // The stamp only matters while FluidAudio pins this repo; on "main" no marker is needed.
+        #expect(Repo.diarizer.revision != "main")
     }
 
     private func makeService() -> ModelInstallService {
@@ -217,6 +350,15 @@ final class ModelInstallServiceTests {
         }
     }
 
+    private func createNemotron3Install(in repoURL: URL, weightsVersion: String?) throws {
+        try createFile(ModelPathResolver.nemotron3BundleRelativePath + "/coremldata.bin", in: repoURL)
+        try createRequiredFiles(ModelPathResolver.nemotron3RequiredAssets, in: repoURL)
+        if let weightsVersion {
+            let markerURL = repoURL.appendingPathComponent(ModelNames.Nemotron3.weightsVersionFile)
+            try Data((weightsVersion + "\n").utf8).write(to: markerURL)
+        }
+    }
+
     private func createFile(_ relativePath: String, in repoURL: URL) throws {
         let fileURL = repoURL.appendingPathComponent(relativePath, isDirectory: false)
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -231,21 +373,21 @@ private struct InMemoryBookmarkStore: BookmarkStore {
 
 private enum TestWarmUpError: Error {
     case vadFailed
-    case lseendFailed
+    case turnDiarizerFailed
 }
 
 private actor WarmUpProbe {
     private var asr = false
     private var diarizer = false
     private var vad = false
-    private var lseend = false
+    private var turnDiarizer = false
 
     func markASR() { asr = true }
     func markDiarizer() { diarizer = true }
     func markVADAttempted() { vad = true }
-    func markLSEENDAttempted() { lseend = true }
+    func markTurnDiarizerAttempted() { turnDiarizer = true }
     func didRunASR() -> Bool { asr }
     func didRunDiarizer() -> Bool { diarizer }
     func didAttemptVAD() -> Bool { vad }
-    func didAttemptLSEEND() -> Bool { lseend }
+    func didAttemptTurnDiarizer() -> Bool { turnDiarizer }
 }

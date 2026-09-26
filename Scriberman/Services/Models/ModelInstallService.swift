@@ -69,8 +69,8 @@ actor ModelInstallService: ModelInstallServicing {
     func warmUpModels(workspace: Workspace) async {
         await warmUpModelsInternal(
             warmUpASR: {
-                let asrDirectory = try self.modelPathResolver.modelDirectory(for: .asrParakeetV3, in: workspace)
-                _ = try await AsrModels.load(from: asrDirectory, encoderComputeUnits: .cpuAndGPU)
+                let asrDirectory = try self.modelPathResolver.modelDirectory(for: .asrParakeetUltra, in: workspace)
+                _ = try await AsrModels.load(from: asrDirectory, version: ModelPathResolver.asrModelVersion, encoderComputeUnits: .cpuAndGPU)
             },
             warmUpDiarizer: {
                 let diarizerDirectory = try self.modelPathResolver.modelDirectory(for: .offlineDiarization, in: workspace)
@@ -88,9 +88,9 @@ actor ModelInstallService: ModelInstallServicing {
                 mlConfig.computeUnits = .cpuAndNeuralEngine
                 _ = try await MLModel.load(contentsOf: vadModelURL, configuration: mlConfig)
             },
-            warmUpLSEEND: {
-                let modelURL = try self.modelPathResolver.lseendModelURL(in: workspace)
-                _ = try LSEENDModel(modelURL: modelURL)
+            warmUpTurnDiarizer: {
+                let repoDirectory = try self.modelPathResolver.modelDirectory(for: .nemotron3Diarization, in: workspace)
+                _ = try await Nemotron3Models.load(config: ModelPathResolver.nemotron3LoadConfig, directory: repoDirectory)
             }
         )
     }
@@ -99,7 +99,7 @@ actor ModelInstallService: ModelInstallServicing {
         warmUpASR: () async throws -> Void,
         warmUpDiarizer: () async throws -> Void,
         warmUpVAD: () async throws -> Void,
-        warmUpLSEEND: () async throws -> Void
+        warmUpTurnDiarizer: () async throws -> Void
     ) async {
         do {
             try await warmUpASR()
@@ -112,9 +112,9 @@ actor ModelInstallService: ModelInstallServicing {
             }
 
             do {
-                try await warmUpLSEEND()
+                try await warmUpTurnDiarizer()
             } catch {
-                NSLog("[ModelInstallService] LS-EEND CoreML warm-up failed (non-fatal): %@", String(describing: error))
+                NSLog("[ModelInstallService] Turn diarizer CoreML warm-up failed (non-fatal): %@", String(describing: error))
             }
         } catch {
             NSLog("[ModelInstallService] CoreML warm-up failed (non-fatal): %@", String(describing: error))
@@ -153,6 +153,7 @@ actor ModelInstallService: ModelInstallServicing {
             throw ModelInstallError.validationFailed(group, path: installedURL)
         }
 
+        removeReplacedInstall(of: group, in: workspace.modelsURL)
         return installedURL
     }
 
@@ -197,7 +198,7 @@ actor ModelInstallService: ModelInstallServicing {
     // in [0, 1]. Normalize by the per-API weight so a completed download
     // always reports 1.0.
     static func downloadPhaseWeight(for group: ModelGroup) -> Double {
-        group == .lseendDiarization ? 1.0 : 0.5
+        group == .nemotron3Diarization ? 1.0 : 0.5
     }
 
     static func makeDownloadProgressHandler(
@@ -227,8 +228,8 @@ actor ModelInstallService: ModelInstallServicing {
         progressHandler: ProgressHandler?
     ) async throws {
         switch group {
-        case .asrParakeetV3:
-            try await ModelHub.download(.parakeetV3, to: directory, progressHandler: progressHandler)
+        case .asrParakeetUltra:
+            try await ModelHub.download(.parakeetUltra, to: directory, progressHandler: progressHandler)
 
         case .vadSilero:
             try await ModelHub.download(.vad, to: directory, progressHandler: progressHandler)
@@ -237,16 +238,94 @@ actor ModelInstallService: ModelInstallServicing {
             try await ModelHub.download(.diarizer, to: directory, progressHandler: progressHandler)
             try await ModelHub.download(.diarizer, to: directory, variant: "offline")
 
-        case .lseendDiarization:
-            // Only the pinned variant/step is installed; a full repo download
-            // would pull every LS-EEND variant × step size in the repo.
+        case .nemotron3Diarization:
+            // Only the pinned preset's bundle and the root assets it loads; the repo
+            // carries every preset. Same layout as Nemotron3Models.loadFromHuggingFace.
+            let repoDirectory = directory.appendingPathComponent(
+                ModelGroup.nemotron3Diarization.repoFolderName,
+                isDirectory: true
+            )
             try await ModelHub.download(
-                .lseendDihard3,
-                subdirectory: ModelPathResolver.lseendModelRelativePath,
-                to: directory.appendingPathComponent(ModelGroup.lseendDiarization.repoFolderName, isDirectory: true),
+                .nemotron3Diarization,
+                subdirectory: ModelPathResolver.nemotron3BundleRelativePath,
+                to: repoDirectory,
                 progressHandler: progressHandler
             )
+            let assets = ModelPathResolver.nemotron3RequiredAssets
+            try await ModelHub.download(
+                .nemotron3Diarization,
+                subdirectory: "",
+                to: repoDirectory,
+                progressHandler: nil,
+                shouldSkip: { !assets.contains($0) }
+            )
+            // Written last, as FluidAudio does: its presence means bundle and assets are
+            // one complete copy of this weights version.
+            try Data((ModelNames.Nemotron3.weightsVersion + "\n").utf8).write(
+                to: repoDirectory.appendingPathComponent(ModelNames.Nemotron3.weightsVersionFile),
+                options: .atomic
+            )
         }
+    }
+
+    // MARK: - Replaced installs
+
+    /// Workspace folders left by a model a group no longer uses. Deleted once the group's
+    /// replacement validates as installed; nothing loads them.
+    static func replacedFolderNames(for group: ModelGroup) -> [String] {
+        switch group {
+        case .asrParakeetUltra:
+            return ["parakeet-tdt-0.6b-v3"]
+        case .nemotron3Diarization:
+            return ["ls-eend"]
+        case .vadSilero, .offlineDiarization:
+            return []
+        }
+    }
+
+    private func removeReplacedInstall(of group: ModelGroup, in modelsURL: URL) {
+        for folderName in Self.replacedFolderNames(for: group) {
+            let url = modelsURL.appendingPathComponent(folderName, isDirectory: true)
+            do {
+                try removeIfExists(url)
+            } catch {
+                NSLog("[ModelInstallService] Removing replaced model folder %@ failed (non-fatal): %@", folderName, String(describing: error))
+            }
+        }
+    }
+
+    // MARK: - Diarizer revision marker
+
+    /// FluidAudio's per-folder revision marker (`ModelCache.revisionMarkerName`, private upstream).
+    static let revisionMarkerFileName = ".fluidaudio-revision"
+
+    /// Marks a diarizer install made before FluidAudio pinned the diarizer's Hugging Face revision
+    /// (#939) as holding that revision. Without the marker, FluidAudio's loader deletes the folder
+    /// and downloads it again on the first batch pass. No bytes change: the model files at the
+    /// pinned revision are the ones every existing install downloaded (openspec fluidaudio-0-17-4, D5).
+    func stampDiarizerRevisionIfMissing() async {
+        guard let workspace = try? await ensureWorkspaceWriteAccess() else { return }
+        let repoURL = workspace.modelsURL.appendingPathComponent(
+            ModelGroup.offlineDiarization.repoFolderName,
+            isDirectory: true
+        )
+        do {
+            guard try validateInstalledRepo(for: .offlineDiarization, at: repoURL) else { return }
+            if try Self.stampRevisionMarkerIfMissing(at: repoURL, revision: Repo.diarizer.revision) {
+                NSLog("[ModelInstallService] Stamped diarizer install with revision %@", Repo.diarizer.revision)
+            }
+        } catch {
+            NSLog("[ModelInstallService] Stamping diarizer revision failed (non-fatal): %@", String(describing: error))
+        }
+    }
+
+    /// Writes `revision` into `repoURL`'s marker in FluidAudio's format, unless a marker exists.
+    /// - Returns: whether a marker was written.
+    static func stampRevisionMarkerIfMissing(at repoURL: URL, revision: String) throws -> Bool {
+        let markerURL = repoURL.appendingPathComponent(revisionMarkerFileName, isDirectory: false)
+        guard !FileManager.default.fileExists(atPath: markerURL.path) else { return false }
+        try Data((revision + "\n").utf8).write(to: markerURL, options: .atomic)
+        return true
     }
 
     private func removeIfExists(_ url: URL) throws {
@@ -259,12 +338,13 @@ actor ModelInstallService: ModelInstallServicing {
 
     private func validateInstalledRepo(for group: ModelGroup, at repoURL: URL) throws -> Bool {
         switch group {
-        case .asrParakeetV3:
+        case .asrParakeetUltra:
+            // Ultra ships one encoder build; FluidAudio requires the v3 file set for it.
             let modelFilesPresent = requiredFilesExist(
                 in: repoURL,
-                required: ModelNames.ASR.requiredModelsV3(precision: .int8)
+                required: ModelNames.ASR.requiredModelsV3()
             )
-            let vocabName = ModelNames.ASR.vocabulary(for: .parakeetV3)
+            let vocabName = ModelNames.ASR.vocabulary(for: .parakeetUltra)
             let vocabPresent = fileManager.fileExists(
                 atPath: repoURL.appendingPathComponent(vocabName, isDirectory: false).path
             )
@@ -277,8 +357,18 @@ actor ModelInstallService: ModelInstallServicing {
             return requiredFilesExist(in: repoURL, required: ModelNames.Diarizer.requiredModels)
                 && requiredFilesExist(in: repoURL, required: ModelNames.OfflineDiarizer.requiredModels)
 
-        case .lseendDiarization:
-            return requiredFilesExist(in: repoURL, required: [ModelPathResolver.lseendModelRelativePath])
+        case .nemotron3Diarization:
+            // A compiled bundle is complete once its manifest is on disk (FluidAudio's own check).
+            let manifestPath = repoURL
+                .appendingPathComponent(ModelPathResolver.nemotron3BundleRelativePath, isDirectory: true)
+                .appendingPathComponent("coremldata.bin", isDirectory: false)
+                .path
+            let weightsURL = repoURL.appendingPathComponent(ModelNames.Nemotron3.weightsVersionFile, isDirectory: false)
+            let installedWeights = (try? String(contentsOf: weightsURL, encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return fileManager.fileExists(atPath: manifestPath)
+                && requiredFilesExist(in: repoURL, required: ModelPathResolver.nemotron3RequiredAssets)
+                && installedWeights == ModelNames.Nemotron3.weightsVersion
         }
     }
 
@@ -297,17 +387,21 @@ extension ModelInstallService {
         try validateInstalledRepo(for: group, at: repoURL)
     }
 
+    func removeReplacedInstallForTesting(of group: ModelGroup, in modelsURL: URL) {
+        removeReplacedInstall(of: group, in: modelsURL)
+    }
+
     func warmUpModelsForTesting(
         warmUpASR: () async throws -> Void,
         warmUpDiarizer: () async throws -> Void,
         warmUpVAD: () async throws -> Void,
-        warmUpLSEEND: () async throws -> Void
+        warmUpTurnDiarizer: () async throws -> Void
     ) async {
         await warmUpModelsInternal(
             warmUpASR: warmUpASR,
             warmUpDiarizer: warmUpDiarizer,
             warmUpVAD: warmUpVAD,
-            warmUpLSEEND: warmUpLSEEND
+            warmUpTurnDiarizer: warmUpTurnDiarizer
         )
     }
 }

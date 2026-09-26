@@ -8,7 +8,7 @@ enum LiveTranscriptionError: Error {
     case initializationFailed
 }
 
-/// Session identity of one LS-EEND speaker index within one audio source:
+/// Session identity of one turn-diarizer speaker index within one audio source:
 /// clustering-diarizer embeddings accumulate here, and the first confident
 /// profile match binds the index for the rest of the session (design D5).
 struct SessionSpeakerIdentity {
@@ -82,6 +82,75 @@ private struct VadManagerStreamProcessor: LiveVADStreamingProcessing {
     }
 }
 
+/// Speaker-activity frames committed by one streaming turn-diarizer chunk:
+/// `[frameCount × numSpeakers]`, frame-major.
+struct TurnDiarizerChunk: Sendable {
+    let probabilities: [Float]
+    let frameCount: Int
+}
+
+/// Streaming turn diarizer for one audio source. Implementations are driven only
+/// from `LiveTranscriptionService`'s actor isolation, which never awaits inside
+/// these calls.
+protocol StreamingTurnDiarizing: AnyObject, Sendable {
+    var numSpeakers: Int { get }
+    var frameSeconds: Float { get }
+    /// Buffers 16 kHz mono `samples` and returns the frames committed by every
+    /// chunk they complete.
+    func feed(_ samples: [Float]) throws -> [TurnDiarizerChunk]
+    /// Flushes buffered audio and returns the remaining frames. Later feeds are
+    /// ignored until `reset()`.
+    func finish() throws -> [TurnDiarizerChunk]
+    func reset()
+}
+
+// @unchecked: Nemotron3Diarizer is not thread-safe. LiveTranscriptionService's
+// actor is its only caller and calls it synchronously.
+final class Nemotron3TurnDiarizer: StreamingTurnDiarizing, @unchecked Sendable {
+    private let diarizer: Nemotron3Diarizer
+    private var isFinished = false
+
+    init(config: Nemotron3Config, models: Nemotron3Models) {
+        self.diarizer = Nemotron3Diarizer(config: config, models: models)
+    }
+
+    var numSpeakers: Int { diarizer.config.numSpeakers }
+    var frameSeconds: Float { diarizer.config.outputFrameSeconds }
+
+    func feed(_ samples: [Float]) throws -> [TurnDiarizerChunk] {
+        // Nemotron3Diarizer traps on appendAudio after finishStream; a reentrant
+        // process() while stop() is flushing can reach here.
+        guard !isFinished else { return [] }
+        diarizer.appendAudio(samples)
+        return try diarizer.processBufferedAudio().map(Self.chunk)
+    }
+
+    func finish() throws -> [TurnDiarizerChunk] {
+        guard !isFinished else { return [] }
+        isFinished = true
+        return try diarizer.finishStream().map(Self.chunk)
+    }
+
+    func reset() {
+        diarizer.reset()
+        isFinished = false
+    }
+
+    private static func chunk(_ result: Nemotron3ChunkResult) -> TurnDiarizerChunk {
+        TurnDiarizerChunk(probabilities: result.probabilities, frameCount: result.frameCount)
+    }
+}
+
+/// A transcribed buffer waiting for its source's turn timeline to cover it
+/// (nemotron3-live-turns design D5).
+private struct PendingAttribution {
+    let text: String
+    let tokenTimings: [TokenTiming]?
+    let start: Float
+    let end: Float
+    let longestClusterSegment: TimedSpeakerSegment?
+}
+
 actor LiveTranscriptionService {
     private let logger = Logger(subsystem: "Scriberman", category: "LiveTranscriptionService")
     private let fileManager = FileManager.default
@@ -93,14 +162,24 @@ actor LiveTranscriptionService {
     private var vadManager: VadManager?
     private var vadStreamProcessor: (any LiveVADStreamingProcessing)?
 
-    // Streaming turn diarization: one session-long LS-EEND diarizer per source
+    // Streaming turn diarization: one session-long diarizer per source
     // (sources have independent sample clocks; a shared instance would
     // interleave unrelated audio and corrupt its timeline).
-    private var lseendDiarizers: [AudioSource: LSEENDDiarizer] = [:]
-    // Session offset (seconds) from which a source's LS-EEND timeline is
+    private var turnDiarizers: [AudioSource: any StreamingTurnDiarizing] = [:]
+    // Committed speaker segments per source, built from the diarizer's output.
+    private var turnTimelines: [AudioSource: TurnTimeline] = [:]
+    // Session offset (seconds) from which a source's turn timeline is
     // desynchronized after a feed failure; queries at or past this point
     // return no runs so attribution falls back to embeddings.
-    private var lseendUnreliableFromOffsets: [AudioSource: Float] = [:]
+    private var turnUnreliableFromOffsets: [AudioSource: Float] = [:]
+    // Transcribed buffers held until their source's timeline covers them,
+    // oldest first (design D5).
+    private var pendingAttributions: [AudioSource: [PendingAttribution]] = [:]
+    // Sources with a release loop running; keeps emission in order across
+    // actor reentrancy.
+    private var releasingSources: Set<AudioSource> = []
+    // Committed output may end a frame short of the sample clock.
+    private static let coverageTolerance: Float = 0.02
 
     // Dependencies
     private let speakerEmbeddingStore: SpeakerEmbeddingStore?
@@ -138,13 +217,13 @@ actor LiveTranscriptionService {
     private var collectedFinalSegments: [TranscriptSegment] = []
 
     // Speaker tracking across session — fallback path only. Chunks attributed
-    // without an LS-EEND timeline (empty/unreliable) record here under the
-    // clustering diarizer's session-local ID, preserving pre-LS-EEND behavior.
+    // without a turn timeline (empty/unreliable) record here under the
+    // clustering diarizer's session-local ID, preserving pre-turn-diarizer behavior.
     // Key: session-local speaker ID ("speaker_SPEAKER_0" etc.)
     // Value: (embedding, wasMatched, matchedProfileID)
     var sessionSpeakers: [String: (embedding: [Float], wasMatched: Bool, matchedProfileID: UUID?)] = [:]
 
-    // Primary speaker identity: per-source LS-EEND speaker index → identity
+    // Primary speaker identity: per-source turn-diarizer speaker index → identity
     // record (accumulated embeddings + sticky profile binding).
     private(set) var sessionSpeakerIdentities: [AudioSource: [Int: SessionSpeakerIdentity]] = [:]
 
@@ -177,8 +256,8 @@ actor LiveTranscriptionService {
             initializeAsr: { workspace in
                 let asrConfig = ASRConfig()
                 let asr = AsrManager(config: asrConfig)
-                let asrDirectory = try ModelPathResolver().modelDirectory(for: .asrParakeetV3, in: workspace)
-                let asrModels = try await AsrModels.load(from: asrDirectory, encoderComputeUnits: .cpuAndGPU)
+                let asrDirectory = try ModelPathResolver().modelDirectory(for: .asrParakeetUltra, in: workspace)
+                let asrModels = try await AsrModels.load(from: asrDirectory, version: ModelPathResolver.asrModelVersion, encoderComputeUnits: .cpuAndGPU)
                 try await asr.loadModels(asrModels)
                 return asr
             },
@@ -215,15 +294,16 @@ actor LiveTranscriptionService {
                 let manager = VadManager(config: VadConfig(defaultThreshold: Float(config.vadThreshold)), vadModel: mlModel)
                 return (manager, VadManagerStreamProcessor(manager: manager))
             },
-            initializeLSEEND: { workspace in
-                // One LSEENDModel (MLModel access is lock-serialized inside
-                // FluidAudio) shared by per-source diarizers, each of which
-                // owns its own streaming session and timeline.
-                let modelURL = try ModelPathResolver().lseendModelURL(in: workspace)
-                let model = try LSEENDModel(modelURL: modelURL)
-                var diarizers: [AudioSource: LSEENDDiarizer] = [:]
+            initializeTurnDiarizers: { workspace in
+                // One model shared by per-source diarizers, each owning its own
+                // streaming state. Safe because this actor serializes every
+                // feed/finish call and none of them await (design D3).
+                let repoDirectory = try ModelPathResolver().modelDirectory(for: .nemotron3Diarization, in: workspace)
+                let config = ModelPathResolver.nemotron3LoadConfig
+                let models = try await Nemotron3Models.load(config: config, directory: repoDirectory)
+                var diarizers: [AudioSource: any StreamingTurnDiarizing] = [:]
                 for source in AudioSource.allCases {
-                    diarizers[source] = try LSEENDDiarizer(model: model)
+                    diarizers[source] = Nemotron3TurnDiarizer(config: config, models: models)
                 }
                 return diarizers
             }
@@ -236,7 +316,7 @@ actor LiveTranscriptionService {
         initializeAsr: @Sendable (Workspace) async throws -> AsrManager,
         initializeDiarizer: @Sendable (Workspace, LiveTranscriptionPipelineSettings) async throws -> DiarizerManager,
         initializeVad: @Sendable (Workspace, LiveTranscriptionPipelineSettings) async throws -> (VadManager, any LiveVADStreamingProcessing),
-        initializeLSEEND: @Sendable (Workspace) async throws -> [AudioSource: LSEENDDiarizer]
+        initializeTurnDiarizers: @Sendable (Workspace) async throws -> [AudioSource: any StreamingTurnDiarizing]
     ) async {
         storedConfig = config
 
@@ -284,17 +364,18 @@ actor LiveTranscriptionService {
             return
         }
 
-        // 4. Initialize LS-EEND turn diarizers (one per audio source)
+        // 4. Initialize turn diarizers (one per audio source)
         do {
-            self.lseendDiarizers = try await initializeLSEEND(workspace)
-            logger.info("LS-EEND diarizers initialized from workspace models (\(self.lseendDiarizers.count) sources)")
+            let diarizers = try await initializeTurnDiarizers(workspace)
+            installTurnDiarizers(diarizers)
+            logger.info("Turn diarizers initialized from workspace models (\(self.turnDiarizers.count) sources)")
         } catch {
-            logger.error("LS-EEND initialization failed during prepare(): \(error). Live transcription unavailable.")
+            logger.error("Turn diarizer initialization failed during prepare(): \(error). Live transcription unavailable.")
             asrManager = nil
             diarizer = nil
             vadManager = nil
             vadStreamProcessor = nil
-            lseendDiarizers.removeAll()
+            installTurnDiarizers([:])
             return
         }
 
@@ -319,10 +400,12 @@ actor LiveTranscriptionService {
         collectedFinalSegments.removeAll()
         sessionSpeakers.removeAll()
         sessionSpeakerIdentities.removeAll()
-        lseendUnreliableFromOffsets.removeAll()
-        for lseendDiarizer in lseendDiarizers.values {
-            lseendDiarizer.reset()
+        turnUnreliableFromOffsets.removeAll()
+        pendingAttributions.removeAll()
+        for turnDiarizer in turnDiarizers.values {
+            turnDiarizer.reset()
         }
+        installTurnDiarizers(turnDiarizers)
 
         storedConfig = config
 
@@ -341,15 +424,19 @@ actor LiveTranscriptionService {
     func stop() async -> [TranscriptSegment] {
         logger.info("Stopping live transcription service")
 
-        // Finalize LS-EEND sessions first so tentative timeline segments are
-        // flushed before the pending speech buffers below query them for
-        // final speaker attribution.
-        for (source, lseendDiarizer) in lseendDiarizers where lseendDiarizer.isAvailable {
+        // Finish each turn diarizer stream first so its timeline covers all
+        // audio before held buffers and the pending speech buffers below are
+        // attributed.
+        for (source, turnDiarizer) in turnDiarizers where turnUnreliableFromOffsets[source] == nil {
             do {
-                try lseendDiarizer.finalizeSession()
+                let chunks = try turnDiarizer.finish()
+                appendTurnChunks(chunks, for: source)
             } catch {
-                logger.error("LS-EEND finalize failed for \(source.rawValue) (non-fatal): \(error)")
+                markTurnDiarizerUnreliable(source: source, error: error)
             }
+        }
+        for source in turnDiarizers.keys {
+            await releasePendingAttributions(for: source)
         }
 
         // Flush pending speech buffers before speaker enrollment.
@@ -372,7 +459,13 @@ actor LiveTranscriptionService {
             recentPreRollChunks[source] = []
         }
 
-        // Speaker enrollment at session end: LS-EEND identity records are the
+        // Anything still held (a stream that failed to finish) is attributed
+        // with whatever the timeline has, falling back to embeddings.
+        for source in Array(pendingAttributions.keys) {
+            await releasePendingAttributions(for: source, force: true)
+        }
+
+        // Speaker enrollment at session end: turn-diarizer identity records are the
         // primary source; legacy sessionSpeakers covers fallback-attributed
         // chunks (empty/unreliable timeline stretches).
         if let store = speakerEmbeddingStore, !sessionSpeakerIdentities.isEmpty || !sessionSpeakers.isEmpty {
@@ -381,7 +474,7 @@ actor LiveTranscriptionService {
                 let existingCount = allProfiles.count
                 var newSpeakerIndex = 0
 
-                // Iterate deterministically: sources then LS-EEND indices.
+                // Iterate deterministically: sources then turn-diarizer indices.
                 for source in sessionSpeakerIdentities.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
                     let records = sessionSpeakerIdentities[source] ?? [:]
                     for speakerIndex in records.keys.sorted() {
@@ -396,7 +489,7 @@ actor LiveTranscriptionService {
                             let name = "Speaker \(existingCount + newSpeakerIndex + 1)"
                             newSpeakerIndex += 1
                             try? await store.enrollSpeaker(name: name, embedding: embedding)
-                            logger.info("Enrolled new speaker '\(name)' for LS-EEND speaker \(speakerIndex) (\(source.rawValue))")
+                            logger.info("Enrolled new speaker '\(name)' for turn speaker \(speakerIndex) (\(source.rawValue))")
                         }
                     }
                 }
@@ -439,8 +532,10 @@ actor LiveTranscriptionService {
         diarizer = nil
         vadManager = nil
         vadStreamProcessor = nil
-        lseendDiarizers.removeAll()
-        lseendUnreliableFromOffsets.removeAll()
+        installTurnDiarizers([:])
+        turnUnreliableFromOffsets.removeAll()
+        pendingAttributions.removeAll()
+        releasingSources.removeAll()
         isInitialized = false
 
         return segments
@@ -458,9 +553,10 @@ actor LiveTranscriptionService {
             totalSamplesProcessed[source] = (totalSamplesProcessed[source] ?? 0) + resampled.count
 
             // Feed every resampled sample (silence included, before VAD
-            // gating) so the LS-EEND timeline stays aligned with the session
+            // gating) so the turn timeline stays aligned with the session
             // sample clock used for TranscriptSegment offsets.
             feedTurnDiarizer(resampled, for: source)
+            await releasePendingAttributions(for: source)
 
             var combinedSamples = vadInputRemainders[source] ?? []
             combinedSamples.append(contentsOf: resampled)
@@ -550,56 +646,89 @@ actor LiveTranscriptionService {
         Float(totalSamplesProcessed[source] ?? 0) / Self.SAMPLE_RATE
     }
 
-    // MARK: - Streaming Turn Diarization (LS-EEND)
+    // MARK: - Streaming Turn Diarization
+
+    private func installTurnDiarizers(_ diarizers: [AudioSource: any StreamingTurnDiarizing]) {
+        turnDiarizers = diarizers
+        turnTimelines = diarizers.mapValues {
+            TurnTimeline(numSpeakers: $0.numSpeakers, frameSeconds: $0.frameSeconds)
+        }
+    }
 
     private func feedTurnDiarizer(_ samples: [Float], for source: AudioSource) {
-        guard let lseendDiarizer = lseendDiarizers[source], lseendDiarizer.isAvailable else { return }
+        guard let turnDiarizer = turnDiarizers[source] else { return }
         // Once desynchronized there is no way to realign the timeline with
         // the sample clock mid-session; stop paying for inference.
-        guard lseendUnreliableFromOffsets[source] == nil else { return }
+        guard turnUnreliableFromOffsets[source] == nil else { return }
 
         do {
-            try lseendDiarizer.addAudio(samples)
-            _ = try lseendDiarizer.process()
+            let chunks = try turnDiarizer.feed(samples)
+            appendTurnChunks(chunks, for: source)
         } catch {
-            let failureOffset = Float((totalSamplesProcessed[source] ?? 0) - samples.count) / Self.SAMPLE_RATE
-            lseendUnreliableFromOffsets[source] = failureOffset
-            logger.error("LS-EEND feed failed for \(source.rawValue) at \(String(format: "%.1f", failureOffset))s; attribution falls back to embeddings from here: \(error)")
+            markTurnDiarizerUnreliable(source: source, error: error, fedSampleCount: samples.count)
         }
     }
 
-    /// Speaker runs (finalized + tentative) from the source's LS-EEND
-    /// timeline overlapping `[start, end]` session seconds. Empty when the
-    /// diarizer is unavailable or its timeline is unreliable for the range —
-    /// callers fall back to embedding-based attribution.
+    private func appendTurnChunks(_ chunks: [TurnDiarizerChunk], for source: AudioSource) {
+        guard !chunks.isEmpty, var timeline = turnTimelines[source] else { return }
+        for chunk in chunks {
+            timeline.append(probabilities: chunk.probabilities, frameCount: chunk.frameCount)
+        }
+        turnTimelines[source] = timeline
+    }
+
+    private func markTurnDiarizerUnreliable(source: AudioSource, error: Error, fedSampleCount: Int = 0) {
+        let failureOffset = turnTimelines[source]?.coveredUntil
+            ?? Float((totalSamplesProcessed[source] ?? 0) - fedSampleCount) / Self.SAMPLE_RATE
+        turnUnreliableFromOffsets[source] = failureOffset
+        logger.error("Turn diarizer failed for \(source.rawValue) at \(String(format: "%.1f", failureOffset))s; attribution falls back to embeddings from here: \(error)")
+    }
+
+    /// Speaker runs from the source's committed turn timeline overlapping
+    /// `[start, end]` session seconds. Empty when the diarizer is unavailable or
+    /// its timeline is unreliable for the range — callers fall back to
+    /// embedding-based attribution.
     func turnSpeakerRuns(for source: AudioSource, start: Float, end: Float) -> [SpeakerRun] {
-        guard let lseendDiarizer = lseendDiarizers[source] else { return [] }
-        if let unreliableFrom = lseendUnreliableFromOffsets[source], end > unreliableFrom {
+        guard let timeline = turnTimelines[source] else { return [] }
+        if let unreliableFrom = turnUnreliableFromOffsets[source], end > unreliableFrom {
             return []
         }
-        return LiveSpeakerTimeline.speakerRuns(
-            in: Self.allTimelineSegments(lseendDiarizer.timeline),
-            start: start,
-            end: end
-        )
+        return LiveSpeakerTimeline.speakerRuns(in: timeline.segments, start: start, end: end)
     }
 
-    /// Dominant LS-EEND speaker index for `[start, end]`, or nil when the
+    /// Dominant turn-diarizer speaker index for `[start, end]`, or nil when the
     /// timeline has no reliable data for the range.
     func dominantTurnSpeaker(for source: AudioSource, start: Float, end: Float) -> Int? {
-        guard let lseendDiarizer = lseendDiarizers[source] else { return nil }
-        if let unreliableFrom = lseendUnreliableFromOffsets[source], end > unreliableFrom {
+        guard let timeline = turnTimelines[source] else { return nil }
+        if let unreliableFrom = turnUnreliableFromOffsets[source], end > unreliableFrom {
             return nil
         }
-        return LiveSpeakerTimeline.dominantSpeaker(
-            in: Self.allTimelineSegments(lseendDiarizer.timeline),
-            start: start,
-            end: end
-        )
+        return LiveSpeakerTimeline.dominantSpeaker(in: timeline.segments, start: start, end: end)
     }
 
-    private static func allTimelineSegments(_ timeline: DiarizerTimeline) -> [DiarizerSegment] {
-        timeline.speakers.values.flatMap { $0.finalizedSegments + $0.tentativeSegments }
+    /// Whether a buffer ending at `end` can be attributed now: the timeline
+    /// covers it, or there is no timeline worth waiting for.
+    private func isTurnTimelineReady(through end: Float, for source: AudioSource) -> Bool {
+        guard let timeline = turnTimelines[source] else { return true }
+        if let unreliableFrom = turnUnreliableFromOffsets[source], end > unreliableFrom {
+            return true
+        }
+        return timeline.coveredUntil + Self.coverageTolerance >= end
+    }
+
+    /// Attributes and emits held buffers, oldest first, while the timeline
+    /// covers them (or unconditionally when `force`). One loop per source runs
+    /// at a time so emission order survives actor reentrancy.
+    private func releasePendingAttributions(for source: AudioSource, force: Bool = false) async {
+        guard !releasingSources.contains(source) else { return }
+        releasingSources.insert(source)
+        defer { releasingSources.remove(source) }
+
+        while let next = pendingAttributions[source]?.first,
+              force || isTurnTimelineReady(through: next.end, for: source) {
+            pendingAttributions[source]?.removeFirst()
+            await attribute(next, source: source)
+        }
     }
 
     private func flushSpeechBuffer(for source: AudioSource) async {
@@ -689,7 +818,7 @@ actor LiveTranscriptionService {
             }
 
             // Clustering diarization is retained solely for embedding
-            // extraction (design D1): LS-EEND provides turn boundaries and
+            // extraction (design D1): the turn diarizer provides turn boundaries and
             // within-session consistency; embeddings provide identity.
             var longestClusterSegment: TimedSpeakerSegment?
             if let diarizer = diarizer {
@@ -700,56 +829,71 @@ actor LiveTranscriptionService {
                     logger.error("Embedding diarization failed: \(error)")
                 }
             }
-            let chunkEmbedding = longestClusterSegment?.embedding ?? []
 
-            let bufferStart = currentOffset
-            let bufferEnd = currentOffset + chunkDuration
-            let runs = turnSpeakerRuns(for: source, start: bufferStart, end: bufferEnd)
-            let parts = LiveSegmentSplitter.planParts(runs: runs, start: bufferStart, end: bufferEnd)
-
-            guard !parts.isEmpty else {
-                // Timeline has no reliable data for this range: fall back to
-                // embedding-based attribution (pre-LS-EEND behavior).
-                let speakerID = await fallbackSpeakerID(from: longestClusterSegment)
-                logger.info("📝 RESULT [\(source.rawValue)] (embedding fallback): \(speakerID): \(cleanedText)")
-                emitFinalSegment(speakerId: speakerID, text: cleanedText, start: bufferStart, end: bufferEnd, source: source)
-                return
-            }
-
-            // Accumulate the chunk's embedding on the dominant part's
-            // identity record; first confident match binds the LS-EEND index
-            // to a profile for the rest of the session (design D5).
-            if !chunkEmbedding.isEmpty,
-               let dominantPart = parts.max(by: { $0.duration < $1.duration }) {
-                var record = sessionSpeakerIdentities[source]?[dominantPart.speakerIndex] ?? SessionSpeakerIdentity()
-                record.accumulate(chunkEmbedding)
-                if !record.isBound, let match = await findBestSpeakerMatch(for: chunkEmbedding) {
-                    record.boundProfileID = match.id
-                    record.boundProfileName = match.name
-                    logger.info("📍 Bound LS-EEND speaker \(dominantPart.speakerIndex) (\(source.rawValue)) to profile '\(match.name)'")
-                }
-                sessionSpeakerIdentities[source, default: [:]][dominantPart.speakerIndex] = record
-            }
-
-            let texts = LiveSegmentSplitter.apportionText(
-                cleanedText,
-                parts: parts,
-                bufferStart: bufferStart,
-                tokenTimings: asrResult.tokenTimings
-            )
-
-            for (part, text) in zip(parts, texts) where !text.isEmpty {
-                let speakerID = turnSpeakerLabel(for: part.speakerIndex, source: source)
-                logger.info("📝 RESULT [\(source.rawValue)]: \(speakerID): \(text)")
-                emitFinalSegment(speakerId: speakerID, text: text, start: part.start, end: part.end, source: source)
-            }
+            pendingAttributions[source, default: []].append(PendingAttribution(
+                text: cleanedText,
+                tokenTimings: asrResult.tokenTimings,
+                start: currentOffset,
+                end: currentOffset + chunkDuration,
+                longestClusterSegment: longestClusterSegment
+            ))
+            await releasePendingAttributions(for: source)
 
         } catch {
             logger.error("Chunk processing failed: \(error)")
         }
     }
 
-    /// Label for an LS-EEND speaker index: the bound profile's name, or a
+    /// Splits a covered buffer at turn boundaries and emits its segments, or
+    /// falls back to embedding attribution when the timeline has nothing.
+    private func attribute(_ pending: PendingAttribution, source: AudioSource) async {
+        let bufferStart = pending.start
+        let bufferEnd = pending.end
+        let cleanedText = pending.text
+        let longestClusterSegment = pending.longestClusterSegment
+        let chunkEmbedding = longestClusterSegment?.embedding ?? []
+        let runs = turnSpeakerRuns(for: source, start: bufferStart, end: bufferEnd)
+        let parts = LiveSegmentSplitter.planParts(runs: runs, start: bufferStart, end: bufferEnd)
+
+        guard !parts.isEmpty else {
+            // Timeline has no reliable data for this range: fall back to
+            // embedding-based attribution (pre-turn-diarizer behavior).
+            let speakerID = await fallbackSpeakerID(from: longestClusterSegment)
+            logger.info("📝 RESULT [\(source.rawValue)] (embedding fallback): \(speakerID): \(cleanedText)")
+            emitFinalSegment(speakerId: speakerID, text: cleanedText, start: bufferStart, end: bufferEnd, source: source)
+            return
+        }
+
+        // Accumulate the chunk's embedding on the dominant part's
+        // identity record; first confident match binds the turn-diarizer index
+        // to a profile for the rest of the session (design D5).
+        if !chunkEmbedding.isEmpty,
+           let dominantPart = parts.max(by: { $0.duration < $1.duration }) {
+            var record = sessionSpeakerIdentities[source]?[dominantPart.speakerIndex] ?? SessionSpeakerIdentity()
+            record.accumulate(chunkEmbedding)
+            if !record.isBound, let match = await findBestSpeakerMatch(for: chunkEmbedding) {
+                record.boundProfileID = match.id
+                record.boundProfileName = match.name
+                logger.info("📍 Bound turn speaker \(dominantPart.speakerIndex) (\(source.rawValue)) to profile '\(match.name)'")
+            }
+            sessionSpeakerIdentities[source, default: [:]][dominantPart.speakerIndex] = record
+        }
+
+        let texts = LiveSegmentSplitter.apportionText(
+            cleanedText,
+            parts: parts,
+            bufferStart: bufferStart,
+            tokenTimings: pending.tokenTimings
+        )
+
+        for (part, text) in zip(parts, texts) where !text.isEmpty {
+            let speakerID = turnSpeakerLabel(for: part.speakerIndex, source: source)
+            logger.info("📝 RESULT [\(source.rawValue)]: \(speakerID): \(text)")
+            emitFinalSegment(speakerId: speakerID, text: text, start: part.start, end: part.end, source: source)
+        }
+    }
+
+    /// Label for a turn-diarizer speaker index: the bound profile's name, or a
     /// session-local ID that stays stable for the whole session.
     private func turnSpeakerLabel(for speakerIndex: Int, source: AudioSource) -> String {
         if let name = sessionSpeakerIdentities[source]?[speakerIndex]?.boundProfileName {
@@ -758,7 +902,7 @@ actor LiveTranscriptionService {
         return "speaker_\(source.rawValue)_\(speakerIndex)"
     }
 
-    /// Pre-LS-EEND attribution used when the timeline has no data for a
+    /// Pre-turn-diarizer attribution used when the timeline has no data for a
     /// buffer: match the chunk's embedding against stored profiles and track
     /// the result in `sessionSpeakers` for enrollment at stop().
     private func fallbackSpeakerID(from longestSegment: TimedSpeakerSegment?) async -> String {
@@ -875,7 +1019,7 @@ extension LiveTranscriptionService {
         initializeAsr: @Sendable (Workspace) async throws -> AsrManager,
         initializeDiarizer: @Sendable (Workspace, LiveTranscriptionPipelineSettings) async throws -> DiarizerManager,
         initializeVad: @Sendable (Workspace, LiveTranscriptionPipelineSettings) async throws -> (VadManager, any LiveVADStreamingProcessing),
-        initializeLSEEND: @Sendable (Workspace) async throws -> [AudioSource: LSEENDDiarizer] = { _ in [:] }
+        initializeTurnDiarizers: @Sendable (Workspace) async throws -> [AudioSource: any StreamingTurnDiarizing] = { _ in [:] }
     ) async {
         await prepare(
             workspace: workspace,
@@ -883,12 +1027,16 @@ extension LiveTranscriptionService {
             initializeAsr: initializeAsr,
             initializeDiarizer: initializeDiarizer,
             initializeVad: initializeVad,
-            initializeLSEEND: initializeLSEEND
+            initializeTurnDiarizers: initializeTurnDiarizers
         )
     }
 
-    func setLSEENDDiarizersForTesting(_ diarizers: [AudioSource: LSEENDDiarizer]) {
-        self.lseendDiarizers = diarizers
+    func setTurnDiarizersForTesting(_ diarizers: [AudioSource: any StreamingTurnDiarizing]) {
+        installTurnDiarizers(diarizers)
+    }
+
+    func pendingAttributionCountForTesting(source: AudioSource) -> Int {
+        pendingAttributions[source]?.count ?? 0
     }
 
     func injectSpeakerIdentityForTesting(source: AudioSource, speakerIndex: Int, identity: SessionSpeakerIdentity) {
@@ -899,8 +1047,8 @@ extension LiveTranscriptionService {
         sessionSpeakerIdentities[source]?[speakerIndex]
     }
 
-    func markLSEENDUnreliableForTesting(source: AudioSource, fromOffset: Float) {
-        self.lseendUnreliableFromOffsets[source] = fromOffset
+    func markTurnDiarizerUnreliableForTesting(source: AudioSource, fromOffset: Float) {
+        self.turnUnreliableFromOffsets[source] = fromOffset
     }
 
     func lastFinalSegmentEndOffsetForTesting(source: AudioSource) -> Float? {

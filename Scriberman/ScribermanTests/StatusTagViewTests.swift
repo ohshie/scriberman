@@ -110,10 +110,10 @@ struct StatusTagViewTests {
 
     @Test
     func downloadPhaseWeightMatchesModelHubAPIPerGroup() {
-        #expect(ModelInstallService.downloadPhaseWeight(for: .asrParakeetV3) == 0.5)
+        #expect(ModelInstallService.downloadPhaseWeight(for: .asrParakeetUltra) == 0.5)
         #expect(ModelInstallService.downloadPhaseWeight(for: .vadSilero) == 0.5)
         #expect(ModelInstallService.downloadPhaseWeight(for: .offlineDiarization) == 0.5)
-        #expect(ModelInstallService.downloadPhaseWeight(for: .lseendDiarization) == 1.0)
+        #expect(ModelInstallService.downloadPhaseWeight(for: .nemotron3Diarization) == 1.0)
     }
 
     @Test
@@ -128,15 +128,15 @@ struct StatusTagViewTests {
     @Test
     func modelGroupsListContainsExactlyFourRequiredRows() {
         #expect(ModelGroup.allCases.count == 4)
-        #expect(ModelGroup.allCases == [.asrParakeetV3, .vadSilero, .offlineDiarization, .lseendDiarization])
+        #expect(ModelGroup.allCases == [.asrParakeetUltra, .vadSilero, .offlineDiarization, .nemotron3Diarization])
     }
 
     @Test
     func modelGroupTitlesMatchSettingsRows() {
-        #expect(ModelGroup.asrParakeetV3.title == "ASR (Parakeet v3)")
+        #expect(ModelGroup.asrParakeetUltra.title == "ASR (Parakeet v3)")
         #expect(ModelGroup.vadSilero.title == "VAD (Silero CoreML)")
         #expect(ModelGroup.offlineDiarization.title == "Diarization (Global Offline)")
-        #expect(ModelGroup.lseendDiarization.title == "Turn Diarization (LS-EEND)")
+        #expect(ModelGroup.nemotron3Diarization.title == "Turn Diarization (LS-EEND)")
     }
 
     private func statusTagViewSource() throws -> String {

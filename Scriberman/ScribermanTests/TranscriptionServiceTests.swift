@@ -175,7 +175,7 @@ struct TranscriptionServiceTests {
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
         let workspace = Workspace(rootURL: tempRoot)
-        let requiredGroups: [ModelGroup] = [.asrParakeetV3, .vadSilero, .offlineDiarization]
+        let requiredGroups: [ModelGroup] = [.asrParakeetUltra, .vadSilero, .offlineDiarization]
         for group in requiredGroups {
             let directory = workspace.modelsURL.appendingPathComponent(group.repoFolderName, isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -192,7 +192,7 @@ struct TranscriptionServiceTests {
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
         let workspace = Workspace(rootURL: tempRoot)
-        let presentGroups: [ModelGroup] = [.asrParakeetV3, .vadSilero]
+        let presentGroups: [ModelGroup] = [.asrParakeetUltra, .vadSilero]
         for group in presentGroups {
             let directory = workspace.modelsURL.appendingPathComponent(group.repoFolderName, isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
