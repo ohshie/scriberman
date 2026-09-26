@@ -110,7 +110,7 @@ struct StatusTagViewTests {
 
     @Test
     func downloadPhaseWeightMatchesModelHubAPIPerGroup() {
-        #expect(ModelInstallService.downloadPhaseWeight(for: .asrParakeetV3) == 0.5)
+        #expect(ModelInstallService.downloadPhaseWeight(for: .asrParakeetUltra) == 0.5)
         #expect(ModelInstallService.downloadPhaseWeight(for: .vadSilero) == 0.5)
         #expect(ModelInstallService.downloadPhaseWeight(for: .offlineDiarization) == 0.5)
         #expect(ModelInstallService.downloadPhaseWeight(for: .lseendDiarization) == 1.0)
@@ -128,12 +128,12 @@ struct StatusTagViewTests {
     @Test
     func modelGroupsListContainsExactlyFourRequiredRows() {
         #expect(ModelGroup.allCases.count == 4)
-        #expect(ModelGroup.allCases == [.asrParakeetV3, .vadSilero, .offlineDiarization, .lseendDiarization])
+        #expect(ModelGroup.allCases == [.asrParakeetUltra, .vadSilero, .offlineDiarization, .lseendDiarization])
     }
 
     @Test
     func modelGroupTitlesMatchSettingsRows() {
-        #expect(ModelGroup.asrParakeetV3.title == "ASR (Parakeet v3)")
+        #expect(ModelGroup.asrParakeetUltra.title == "ASR (Parakeet v3)")
         #expect(ModelGroup.vadSilero.title == "VAD (Silero CoreML)")
         #expect(ModelGroup.offlineDiarization.title == "Diarization (Global Offline)")
         #expect(ModelGroup.lseendDiarization.title == "Turn Diarization (LS-EEND)")

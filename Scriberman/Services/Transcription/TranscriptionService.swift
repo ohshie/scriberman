@@ -72,7 +72,7 @@ actor TranscriptionService: TranscriptionServiceProtocol {
     }
 
     func prepareModels(workspace: Workspace) async throws {
-        let requiredGroups: [ModelGroup] = [.asrParakeetV3, .vadSilero, .offlineDiarization]
+        let requiredGroups: [ModelGroup] = [.asrParakeetUltra, .vadSilero, .offlineDiarization]
         var missingRepos: [String] = []
 
         for group in requiredGroups {

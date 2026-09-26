@@ -27,6 +27,13 @@ struct ModelPathResolver: @unchecked Sendable {
         return url
     }
 
+    // MARK: - ASR
+
+    /// Parakeet version installed by `ModelInstallService` and loaded by every ASR path.
+    /// `AsrModels.load(from:)` resolves the repo folder from this version, so each load call
+    /// must pass it; omitting it resolves (and downloads) v3.
+    static let asrModelVersion: AsrModelVersion = .ultra
+
     // MARK: - LS-EEND
 
     /// LS-EEND variant/step installed by `ModelInstallService` and loaded by

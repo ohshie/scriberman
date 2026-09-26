@@ -91,9 +91,9 @@ final class DictationService {
         state = .prewarming
 
         do {
-            let asrDir = try modelPathResolver.modelDirectory(for: .asrParakeetV3, in: workspace)
+            let asrDir = try modelPathResolver.modelDirectory(for: .asrParakeetUltra, in: workspace)
             let asr = AsrManager(config: ASRConfig())
-            let asrModels = try await AsrModels.load(from: asrDir, encoderComputeUnits: .cpuAndGPU)
+            let asrModels = try await AsrModels.load(from: asrDir, version: ModelPathResolver.asrModelVersion, encoderComputeUnits: .cpuAndGPU)
             try await asr.loadModels(asrModels)
             asrManager = asr
 

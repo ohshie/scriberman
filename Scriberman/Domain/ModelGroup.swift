@@ -1,7 +1,7 @@
 import Foundation
 
 enum ModelGroup: String, CaseIterable, Identifiable {
-    case asrParakeetV3
+    case asrParakeetUltra
     case vadSilero
     case offlineDiarization
     case lseendDiarization
@@ -10,7 +10,7 @@ enum ModelGroup: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .asrParakeetV3:
+        case .asrParakeetUltra:
             return "ASR (Parakeet v3)"
         case .vadSilero:
             return "VAD (Silero CoreML)"
@@ -23,8 +23,10 @@ enum ModelGroup: String, CaseIterable, Identifiable {
 
     var repoFolderName: String {
         switch self {
-        case .asrParakeetV3:
-            return "parakeet-tdt-0.6b-v3"
+        case .asrParakeetUltra:
+            // Matches FluidAudio's Repo.parakeetUltra.folderName; AsrModels.load(from:)
+            // resolves the repo by that name next to the directory it is given.
+            return "parakeet-ultra"
         case .vadSilero:
             return "silero-vad"
         case .offlineDiarization:
