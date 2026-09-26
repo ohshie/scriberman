@@ -166,6 +166,11 @@ final class AppState {
             workspaceErrorMessage = error.localizedDescription
         }
 
+        // Before anything that can load the batch diarizer (recovery sweep, retranscription).
+        if workspace != nil {
+            await backgroundServices.modelInstallService.stampDiarizerRevisionIfMissing()
+        }
+
         permissionService.checkAll()
         _ = await permissionService.verifyMic()
         _ = await permissionService.verifyScreenRecording()
@@ -208,6 +213,7 @@ final class AppState {
             let configuredWorkspace = try await setWorkspaceHandler(url)
             workspace = configuredWorkspace
             workspaceErrorMessage = nil
+            await backgroundServices.modelInstallService.stampDiarizerRevisionIfMissing()
         } catch {
             workspace = nil
             workspaceErrorMessage = error.localizedDescription

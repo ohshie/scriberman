@@ -198,6 +198,38 @@ final class ModelInstallServiceTests {
         #expect(didAttemptLSEEND)
     }
 
+    @Test
+    func testStampRevisionMarkerWritesPinnedRevisionWhenMissing() throws {
+        let repoURL = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: repoURL) }
+
+        let didStamp = try ModelInstallService.stampRevisionMarkerIfMissing(at: repoURL, revision: Repo.diarizer.revision)
+
+        #expect(didStamp)
+        let markerURL = repoURL.appendingPathComponent(ModelInstallService.revisionMarkerFileName)
+        let stored = try String(contentsOf: markerURL, encoding: .utf8)
+        #expect(stored == Repo.diarizer.revision + "\n")
+    }
+
+    @Test
+    func testStampRevisionMarkerLeavesExistingMarkerUntouched() throws {
+        let repoURL = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: repoURL) }
+        let markerURL = repoURL.appendingPathComponent(ModelInstallService.revisionMarkerFileName)
+        try Data("older-revision\n".utf8).write(to: markerURL)
+
+        let didStamp = try ModelInstallService.stampRevisionMarkerIfMissing(at: repoURL, revision: Repo.diarizer.revision)
+
+        #expect(!didStamp)
+        #expect(try String(contentsOf: markerURL, encoding: .utf8) == "older-revision\n")
+    }
+
+    @Test
+    func testDiarizerRevisionIsPinned() {
+        // The stamp only matters while FluidAudio pins this repo; on "main" no marker is needed.
+        #expect(Repo.diarizer.revision != "main")
+    }
+
     private func makeService() -> ModelInstallService {
         ModelInstallService(workspaceService: WorkspaceService(bookmarkStore: InMemoryBookmarkStore()))
     }

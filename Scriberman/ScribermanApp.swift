@@ -21,6 +21,12 @@ struct ScribermanApp: App {
     )
     private let modelContainer = ScribermanApp.appModelContainer
 
+    init() {
+        // FluidAudio's ASR debug lines include recognised words, and Debug builds mirror every
+        // level to the console. `.info` drops those lines and keeps model-load and download logs.
+        AppLogger.minimumLevel = .info
+    }
+
     /// Seeds the default tag and brings recordings that predate tags up to it.
     ///
     /// Runs ahead of `bootstrapWorkspace`, and therefore ahead of anything that could start a
