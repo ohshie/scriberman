@@ -58,7 +58,7 @@ final class SettingsViewModelTests {
         #expect(viewModel.bundlePhase == .allReady)
 
         let installOrder = await mockService.installOrder()
-        #expect(installOrder == [.asrParakeetV3, .vadSilero, .offlineDiarization, .lseendDiarization])
+        #expect(installOrder == [.asrParakeetUltra, .vadSilero, .offlineDiarization, .lseendDiarization])
         let warmedUp = await mockService.didWarmUp()
         #expect(warmedUp)
     }
@@ -123,7 +123,7 @@ final class SettingsViewModelTests {
         let workspaceService = MockWorkspaceService()
         let mockService = MockModelInstallService()
         await mockService.setCanInstallModels(true)
-        await mockService.setState(.ready, for: .asrParakeetV3)
+        await mockService.setState(.ready, for: .asrParakeetUltra)
         await mockService.setState(.ready, for: .vadSilero)
         await mockService.setState(.ready, for: .offlineDiarization)
         await mockService.setState(.missing, for: .lseendDiarization)

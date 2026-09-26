@@ -137,11 +137,11 @@ final class SettingsViewModel {
     }
 
     var currentModelNameText: String {
-        ModelGroup.asrParakeetV3.title
+        ModelGroup.asrParakeetUltra.title
     }
 
     var currentModelStatusText: String {
-        switch modelStates[.asrParakeetV3] ?? .missing {
+        switch modelStates[.asrParakeetUltra] ?? .missing {
         case .ready:
             return "Installed"
         case .missing:
@@ -162,7 +162,7 @@ final class SettingsViewModel {
         modelStatusMessages = [:]
 
         let groupsInOrder: [(group: ModelGroup, label: String, start: Double)] = [
-            (.asrParakeetV3, "Downloading ASR…", 0.0),
+            (.asrParakeetUltra, "Downloading ASR…", 0.0),
             (.vadSilero, "Downloading VAD…", 0.2),
             (.offlineDiarization, "Downloading Diarizer…", 0.4),
             (.lseendDiarization, "Downloading Turn Diarizer…", 0.6)

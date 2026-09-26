@@ -69,8 +69,8 @@ actor ModelInstallService: ModelInstallServicing {
     func warmUpModels(workspace: Workspace) async {
         await warmUpModelsInternal(
             warmUpASR: {
-                let asrDirectory = try self.modelPathResolver.modelDirectory(for: .asrParakeetV3, in: workspace)
-                _ = try await AsrModels.load(from: asrDirectory, encoderComputeUnits: .cpuAndGPU)
+                let asrDirectory = try self.modelPathResolver.modelDirectory(for: .asrParakeetUltra, in: workspace)
+                _ = try await AsrModels.load(from: asrDirectory, version: ModelPathResolver.asrModelVersion, encoderComputeUnits: .cpuAndGPU)
             },
             warmUpDiarizer: {
                 let diarizerDirectory = try self.modelPathResolver.modelDirectory(for: .offlineDiarization, in: workspace)
@@ -153,6 +153,7 @@ actor ModelInstallService: ModelInstallServicing {
             throw ModelInstallError.validationFailed(group, path: installedURL)
         }
 
+        removeReplacedInstall(of: group, in: workspace.modelsURL)
         return installedURL
     }
 
@@ -227,8 +228,8 @@ actor ModelInstallService: ModelInstallServicing {
         progressHandler: ProgressHandler?
     ) async throws {
         switch group {
-        case .asrParakeetV3:
-            try await ModelHub.download(.parakeetV3, to: directory, progressHandler: progressHandler)
+        case .asrParakeetUltra:
+            try await ModelHub.download(.parakeetUltra, to: directory, progressHandler: progressHandler)
 
         case .vadSilero:
             try await ModelHub.download(.vad, to: directory, progressHandler: progressHandler)
@@ -246,6 +247,30 @@ actor ModelInstallService: ModelInstallServicing {
                 to: directory.appendingPathComponent(ModelGroup.lseendDiarization.repoFolderName, isDirectory: true),
                 progressHandler: progressHandler
             )
+        }
+    }
+
+    // MARK: - Replaced installs
+
+    /// Workspace folders left by a model a group no longer uses. Deleted once the group's
+    /// replacement validates as installed; nothing loads them.
+    static func replacedFolderNames(for group: ModelGroup) -> [String] {
+        switch group {
+        case .asrParakeetUltra:
+            return ["parakeet-tdt-0.6b-v3"]
+        case .vadSilero, .offlineDiarization, .lseendDiarization:
+            return []
+        }
+    }
+
+    private func removeReplacedInstall(of group: ModelGroup, in modelsURL: URL) {
+        for folderName in Self.replacedFolderNames(for: group) {
+            let url = modelsURL.appendingPathComponent(folderName, isDirectory: true)
+            do {
+                try removeIfExists(url)
+            } catch {
+                NSLog("[ModelInstallService] Removing replaced model folder %@ failed (non-fatal): %@", folderName, String(describing: error))
+            }
         }
     }
 
@@ -293,12 +318,13 @@ actor ModelInstallService: ModelInstallServicing {
 
     private func validateInstalledRepo(for group: ModelGroup, at repoURL: URL) throws -> Bool {
         switch group {
-        case .asrParakeetV3:
+        case .asrParakeetUltra:
+            // Ultra ships one encoder build; FluidAudio requires the v3 file set for it.
             let modelFilesPresent = requiredFilesExist(
                 in: repoURL,
-                required: ModelNames.ASR.requiredModelsV3(precision: .int8)
+                required: ModelNames.ASR.requiredModelsV3()
             )
-            let vocabName = ModelNames.ASR.vocabulary(for: .parakeetV3)
+            let vocabName = ModelNames.ASR.vocabulary(for: .parakeetUltra)
             let vocabPresent = fileManager.fileExists(
                 atPath: repoURL.appendingPathComponent(vocabName, isDirectory: false).path
             )
@@ -329,6 +355,10 @@ actor ModelInstallService: ModelInstallServicing {
 extension ModelInstallService {
     func validateInstalledRepoForTesting(for group: ModelGroup, at repoURL: URL) throws -> Bool {
         try validateInstalledRepo(for: group, at: repoURL)
+    }
+
+    func removeReplacedInstallForTesting(of group: ModelGroup, in modelsURL: URL) {
+        removeReplacedInstall(of: group, in: modelsURL)
     }
 
     func warmUpModelsForTesting(

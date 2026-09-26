@@ -5,30 +5,30 @@ import Testing
 
 final class ModelInstallServiceTests {
     @Test
-    func testValidateInstalledRepoASRParakeetV3UsesV3RequiredModels() async throws {
+    func testValidateInstalledRepoASRParakeetUltraUsesV3FileSet() async throws {
         let service = makeService()
         let tempRoot = try makeTempRoot()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-        let repoURL = tempRoot.appendingPathComponent(ModelGroup.asrParakeetV3.repoFolderName, isDirectory: true)
-        try createRequiredFiles(ModelNames.ASR.requiredModelsV3(precision: .int8), in: repoURL)
+        let repoURL = tempRoot.appendingPathComponent(ModelGroup.asrParakeetUltra.repoFolderName, isDirectory: true)
+        try createRequiredFiles(ModelNames.ASR.requiredModelsV3(), in: repoURL)
         try createFile(ModelNames.ASR.vocabulary(for: .parakeetV3), in: repoURL)
 
-        let isValid = try await service.validateInstalledRepoForTesting(for: .asrParakeetV3, at: repoURL)
+        let isValid = try await service.validateInstalledRepoForTesting(for: .asrParakeetUltra, at: repoURL)
         #expect(isValid)
     }
 
     @Test
-    func testValidateInstalledRepoASRParakeetV3RejectsLegacyJointModelSet() async throws {
+    func testValidateInstalledRepoASRParakeetUltraRejectsLegacyJointModelSet() async throws {
         let service = makeService()
         let tempRoot = try makeTempRoot()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-        let repoURL = tempRoot.appendingPathComponent(ModelGroup.asrParakeetV3.repoFolderName, isDirectory: true)
+        let repoURL = tempRoot.appendingPathComponent(ModelGroup.asrParakeetUltra.repoFolderName, isDirectory: true)
         try createRequiredFiles(ModelNames.ASR.requiredModels, in: repoURL)
         try createFile(ModelNames.ASR.vocabulary(for: .parakeetV3), in: repoURL)
 
-        let isValid = try await service.validateInstalledRepoForTesting(for: .asrParakeetV3, at: repoURL)
+        let isValid = try await service.validateInstalledRepoForTesting(for: .asrParakeetUltra, at: repoURL)
         #expect(!isValid)
     }
 
@@ -196,6 +196,63 @@ final class ModelInstallServiceTests {
         #expect(didRunDiarizer)
         #expect(didAttemptVAD)
         #expect(didAttemptLSEEND)
+    }
+
+    @Test
+    func testUltraGroupIsNotSatisfiedByLegacyV3Folder() async throws {
+        let service = makeService()
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let legacyURL = tempRoot.appendingPathComponent("parakeet-tdt-0.6b-v3", isDirectory: true)
+        try createRequiredFiles(ModelNames.ASR.requiredModelsV3(), in: legacyURL)
+        try createFile(ModelNames.ASR.vocabulary(for: .parakeetV3), in: legacyURL)
+
+        let ultraURL = tempRoot.appendingPathComponent(ModelGroup.asrParakeetUltra.repoFolderName, isDirectory: true)
+        let isValid = try await service.validateInstalledRepoForTesting(for: .asrParakeetUltra, at: ultraURL)
+        #expect(!isValid)
+    }
+
+    @Test
+    func testUltraFolderMatchesFluidAudioRepoFolder() {
+        // AsrModels.load(from:version:) resolves the repo by this name next to the given directory.
+        #expect(ModelGroup.asrParakeetUltra.repoFolderName == Repo.parakeetUltra.folderName)
+        #expect(ModelPathResolver.asrModelVersion == .ultra)
+    }
+
+    @Test
+    func testReplacedV3FolderRemovedAfterUltraInstall() async throws {
+        let service = makeService()
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let legacyURL = tempRoot.appendingPathComponent("parakeet-tdt-0.6b-v3", isDirectory: true)
+        try createRequiredFiles(ModelNames.ASR.requiredModelsV3(), in: legacyURL)
+
+        await service.removeReplacedInstallForTesting(of: .asrParakeetUltra, in: tempRoot)
+
+        #expect(!FileManager.default.fileExists(atPath: legacyURL.path))
+    }
+
+    @Test
+    func testReplacedFolderRemovalLeavesOtherGroupsAlone() async throws {
+        let service = makeService()
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let legacyURL = tempRoot.appendingPathComponent("parakeet-tdt-0.6b-v3", isDirectory: true)
+        try createRequiredFiles(ModelNames.ASR.requiredModelsV3(), in: legacyURL)
+
+        await service.removeReplacedInstallForTesting(of: .vadSilero, in: tempRoot)
+
+        #expect(FileManager.default.fileExists(atPath: legacyURL.path))
+    }
+
+    @Test
+    func testReplacedFolderRemovalIsNonFatalWhenFolderMissing() async throws {
+        let service = makeService()
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        await service.removeReplacedInstallForTesting(of: .asrParakeetUltra, in: tempRoot)
     }
 
     @Test
