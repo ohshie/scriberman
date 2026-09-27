@@ -136,6 +136,7 @@ struct MicStreamOutputHandlerTests {
         handler.processSampleBufferForTesting(interleaved)
 
         #expect(handler.unsupportedFormatCount == 2)
+        #expect(handler.loggedUnsupportedFormatCount == 1)
         #expect(anchors.values.isEmpty)
 
         // A supported buffer afterwards is written and anchors the timeline.
@@ -147,6 +148,39 @@ struct MicStreamOutputHandlerTests {
         #expect(handler.unsupportedFormatCount == 2)
         #expect(anchors.values == [1_010_000_000])
         #expect(try AVAudioFile(forReading: micURL).length > 0)
+    }
+
+    /// ScreenCaptureKit delivers some mono microphone buffers flagged as interleaved. One channel has
+    /// the same layout either way, so these must be written, not rejected.
+    @Test
+    func testMonoBuffersFlaggedInterleavedAreWritten() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let micURL = root.appendingPathComponent("mic.wav")
+        let appURL = root.appendingPathComponent("app.wav")
+
+        let micAnchors = AnchorRecorder()
+        let mic = MicStreamOutputHandler()
+        mic.onFirstBufferHostTime = { micAnchors.record($0.nanoseconds) }
+        mic.configureOutput(url: micURL)
+        let app = AppAudioStreamOutputHandler()
+        app.configureOutput(url: appURL)
+
+        let monoInterleaved = try makeSampleBuffer(
+            sampleRate: 48_000, channels: 1, frameCount: 480, hostTimeNanos: 1_000_000_000, interleaved: true
+        )
+        mic.processSampleBufferForTesting(monoInterleaved)
+        app.processSampleBufferForTesting(monoInterleaved)
+        mic.closeOutput()
+        app.closeOutput()
+
+        #expect(mic.unsupportedFormatCount == 0)
+        #expect(app.unsupportedFormatCount == 0)
+        #expect(micAnchors.values == [1_000_000_000])
+        #expect(try AVAudioFile(forReading: micURL).length == 480)
+        #expect(try AVAudioFile(forReading: appURL).length == 480)
     }
 
     @Test

@@ -19,6 +19,9 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
     /// Buffers dropped because their sample layout cannot be copied.
     var unsupportedFormatCount: Int { layoutTracker.unsupportedFormatCount }
 
+    /// Distinct unsupported formats logged.
+    var loggedUnsupportedFormatCount: Int { layoutTracker.loggedFormatCount }
+
     var audioLevel: Float {
         streamer.audioLevel
     }
