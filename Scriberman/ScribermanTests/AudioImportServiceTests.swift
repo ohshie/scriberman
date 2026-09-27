@@ -59,6 +59,30 @@ final class AudioImportServiceTests {
     }
 
     @Test
+    func testImportStopsWhenTheNewSessionCannotBeSaved() async throws {
+        let workspace = Workspace(rootURL: workspaceRootURL)
+        let inputURL = workspaceRootURL.appendingPathComponent("meeting.mp3")
+        let probed = LockedValue<Bool>(false)
+        let service = AudioImportService(
+            retranscriptionService: RetranscriptionService(transcriptionService: TranscriptionService()),
+            probeAudio: { _ in
+                probed.set(true)
+                return AudioImportProbeResult(title: "meeting", originalFileName: "meeting.mp3", originalFormat: "mp3", duration: 42)
+            },
+            readChannelSamples: { _ in DecodedAudio(channels: [[0.1]], sampleRate: 48_000) },
+            writeMonoAAC: { _, _ in },
+            retranscribe: { _, _, _, _ in },
+            saveContext: { _ in throw CocoaError(.fileWriteUnknown) }
+        )
+
+        await #expect(throws: AudioImportError.self) {
+            try await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
+        }
+        #expect(probed.get() == false)
+        #expect(fetchImportedSession() == nil)
+    }
+
+    @Test
     func testImportAudioSuccessfulMonoImport() async throws {
         let workspace = Workspace(rootURL: workspaceRootURL)
         let inputURL = workspaceRootURL.appendingPathComponent("meeting.mp3")
@@ -91,7 +115,7 @@ final class AudioImportServiceTests {
             }
         )
 
-        await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
+        try await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
 
         let imported = try #require(fetchImportedSession())
         #expect(imported.title == "meeting")
@@ -138,7 +162,7 @@ final class AudioImportServiceTests {
             }
         )
 
-        await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
+        try await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
 
         let written = capturedWrittenSamples.get()
         #expect(written.count == 3)
@@ -171,7 +195,7 @@ final class AudioImportServiceTests {
             }
         )
 
-        await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
+        try await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
 
         let imported = try #require(fetchImportedSession())
         if case .error(let message) = imported.status {
@@ -205,7 +229,7 @@ final class AudioImportServiceTests {
             }
         )
 
-        await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
+        try await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
 
         let imported = try #require(fetchImportedSession())
         if case .error(let message) = imported.status {
@@ -249,7 +273,7 @@ final class AudioImportServiceTests {
             }
         )
 
-        await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
+        try await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
 
         let imported = try #require(fetchImportedSession())
         #expect(fallbackCalled.get())
@@ -280,7 +304,7 @@ final class AudioImportServiceTests {
             retranscribe: { _, _, _, _ in }
         )
 
-        await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
+        try await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
 
         #expect(abs(capturedCount.get() - 480_000) <= Self.converterBlockFrames)
     }
@@ -333,7 +357,7 @@ final class AudioImportServiceTests {
             retranscribe: { _, _, _, _ in }
         )
 
-        await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
+        try await service.importAudio(from: inputURL, workspace: workspace, modelContainer: container)
 
         let imported = try #require(fetchImportedSession())
         let outputPath = try #require(imported.mixdownURL)

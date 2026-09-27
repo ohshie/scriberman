@@ -20,6 +20,8 @@ struct AppShellView: View {
     @State private var detailMode: DetailMode = .standard
     @State private var selectedTransformationID: UUID?
     @State private var studyActionErrorMessage: String?
+    /// A store or disk failure from deleting, importing or stopping, waiting to be shown.
+    @State private var storeFailureAlert: StoreFailureAlert?
     @State private var audioPlayerViewModel = AudioPlayerViewModel()
     @State private var transcriptAutoScrollEnabled = true
     /// The search to open the study view with, set when a search result is clicked and cleared on
@@ -103,6 +105,23 @@ struct AppShellView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(studyActionErrorMessage ?? "Unknown error.")
+        }
+        .alert(
+            storeFailureAlert?.title ?? "",
+            isPresented: Binding(
+                get: { storeFailureAlert != nil },
+                set: { if !$0 { dismissStoreFailureAlert() } }
+            ),
+            presenting: storeFailureAlert
+        ) { _ in
+            Button("OK", role: .cancel) { }
+        } message: { alert in
+            Text(alert.message)
+        }
+        .onChange(of: appState.newSessionViewModel.unsavedTranscriptSegmentCount) { _, count in
+            if count > 0 {
+                storeFailureAlert = .transcriptNotSaved(count)
+            }
         }
         .sheet(isPresented: Binding(
             get: { appState.sessionToTrim != nil },
@@ -266,8 +285,12 @@ struct AppShellView: View {
                         appState.jobsViewModel.reprocess(session: session, context: modelContext)
                     },
                     onDelete: {
-                        Task { await appState.jobsViewModel.delete(session: session, context: modelContext) }
+                        let item = selectedSession
                         selectedSession = nil
+                        Task {
+                            let result = await appState.jobsViewModel.delete(session: session, context: modelContext)
+                            handleDeletion(result, of: item)
+                        }
                     },
                     onRestoreOriginal: {
                         try await restoreOriginal(of: session)
@@ -307,8 +330,12 @@ struct AppShellView: View {
                         appState.jobsViewModel.reprocess(session: session, context: modelContext)
                     },
                     onDelete: {
-                        Task { await appState.jobsViewModel.deleteImported(session: session, context: modelContext) }
+                        let item = selectedSession
                         selectedSession = nil
+                        Task {
+                            let result = await appState.jobsViewModel.deleteImported(session: session, context: modelContext)
+                            handleDeletion(result, of: item)
+                        }
                     },
                     onOpenStudy: {
                         detailMode = .study
@@ -324,6 +351,26 @@ struct AppShellView: View {
     }
 
     @Environment(\.modelContext) private var modelContext
+
+    /// Reports a deletion. A failed save leaves the session in place, so its row is selected again.
+    private func handleDeletion(_ result: JobsViewModel.DeletionResult, of item: JobsViewModel.SessionListItem?) {
+        switch result {
+        case .deleted:
+            break
+        case .saveFailed(let reason):
+            selectedSession = item
+            storeFailureAlert = .deletionFailed(reason)
+        case .filesLeft(let folder):
+            storeFailureAlert = .filesLeft(folder.path)
+        }
+    }
+
+    private func dismissStoreFailureAlert() {
+        if case .transcriptNotSaved = storeFailureAlert {
+            appState.newSessionViewModel.unsavedTranscriptSegmentCount = 0
+        }
+        storeFailureAlert = nil
+    }
 
     private func restoreOriginal(of session: RecordingSession) async throws {
         audioPlayerViewModel.stop()
@@ -388,8 +435,11 @@ struct AppShellView: View {
         }
 
         Task {
-            await appState.jobsViewModel.importAudio(urls: panel.urls, context: modelContext)
+            let failed = await appState.jobsViewModel.importAudio(urls: panel.urls, context: modelContext)
             appState.discardPendingSession()
+            if !failed.isEmpty {
+                storeFailureAlert = .importFailed(failed.map(\.lastPathComponent))
+            }
         }
     }
 
@@ -617,5 +667,35 @@ struct AppShellView: View {
         let baseSession = sanitizedSession.isEmpty ? "Session" : sanitizedSession
         let basePrompt = sanitizedPrompt.isEmpty ? "Transformation" : sanitizedPrompt
         return "\(baseSession) - \(basePrompt).md"
+    }
+}
+
+/// The failures where the store and the disk could disagree, as the user is told about them.
+private enum StoreFailureAlert: Equatable {
+    case deletionFailed(String)
+    case filesLeft(String)
+    case importFailed([String])
+    case transcriptNotSaved(Int)
+
+    var title: String {
+        switch self {
+        case .deletionFailed: "Deletion Failed"
+        case .filesLeft: "Files Left on Disk"
+        case .importFailed: "Import Failed"
+        case .transcriptNotSaved: "Transcript Not Fully Saved"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .deletionFailed(let reason):
+            "Scriberman could not save the change, so nothing was deleted. \(reason)"
+        case .filesLeft(let path):
+            "The session was deleted, but its folder could not be removed: \(path)"
+        case .importFailed(let fileNames):
+            "\(fileNames.joined(separator: ", ")) could not be added to your library. Try importing it again."
+        case .transcriptNotSaved(let count):
+            "\(count) transcript lines from this recording could not be saved. The audio is intact; you can reprocess it to rebuild the transcript."
+        }
     }
 }

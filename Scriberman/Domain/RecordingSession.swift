@@ -51,6 +51,9 @@ final class RecordingSession {
     /// the transcript setters. Optional and absent from the initialiser: existing sessions have it
     /// backfilled at startup rather than through a migration.
     var searchableText: String?
+    /// Live transcript segments persisted during capture. They belong to this recording and go
+    /// with it: the default rule, nullify, left them in the store with no owner.
+    @Relationship(deleteRule: .cascade, inverse: \RecordingTranscriptSegment.session)
     var transcriptSegments: [RecordingTranscriptSegment] = []
     /// Tags carried by this recording — one to three, never zero.
     ///

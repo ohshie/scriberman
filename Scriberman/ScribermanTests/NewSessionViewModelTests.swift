@@ -24,7 +24,8 @@ struct NewSessionViewModelTests {
         initialSelectedApp: CapturedApp? = nil,
         availableDisplays: [CaptureDisplay] = [],
         selectedDisplayID: CGDirectDisplayID? = nil,
-        transcriber: (any LiveTranscribing)? = nil
+        transcriber: (any LiveTranscribing)? = nil,
+        saveContext: (@MainActor (ModelContext) throws -> Void)? = nil
     ) -> Fixture {
         let workspaceService = MockWorkspaceService()
         let recordingService = MockRecordingService()
@@ -55,7 +56,8 @@ struct NewSessionViewModelTests {
             screenCaptureService: screenCaptureService,
             permissionService: permissionService,
             userDefaults: userDefaults,
-            liveTranscriptionService: transcriber
+            liveTranscriptionService: transcriber,
+            saveContext: saveContext ?? { try $0.save() }
         )
         let menuBarSettings = MenuBarSettings(userDefaults: userDefaults)
         viewModel.menuBarSettings = menuBarSettings
@@ -103,6 +105,89 @@ struct NewSessionViewModelTests {
             #expect(await transcriber.processed == Array(1...index).map(Float.init))
             oldContinuation = continuation
         }
+    }
+
+    // MARK: - Live segment save failures
+
+    @Test
+    func aFailedLiveSegmentSaveIsRetriedByTheNextSave() async throws {
+        let saves = SaveScript(failing: [1])
+        let (fixture, transcriber, recording) = try await startScriptedRecording(saves: saves)
+        defer { fixture.cleanup() }
+
+        await transcriber.emit("first")
+        await waitForSaves(saves, count: 1)
+        await transcriber.emit("second")
+        await waitForSaves(saves, count: 2)
+
+        #expect(try savedSegmentTexts(fixture.context) == ["first", "second"])
+        _ = await fixture.viewModel.stopRecording(context: fixture.context)
+        #expect(recording.transcriptSegments.count == 2)
+        #expect(fixture.viewModel.unsavedTranscriptSegmentCount == 0)
+    }
+
+    @Test
+    func stopFlushesSegmentsWhoseSavesFailedDuringRecording() async throws {
+        let saves = SaveScript(failing: [1, 2])
+        let (fixture, transcriber, _) = try await startScriptedRecording(saves: saves)
+        defer { fixture.cleanup() }
+
+        await transcriber.emit("first")
+        await transcriber.emit("second")
+        await waitForSaves(saves, count: 2)
+        #expect(try savedSegmentTexts(fixture.context).isEmpty)
+
+        _ = await fixture.viewModel.stopRecording(context: fixture.context)
+
+        #expect(try savedSegmentTexts(fixture.context) == ["first", "second"])
+        #expect(fixture.viewModel.unsavedTranscriptSegmentCount == 0)
+    }
+
+    @Test
+    func aSaveFailureThatOutlastsStopIsReported() async throws {
+        let saves = SaveScript(failingFrom: 1)
+        let (fixture, transcriber, _) = try await startScriptedRecording(saves: saves)
+        defer { fixture.cleanup() }
+
+        await transcriber.emit("first")
+        await transcriber.emit("second")
+        await waitForSaves(saves, count: 2)
+
+        _ = await fixture.viewModel.stopRecording(context: fixture.context)
+
+        #expect(fixture.viewModel.unsavedTranscriptSegmentCount == 2)
+    }
+
+    private func startScriptedRecording(
+        saves: SaveScript
+    ) async throws -> (Fixture, ScriptedLiveTranscriber, RecordingSession) {
+        let transcriber = ScriptedLiveTranscriber()
+        let fixture = makeFixture(transcriber: transcriber, saveContext: { context in
+            try saves.save(context)
+        })
+        let recording = RecordingSession(createdAt: .now, duration: 0, micAudioURL: "/tmp/live-save-test/mic.wav", title: "Live", status: .recording)
+        fixture.context.insert(recording)
+        try fixture.context.save()
+        fixture.recordingService.startReturns = recording.id
+        fixture.recordingService.stopReturns = recording.id
+        _ = await fixture.viewModel.startRecording(title: "Live", context: fixture.context)
+        await transcriber.waitUntilStarted()
+        return (fixture, transcriber, recording)
+    }
+
+    private func waitForSaves(_ saves: SaveScript, count: Int) async {
+        for _ in 0..<500 where saves.calls < count {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(saves.calls >= count)
+    }
+
+    /// Segment texts as the store holds them, read through a fresh context so unsaved inserts in
+    /// the view model's context do not count.
+    private func savedSegmentTexts(_ context: ModelContext) throws -> [String] {
+        try ModelContext(context.container)
+            .fetch(FetchDescriptor<RecordingTranscriptSegment>(sortBy: [SortDescriptor(\.startTime)]))
+            .map(\.text)
     }
 
     @Test
@@ -1452,6 +1537,54 @@ private actor SuspendedLiveTranscriber: LiveTranscribing {
         results?.yield(segment)
         results?.finish()
         // No backfill: this test requires the result consumer to persist the segment.
+        return []
+    }
+}
+
+/// A save that fails on chosen calls, counting from 1, and saves for real otherwise.
+@MainActor
+private final class SaveScript {
+    private let shouldFail: (Int) -> Bool
+    private(set) var calls = 0
+
+    init(failing calls: Set<Int>) {
+        shouldFail = { calls.contains($0) }
+    }
+
+    init(failingFrom first: Int) {
+        shouldFail = { $0 >= first }
+    }
+
+    func save(_ context: ModelContext) throws {
+        calls += 1
+        if shouldFail(calls) { throw CocoaError(.fileWriteUnknown) }
+        try context.save()
+    }
+}
+
+/// Emits final segments when told to, so a test controls when each live save happens.
+private actor ScriptedLiveTranscriber: LiveTranscribing {
+    private var results: AsyncStream<TranscriptSegment>.Continuation?
+    private var startWaiter: CheckedContinuation<Void, Never>?
+    private var emitted: Float = 0
+
+    func prepare(workspace: Workspace, config: LiveTranscriptionPipelineSettings) async {}
+    func start(workspace: Workspace, config: LiveTranscriptionPipelineSettings, resultContinuation: AsyncStream<TranscriptSegment>.Continuation) async throws {
+        results = resultContinuation
+        startWaiter?.resume()
+        startWaiter = nil
+    }
+    func process(_ chunk: LiveAudioChunk, anchor: HostNanoseconds?) async {}
+    func waitUntilStarted() async {
+        if results != nil { return }
+        await withCheckedContinuation { startWaiter = $0 }
+    }
+    func emit(_ text: String) {
+        results?.yield(TranscriptSegment(speakerId: "S1", text: text, startTime: emitted, endTime: emitted + 1, audioSource: .mic, isFinal: true))
+        emitted += 1
+    }
+    func stop() async -> [TranscriptSegment] {
+        results?.finish()
         return []
     }
 }
