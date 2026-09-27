@@ -36,8 +36,10 @@ struct SpeakerMatcher {
             return nil
         }
 
+        // A profile qualifies at a distance at or below the threshold — similarity at or above
+        // 1 - threshold. Among equally close profiles, the one seen least recently wins.
         var bestMatch: T?
-        var bestDistance = threshold
+        var bestDistance = Float.infinity
 
         for profile in profiles {
             let profileEmbedding = profileEmbedding(profile)
@@ -46,13 +48,13 @@ struct SpeakerMatcher {
             }
 
             let distance = SpeakerUtilities.cosineDistance(embedding, profileEmbedding)
+            guard distance <= threshold else { continue }
             if distance < bestDistance {
                 bestDistance = distance
                 bestMatch = profile
-            } else if distance == bestDistance, let currentBest = bestMatch {
-                if profileLastSeen(profile) < profileLastSeen(currentBest) {
-                    bestMatch = profile
-                }
+            } else if distance == bestDistance, let currentBest = bestMatch,
+                      profileLastSeen(profile) < profileLastSeen(currentBest) {
+                bestMatch = profile
             }
         }
 

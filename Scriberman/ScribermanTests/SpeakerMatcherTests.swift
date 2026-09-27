@@ -1,3 +1,4 @@
+import FluidAudio
 import Foundation
 import Testing
 @testable import Scriberman
@@ -72,4 +73,38 @@ struct SpeakerMatcherTests {
 
         #expect(match?.name == "Older")
     }
+
+    /// A profile at exactly the threshold distance matches: the boundary is inclusive.
+    @Test
+    func findBestMatchAcceptsDistanceExactlyAtThreshold() {
+        var stored = Array(repeating: Float(0), count: 192)
+        stored[0] = 1
+        var query = Array(repeating: Float(0), count: 192)
+        query[0] = 0.72
+        query[1] = 0.69
+        let distance = SpeakerUtilities.cosineDistance(query, stored)
+
+        let atBoundary = SpeakerMatcher(threshold: distance)
+        let justInside = SpeakerMatcher(threshold: distance.nextDown)
+
+        #expect(atBoundary.findBestMatch(for: query, in: [SpeakerProfile(name: "Alice", embedding: stored)])?.name == "Alice")
+        #expect(justInside.findBestMatch(for: query, in: [SpeakerProfile(name: "Alice", embedding: stored)]) == nil)
+    }
+
+    /// The tie rule also applies when the tied distance is exactly the threshold.
+    @Test
+    func findBestMatchBreaksTiesAtTheBoundaryByOldestLastSeen() {
+        var stored = Array(repeating: Float(0), count: 192)
+        stored[0] = 1
+        var query = Array(repeating: Float(0), count: 192)
+        query[0] = 0.72
+        query[1] = 0.69
+        let matcher = SpeakerMatcher(threshold: SpeakerUtilities.cosineDistance(query, stored))
+
+        let newer = SpeakerProfile(name: "Newer", embedding: stored, lastSeen: Date(timeIntervalSince1970: 2_000))
+        let older = SpeakerProfile(name: "Older", embedding: stored, lastSeen: Date(timeIntervalSince1970: 1_000))
+
+        #expect(matcher.findBestMatch(for: query, in: [newer, older])?.name == "Older")
+    }
 }
+
