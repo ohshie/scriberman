@@ -3,25 +3,25 @@
     <channel>
         <title>Scriberman</title>
         <item>
-            <title>1.0.9</title>
-            <pubDate>Sat, 26 Sep 2026 21:14:35 +0200</pubDate>
-            <sparkle:version>10</sparkle:version>
-            <sparkle:shortVersionString>1.0.9</sparkle:shortVersionString>
+            <title>1.0.10</title>
+            <pubDate>Sun, 27 Sep 2026 21:39:38 +0200</pubDate>
+            <sparkle:version>11</sparkle:version>
+            <sparkle:shortVersionString>1.0.10</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<h2>Scriberman 1.0.9</h2>
-<h3>What’s new</h3>
-<ul>
-  <li>Updated speech recognition for dictation, live transcription, and saved recordings.</li>
-  <li>Live transcripts wait for speaker labels before finalizing passages, including when recording stops.</li>
-  <li>Replaced speech and speaker models are automatically removed after successful installation to reclaim disk space.</li>
-</ul>
+            <description><![CDATA[<h2>Scriberman 1.0.10</h2>
 <h3>Fixes</h3>
 <ul>
-  <li>Avoided unnecessary re-downloads of existing speaker-identification models after upgrading.</li>
+  <li>Imported 16 kHz and 44.1 kHz audio keeps its correct duration and pitch.</li>
+  <li>Recordings no longer share files accidentally, and interrupted audio and screen-video processing can recover on restart.</li>
+  <li>Trimming and restoring recordings preserve existing files if an operation fails.</li>
+  <li>Switching sessions shows the correct transcript, and search matches refresh when transcript content changes.</li>
+  <li>Automatic speaker enrollment no longer overwrites existing speaker profiles.</li>
+  <li>AI transformations respect the disabled setting and prevent duplicate requests for the same session.</li>
+  <li>Recording and loading animations respect Reduce Motion, and more controls have accessibility labels.</li>
 </ul>
 ]]></description>
-            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.0.9/Scriberman-1.0.9-10-arm64.dmg" length="16372897" type="application/octet-stream" sparkle:edSignature="4SLuszCCU2Kde5p8v/m5W94fs63Dnk+Hw3hauho4fH+MU68/8d5KznBjGcNlhIWKx2vP7GXnaPBEMta1bjEfCw=="/>
+            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.0.10/Scriberman-1.0.10-11-arm64.dmg" length="16490487" type="application/octet-stream" sparkle:edSignature="ZKcLMMGHvdMF74LIjugITWOdYrk5eD3wi8VZ3xl6g9T+5ZZ19BBmM68gX9/QEWkZ1hkNE2+MlLtn6dxtGFZRBw=="/>
         </item>
     </channel>
 </rss>
