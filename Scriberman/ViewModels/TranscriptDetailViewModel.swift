@@ -12,8 +12,14 @@ final class TranscriptDetailViewModel {
     var prompts: [AIPrompt] = []
     var selectedPromptID: UUID?
     var selectedTransformationID: UUID?
-    var isRunningTransformation = false
     var transformationErrorMessage: String?
+
+    /// Sessions with a transformation in flight. A second run for one of them is rejected.
+    private(set) var runningTransformationSessionIDs: Set<UUID> = []
+
+    var isRunningTransformation: Bool {
+        runningTransformationSessionIDs.isEmpty == false
+    }
 
     init(
         session: any TranscribableSession,
@@ -109,7 +115,12 @@ final class TranscriptDetailViewModel {
         aiProviderService.shouldWarnAboutTranscriptLength(finalTranscriptText)
     }
 
+    var isAIEnabled: Bool {
+        aiProviderService.isEnabled
+    }
+
     var canRunTransformation: Bool {
+        aiProviderService.isEnabled &&
         prompts.isEmpty == false &&
         selectedPrompt != nil &&
         isRunningTransformation == false &&
@@ -148,35 +159,36 @@ final class TranscriptDetailViewModel {
             return
         }
 
-        await runTransformation(
+        let request = AITransformationRequest(
             transcript: finalTranscriptText,
             systemPrompt: selectedPrompt.content,
-            session: session,
             promptName: selectedPrompt.name,
-            promptID: selectedPrompt.id
+            modelID: aiProviderService.selectedModelID ?? ""
         )
+        await runTransformation(request, session: session, promptID: selectedPrompt.id)
     }
 
     func runTransformation(
-        transcript: String,
-        systemPrompt: String,
+        _ request: AITransformationRequest,
         session: any TranscribableSession,
-        promptName: String,
         promptID: UUID?
     ) async {
+        let sessionID = session.id
+        guard runningTransformationSessionIDs.contains(sessionID) == false else {
+            return
+        }
+
         transformationErrorMessage = nil
-        isRunningTransformation = true
+        runningTransformationSessionIDs.insert(sessionID)
+        defer { runningTransformationSessionIDs.remove(sessionID) }
 
         do {
-            let resultText = try await aiProviderService.performTransformation(
-                transcript: transcript,
-                systemPrompt: systemPrompt
-            )
+            let result = try await aiProviderService.performTransformation(request)
 
             let transformation = AITransformation(
-                promptName: promptName,
-                modelID: aiProviderService.selectedModelID ?? "unknown",
-                resultText: resultText
+                promptName: result.promptName,
+                modelID: result.modelID,
+                resultText: result.text
             )
 
             var history = session.aiTransformations
@@ -187,7 +199,5 @@ final class TranscriptDetailViewModel {
         } catch {
             transformationErrorMessage = error.localizedDescription
         }
-
-        isRunningTransformation = false
     }
 }

@@ -254,12 +254,16 @@ final class AIProviderServiceTests {
                 throw TestError.expectedFailure
             }
         )
-        service.selectedModelID = "gpt-5.2"
+        service.isEnabled = true
 
         do {
             _ = try await service.performTransformation(
-                transcript: "Transcript body",
-                systemPrompt: "Summarize this transcript"
+                AITransformationRequest(
+                    transcript: "Transcript body",
+                    systemPrompt: "Summarize this transcript",
+                    promptName: "Summary",
+                    modelID: "gpt-5.2"
+                )
             )
             Issue.record("Expected provider failure")
         } catch {
@@ -276,6 +280,69 @@ final class AIProviderServiceTests {
         } else {
             Issue.record("Expected text input request")
         }
+    }
+
+    @Test
+    func testPerformTransformationWhenDisabledThrowsWithoutCreatingClient() async throws {
+        let keychainStore = MockKeychainStore()
+        try keychainStore.save(key: "aiProvider.openAI.apiKey", value: Self.validAPIKey)
+        var clientFactoryCalls = 0
+        var responseCreatorCalls = 0
+
+        let service = makeService(
+            keychainStore: keychainStore,
+            clientFactory: { token in
+                clientFactoryCalls += 1
+                return OpenAI(apiToken: token)
+            },
+            responseCreator: { _, _ in
+                responseCreatorCalls += 1
+                return Self.makeResponseObject(text: "ok")
+            }
+        )
+        service.isEnabled = false
+
+        await #expect(throws: AIProviderService.AITransformationError.disabled) {
+            _ = try await service.performTransformation(
+                AITransformationRequest(
+                    transcript: "Transcript body",
+                    systemPrompt: "Summarize",
+                    promptName: "Summary",
+                    modelID: "gpt-5.2"
+                )
+            )
+        }
+        #expect(clientFactoryCalls == 0)
+        #expect(responseCreatorCalls == 0)
+    }
+
+    @Test
+    func testPerformTransformationSendsRequestModelNotSelectedModel() async throws {
+        let keychainStore = MockKeychainStore()
+        try keychainStore.save(key: "aiProvider.openAI.apiKey", value: Self.validAPIKey)
+        var sentModels: [String?] = []
+
+        let service = makeService(
+            keychainStore: keychainStore,
+            responseCreator: { _, query in
+                sentModels.append(query.model)
+                return Self.makeResponseObject(text: "ok")
+            }
+        )
+        service.isEnabled = true
+        service.selectedModelID = "model-b"
+
+        let result = try await service.performTransformation(
+            AITransformationRequest(
+                transcript: "Transcript body",
+                systemPrompt: "Summarize",
+                promptName: "Summary",
+                modelID: "model-a"
+            )
+        )
+
+        #expect(sentModels == ["model-a"])
+        #expect(result == AITransformationResult(text: "ok", promptName: "Summary", modelID: "model-a"))
     }
 
     @Test

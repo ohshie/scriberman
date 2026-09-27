@@ -64,6 +64,7 @@ struct TranscriptDetailViewModelTests {
                 return try Self.makeResponse(text: "Result text")
             }
         )
+        service.isEnabled = true
         service.selectedModelID = "gpt-5.2"
 
         let viewModel = TranscriptDetailViewModel(
@@ -108,6 +109,7 @@ struct TranscriptDetailViewModelTests {
                 throw TestError.expectedFailure
             }
         )
+        service.isEnabled = true
         service.selectedModelID = "gpt-5.2"
 
         let viewModel = TranscriptDetailViewModel(
@@ -123,6 +125,149 @@ struct TranscriptDetailViewModelTests {
         #expect(viewModel.isRunningTransformation == false)
         #expect(viewModel.transformationErrorMessage != nil)
         #expect(session.aiTransformations.count == 0)
+    }
+
+    @Test
+    @MainActor
+    func testCanRunTransformationRequiresAIEnabled() async {
+        let (defaults, suiteName) = makeDefaults()
+        defer { cleanupDefaults(named: suiteName) }
+
+        let promptStore = AIPromptStore(defaults: defaults)
+        let prompt = promptStore.addPrompt(name: "Summary", content: "Summarize")
+        let session = makeRecordingSession(transcriptText: "Transcript")
+        var responseCreatorCalls = 0
+
+        let service = makeService(
+            defaults: defaults,
+            responseCreator: { _, _ in
+                responseCreatorCalls += 1
+                return try Self.makeResponse(text: "Result text")
+            }
+        )
+        service.selectedModelID = "gpt-5.2"
+
+        let viewModel = TranscriptDetailViewModel(
+            session: session,
+            aiProviderService: service,
+            promptStore: promptStore
+        )
+        viewModel.prompts = [prompt]
+        viewModel.selectedPromptID = prompt.id
+
+        service.isEnabled = false
+        #expect(viewModel.canRunTransformation == false)
+
+        await viewModel.runTransformation()
+        #expect(responseCreatorCalls == 0)
+        #expect(session.aiTransformations.isEmpty)
+        #expect(
+            viewModel.transformationErrorMessage
+                == AIProviderService.AITransformationError.disabled.localizedDescription
+        )
+
+        service.isEnabled = true
+        #expect(viewModel.canRunTransformation)
+    }
+
+    @Test
+    @MainActor
+    func testHistoryRecordsModelInEffectWhenRequestStarted() async {
+        let (defaults, suiteName) = makeDefaults()
+        defer { cleanupDefaults(named: suiteName) }
+
+        let promptStore = AIPromptStore(defaults: defaults)
+        let prompt = promptStore.addPrompt(name: "Summary", content: "Summarize")
+        let session = makeRecordingSession(transcriptText: "Transcript")
+        let (gate, release) = AsyncStream<Void>.makeStream()
+        var sentModels: [String?] = []
+
+        let service = makeService(
+            defaults: defaults,
+            responseCreator: { _, query in
+                sentModels.append(query.model)
+                for await _ in gate { break }
+                return try Self.makeResponse(text: "Result text")
+            }
+        )
+        service.isEnabled = true
+        service.selectedModelID = "model-a"
+
+        let viewModel = TranscriptDetailViewModel(
+            session: session,
+            aiProviderService: service,
+            promptStore: promptStore
+        )
+        viewModel.prompts = [prompt]
+        viewModel.selectedPromptID = prompt.id
+
+        let task = Task {
+            await viewModel.runTransformation()
+        }
+        for _ in 0..<1_000 where sentModels.isEmpty {
+            await Task.yield()
+        }
+
+        service.selectedModelID = "model-b"
+        release.yield()
+        release.finish()
+        await task.value
+
+        #expect(sentModels == ["model-a"])
+        #expect(session.aiTransformations.count == 1)
+        #expect(session.aiTransformations.first?.modelID == "model-a")
+        #expect(session.aiTransformations.first?.promptName == "Summary")
+    }
+
+    @Test
+    @MainActor
+    func testSecondRunForSameSessionIsRejectedWhileFirstIsRunning() async {
+        let (defaults, suiteName) = makeDefaults()
+        defer { cleanupDefaults(named: suiteName) }
+
+        let promptStore = AIPromptStore(defaults: defaults)
+        let prompt = promptStore.addPrompt(name: "Summary", content: "Summarize")
+        let session = makeRecordingSession(transcriptText: "Transcript")
+        let (gate, release) = AsyncStream<Void>.makeStream()
+        var responseCreatorCalls = 0
+
+        let service = makeService(
+            defaults: defaults,
+            responseCreator: { _, _ in
+                responseCreatorCalls += 1
+                for await _ in gate { break }
+                return try Self.makeResponse(text: "Result text")
+            }
+        )
+        service.isEnabled = true
+        service.selectedModelID = "gpt-5.2"
+
+        let viewModel = TranscriptDetailViewModel(
+            session: session,
+            aiProviderService: service,
+            promptStore: promptStore
+        )
+        viewModel.prompts = [prompt]
+        viewModel.selectedPromptID = prompt.id
+
+        let first = Task {
+            await viewModel.runTransformation()
+        }
+        for _ in 0..<1_000 where responseCreatorCalls == 0 {
+            await Task.yield()
+        }
+
+        await viewModel.runTransformation()
+        #expect(responseCreatorCalls == 1)
+        #expect(viewModel.isRunningTransformation)
+
+        release.yield()
+        release.finish()
+        await first.value
+
+        #expect(responseCreatorCalls == 1)
+        #expect(session.aiTransformations.count == 1)
+        #expect(viewModel.isRunningTransformation == false)
     }
 
     @Test
