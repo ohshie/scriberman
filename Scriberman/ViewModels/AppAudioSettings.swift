@@ -11,12 +11,12 @@ final class AppAudioSettings {
     private let userDefaults: UserDefaults
 
     var voiceProcessingEnabled: Bool {
-        get { userDefaults.bool(forKey: Key.voiceProcessingEnabled) }
-        set { userDefaults.set(newValue, forKey: Key.voiceProcessingEnabled) }
+        didSet { userDefaults.set(voiceProcessingEnabled, forKey: Key.voiceProcessingEnabled) }
     }
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
+        voiceProcessingEnabled = userDefaults.bool(forKey: Key.voiceProcessingEnabled)
     }
 
     func resetToDefaults() {

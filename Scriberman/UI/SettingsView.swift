@@ -90,7 +90,7 @@ struct SettingsView: View {
                             "Automatically check for updates",
                             isOn: Binding(
                                 get: { updateService.automaticallyChecksForUpdates },
-                                set: { updateService.automaticallyChecksForUpdates = $0 }
+                                set: { updateService.setAutomaticallyChecksForUpdates($0) }
                             )
                         )
                         .disabled(!updateService.isConfigured)
