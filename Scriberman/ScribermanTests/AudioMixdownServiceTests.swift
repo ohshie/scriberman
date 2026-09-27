@@ -349,7 +349,7 @@ final class AudioMixdownServiceTests {
             workspaceService: MockWorkspaceService(),
             modelContainer: container
         )
-        await coordinator.runMixdown(
+        let committed = await coordinator.runMixdown(
             sessionID: session.id,
             micURL: micURL,
             appURL: nil,
@@ -359,8 +359,44 @@ final class AudioMixdownServiceTests {
         )
 
         let persisted = try #require(try RecordingSession.fetch(id: session.id, in: ModelContext(container)))
+        #expect(committed)
         #expect(persisted.mixdownURL == mixdownURL.path)
         #expect(FileManager.default.fileExists(atPath: mixdownURL.path))
+        #expect(FileManager.default.fileExists(atPath: micURL.path))
+    }
+
+    @Test
+    func testCoordinatorKeepsInputsWhenTheMixdownCannotBeSaved() async throws {
+        let folder = tempDirectoryURL.appendingPathComponent("unsaved", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let micURL = folder.appendingPathComponent("mic.wav")
+        let sidecarURL = AudioFileStreamer.timingSidecarURL(for: micURL)
+        let mixdownURL = folder.appendingPathComponent("recording.m4a")
+        try writeMonoWAV(samples: Array(repeating: Float(0.25), count: 48_000), to: micURL)
+        _ = FileManager.default.createFile(atPath: sidecarURL.path, contents: Data("timing".utf8))
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let coordinator = RecordingMixdownCoordinator(
+            workspaceService: MockWorkspaceService(),
+            modelContainer: container
+        )
+        // No session with this ID exists, so saving the location fails after the export.
+        let committed = await coordinator.runMixdown(
+            sessionID: UUID(),
+            micURL: micURL,
+            appURL: nil,
+            mixdownURL: mixdownURL,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: nil
+        )
+
+        #expect(!committed)
+        #expect(FileManager.default.fileExists(atPath: mixdownURL.path))
+        #expect(FileManager.default.fileExists(atPath: micURL.path))
+        #expect(FileManager.default.fileExists(atPath: sidecarURL.path))
     }
 
     @Test

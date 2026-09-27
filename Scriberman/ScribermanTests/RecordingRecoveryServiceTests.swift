@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import SwiftData
 import Testing
@@ -418,8 +419,231 @@ final class RecordingRecoveryServiceTests {
 
     // MARK: - Helpers
 
+    // MARK: - Finalization recovery (recording-finalization-safety)
+
+    private func makeFolder() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    /// A short AAC file that `AVAudioFile` opens with a positive length.
+    private func writeValidMixdown(at url: URL) throws {
+        let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1))
+        let file = try AVAudioFile(
+            forWriting: url,
+            settings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48_000, AVNumberOfChannelsKey: 1]
+        )
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 48_000))
+        buffer.frameLength = 48_000
+        try file.write(from: buffer)
+    }
+
+    private func makeRecoveryService(
+        container: ModelContainer,
+        performMixdown: @escaping RecordingRecoveryService.MixdownHandler = { _, _, _ in },
+        performMux: RecordingRecoveryService.MuxHandler? = nil,
+        isFinalizing: @escaping @Sendable (UUID) -> Bool = { _ in false }
+    ) -> RecordingRecoveryService {
+        let workspaceService = MockWorkspaceService()
+        workspaceService.currentWorkspaceResult = makeWorkspace()
+        return RecordingRecoveryService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            performMixdown: performMixdown,
+            performMux: performMux ?? { _ in },
+            isFinalizing: isFinalizing
+        )
+    }
+
+    private func fetch(_ id: UUID, in container: ModelContainer) throws -> RecordingSession {
+        try #require(try RecordingSession.fetch(id: id, in: ModelContext(container)))
+    }
+
+    @Test
+    func testRelaunchWithOnlyRecordingM4AAdoptsIt() async throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let mixdownURL = folder.appendingPathComponent("recording.m4a")
+        try writeValidMixdown(at: mixdownURL)
+
+        let container = try makeContainer()
+        let context = ModelContext(container)
+        let session = makeSession(micAudioURL: folder.appendingPathComponent("mic.wav").path, status: .recorded)
+        context.insert(session)
+        try context.save()
+
+        let tracker = CallTracker()
+        let service = makeRecoveryService(container: container, performMixdown: { _, _, _ in await tracker.markCalled() })
+        await service.sweepIncompleteSessions()
+
+        let recovered = try fetch(session.id, in: container)
+        #expect(recovered.mixdownURL == mixdownURL.path)
+        #expect(recovered.status == .recorded)
+        #expect(!(await tracker.called))
+    }
+
+    @Test
+    func testUnreadableRecordingM4AFallsBackToMixingRawInputs() async throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let micURL = folder.appendingPathComponent("mic.wav")
+        FileManager.default.createFile(atPath: micURL.path, contents: Data("wav".utf8))
+        FileManager.default.createFile(atPath: folder.appendingPathComponent("recording.m4a").path, contents: Data("not audio".utf8))
+
+        let container = try makeContainer()
+        let context = ModelContext(container)
+        let session = makeSession(micAudioURL: micURL.path, status: .recorded)
+        context.insert(session)
+        try context.save()
+
+        let tracker = CallTracker()
+        let service = makeRecoveryService(container: container, performMixdown: { _, _, _ in await tracker.markCalled() })
+        await service.sweepIncompleteSessions()
+
+        #expect(await tracker.called)
+        #expect(try fetch(session.id, in: container).mixdownURL != nil)
+    }
+
+    @Test
+    func testFailedScreenMuxSucceedsOnTheNextSweep() async throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let mixdownURL = folder.appendingPathComponent("recording.m4a")
+        try writeValidMixdown(at: mixdownURL)
+        let screenTmpURL = RecordingFileLayout.screenTmpVideoURL(in: folder)
+        FileManager.default.createFile(atPath: screenTmpURL.path, contents: Data("video".utf8))
+
+        let container = try makeContainer()
+        let context = ModelContext(container)
+        let session = makeSession(micAudioURL: folder.appendingPathComponent("mic.wav").path, mixdownURL: mixdownURL.path)
+        session.screenMuxState = ScreenMuxState.failed.rawValue
+        session.videoStartHostTimeNanos = 2_000_000_000
+        session.audioAnchorHostTimeNanos = 1_000_000_000
+        context.insert(session)
+        try context.save()
+
+        let exporter = FailOnceExporter()
+        let muxer = ScreenVideoMuxer(workspaceService: MockWorkspaceService(), modelContainer: container, exporter: exporter)
+        let service = makeRecoveryService(container: container, performMux: { await muxer.runMux(request: $0) })
+
+        await service.sweepIncompleteSessions()
+        var refreshed = try fetch(session.id, in: container)
+        #expect(refreshed.screenMuxState == ScreenMuxState.failed.rawValue)
+        #expect(refreshed.screenMuxAttemptCount == 1)
+        #expect(FileManager.default.fileExists(atPath: screenTmpURL.path))
+
+        await service.sweepIncompleteSessions()
+        refreshed = try fetch(session.id, in: container)
+        #expect(refreshed.screenMuxState == nil)
+        #expect(refreshed.screenVideoURL == RecordingFileLayout.screenVideoURL(in: folder).path)
+        #expect(!FileManager.default.fileExists(atPath: screenTmpURL.path))
+        let plan = try #require(exporter.lastPlan)
+        #expect(plan.audioInstructions.map(\.url) == [mixdownURL])
+    }
+
+    @Test
+    func testScreenMuxRetriesStopAtTheLimit() async throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let mixdownURL = folder.appendingPathComponent("recording.m4a")
+        try writeValidMixdown(at: mixdownURL)
+        FileManager.default.createFile(atPath: RecordingFileLayout.screenTmpVideoURL(in: folder).path, contents: Data("video".utf8))
+
+        let container = try makeContainer()
+        let context = ModelContext(container)
+        let session = makeSession(micAudioURL: folder.appendingPathComponent("mic.wav").path, mixdownURL: mixdownURL.path)
+        session.screenMuxState = ScreenMuxState.pending.rawValue
+        session.videoStartHostTimeNanos = 2_000_000_000
+        session.screenMuxAttemptCount = RecordingRecoveryService.maxScreenMuxAttempts
+        context.insert(session)
+        try context.save()
+
+        let tracker = CallTracker()
+        let service = makeRecoveryService(container: container, performMux: { _ in await tracker.markCalled() })
+        await service.sweepIncompleteSessions()
+
+        #expect(!(await tracker.called))
+    }
+
+    @Test
+    func testLeftoverSourcesAreRetiredForACommittedMixdown() async throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let mixdownURL = folder.appendingPathComponent("recording.m4a")
+        try writeValidMixdown(at: mixdownURL)
+        let micURL = folder.appendingPathComponent("mic.wav")
+        let appURL = folder.appendingPathComponent("app.wav")
+        for url in [micURL, appURL, AudioFileStreamer.timingSidecarURL(for: micURL), AudioFileStreamer.timingSidecarURL(for: appURL)] {
+            FileManager.default.createFile(atPath: url.path, contents: Data("x".utf8))
+        }
+
+        let container = try makeContainer()
+        let context = ModelContext(container)
+        let session = makeSession(micAudioURL: micURL.path, mixdownURL: mixdownURL.path)
+        session.appAudioURL = appURL.path
+        context.insert(session)
+        try context.save()
+
+        await makeRecoveryService(container: container).sweepIncompleteSessions()
+
+        #expect(!RecordingSourceFiles.anyExist(micURL: micURL, appURL: appURL))
+        #expect(FileManager.default.fileExists(atPath: mixdownURL.path))
+    }
+
+    @Test
+    func testSessionStillBeingFinalizedIsLeftAlone() async throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let micURL = folder.appendingPathComponent("mic.wav")
+        FileManager.default.createFile(atPath: micURL.path, contents: Data("wav".utf8))
+
+        let container = try makeContainer()
+        let context = ModelContext(container)
+        let session = makeSession(micAudioURL: micURL.path, status: .recorded)
+        context.insert(session)
+        try context.save()
+        let sessionID = session.id
+
+        let tracker = CallTracker()
+        let service = makeRecoveryService(
+            container: container,
+            performMixdown: { _, _, _ in await tracker.markCalled() },
+            isFinalizing: { $0 == sessionID }
+        )
+        await service.sweepIncompleteSessions()
+
+        #expect(!(await tracker.called))
+        #expect(FileManager.default.fileExists(atPath: micURL.path))
+    }
+
     private func makeWorkspace() -> Workspace {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         return Workspace(rootURL: url)
+    }
+}
+
+/// Fails the first export, then writes the output file.
+private final class FailOnceExporter: ScreenVideoExporting, @unchecked Sendable {
+    private let lock = NSLock()
+    private var exports = 0
+    private var plan: ScreenVideoMuxPlan?
+
+    var lastPlan: ScreenVideoMuxPlan? {
+        lock.lock()
+        defer { lock.unlock() }
+        return plan
+    }
+
+    func export(plan: ScreenVideoMuxPlan) async throws {
+        let attempt = lock.withLock {
+            exports += 1
+            self.plan = plan
+            return exports
+        }
+        if attempt == 1 {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        FileManager.default.createFile(atPath: plan.request.screenVideoURL.path, contents: Data("mov".utf8))
     }
 }

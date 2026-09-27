@@ -62,6 +62,14 @@ struct RecordingSessionRow: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
+
+                // Video was captured but screen.mov could not be produced. screen-tmp.mov is kept
+                // and recovery retries it, so this clears once a retry succeeds.
+                if session.didScreenVideoFinalizationFail {
+                    Label("Errors in screen recording occurred", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
             // Fills, so the timestamp's trailing alignment has an edge to resolve against. This is
             // also what puts the accessory column against the row's right side without a Spacer.

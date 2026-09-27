@@ -332,7 +332,14 @@ final class RecordingServiceTests {
 
         let mixdownStart = try #require(await mixdownCoordinator.firstCallStartedAt())
         let muxStart = try #require(await screenVideoMuxer.firstCallStartedAt())
-        #expect(abs(mixdownStart.timeIntervalSince(muxStart)) < 0.25)
+        #expect(muxStart >= mixdownStart)
+
+        // Stop saves what recovery needs to retry the mux (design D3).
+        let stoppedID = try #require(sessionID)
+        let session = try #require(try RecordingSession.fetch(id: stoppedID, in: ModelContext(container)))
+        #expect(session.screenMuxState == ScreenMuxState.pending.rawValue)
+        #expect(session.videoStartHostTimeNanos == 9_000)
+        #expect(session.audioAnchorHostTimeNanos != nil)
     }
 
     @Test
@@ -1989,13 +1996,14 @@ private actor MockRecordingMixdownCoordinator: RecordingMixdownCoordinating {
         mixdownURL _: URL,
         micStartHostTime _: HostNanoseconds,
         appStartHostTime _: HostNanoseconds?
-    ) async {
+    ) async -> Bool {
         calls.append(Call(startedAt: Date()))
         let continuations = waiters
         waiters.removeAll()
         for continuation in continuations {
             continuation.resume()
         }
+        return false
     }
 
     func waitForCall() async {

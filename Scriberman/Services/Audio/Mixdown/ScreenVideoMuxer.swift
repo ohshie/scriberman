@@ -93,8 +93,9 @@ actor ScreenVideoMuxer: ScreenVideoMuxing {
             )
             cleanupTemporaryVideo(at: request.screenTmpURL)
         } catch {
-            logger.error("Screen video mux failed for session \(request.sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            cleanupTemporaryVideo(at: request.screenTmpURL)
+            // screen-tmp.mov is the only input a retry can use, so it stays (design D3).
+            logger.error("Screen video mux failed for session \(request.sessionID, privacy: .public); keeping screen-tmp.mov: \(error.localizedDescription, privacy: .public)")
+            recordMuxFailure(sessionID: request.sessionID)
         }
     }
 
@@ -129,7 +130,19 @@ actor ScreenVideoMuxer: ScreenVideoMuxing {
             throw RecordingError.failedToStart("Screen video mux succeeded but the session could not be found.")
         }
         session.screenVideoURL = screenVideoURL.path
+        session.screenMuxState = nil
         try context.save()
+    }
+
+    private func recordMuxFailure(sessionID: UUID) {
+        do {
+            let context = ModelContext(modelContainer)
+            guard let session = try RecordingSession.fetch(id: sessionID, in: context) else { return }
+            session.screenMuxState = ScreenMuxState.failed.rawValue
+            try context.save()
+        } catch {
+            logger.error("Recording the mux failure for session \(sessionID, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     private func cleanupTemporaryVideo(at url: URL) {

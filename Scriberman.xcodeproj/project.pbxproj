@@ -105,6 +105,7 @@
 		791009722F7F0A2000225294 /* ScreenCaptureSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009712F7F0A2000225294 /* ScreenCaptureSessionTests.swift */; };
 		791009742F7F0A3000225294 /* ScreenVideoMuxer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009732F7F0A3000225294 /* ScreenVideoMuxer.swift */; };
 		791009762F7F0A4000225294 /* ScreenVideoMuxerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009752F7F0A4000225294 /* ScreenVideoMuxerTests.swift */; };
+		B3A1714A2CC32AA15C375EA2 /* RecordingFinalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C64CEE59FB7314F2083BAD83 /* RecordingFinalizerTests.swift */; };
 		791009782F7F0A5000225294 /* ScreenCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009772F7F0A5000225294 /* ScreenCaptureService.swift */; };
 		7910097A2F7F0A6000225294 /* ScreenCaptureServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791009792F7F0A6000225294 /* ScreenCaptureServiceProtocol.swift */; };
 		7910097C2F7F0A7000225294 /* ScreenCaptureServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7910097B2F7F0A7000225294 /* ScreenCaptureServiceTests.swift */; };
@@ -165,6 +166,7 @@
 		79A11C1F2F856CEC0084F195 /* AppAudioSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79A11C1E2F856CEC0084F195 /* AppAudioSettingsTests.swift */; };
 		79A11C212F859FA90084F195 /* RecordingFileLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79A11C202F859FA90084F195 /* RecordingFileLayout.swift */; };
 		79A11C252F8601110084F195 /* RecordingMixdownCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79A11C242F8601110084F195 /* RecordingMixdownCoordinator.swift */; };
+		EEAEE9A5FB95B315C52E7A56 /* RecordingFinalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 206C8B26AB70359280550C53 /* RecordingFinalizer.swift */; };
 		79A11C272F8601220084F195 /* RecordingPermissionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79A11C262F8601220084F195 /* RecordingPermissionService.swift */; };
 		79AF5DC42F92DC4B0075AA88 /* RecordingRecoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79AF5DC32F92DC4B0075AA88 /* RecordingRecoveryService.swift */; };
 		E5C0DE01B2C3D4E5F6A90002 /* WavHeaderRepairer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5C0DE01B2C3D4E5F6A90001 /* WavHeaderRepairer.swift */; };
@@ -389,6 +391,7 @@
 		791009712F7F0A2000225294 /* ScreenCaptureSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureSessionTests.swift; sourceTree = "<group>"; };
 		791009732F7F0A3000225294 /* ScreenVideoMuxer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenVideoMuxer.swift; sourceTree = "<group>"; };
 		791009752F7F0A4000225294 /* ScreenVideoMuxerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenVideoMuxerTests.swift; sourceTree = "<group>"; };
+		C64CEE59FB7314F2083BAD83 /* RecordingFinalizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingFinalizerTests.swift; sourceTree = "<group>"; };
 		791009772F7F0A5000225294 /* ScreenCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureService.swift; sourceTree = "<group>"; };
 		791009792F7F0A6000225294 /* ScreenCaptureServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureServiceProtocol.swift; sourceTree = "<group>"; };
 		7910097B2F7F0A7000225294 /* ScreenCaptureServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureServiceTests.swift; sourceTree = "<group>"; };
@@ -449,6 +452,7 @@
 		79A11C1E2F856CEC0084F195 /* AppAudioSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAudioSettingsTests.swift; sourceTree = "<group>"; };
 		79A11C202F859FA90084F195 /* RecordingFileLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingFileLayout.swift; sourceTree = "<group>"; };
 		79A11C242F8601110084F195 /* RecordingMixdownCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingMixdownCoordinator.swift; sourceTree = "<group>"; };
+		206C8B26AB70359280550C53 /* RecordingFinalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingFinalizer.swift; sourceTree = "<group>"; };
 		79A11C262F8601220084F195 /* RecordingPermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingPermissionService.swift; sourceTree = "<group>"; };
 		79AF5DC32F92DC4B0075AA88 /* RecordingRecoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingRecoveryService.swift; sourceTree = "<group>"; };
 		E5C0DE01B2C3D4E5F6A90001 /* WavHeaderRepairer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WavHeaderRepairer.swift; sourceTree = "<group>"; };
@@ -649,6 +653,7 @@
 				791009712F7F0A2000225294 /* ScreenCaptureSessionTests.swift */,
 				7910097B2F7F0A7000225294 /* ScreenCaptureServiceTests.swift */,
 				791009752F7F0A4000225294 /* ScreenVideoMuxerTests.swift */,
+				C64CEE59FB7314F2083BAD83 /* RecordingFinalizerTests.swift */,
 				791009522F78184E00225294 /* AudioMixdownServiceTests.swift */,
 				791009562F7832AD00225294 /* M4AChannelExtractorTests.swift */,
 				7910095A2F783E9B00225294 /* RetranscriptionServiceTests.swift */,
@@ -881,6 +886,7 @@
 				791009542F78328500225294 /* M4AChannelExtractor.swift */,
 				7987326A2F7D8D1700570A03 /* AudioSampleReader.swift */,
 				79A11C242F8601110084F195 /* RecordingMixdownCoordinator.swift */,
+				206C8B26AB70359280550C53 /* RecordingFinalizer.swift */,
 				791009732F7F0A3000225294 /* ScreenVideoMuxer.swift */,
 			);
 			path = Mixdown;
@@ -1303,6 +1309,7 @@
 				51131E24461C4A109A7F68C8 /* AudioDriftMeasurement.swift in Sources */,
 				340DCED74830451F973E701D /* AudioSyncConfig.swift in Sources */,
 				79A11C252F8601110084F195 /* RecordingMixdownCoordinator.swift in Sources */,
+				EEAEE9A5FB95B315C52E7A56 /* RecordingFinalizer.swift in Sources */,
 				7910097A2F7F0A6000225294 /* ScreenCaptureServiceProtocol.swift in Sources */,
 				791009782F7F0A5000225294 /* ScreenCaptureService.swift in Sources */,
 				791009742F7F0A3000225294 /* ScreenVideoMuxer.swift in Sources */,
@@ -1512,6 +1519,7 @@
 				791009722F7F0A2000225294 /* ScreenCaptureSessionTests.swift in Sources */,
 				7910097C2F7F0A7000225294 /* ScreenCaptureServiceTests.swift in Sources */,
 				791009762F7F0A4000225294 /* ScreenVideoMuxerTests.swift in Sources */,
+				B3A1714A2CC32AA15C375EA2 /* RecordingFinalizerTests.swift in Sources */,
 				7987328E2F7DBC2800570A03 /* SettingsViewModelTests.swift in Sources */,
 				B72B82B2F929E58EEF71508F /* AudioTrimServiceTests.swift in Sources */,
 				712E8E5BDF5B4757A330E0B2 /* TranscriptRowTests.swift in Sources */,

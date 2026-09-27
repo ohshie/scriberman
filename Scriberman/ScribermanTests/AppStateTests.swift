@@ -293,6 +293,42 @@ final class AppStateTests {
     }
 
     @Test
+    func testApplicationShouldTerminateWaitsForFinalizationWithoutRecording() async {
+        let delegate = AppDelegate()
+        delegate.modelContext = modelContainer.mainContext
+        delegate.isRecordingForLifecycleHandler = { false }
+        let finalizer = FakeRecordingFinalizer(hasJobs: true)
+        delegate.recordingFinalizer = finalizer
+
+        var didReplyToTerminate = false
+        delegate.terminationReplyHandler = { didReplyToTerminate = $0 }
+
+        let result = delegate.applicationShouldTerminate(NSApp)
+
+        #expect(result == .terminateLater)
+        await assertEventuallyTrue("Expected quit to wait on the finalizer") {
+            finalizer.waitCount == 1
+        }
+        #expect(!didReplyToTerminate)
+        #expect(finalizer.lastTimeout == .seconds(15))
+
+        finalizer.finish()
+        await assertEventuallyTrue("Expected the termination reply after finalization") {
+            didReplyToTerminate
+        }
+    }
+
+    @Test
+    func testApplicationShouldTerminateReturnsTerminateNowWithNoFinalizationWork() {
+        let delegate = AppDelegate()
+        delegate.modelContext = modelContainer.mainContext
+        delegate.isRecordingForLifecycleHandler = { false }
+        delegate.recordingFinalizer = FakeRecordingFinalizer(hasJobs: false)
+
+        #expect(delegate.applicationShouldTerminate(NSApp) == .terminateNow)
+    }
+
+    @Test
     func testWakeCleanupWaitsForInFlightPreSleepStop() async {
         let delegate = AppDelegate()
         delegate.modelContext = modelContainer.mainContext
@@ -458,6 +494,10 @@ final class AppStateTests {
                 recoveryService: RecordingRecoveryService(
                     workspaceService: workspaceService,
                     modelContainer: modelContainer
+                ),
+                recordingFinalizer: RecordingFinalizer(
+                    mixdownCoordinator: RecordingMixdownCoordinator(workspaceService: workspaceService, modelContainer: modelContainer),
+                    screenVideoMuxer: ScreenVideoMuxer(workspaceService: workspaceService, modelContainer: modelContainer)
                 )
             )
         )
@@ -514,5 +554,45 @@ private final class TestBookmarkStore: BookmarkStore, @unchecked Sendable {
 
     func saveWorkspaceBookmark(_ data: Data) {
         bookmarkData = data
+    }
+}
+
+/// Finalizer whose `waitForAll` returns only after `finish()`.
+private final class FakeRecordingFinalizer: RecordingFinalizing, @unchecked Sendable {
+    private let lock = NSLock()
+    private let jobs: Bool
+    private var waits = 0
+    private var timeout: Duration?
+    private var continuation: CheckedContinuation<Bool, Never>?
+    private var finished = false
+
+    init(hasJobs: Bool) {
+        jobs = hasJobs
+    }
+
+    var hasJobs: Bool { jobs }
+    var waitCount: Int { lock.withLock { waits } }
+    var lastTimeout: Duration? { lock.withLock { timeout } }
+
+    func waitForAll(timeout: Duration) async -> Bool {
+        await withCheckedContinuation { continuation in
+            let resumeNow = lock.withLock {
+                waits += 1
+                self.timeout = timeout
+                if finished { return true }
+                self.continuation = continuation
+                return false
+            }
+            if resumeNow { continuation.resume(returning: true) }
+        }
+    }
+
+    func finish() {
+        let pending = lock.withLock {
+            finished = true
+            defer { continuation = nil }
+            return continuation
+        }
+        pending?.resume(returning: true)
     }
 }

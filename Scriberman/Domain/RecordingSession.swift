@@ -34,6 +34,16 @@ final class RecordingSession {
     /// correctly placed; the uncovered interval is silence. Stored as data, not a message.
     var partiallyCoveredSources: [String]?
     var mixdownAttemptCountValue: Int?
+    /// Screen video finalization state, as a `ScreenMuxState` raw value: `pending` from stop
+    /// until `screen.mov` is saved, `failed` after a failed attempt, `nil` when done or when the
+    /// recording has no video. `screen-tmp.mov` is kept while it is set.
+    var screenMuxState: String?
+    /// Host time of the first video frame, saved at stop so recovery can retry the mux.
+    var videoStartHostTimeNanos: Int64?
+    /// Host time the mixdown audio is anchored to, saved at stop so recovery can retry the mux.
+    var audioAnchorHostTimeNanos: Int64?
+    /// Screen video mux attempts started by recovery.
+    var screenMuxAttemptCountValue: Int?
     var transcriptData: Data?
     var retranscriptData: Data?
     var aiTransformationsData: Data?
@@ -87,6 +97,14 @@ final class RecordingSession {
         get { mixdownAttemptCountValue ?? 0 }
         set { mixdownAttemptCountValue = newValue }
     }
+
+    var screenMuxAttemptCount: Int {
+        get { screenMuxAttemptCountValue ?? 0 }
+        set { screenMuxAttemptCountValue = newValue }
+    }
+
+    /// Whether the screen video could not be produced and `screen-tmp.mov` is still waiting.
+    var didScreenVideoFinalizationFail: Bool { screenMuxState == ScreenMuxState.failed.rawValue }
 
     var transcript: Transcript? {
         get {
@@ -158,6 +176,11 @@ final class RecordingSession {
 }
 
 extension RecordingSession: TranscribableSession {}
+
+enum ScreenMuxState: String, Sendable {
+    case pending
+    case failed
+}
 
 extension RecordingSession {
     static func fetch(id: UUID, in context: ModelContext) throws -> RecordingSession? {
