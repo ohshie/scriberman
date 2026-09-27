@@ -311,6 +311,168 @@ final class RecordingServiceTests {
     }
 
     @Test
+    func testConcurrentStopRequestsShareOneTeardown() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        let mixdownCoordinator = MockRecordingMixdownCoordinator()
+        let screenSession = MockScreenCaptureSession()
+        let stopBlocker = MockScreenCaptureStopBlocker()
+        screenSession.blockNextStop(using: stopBlocker)
+        let factoryProbe = ScreenCaptureSessionFactoryProbe(session: screenSession)
+
+        let service = RecordingService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            micCaptureController: MockMicCaptureController(),
+            mixdownCoordinator: mixdownCoordinator,
+            screenVideoMuxer: MockScreenVideoMuxer(),
+            permissionChecker: {},
+            scopedAccessStarter: { _ in true },
+            scopedAccessStopper: { _ in },
+            screenCaptureSessionFactory: { factoryProbe.makeSession() }
+        )
+
+        _ = try await service.startRecording(
+            in: workspace,
+            micDeviceID: nil,
+            captureDisplayID: 42,
+            capturedAppName: nil,
+            appProcessID: nil,
+            title: "Session"
+        )
+
+        let firstStop = Task { await service.stopRecording() }
+        await stopBlocker.waitUntilStopStarts()
+        let secondStop = Task { await service.stopRecording() }
+        while await service.stopRecordingCallCountForTesting() < 2 {
+            await Task.yield()
+        }
+        await stopBlocker.release()
+
+        let firstID = await firstStop.value
+        let secondID = await secondStop.value
+        #expect(firstID != nil)
+        #expect(firstID == secondID)
+        await mixdownCoordinator.waitForCall()
+        #expect(await mixdownCoordinator.callCount() == 1)
+        #expect(screenSession.stopCallCount == 1)
+        #expect(await service.isRecording() == false)
+    }
+
+    @Test
+    func testConcurrentStartRequestsStartOneRecording() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        let permissionGate = MockScreenCaptureStopBlocker()
+
+        let service = RecordingService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            micCaptureController: MockMicCaptureController(),
+            mixdownCoordinator: MockRecordingMixdownCoordinator(),
+            screenVideoMuxer: MockScreenVideoMuxer(),
+            permissionChecker: {
+                await permissionGate.markStopStarted()
+                await permissionGate.waitUntilReleased()
+            },
+            scopedAccessStarter: { _ in true },
+            scopedAccessStopper: { _ in }
+        )
+
+        let firstStart = Task { try await service.startRecording(in: workspace, title: "First") }
+        await permissionGate.waitUntilStopStarts()
+
+        var secondError: RecordingError?
+        do {
+            _ = try await service.startRecording(in: workspace, title: "Second")
+        } catch {
+            secondError = error
+        }
+        guard case .alreadyRecording = secondError else {
+            Issue.record("Expected alreadyRecording, got \(String(describing: secondError))")
+            return
+        }
+
+        await permissionGate.release()
+        let firstID = try await firstStart.value
+        #expect(await service.isRecording())
+
+        let stoppedID = await service.stopRecording()
+        #expect(stoppedID == firstID)
+    }
+
+    @Test
+    func testFailedStartLeavesServiceReadyForNextStart() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        let tagCalls = VPCallCounter()
+
+        let service = RecordingService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            micCaptureController: MockMicCaptureController(),
+            mixdownCoordinator: MockRecordingMixdownCoordinator(),
+            screenVideoMuxer: MockScreenVideoMuxer(),
+            permissionChecker: {},
+            scopedAccessStarter: { _ in true },
+            scopedAccessStopper: { _ in },
+            defaultTagApplier: { session, context in
+                tagCalls.increment()
+                if tagCalls.callCount == 1 {
+                    throw NSError(domain: "RecordingServiceTests", code: 11)
+                }
+                try TagService().applyDefaultTag(to: session, in: context)
+            }
+        )
+
+        var firstError: RecordingError?
+        do {
+            _ = try await service.startRecording(in: workspace, title: "Fails")
+        } catch {
+            firstError = error
+        }
+        guard case .failedToStart = firstError else {
+            Issue.record("Expected failedToStart, got \(String(describing: firstError))")
+            return
+        }
+        #expect(await service.isRecording() == false)
+
+        let sessionID = try await service.startRecording(in: workspace, title: "Succeeds")
+        #expect(await service.isRecording())
+        #expect(await service.stopRecording() == sessionID)
+    }
+
+    @Test
     func testScreenCaptureErrorKeepsAudioRecordingAndSkipsMux() async throws {
         let workspace = makeWorkspace()
         defer { removeWorkspace(at: workspace.rootURL) }
