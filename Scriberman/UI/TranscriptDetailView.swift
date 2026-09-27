@@ -6,11 +6,16 @@ struct TranscriptDetailView: View {
     let session: any TranscribableSession
     let onReprocess: (() -> Void)?
     let onDelete: () -> Void
+    /// Restores a trimmed recording to its pre-trim state; `nil` for sessions that cannot be trimmed.
+    let onRestoreOriginal: (() async throws -> Void)?
     let onOpenStudy: (() -> Void)?
     let onOpenTransformation: ((UUID) -> Void)?
 
     @Environment(\.modelContext) private var modelContext
     @State private var showingDeleteConfirmation = false
+    @State private var showingRestoreConfirmation = false
+    @State private var isRestoringOriginal = false
+    @State private var restoreErrorMessage: String?
     @State private var editingTitle: String
     @State private var viewModel: TranscriptDetailViewModel
     @FocusState private var titleFocused: Bool
@@ -21,12 +26,14 @@ struct TranscriptDetailView: View {
         aiProviderService: AIProviderService,
         onReprocess: (() -> Void)?,
         onDelete: @escaping () -> Void,
+        onRestoreOriginal: (() async throws -> Void)? = nil,
         onOpenStudy: (() -> Void)?,
         onOpenTransformation: ((UUID) -> Void)?
     ) {
         self.session = session
         self.onReprocess = onReprocess
         self.onDelete = onDelete
+        self.onRestoreOriginal = onRestoreOriginal
         self.onOpenStudy = onOpenStudy
         self.onOpenTransformation = onOpenTransformation
         _editingTitle = State(initialValue: session.title)
@@ -83,6 +90,15 @@ struct TranscriptDetailView: View {
 
                 transformMenu
 
+                if onRestoreOriginal != nil, (session as? RecordingSession)?.isTrimmed == true {
+                    Button {
+                        showingRestoreConfirmation = true
+                    } label: {
+                        Label("Restore Original", systemImage: "arrow.counterclockwise")
+                    }
+                    .disabled(isRestoringOriginal)
+                }
+
                 Button(role: .destructive) {
                     showingDeleteConfirmation = true
                 } label: {
@@ -97,6 +113,9 @@ struct TranscriptDetailView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("This permanently deletes the selected session.")
+        }
+        .restoreOriginalConfirmation(isPresented: $showingRestoreConfirmation) {
+            restoreOriginal()
         }
         .task {
             viewModel.loadPrompts()
@@ -124,6 +143,12 @@ struct TranscriptDetailView: View {
             Text(headerFactsLine)
                 .font(.headline)
                 .foregroundStyle(.secondary)
+
+            if let restoreErrorMessage {
+                Text(restoreErrorMessage)
+                    .foregroundStyle(.red)
+                    .font(.caption)
+            }
         }
     }
 
@@ -218,6 +243,20 @@ struct TranscriptDetailView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(viewModel.finalTranscriptText, forType: .string)
+    }
+
+    private func restoreOriginal() {
+        guard let onRestoreOriginal else { return }
+        isRestoringOriginal = true
+        restoreErrorMessage = nil
+        Task {
+            do {
+                try await onRestoreOriginal()
+            } catch {
+                restoreErrorMessage = error.localizedDescription
+            }
+            isRestoringOriginal = false
+        }
     }
 
     private func commitTitle() {

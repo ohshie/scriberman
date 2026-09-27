@@ -159,7 +159,7 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         }
 
         return Transcript(
-            fullText: mergedSegments.map(\.text).joined(separator: " "),
+            fullText: Transcript.fullText(joining: mergedSegments),
             segments: mergedSegments,
             speakers: speakers,
             speakerEmbeddings: mergedEmbeddings

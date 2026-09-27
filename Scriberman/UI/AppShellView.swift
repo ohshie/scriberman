@@ -110,7 +110,7 @@ struct AppShellView: View {
         )) {
             if let session = appState.sessionToTrim {
                 TrimEditorView(
-                    viewModel: TrimEditorViewModel(session: session, audioPlayer: audioPlayerViewModel),
+                    viewModel: TrimEditorViewModel(session: session, audioPlayer: audioPlayerViewModel, context: modelContext),
                     onDismiss: { appState.sessionToTrim = nil }
                 )
             }
@@ -269,6 +269,9 @@ struct AppShellView: View {
                         Task { await appState.jobsViewModel.delete(session: session, context: modelContext) }
                         selectedSession = nil
                     },
+                    onRestoreOriginal: {
+                        try await restoreOriginal(of: session)
+                    },
                     onOpenStudy: {
                         detailMode = .study
                     },
@@ -321,6 +324,12 @@ struct AppShellView: View {
     }
 
     @Environment(\.modelContext) private var modelContext
+
+    private func restoreOriginal(of session: RecordingSession) async throws {
+        audioPlayerViewModel.stop()
+        try await AudioTrimService().restore(session: session, context: modelContext)
+        audioPlayerViewModel.reload()
+    }
 
     private func audioURL(for item: JobsViewModel.SessionListItem?) -> URL? {
         guard let item else {

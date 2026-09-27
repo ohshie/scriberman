@@ -12,4 +12,10 @@ struct Transcript: Codable, Equatable {
         self.speakers = speakers
         self.speakerEmbeddings = speakerEmbeddings
     }
+
+    /// The full text of a transcript made of `segments`. Transcription and trim both build
+    /// `fullText` here, so a trimmed transcript's text cannot drift from a transcribed one's.
+    static func fullText(joining segments: [TranscriptSegment]) -> String {
+        segments.map(\.text).joined(separator: " ")
+    }
 }

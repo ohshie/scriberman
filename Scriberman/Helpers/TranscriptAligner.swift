@@ -101,7 +101,7 @@ struct TranscriptAligner {
         if mappedSegments.isEmpty {
             normalizedFullText = fullText.trimmingCharacters(in: .whitespacesAndNewlines)
         } else {
-            normalizedFullText = mappedSegments.map(\.text).joined(separator: " ")
+            normalizedFullText = Transcript.fullText(joining: mappedSegments)
         }
 
         return Transcript(
