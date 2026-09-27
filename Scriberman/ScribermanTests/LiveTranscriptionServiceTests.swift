@@ -59,12 +59,40 @@ struct LiveTranscriptionServiceTests {
     }
 
     @Test
+    func stopEnrollsTwoNewSpeakersPastTheHighestNumberWithoutTouchingExisting() async throws {
+        let store = try makeStore()
+        let speaker3Embedding = Array(repeating: Float(0.3), count: 256)
+        try await store.enrollNamedSpeaker(name: "Speaker 2", embedding: Array(repeating: 0.2, count: 256))
+        let speaker3 = try await store.enrollNamedSpeaker(name: "Speaker 3", embedding: speaker3Embedding)
+        let service = LiveTranscriptionService(speakerEmbeddingStore: store)
+
+        await service.injectSessionSpeaker(
+            id: "speaker_SPEAKER_0",
+            embedding: Array(repeating: 0.6, count: 256),
+            wasMatched: false,
+            matchedProfileID: nil
+        )
+        await service.injectSessionSpeaker(
+            id: "speaker_SPEAKER_1",
+            embedding: Array(repeating: 0.7, count: 256),
+            wasMatched: false,
+            matchedProfileID: nil
+        )
+
+        _ = await service.stop()
+
+        let profiles = try await store.fetchAllSnapshots()
+        #expect(Set(profiles.map(\.name)) == ["Speaker 2", "Speaker 3", "Speaker 4", "Speaker 5"])
+        #expect(try await store.findProfileSnapshot(byID: speaker3)?.embedding == speaker3Embedding)
+    }
+
+    @Test
     func stopUpdatesLastSeenForMatchedSpeaker() async throws {
         let store = try makeStore()
         let oldDate = Date(timeIntervalSinceNow: -3600)
         let aliceEmbedding = Array(repeating: Float(0.1), count: 256)
 
-        try await store.enrollSpeaker(name: "Alice", embedding: aliceEmbedding)
+        try await store.enrollNamedSpeaker(name: "Alice", embedding: aliceEmbedding)
         let alice = try await store.fetchAllSnapshots().first { $0.name == "Alice" }
         let aliceID = try #require(alice?.id)
 

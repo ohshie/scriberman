@@ -195,8 +195,18 @@ struct TranscriptStudyView: View {
         // Enroll in profile database if we have an embedding
         if let embedding = updatedTranscript.speakerEmbeddings?[id], let store = store {
             Task {
-                try? await store.enrollSpeaker(name: newName, embedding: embedding)
+                try? await Self.enrollRenamedSpeaker(name: newName, embedding: embedding, in: store)
             }
+        }
+    }
+
+    /// Gives the renamed speaker's voiceprint to the profile the user named: the existing profile
+    /// with that name (case-insensitive) is updated, otherwise a new one is created.
+    static func enrollRenamedSpeaker(name: String, embedding: [Float], in store: SpeakerEmbeddingStore) async throws {
+        if let profileID = try await store.profileID(forName: name) {
+            try await store.updateEmbedding(profileID: profileID, embedding: embedding)
+        } else {
+            try await store.enrollNamedSpeaker(name: name, embedding: embedding)
         }
     }
 

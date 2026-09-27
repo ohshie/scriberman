@@ -539,48 +539,46 @@ actor LiveTranscriptionService: LiveTranscribing {
         // Speaker enrollment at session end: turn-diarizer identity records are the
         // primary source; legacy sessionSpeakers covers fallback-attributed
         // chunks (empty/unreliable timeline stretches).
+        // Each unbound voice becomes a new profile. The store picks the label, one past the
+        // highest `Speaker N`, and never updates an existing profile here.
         if let store = speakerEmbeddingStore, !sessionSpeakerIdentities.isEmpty || !sessionSpeakers.isEmpty {
-            do {
-                let allProfiles = try await store.fetchAllSnapshots()
-                let existingCount = allProfiles.count
-                var newSpeakerIndex = 0
+            // Iterate deterministically: sources then turn-diarizer indices.
+            for source in sessionSpeakerIdentities.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+                let records = sessionSpeakerIdentities[source] ?? [:]
+                for speakerIndex in records.keys.sorted() {
+                    guard let record = records[speakerIndex] else { continue }
 
-                // Iterate deterministically: sources then turn-diarizer indices.
-                for source in sessionSpeakerIdentities.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
-                    let records = sessionSpeakerIdentities[source] ?? [:]
-                    for speakerIndex in records.keys.sorted() {
-                        guard let record = records[speakerIndex] else { continue }
-
-                        if let profileID = record.boundProfileID {
-                            try? await store.updateProfile(id: profileID)
-                            logger.info("Updated lastSeen for bound speaker \(speakerIndex) (\(source.rawValue))")
-                        } else {
-                            let embedding = record.averagedEmbedding
-                            guard !embedding.isEmpty else { continue }
-                            let name = "Speaker \(existingCount + newSpeakerIndex + 1)"
-                            newSpeakerIndex += 1
-                            try? await store.enrollSpeaker(name: name, embedding: embedding)
-                            logger.info("Enrolled new speaker '\(name)' for turn speaker \(speakerIndex) (\(source.rawValue))")
+                    if let profileID = record.boundProfileID {
+                        try? await store.updateProfile(id: profileID)
+                        logger.info("Updated lastSeen for bound speaker \(speakerIndex) (\(source.rawValue))")
+                    } else {
+                        let embedding = record.averagedEmbedding
+                        guard !embedding.isEmpty else { continue }
+                        do {
+                            let profileID = try await store.enrollNewSpeaker(embedding: embedding)
+                            logger.info("Enrolled new speaker \(profileID, privacy: .public) for turn speaker \(speakerIndex) (\(source.rawValue))")
+                        } catch {
+                            logger.error("Failed to enroll turn speaker \(speakerIndex) (\(source.rawValue)): \(error)")
                         }
                     }
                 }
+            }
 
-                // Sort by session-local ID for deterministic name assignment
-                for sessionLocalId in sessionSpeakers.keys.sorted() {
-                    guard let info = sessionSpeakers[sessionLocalId] else { continue }
+            // Sort by session-local ID for deterministic name assignment
+            for sessionLocalId in sessionSpeakers.keys.sorted() {
+                guard let info = sessionSpeakers[sessionLocalId] else { continue }
 
-                    if info.wasMatched, let profileID = info.matchedProfileID {
-                        try? await store.updateProfile(id: profileID)
-                        logger.info("Updated lastSeen for matched speaker \(sessionLocalId)")
-                    } else if !info.embedding.isEmpty {
-                        let name = "Speaker \(existingCount + newSpeakerIndex + 1)"
-                        newSpeakerIndex += 1
-                        try? await store.enrollSpeaker(name: name, embedding: info.embedding)
-                        logger.info("Enrolled new speaker '\(name)' for session speaker \(sessionLocalId)")
+                if info.wasMatched, let profileID = info.matchedProfileID {
+                    try? await store.updateProfile(id: profileID)
+                    logger.info("Updated lastSeen for matched speaker \(sessionLocalId)")
+                } else if !info.embedding.isEmpty {
+                    do {
+                        let profileID = try await store.enrollNewSpeaker(embedding: info.embedding)
+                        logger.info("Enrolled new speaker \(profileID, privacy: .public) for session speaker \(sessionLocalId)")
+                    } catch {
+                        logger.error("Failed to enroll session speaker \(sessionLocalId): \(error)")
                     }
                 }
-            } catch {
-                logger.error("Failed to read speaker profiles during stop(): \(error)")
             }
         }
 
@@ -1109,18 +1107,7 @@ actor LiveTranscriptionService: LiveTranscribing {
             return nil
         }
 
-        // Keep using the store-level fast path when available.
-        if let match = await store.findBestMatchSnapshot(
-            embedding: embedding,
-            threshold: 1.0 - speakerMatcher.threshold
-        ) {
-            return match
-        }
-
-        guard let profiles = try? await store.fetchAllSnapshots() else {
-            return nil
-        }
-        return speakerMatcher.findBestMatch(for: embedding, in: profiles)
+        return await store.findBestMatchSnapshot(embedding: embedding, matcher: speakerMatcher)
     }
 }
 
