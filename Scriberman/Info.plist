@@ -20,6 +20,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Scriberman reads your calendars to suggest recording sessions for upcoming meetings.</string>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>Scriberman needs audio capture access to record selected app audio with your microphone.</string>
 	<key>NSMicrophoneUsageDescription</key>

@@ -143,8 +143,12 @@ struct AppShellView: View {
             Task {
                 await appState.refreshPermissionsOnActivation()
             }
+            Task {
+                await appState.calendarSuggestions.refresh()
+            }
             focusPendingSessionIfRequested()
         }
+
         .onChange(of: selectedSession) { oldValue, newValue in
             guard oldValue?.id != newValue?.id else {
                 return

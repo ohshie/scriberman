@@ -11,6 +11,8 @@ struct MainServiceContainer {
     let permissionService: PermissionServiceProtocol
     let transcriptExportService: TranscriptExportService
     let appAudioSettings: AppAudioSettings
+    let calendarService: CalendarServiceProtocol
+    let calendarPreferences: CalendarSuggestionPreferences
 }
 
 struct BackgroundServiceContainer: Sendable {
@@ -56,7 +58,9 @@ struct ServiceContainer {
                 screenCaptureService: ScreenCaptureService(),
                 permissionService: PermissionService(),
                 transcriptExportService: TranscriptExportService(),
-                appAudioSettings: appAudioSettings
+                appAudioSettings: appAudioSettings,
+                calendarService: EventKitCalendarService(),
+                calendarPreferences: CalendarSuggestionPreferences()
             ),
             background: BackgroundServiceContainer(
                 workspaceService: workspaceService,

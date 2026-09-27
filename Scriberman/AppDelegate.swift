@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private let idleSessionPrompt = IdleSessionPromptController()
     /// Floating "Recording failed." panel for a recording that never started writing audio.
     private let recordingStartFailurePrompt = RecordingStartFailureController()
+    /// Floating meeting-suggestion panel for calendar events.
+    private let calendarSuggestionPanel = CalendarSuggestionPanelController()
 
     private weak var mainWindow: NSWindow?
     private var statusItem: NSStatusItem?
@@ -601,6 +603,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     /// Connects the idle prompt's presentation and actions to the floating panel. Called
     /// once `appState` and `modelContext` are available.
+    /// Keeps the controller's capture state and the suggestion panel in step with app state.
+    /// Runs independently of any window, so the panel works with the main window closed.
+    func wireCalendarSuggestions() {
+        guard let appState else { return }
+        let (isCaptureActive, suggestions) = withObservationTracking {
+            (appState.isCaptureActive, appState.calendarSuggestions.visibleSuggestions)
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.wireCalendarSuggestions()
+            }
+        }
+        appState.calendarSuggestions.setCaptureActive(isCaptureActive)
+
+        guard !suggestions.isEmpty else {
+            calendarSuggestionPanel.hide()
+            return
+        }
+        calendarSuggestionPanel.show(
+            suggestions,
+            onPrepare: { [weak self] id in
+                Task { @MainActor [weak self] in
+                    await self?.prepareCalendarSession(id)
+                }
+            },
+            onDismiss: { [weak appState] id in
+                appState?.calendarSuggestions.dismiss(id)
+            }
+        )
+    }
+
+    private func prepareCalendarSession(_ id: CalendarOccurrenceID) async {
+        guard let appState else { return }
+        var result = await appState.prepareCalendarSession(id)
+        if case let .needsTitleReplacement(draftID, title) = result {
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.alertStyle = .informational
+            alert.messageText = "Replace Session Title?"
+            alert.informativeText = "Session will be named “\(title)”."
+            alert.addButton(withTitle: "Replace")
+            alert.addButton(withTitle: "Keep Current")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            result = await appState.confirmCalendarTitleReplacement(id, draftID: draftID)
+        }
+        guard result == .prepared else { return }
+        appState.newSessionViewModel.refreshAudioDevicesOnPanelExpanded()
+        appState.requestPendingSessionFocusFromMenuBar()
+        showMainWindow()
+    }
+
     func wireIdleSessionPrompt() {
         guard let appState else { return }
         let viewModel = appState.newSessionViewModel

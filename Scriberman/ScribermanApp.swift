@@ -87,6 +87,7 @@ struct ScribermanApp: App {
                     appDelegate.appState = appState
                     appDelegate.modelContext = modelContainer.mainContext
                     appDelegate.wireIdleSessionPrompt()
+                    appDelegate.wireCalendarSuggestions()
                     // macOS resets to the bundle icon on every launch, so re-apply the choice.
                     appState.appIconPreferences.apply()
                     ScribermanApp.prepareTags(in: modelContainer.mainContext)
