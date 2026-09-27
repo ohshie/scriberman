@@ -16,6 +16,15 @@ final class SpeakerProfile {
     }
 }
 
+extension SpeakerProfile {
+    static func fetch(id: UUID, in context: ModelContext) throws -> SpeakerProfile? {
+        let targetID = id
+        var descriptor = FetchDescriptor<SpeakerProfile>(predicate: #Predicate { $0.id == targetID })
+        descriptor.fetchLimit = 1
+        return try context.fetch(descriptor).first
+    }
+}
+
 struct SpeakerProfileSnapshot: Sendable, Identifiable {
     let id: UUID
     let name: String

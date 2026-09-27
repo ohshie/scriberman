@@ -26,14 +26,7 @@ actor SpeakerEmbeddingStore {
     }
 
     func updateProfile(id: UUID) throws {
-        let descriptor = FetchDescriptor<SpeakerProfile>()
-        let profiles = try context.fetch(descriptor)
-        var profileToUpdate: SpeakerProfile?
-        for profile in profiles where profile.id == id {
-            profileToUpdate = profile
-            break
-        }
-        if let profile = profileToUpdate {
+        if let profile = try SpeakerProfile.fetch(id: id, in: context) {
             profile.lastSeen = .now
             try context.save()
         }
@@ -48,21 +41,14 @@ actor SpeakerEmbeddingStore {
     }
 
     func deleteProfile(id: UUID) throws {
-        let descriptor = FetchDescriptor<SpeakerProfile>()
-        let profiles = try context.fetch(descriptor)
-        if let profile = profiles.first(where: { $0.id == id }) {
+        if let profile = try SpeakerProfile.fetch(id: id, in: context) {
             context.delete(profile)
             try context.save()
         }
     }
 
     func findProfile(byID id: UUID) throws -> SpeakerProfile? {
-        let descriptor = FetchDescriptor<SpeakerProfile>()
-        let profiles = try context.fetch(descriptor)
-        for profile in profiles where profile.id == id {
-            return profile
-        }
-        return nil
+        try SpeakerProfile.fetch(id: id, in: context)
     }
 
     func findProfileSnapshot(byID id: UUID) throws -> SpeakerProfileSnapshot? {

@@ -125,9 +125,7 @@ actor ScreenVideoMuxer: ScreenVideoMuxing {
         screenVideoURL: URL
     ) throws {
         let context = ModelContext(modelContainer)
-        let descriptor = FetchDescriptor<RecordingSession>()
-        let sessions = try context.fetch(descriptor)
-        guard let session = sessions.first(where: { $0.id == sessionID }) else {
+        guard let session = try RecordingSession.fetch(id: sessionID, in: context) else {
             throw RecordingError.failedToStart("Screen video mux succeeded but the session could not be found.")
         }
         session.screenVideoURL = screenVideoURL.path

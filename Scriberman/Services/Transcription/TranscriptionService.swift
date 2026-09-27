@@ -101,15 +101,7 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         pipelineSettings: LiveTranscriptionPipelineSettings = .defaults
     ) async throws -> Transcript {
         let context = ModelContext(modelContainer)
-        let descriptor = FetchDescriptor<RecordingSession>()
-        let sessions = try context.fetch(descriptor)
-        var session: RecordingSession?
-        for candidate in sessions where candidate.id == sessionID {
-            session = candidate
-            break
-        }
-
-        guard let session else {
+        guard let session = try RecordingSession.fetch(id: sessionID, in: context) else {
             throw TranscriptionError.failedToTranscribe("Session not found for ID \(sessionID)")
         }
 

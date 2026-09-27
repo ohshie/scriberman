@@ -158,3 +158,12 @@ final class RecordingSession {
 }
 
 extension RecordingSession: TranscribableSession {}
+
+extension RecordingSession {
+    static func fetch(id: UUID, in context: ModelContext) throws -> RecordingSession? {
+        let targetID = id
+        var descriptor = FetchDescriptor<RecordingSession>(predicate: #Predicate { $0.id == targetID })
+        descriptor.fetchLimit = 1
+        return try context.fetch(descriptor).first
+    }
+}

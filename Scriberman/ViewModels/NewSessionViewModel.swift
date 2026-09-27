@@ -459,8 +459,7 @@ final class NewSessionViewModel {
                 captureStartedAt: recordingStartedAt ?? Date()
             )
 
-            let descriptor = FetchDescriptor<RecordingSession>()
-            let session = try? context.fetch(descriptor).first(where: { $0.id == recordingSessionID })
+            let session = try? RecordingSession.fetch(id: recordingSessionID, in: context)
             
             // Start Live Transcription
             do {
@@ -525,13 +524,7 @@ final class NewSessionViewModel {
         
         var fetchedSession: RecordingSession?
         if let sessionID = sessionID {
-            let descriptor = FetchDescriptor<RecordingSession>()
-            if let sessions = try? context.fetch(descriptor) {
-                for session in sessions where session.id == sessionID {
-                    fetchedSession = session
-                    break
-                }
-            }
+            fetchedSession = try? RecordingSession.fetch(id: sessionID, in: context)
         }
         
         guard let session = fetchedSession else {
@@ -734,15 +727,11 @@ final class NewSessionViewModel {
 
         // Mark the session failed rather than deleting it: this reuses the status vocabulary the
         // jobs pipeline already uses for failures, and leaves the row to point at its log.
-        let descriptor = FetchDescriptor<RecordingSession>()
-        if let sessions = try? context.fetch(descriptor) {
-            for session in sessions where session.id == sessionID {
-                let reason = lastError ?? "Recording produced no audio."
-                session.status = .error(reason)
-                session.errorMessage = reason
-                try? context.save()
-                break
-            }
+        if let session = try? RecordingSession.fetch(id: sessionID, in: context) {
+            let reason = lastError ?? "Recording produced no audio."
+            session.status = .error(reason)
+            session.errorMessage = reason
+            try? context.save()
         }
 
         state = .idle
@@ -1033,9 +1022,7 @@ final class NewSessionViewModel {
             return
         }
 
-        let descriptor = FetchDescriptor<RecordingSession>()
-        guard let sessions = try? context.fetch(descriptor),
-              let session = sessions.first(where: { $0.id == sessionID }),
+        guard let session = try? RecordingSession.fetch(id: sessionID, in: context),
               session.status == .recording
         else {
             return
