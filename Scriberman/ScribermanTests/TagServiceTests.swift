@@ -339,7 +339,7 @@ struct TagServiceTests {
     /// explicit one, every `@Query` and `@Environment(\.modelContext)` inside Settings resolves to a
     /// throwaway context — reads return nothing and writes go nowhere, so tag management silently
     /// does nothing.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheSettingsSceneAttachesTheModelContainer() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let app = try String(
@@ -351,7 +351,7 @@ struct TagServiceTests {
         #expect(afterSettings.contains(".modelContainer(modelContainer)"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testTagFailuresAreLoggedRatherThanSwallowed() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         for file in ["../UI/TagSettingsView.swift", "../UI/TagAssignmentMenu.swift"] {
@@ -375,7 +375,7 @@ struct TagServiceTests {
         )
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testSettingsOffersTagManagement() throws {
         let source = try tagSettingsSource()
         #expect(source.contains("Add new tag"))
@@ -383,13 +383,13 @@ struct TagServiceTests {
         #expect(source.contains("ColorPicker("))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheDefaultTagHasNoDeleteAction() throws {
         let source = try tagSettingsSource()
         #expect(source.contains("if !tag.isDefault"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testDeletionIsConfirmedBeforeAnythingIsRemoved() throws {
         let source = try tagSettingsSource()
         #expect(source.contains("confirmationDialog"))
@@ -400,7 +400,7 @@ struct TagServiceTests {
         #expect(!afterTrash.contains("service.delete"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testSettingsIsWiredIntoTheGeneralTab() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let settings = try String(

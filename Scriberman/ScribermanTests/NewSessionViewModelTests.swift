@@ -651,7 +651,7 @@ struct NewSessionViewModelTests {
         #expect(recordingService.retargetMicCalls.isEmpty)
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testNewSessionPanelShowsMicPermissionWarningIndicator() throws {
         let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
         defer { cleanup() }
@@ -664,7 +664,7 @@ struct NewSessionViewModelTests {
         #expect(source.contains("openPrivacySettings(pane: \"Privacy_Microphone\")"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testNewSessionPanelPromptRequestsMicPermissionViaViewModel() throws {
         let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
         defer { cleanup() }
@@ -674,7 +674,7 @@ struct NewSessionViewModelTests {
         #expect(source.contains("await viewModel.requestMicrophonePermission()"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testNewSessionPanelRefreshesAudioDevicesOnAppear() throws {
         let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
         defer { cleanup() }
@@ -684,7 +684,7 @@ struct NewSessionViewModelTests {
         #expect(source.contains("viewModel.refreshAudioDevicesOnAppear()"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testNewSessionPanelHasNoPermissionBannerAndWarnsOnScreenRow() throws {
         let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
         defer { cleanup() }
@@ -698,7 +698,7 @@ struct NewSessionViewModelTests {
         #expect(source.contains("openPrivacySettings(pane: \"Privacy_ScreenCapture\")"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testNewSessionPanelShowsRecordScreenControls() throws {
         let source = try newSessionPanelSource()
         #expect(source.contains("Text(\"Record app audio\")"))
@@ -707,7 +707,7 @@ struct NewSessionViewModelTests {
         #expect(source.contains("Select display"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testRefreshAudioDevicesOnAppearPreparesLiveTranscriptionWithWorkspace() throws {
         let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
         defer { cleanup() }
@@ -718,7 +718,7 @@ struct NewSessionViewModelTests {
         #expect(source.contains("await liveTranscriptionService.prepare(workspace: workspace, config: pipelineConfig)"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testInitializationFailureMessageDirectsUserToSettingsModels() throws {
         let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
         defer { cleanup() }
@@ -729,7 +729,7 @@ struct NewSessionViewModelTests {
         #expect(source.contains("Open Settings → Models to install ASR and Speaker Diarization models."))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testMenuBarStartRecordingOverloadIsPresent() throws {
         let source = try newSessionViewModelSource()
         #expect(source.contains("func startRecording("))

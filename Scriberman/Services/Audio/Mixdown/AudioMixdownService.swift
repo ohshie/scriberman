@@ -12,7 +12,10 @@ enum AudioMixdownOutputFormat {
 actor AudioMixdownService {
     typealias RemoveItemAtURL = @Sendable (URL) throws -> Void
 
-    private let outputSampleRate: Double = 48_000
+    /// The rate every mixdown and import output is written at.
+    static let outputSampleRate: Double = 48_000
+
+    private let outputSampleRate = AudioMixdownService.outputSampleRate
     private let processingChunkSize: AVAudioFrameCount = 4_096
     private let fileManager = FileManager.default
     private let outputFormat: AudioMixdownOutputFormat

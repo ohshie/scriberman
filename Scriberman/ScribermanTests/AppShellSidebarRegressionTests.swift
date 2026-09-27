@@ -4,7 +4,7 @@ import Foundation
 @Suite("AppShell Sidebar Regression Tests")
 struct AppShellSidebarRegressionTests {
     
-    @Test("Sidebar column removes default sidebar toggle")
+    @Test("Sidebar column removes default sidebar toggle", .tags(.sourceLint))
     func sidebarColumnRemovesDefaultSidebarToggle() throws {
         let source = try appShellSource()
         #expect(
@@ -13,7 +13,7 @@ struct AppShellSidebarRegressionTests {
         )
     }
 
-    @Test("Sidebar toolbar uses native split view toggle action")
+    @Test("Sidebar toolbar uses native split view toggle action", .tags(.sourceLint))
     func sidebarToolbarUsesNativeSplitViewToggleAction() throws {
         let source = try appShellSource()
         #expect(
@@ -22,7 +22,7 @@ struct AppShellSidebarRegressionTests {
         )
     }
 
-    @Test("Sidebar toolbar uses navigation placement and sidebar left icon")
+    @Test("Sidebar toolbar uses navigation placement and sidebar left icon", .tags(.sourceLint))
     func sidebarToolbarUsesNavigationPlacementAndSidebarLeftIcon() throws {
         let source = try appShellSource()
         #expect(
@@ -35,7 +35,7 @@ struct AppShellSidebarRegressionTests {
         )
     }
 
-    @Test("Sidebar toggle is not driven by manual column visibility state")
+    @Test("Sidebar toggle is not driven by manual column visibility state", .tags(.sourceLint))
     func sidebarToggleIsNotDrivenByManualColumnVisibilityState() throws {
         let source = try appShellSource()
         #expect(
@@ -44,7 +44,7 @@ struct AppShellSidebarRegressionTests {
         )
     }
 
-    @Test("App shell uses prominent detail split style for stable detail width")
+    @Test("App shell uses prominent detail split style for stable detail width", .tags(.sourceLint))
     func appShellUsesProminentDetailSplitStyleForStableDetailWidth() throws {
         let source = try appShellSource()
         #expect(
@@ -53,7 +53,7 @@ struct AppShellSidebarRegressionTests {
         )
     }
 
-    @Test("Sidebar column declares wide flexible bounds")
+    @Test("Sidebar column declares wide flexible bounds", .tags(.sourceLint))
     func sidebarColumnDeclaresWideFlexibleBounds() throws {
         let source = try appShellSource()
         #expect(
@@ -62,7 +62,7 @@ struct AppShellSidebarRegressionTests {
         )
     }
 
-    @Test("Detail column declares minimum and ideal widths")
+    @Test("Detail column declares minimum and ideal widths", .tags(.sourceLint))
     func detailColumnDeclaresMinimumAndIdealWidths() throws {
         let source = try appShellSource()
         #expect(
@@ -71,7 +71,7 @@ struct AppShellSidebarRegressionTests {
         )
     }
 
-    @Test("App shell does not clamp global minimum width")
+    @Test("App shell does not clamp global minimum width", .tags(.sourceLint))
     func appShellDoesNotClampGlobalMinimumWidth() throws {
         let source = try appShellSource()
         #expect(
@@ -80,7 +80,7 @@ struct AppShellSidebarRegressionTests {
         )
     }
 
-    @Test("Workspace selection sheet does not enforce minimum width")
+    @Test("Workspace selection sheet does not enforce minimum width", .tags(.sourceLint))
     func workspaceSelectionSheetDoesNotEnforceMinimumWidth() throws {
         let source = try appShellSource()
         #expect(
@@ -89,7 +89,7 @@ struct AppShellSidebarRegressionTests {
         )
     }
 
-    @Test("Jobs view does not render inline hide sidebar row")
+    @Test("Jobs view does not render inline hide sidebar row", .tags(.sourceLint))
     func jobsViewDoesNotRenderInlineHideSidebarRow() throws {
         let source = try jobsViewSource()
         #expect(
@@ -98,7 +98,7 @@ struct AppShellSidebarRegressionTests {
         )
     }
 
-    @Test("Jobs toolbar keeps new session primary action")
+    @Test("Jobs toolbar keeps new session primary action", .tags(.sourceLint))
     func jobsToolbarKeepsNewSessionPrimaryAction() throws {
         let source = try appShellSource()
         #expect(
@@ -111,7 +111,7 @@ struct AppShellSidebarRegressionTests {
         )
     }
 
-    @Test("App shell defines detail mode and defaults to standard")
+    @Test("App shell defines detail mode and defaults to standard", .tags(.sourceLint))
     func appShellDefinesDetailModeAndDefaultsToStandard() throws {
         let source = try appShellSource()
         #expect(
@@ -124,7 +124,7 @@ struct AppShellSidebarRegressionTests {
         )
     }
 
-    @Test("Preview tap switches detail mode to study")
+    @Test("Preview tap switches detail mode to study", .tags(.sourceLint))
     func previewTapSwitchesDetailModeToStudy() throws {
         let source = try appShellSource()
         #expect(
@@ -133,7 +133,7 @@ struct AppShellSidebarRegressionTests {
         )
     }
 
-    @Test("App shell resets detail mode when selection changes")
+    @Test("App shell resets detail mode when selection changes", .tags(.sourceLint))
     func appShellResetsDetailModeWhenSelectionChanges() throws {
         let source = try appShellSource()
         #expect(
@@ -146,7 +146,7 @@ struct AppShellSidebarRegressionTests {
         )
     }
 
-    @Test("Study mode toolbar provides back button and study actions")
+    @Test("Study mode toolbar provides back button and study actions", .tags(.sourceLint))
     func studyModeToolbarProvidesBackButtonAndStudyActions() throws {
         let source = try appShellSource()
         #expect(
@@ -167,7 +167,7 @@ struct AppShellSidebarRegressionTests {
         )
     }
 
-    @Test("Study mode renders TranscriptStudyView in place")
+    @Test("Study mode renders TranscriptStudyView in place", .tags(.sourceLint))
     func studyModeRendersTranscriptStudyViewInPlace() throws {
         let source = try appShellSource()
         #expect(
@@ -176,7 +176,7 @@ struct AppShellSidebarRegressionTests {
         )
     }
 
-    @Test("Recording sessions route to active recording detail view while status is recording")
+    @Test("Recording sessions route to active recording detail view while status is recording", .tags(.sourceLint))
     func recordingSessionsRouteToActiveRecordingDetailView() throws {
         let source = try appShellSource()
         #expect(source.contains("if session.status == .recording {"))
@@ -185,7 +185,7 @@ struct AppShellSidebarRegressionTests {
         #expect(source.contains("modelContext: modelContext"))
     }
 
-    @Test("App activation refreshes permissions via AppState")
+    @Test("App activation refreshes permissions via AppState", .tags(.sourceLint))
     func appActivationRefreshesPermissionsViaAppState() throws {
         let source = try appShellSource()
         #expect(

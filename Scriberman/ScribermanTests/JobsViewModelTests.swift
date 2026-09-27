@@ -32,7 +32,7 @@ final class JobsViewModelTests {
                     duration: 0
                 )
             },
-            readChannelSamples: { _ in [[0.1]] },
+            readChannelSamples: { _ in DecodedAudio(channels: [[0.1]], sampleRate: 48_000) },
             writeMonoAAC: { _, _ in },
             retranscribe: { _, _, _, _ in }
         )

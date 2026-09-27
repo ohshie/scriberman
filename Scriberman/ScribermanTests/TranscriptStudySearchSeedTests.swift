@@ -68,7 +68,7 @@ struct TranscriptStudySearchSeedTests {
 
     // MARK: - The view's wiring
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheSeedIsAppliedFromATaskKeyedOnIt() throws {
         let source = try studyViewSource()
 
@@ -76,7 +76,7 @@ struct TranscriptStudySearchSeedTests {
         #expect(source.contains("applySearchSeed()"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testApplyingASeedSelectsTheMatchAndScrollsToIt() throws {
         let body = try #require(functionBody(named: "private func applySearchSeed()", in: try studyViewSource()))
 
@@ -88,7 +88,7 @@ struct TranscriptStudySearchSeedTests {
 
     /// Opening a session that was not reached by search leaves the view exactly as it was: empty
     /// find bar, no match, nothing hidden.
-    @Test
+    @Test(.tags(.sourceLint))
     func testNoSeedLeavesTheViewUnchanged() throws {
         let body = try #require(functionBody(named: "private func applySearchSeed()", in: try studyViewSource()))
 
@@ -96,7 +96,7 @@ struct TranscriptStudySearchSeedTests {
     }
 
     /// Locating text and listening to it are separate intentions.
-    @Test
+    @Test(.tags(.sourceLint))
     func testApplyingASeedStartsNoPlayback() throws {
         let body = try #require(functionBody(named: "private func applySearchSeed()", in: try studyViewSource()))
 
@@ -104,7 +104,7 @@ struct TranscriptStudySearchSeedTests {
         #expect(!body.contains(".play()"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testOpeningAResultStartsNoPlayback() throws {
         let body = try #require(functionBody(named: "private func openSearchResult(", in: try appShellSource()))
 
@@ -113,7 +113,7 @@ struct TranscriptStudySearchSeedTests {
 
     /// A seeded search is dismissed by the same path as one the user opened, so Escape behaves the
     /// same either way.
-    @Test
+    @Test(.tags(.sourceLint))
     func testASeededSearchIsDismissedLikeAnyOther() throws {
         let source = try studyViewSource()
         let dismiss = try #require(functionBody(named: "private func dismissSearch()", in: source))
@@ -126,7 +126,7 @@ struct TranscriptStudySearchSeedTests {
 
     /// Clicking a result whose session is already selected changes no binding, so the row reports
     /// the click itself.
-    @Test
+    @Test(.tags(.sourceLint))
     func testAClickOnAResultIsReportedEvenWithoutASelectionChange() throws {
         let source = try readSourceFile(relativePathFromTests: "../UI/JobsView.swift")
 
@@ -138,7 +138,7 @@ struct TranscriptStudySearchSeedTests {
 
     /// The selection change handler resets the detail view. Without this guard it would undo the
     /// navigation that caused the change.
-    @Test
+    @Test(.tags(.sourceLint))
     func testSelectingAResultIsNotResetByTheSelectionHandler() throws {
         let source = try appShellSource()
 

@@ -141,7 +141,7 @@ final class AppStateTests {
         #expect(permissionService.verifyScreenRecordingCalls == 1)
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testAppSourceDeclaresSettingsScene() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let appFileURL = testsDirectory
@@ -155,7 +155,7 @@ final class AppStateTests {
         )
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testAppSourceDeclaresApplicationDelegateAdaptor() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let appFileURL = testsDirectory
@@ -173,7 +173,7 @@ final class AppStateTests {
         )
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testMenuBarExtraViewSourceDeclaresRecordWithSections() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let viewFileURL = testsDirectory
@@ -187,7 +187,7 @@ final class AppStateTests {
         #expect(viewSource.contains("No App Audio"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testSettingsViewSourceDeclaresMenuBarTab() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let viewFileURL = testsDirectory
@@ -200,7 +200,7 @@ final class AppStateTests {
         #expect(viewSource.contains("MenuBarSettingsView("))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testMenuBarSettingsViewSourceDeclaresCloseActionAndReset() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let viewFileURL = testsDirectory
@@ -217,7 +217,7 @@ final class AppStateTests {
         #expect(viewSource.contains("return \"None\""))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testAppDelegateSourceGuardsOnboardingBeforeFirstTimeTrayAlert() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let delegateFileURL = testsDirectory
@@ -231,7 +231,7 @@ final class AppStateTests {
         #expect(delegateSource.contains("hasShownFirstTimeTrayAlert"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testAppDelegateSourceRemembersCloseChoiceWhenRequested() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let delegateFileURL = testsDirectory
@@ -244,7 +244,7 @@ final class AppStateTests {
         #expect(delegateSource.contains("appState.menuBarSettings.closeAction = keepInMenuBar ? .tray : .quit"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testAppDelegateSourceDeclaresStatusItemRecordingMenuActions() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let delegateFileURL = testsDirectory
