@@ -271,6 +271,7 @@ struct AppShellView: View {
                     store: appState.backgroundServices.speakerEmbeddingStore,
                     searchSeed: studySearchSeed
                 )
+                .id(session.id)
             } else if detailMode == .transformation {
                 AITransformationDetailView(
                     session: session,
@@ -316,6 +317,7 @@ struct AppShellView: View {
                     store: appState.backgroundServices.speakerEmbeddingStore,
                     searchSeed: studySearchSeed
                 )
+                .id(session.id)
             } else if detailMode == .transformation {
                 AITransformationDetailView(
                     session: session,

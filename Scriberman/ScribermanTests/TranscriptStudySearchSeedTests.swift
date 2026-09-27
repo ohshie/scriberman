@@ -170,4 +170,58 @@ struct TranscriptStudySearchSeedTests {
             encoding: .utf8
         )
     }
+
+    // MARK: - Session identity
+
+    /// Search result A, then search result B, then a speaker rename: only B may change.
+    @Test
+    func testRenamingASpeakerWritesOnlyTheViewsSession() throws {
+        let sessionA = RecordingSession(duration: 10, micAudioURL: "/tmp/a/mic.wav", title: "A")
+        let sessionB = RecordingSession(duration: 10, micAudioURL: "/tmp/b/mic.wav", title: "B")
+        sessionA.transcript = transcript(text: "session a words", speakerLabel: "Speaker 1")
+        sessionB.transcript = transcript(text: "session b words", speakerLabel: "Speaker 1")
+        let sessionABefore = sessionA.transcriptData
+
+        let shownForB = try #require(sessionB.retranscript ?? sessionB.transcript)
+        let renamed = try #require(TranscriptStudyView.renameSpeaker(id: "S1", to: "Ana", in: shownForB, of: sessionB))
+
+        #expect(renamed.speakers.map(\.label) == ["Ana"])
+        #expect(sessionB.transcript?.speakers.map(\.label) == ["Ana"])
+        #expect(sessionB.transcript?.fullText == "session b words")
+        #expect(sessionA.transcriptData == sessionABefore)
+    }
+
+    @Test
+    func testRenamingWritesTheRetranscriptWhenOneIsDisplayed() throws {
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/c/mic.wav", title: "C")
+        session.transcript = transcript(text: "first pass", speakerLabel: "Speaker 1")
+        session.retranscript = transcript(text: "second pass", speakerLabel: "Speaker 1")
+        let firstPassBefore = session.transcriptData
+
+        let shown = try #require(session.retranscript)
+        _ = TranscriptStudyView.renameSpeaker(id: "S1", to: "Ana", in: shown, of: session)
+
+        #expect(session.retranscript?.speakers.map(\.label) == ["Ana"])
+        #expect(session.transcriptData == firstPassBefore)
+    }
+
+    @Test
+    func testRenamingAnUnknownSpeakerWritesNothing() {
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/d/mic.wav", title: "D")
+        session.transcript = transcript(text: "words", speakerLabel: "Speaker 1")
+        let before = session.transcriptData
+
+        let result = TranscriptStudyView.renameSpeaker(id: "missing", to: "Ana", in: session.transcript!, of: session)
+
+        #expect(result == nil)
+        #expect(session.transcriptData == before)
+    }
+
+    private func transcript(text: String, speakerLabel: String) -> Transcript {
+        Transcript(
+            fullText: text,
+            segments: [TranscriptSegment(speakerId: "S1", text: text, startTime: 0, endTime: 1)],
+            speakers: [TranscriptSpeaker(id: "S1", label: speakerLabel, colorHex: "#112233")]
+        )
+    }
 }
