@@ -304,8 +304,9 @@ final class JobsViewModelTests {
         context.insert(session)
         try context.save()
 
-        await viewModel.delete(session: session, context: context)
+        let result = await viewModel.delete(session: session, context: context)
 
+        #expect(result == .deleted)
         // The folder goes, not just mic.wav — app audio, the mixdown, both sidecars and the screen
         // recording used to survive a delete forever.
         #expect(!FileManager.default.fileExists(atPath: folder.path))
@@ -374,10 +375,88 @@ final class JobsViewModelTests {
         context.insert(session)
         try context.save()
 
-        await viewModel.delete(session: session, context: context)
+        let result = await viewModel.delete(session: session, context: context)
 
         #expect(FileManager.default.fileExists(atPath: outside.path))
         #expect(try context.fetch(FetchDescriptor<RecordingSession>()).isEmpty)
+        #expect(result == .filesLeft(outside))
+    }
+
+    @Test
+    func testAFailedSaveKeepsTheRecordingAndItsFolder() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
+        workspaceService.currentWorkspaceResult = workspace
+        let folder = try makePopulatedSessionFolder(in: workspace.recordingsURL, named: "Recording A")
+        let session = RecordingSession(duration: 60, micAudioURL: folder.appendingPathComponent("mic.wav").path, title: "A")
+        context.insert(session)
+        try context.save()
+
+        let result = await makeViewModel(failingSave: true).delete(session: session, context: context)
+
+        guard case .saveFailed = result else {
+            Issue.record("Expected saveFailed, got \(result)")
+            return
+        }
+        #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("mic.wav").path))
+        #expect(try ModelContext(container).fetch(FetchDescriptor<RecordingSession>()).map(\.title) == ["A"])
+        #expect(try context.fetch(FetchDescriptor<RecordingSession>()).map(\.title) == ["A"])
+    }
+
+    @Test
+    func testAFailedSaveKeepsTheImportedSessionAndItsFolder() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
+        workspaceService.currentWorkspaceResult = workspace
+        let folder = try makePopulatedSessionFolder(in: workspace.importsURL, named: "Imported A")
+        let session = makeImportedSession(createdAt: makeDate(year: 2026, month: 3, day: 20, hour: 8))
+        session.mixdownURL = folder.appendingPathComponent("recording.m4a").path
+        context.insert(session)
+        try context.save()
+
+        let result = await makeViewModel(failingSave: true).deleteImported(session: session, context: context)
+
+        guard case .saveFailed = result else {
+            Issue.record("Expected saveFailed, got \(result)")
+            return
+        }
+        #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("recording.m4a").path))
+        #expect(try context.fetch(FetchDescriptor<ImportedSession>()).count == 1)
+    }
+
+    @Test
+    func testAFolderThatCannotBeRemovedIsReportedAfterTheRecordGoes() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: workspace.recordingsURL.path)
+            try? FileManager.default.removeItem(at: workspace.rootURL)
+        }
+        workspaceService.currentWorkspaceResult = workspace
+        let folder = try makePopulatedSessionFolder(in: workspace.recordingsURL, named: "Recording A")
+        let session = RecordingSession(duration: 60, micAudioURL: folder.appendingPathComponent("mic.wav").path, title: "A")
+        context.insert(session)
+        try context.save()
+        // A read-only parent makes the session folder impossible to remove.
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: workspace.recordingsURL.path)
+
+        let result = await viewModel.delete(session: session, context: context)
+
+        #expect(result == .filesLeft(folder))
+        #expect(FileManager.default.fileExists(atPath: folder.path))
+        #expect(try ModelContext(container).fetch(FetchDescriptor<RecordingSession>()).isEmpty)
+    }
+
+    private func makeViewModel(failingSave: Bool) -> JobsViewModel {
+        JobsViewModel(
+            workspaceService: workspaceService,
+            transcriptionService: transcriptionService,
+            retranscriptionService: retranscriptionService,
+            audioImportService: audioImportService,
+            saveContext: { context in
+                if failingSave { throw CocoaError(.fileWriteUnknown) }
+                try context.save()
+            }
+        )
     }
 
     // MARK: Imported deletion
@@ -394,8 +473,9 @@ final class JobsViewModelTests {
         context.insert(session)
         try context.save()
 
-        await viewModel.deleteImported(session: session, context: context)
+        let result = await viewModel.deleteImported(session: session, context: context)
 
+        #expect(result == .deleted)
         // Previously the folder survived unless it happened to be empty afterwards.
         #expect(!FileManager.default.fileExists(atPath: folder.path))
         #expect(try context.fetch(FetchDescriptor<ImportedSession>()).isEmpty)

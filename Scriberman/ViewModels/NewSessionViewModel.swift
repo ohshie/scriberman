@@ -67,6 +67,13 @@ final class NewSessionViewModel {
     /// Set when a recording was stopped because it never started writing audio. The UI observes
     /// this to present the failure; the wording is owned by the view, not by this model.
     var didFailToStartRecording = false
+    /// How many live transcript segments of the last stopped recording could not be saved, or 0.
+    /// Set by stop after its final save fails; the UI observes it, and the wording is the view's.
+    var unsavedTranscriptSegmentCount = 0
+    /// Live segments inserted into the context whose save has not succeeded yet. They stay pending
+    /// in the context, so the next successful save writes them; the IDs are kept to report a count.
+    private var unsavedSegmentIDs: Set<UUID> = []
+    private let saveContext: @MainActor (ModelContext) throws -> Void
     private var startVerificationTask: Task<Void, Never>?
     private let sessionFailureLogWriter = SessionFailureLogWriter()
     private let logger = Logger(subsystem: "Scriberman", category: "NewSessionViewModel")
@@ -226,8 +233,10 @@ final class NewSessionViewModel {
         speakerEmbeddingStore: SpeakerEmbeddingStore? = nil,
         userInputIdleProvider: any UserInputIdleProviding = SystemUserInputIdleProvider(),
         userDefaults _: UserDefaults = .standard,
-        liveTranscriptionService: (any LiveTranscribing)? = nil
+        liveTranscriptionService: (any LiveTranscribing)? = nil,
+        saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() }
     ) {
+        self.saveContext = saveContext
         self.userInputIdleProvider = userInputIdleProvider
         self.liveTranscriptionService = liveTranscriptionService ?? LiveTranscriptionService(speakerEmbeddingStore: speakerEmbeddingStore)
         self.workspaceService = workspaceService
@@ -441,6 +450,8 @@ final class NewSessionViewModel {
 
             recordingStartedAt = .now
             activeRecordingSessionID = recordingSessionID
+            unsavedSegmentIDs = []
+            unsavedTranscriptSegmentCount = 0
             state = .recording(duration: 0, level: 0)
             liveSegments = []
             // The idle prompt only applies to mic + app sessions.
@@ -544,7 +555,14 @@ final class NewSessionViewModel {
 
         backfillPersistedSegments(liveFinalSegments, to: session, context: context)
         saveLiveTranscript(to: session)
-        try? context.save()
+        // The flush: every segment a failed save left pending is written here, or reported.
+        do {
+            try saveContext(context)
+            unsavedSegmentIDs = []
+        } catch {
+            unsavedTranscriptSegmentCount = unsavedSegmentIDs.count
+            logger.error("Saving the transcript at stop failed with \(self.unsavedSegmentIDs.count, privacy: .public) live segment(s) unsaved: \(error.localizedDescription, privacy: .public)")
+        }
         
         state = .idle
         return session
@@ -1079,8 +1097,20 @@ final class NewSessionViewModel {
 
         let persistedSegment = RecordingTranscriptSegment(segment: segment, session: session)
         context.insert(persistedSegment)
-        try? context.save()
+        unsavedSegmentIDs.insert(persistedSegment.id)
+        saveLiveSegments(context: context)
         appendSegmentToTranscriptMarkdown(persistedSegment, for: session)
+    }
+
+    /// Saves pending live segments. A failure keeps them pending for the next save, which retries
+    /// every one of them; stop makes the last attempt.
+    private func saveLiveSegments(context: ModelContext) {
+        do {
+            try saveContext(context)
+            unsavedSegmentIDs = []
+        } catch {
+            logger.error("Saving live transcript segments failed, \(self.unsavedSegmentIDs.count, privacy: .public) pending for retry: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     private func backfillPersistedSegments(
@@ -1098,6 +1128,7 @@ final class NewSessionViewModel {
                 session: session
             )
             context.insert(persistedSegment)
+            unsavedSegmentIDs.insert(persistedSegment.id)
             appendSegmentToTranscriptMarkdown(persistedSegment, for: session)
         }
     }

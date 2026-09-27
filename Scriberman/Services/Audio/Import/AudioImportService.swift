@@ -1,6 +1,12 @@
 import Foundation
 import SwiftData
 
+/// Why an import could not begin.
+enum AudioImportError: Error, Equatable {
+    /// The new session could not be saved, so nothing was converted.
+    case couldNotRecord(String)
+}
+
 struct AudioImportProbeResult {
     let title: String
     let originalFileName: String
@@ -73,12 +79,17 @@ actor AudioImportService {
         }
     }
 
+    /// Imports `url` as a new session.
+    ///
+    /// Throws only when the session itself cannot be saved: conversion does not start, since its
+    /// progress and result would belong to a record the store never took. Every later failure is
+    /// recorded on the session as its error status instead.
     func importAudio(
         from url: URL,
         workspace: Workspace,
         modelContainer: ModelContainer,
         pipelineSettings: LiveTranscriptionPipelineSettings = .defaults
-    ) async {
+    ) async throws {
         let context = ModelContext(modelContainer)
         let fallbackTitle = Self.defaultTitle(from: url)
         let fallbackFileName = url.lastPathComponent
@@ -104,8 +115,12 @@ actor AudioImportService {
         )
         
         context.insert(session)
-        try? saveContext(context)
-        
+        do {
+            try saveContext(context)
+        } catch {
+            throw AudioImportError.couldNotRecord(error.localizedDescription)
+        }
+
         let sessionID = session.id
 
         do {
