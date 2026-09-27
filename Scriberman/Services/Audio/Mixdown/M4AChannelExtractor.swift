@@ -7,6 +7,7 @@ enum M4AChannelExtractorError: LocalizedError {
     case failedToReadFile(String)
     case invalidChannelCount(expectedStereo: Bool, actual: Int)
     case conversionFailed(String)
+    case fileTooLong(frameCount: AVAudioFramePosition)
 
     var errorDescription: String? {
         switch self {
@@ -23,6 +24,8 @@ enum M4AChannelExtractorError: LocalizedError {
             return "Expected mono or stereo audio with at least 1 channel, got \(actual)"
         case .conversionFailed(let reason):
             return "Failed to resample audio: \(reason)"
+        case .fileTooLong(let frameCount):
+            return "Audio file has \(frameCount) frames, more than the \(AVAudioFrameCount.max) that can be read at once"
         }
     }
 }
@@ -50,7 +53,7 @@ struct M4AChannelExtractor {
 
         guard let buffer = AVAudioPCMBuffer(
             pcmFormat: file.processingFormat,
-            frameCapacity: AVAudioFrameCount(file.length)
+            frameCapacity: try Self.frameCapacity(forLength: file.length)
         ) else {
             throw M4AChannelExtractorError.failedToReadFile("Failed to allocate buffer for extraction.")
         }
@@ -80,6 +83,13 @@ struct M4AChannelExtractor {
         }
 
         return (mic: mic, app: nil)
+    }
+
+    static func frameCapacity(forLength length: AVAudioFramePosition) throws -> AVAudioFrameCount {
+        guard length <= AVAudioFramePosition(AVAudioFrameCount.max) else {
+            throw M4AChannelExtractorError.fileTooLong(frameCount: length)
+        }
+        return AVAudioFrameCount(length)
     }
 
     private func resample(_ samples: [Float], sourceSampleRate: Double) throws -> [Float] {
