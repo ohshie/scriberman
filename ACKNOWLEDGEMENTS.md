@@ -14,6 +14,13 @@ Copyright FluidInference. Licensed under the Apache License 2.0.
 Bundles third-party components: fastcluster (© 2011 Daniel Müllner, BSD-style)
 and VBx (Brno University of Technology, Apache License 2.0).
 
+### NemoTextProcessing (text-processing-rs)
+Text normalization, linked through FluidAudio.
+Licensed under the Apache License 2.0. Statically links NVIDIA NeMo Text
+Processing (Apache License 2.0), rustfst and flate2 (MIT or Apache License 2.0),
+and other Rust crates.
+<https://github.com/FluidInference/text-processing-rs>
+
 ### Sparkle
 Software update framework for macOS.
 Copyright (c) 2006–2013 Andy Matuschak, (c) 2009–2013 Elgato Systems GmbH,
@@ -53,12 +60,14 @@ Scriberman downloads the following models at runtime from the
 [FluidInference](https://huggingface.co/FluidInference) Hugging Face
 organization. They are not distributed inside the application bundle.
 
-- **NVIDIA Parakeet TDT 0.6B v3** (speech recognition) — CC-BY-4.0.
-  Original model by NVIDIA; CoreML conversion by FluidInference.
-- **Speaker diarization models** (pyannote segmentation, WeSpeaker embeddings) —
-  CC-BY-4.0. CoreML conversion by FluidInference.
+- **Parakeet Ultra** (speech recognition) — CC-BY-4.0. Post-trained from
+  NVIDIA Parakeet TDT 0.6B v3 by moondream; CoreML conversion by FluidInference.
+- **NVIDIA Nemotron 3 Diarization** (live speaker turns) — OpenMDW License 1.1.
+  CoreML conversion by FluidInference.
+- **Speaker diarization models** — pyannote Community-1 (CC-BY-4.0, PLDA by
+  BUT Speech@FIT), pyannote segmentation 3.0 (MIT), WeSpeaker ResNet34
+  (CC-BY-4.0). CoreML conversion by FluidInference.
 - **Silero VAD** (voice activity detection) — MIT. © Silero Team.
-- **LS-EEND** (streaming turn diarization) — MIT. CoreML conversion by FluidInference.
 
 ## MIT License (applies to the MIT-licensed components above)
 

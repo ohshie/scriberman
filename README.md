@@ -11,19 +11,13 @@ machine for transcription.
   screen video) into per-session files.
 - **Live transcription** — on-device speech-to-text with real-time speaker
   turn attribution while you record.
-- **Offline transcription & retranscription** — re-run improved transcription
-  over any session's audio, with global speaker diarization and word-level
-  speaker alignment.
 - **Speaker memory** — recognized speakers keep their names across meetings.
 - **Voice dictation** — system-wide dictation that types into any app.
-- **AI transformations** — optional post-processing of transcripts (summaries,
-  cleanups) through OpenAI-compatible providers you configure; only the
-  transcript text you explicitly transform is sent.
-- **Transcript tools** — search, playback-synced navigation, cleanup rules,
-  export.
+- **AI summary** — summaries for your transcript via OpenRouter.
+- **Calendar suggestions** — suggests recordings from your calendar events.
 
-Transcription runs on Apple silicon via [FluidAudio](https://github.com/FluidInference/FluidAudio)
-(NVIDIA Parakeet ASR, Silero VAD, pyannote/WeSpeaker diarization) — see
+Transcription runs on Apple silicon with Parakeet Ultra, Silero VAD,
+Nemotron 3, pyannote and WeSpeaker — see
 [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md) for full credits.
 
 ## Installation
@@ -36,11 +30,6 @@ Download the latest DMG from
 ```bash
 xattr -cr /Applications/Scriberman.app
 ```
-
-## Support
-
-Scriberman is free software, developed in spare time. If it's useful to you,
-donations are welcome — see the repository sidebar.
 
 ## Contributing
 
