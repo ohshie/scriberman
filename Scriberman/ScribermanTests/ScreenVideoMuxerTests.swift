@@ -143,7 +143,7 @@ final class ScreenVideoMuxerTests {
     }
 
     @Test
-    func testRunMuxFailureLeavesSessionUntouchedAndDeletesTmpVideo() async throws {
+    func testRunMuxFailureKeepsTmpVideoAndRecordsTheFailure() async throws {
         let container = try ModelContainer(
             for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
@@ -170,7 +170,9 @@ final class ScreenVideoMuxerTests {
 
         let refreshed = try fetchSession(id: session.id, container: container)
         #expect(refreshed.screenVideoURL == nil)
-        #expect(!FileManager.default.fileExists(atPath: request.screenTmpURL.path))
+        #expect(refreshed.status == .recorded)
+        #expect(refreshed.screenMuxState == ScreenMuxState.failed.rawValue)
+        #expect(FileManager.default.fileExists(atPath: request.screenTmpURL.path))
     }
 
     @Test
@@ -187,6 +189,7 @@ final class ScreenVideoMuxerTests {
             title: "Session",
             status: .recorded
         )
+        session.screenMuxState = ScreenMuxState.pending.rawValue
         context.insert(session)
         try context.save()
 
@@ -201,6 +204,7 @@ final class ScreenVideoMuxerTests {
 
         let refreshed = try fetchSession(id: session.id, container: container)
         #expect(refreshed.screenVideoURL == request.screenVideoURL.path)
+        #expect(refreshed.screenMuxState == nil)
         #expect(FileManager.default.fileExists(atPath: request.screenVideoURL.path))
         #expect(!FileManager.default.fileExists(atPath: request.screenTmpURL.path))
     }

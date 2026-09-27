@@ -238,7 +238,7 @@ actor RecordingService: RecordingServiceProtocol {
     private let notificationCenter: NotificationCenter
     private let fileManager = FileManager.default
     private let mixdownCoordinator: any RecordingMixdownCoordinating
-    private let screenVideoMuxer: any ScreenVideoMuxing
+    private let finalizer: RecordingFinalizer
     private let logger = Logger(subsystem: "Scriberman", category: "RecordingService")
     private let appAudioSettings: AppAudioSettings
     private let hardware: AudioDeviceHardwareProviding
@@ -342,6 +342,7 @@ actor RecordingService: RecordingServiceProtocol {
         notificationCenter: NotificationCenter = .default,
         mixdownCoordinator: (any RecordingMixdownCoordinating)? = nil,
         screenVideoMuxer: (any ScreenVideoMuxing)? = nil,
+        finalizer: RecordingFinalizer? = nil,
         permissionChecker: @escaping PermissionChecker = RecordingPermissionService.ensureMicrophonePermission,
         scopedAccessStarter: @escaping ScopedAccessStarter = { $0.startAccessingSecurityScopedResource() },
         scopedAccessStopper: @escaping ScopedAccessStopper = { $0.stopAccessingSecurityScopedResource() },
@@ -364,13 +365,17 @@ actor RecordingService: RecordingServiceProtocol {
         self.applyDefaultTag = defaultTagApplier
         self.now = now
         self.hardwareListenerQueue = DispatchQueue(label: "Scriberman.RecordingService.HardwareListeners")
-        self.mixdownCoordinator = mixdownCoordinator ?? RecordingMixdownCoordinator(
+        let mixdownCoordinator = mixdownCoordinator ?? RecordingMixdownCoordinator(
             workspaceService: workspaceService,
             modelContainer: modelContainer
         )
-        self.screenVideoMuxer = screenVideoMuxer ?? ScreenVideoMuxer(
-            workspaceService: workspaceService,
-            modelContainer: modelContainer
+        self.mixdownCoordinator = mixdownCoordinator
+        self.finalizer = finalizer ?? RecordingFinalizer(
+            mixdownCoordinator: mixdownCoordinator,
+            screenVideoMuxer: screenVideoMuxer ?? ScreenVideoMuxer(
+                workspaceService: workspaceService,
+                modelContainer: modelContainer
+            )
         )
         self.hardwarePropertyListener = { [weak self] _, _ in
             Task {
@@ -1152,6 +1157,7 @@ actor RecordingService: RecordingServiceProtocol {
             let videoStartHostTime = shouldSkipScreenMux ? nil : self.videoStartHostTime
             let mixdownURL = finalRecordingURLs.mic.deletingLastPathComponent().appendingPathComponent("recording.m4a")
             let shouldRunScreenMux = videoStartHostTime != nil && fileManager.fileExists(atPath: screenTmpVideoURL.path)
+            let audioAnchorHostTime = Self.audioAnchorHostTime(mic: micStartHostTime, app: appStartHostTime)
 
             if self.micStartHostTime == nil {
                 logger.warning("Mic start host time missing for session \(sessionID, privacy: .public); using fallback for mixdown alignment.")
@@ -1173,6 +1179,12 @@ actor RecordingService: RecordingServiceProtocol {
             session.captureWriteFailureCount = writeFailuresAtStop > 0 ? writeFailuresAtStop : nil
             session.partiallyCoveredSources = partiallyCoveredSources.isEmpty ? nil : partiallyCoveredSources
             session.status = .recorded
+            // Saved before the mux runs so recovery can retry it after a quit (design D3).
+            if shouldRunScreenMux, let videoStartHostTime {
+                session.screenMuxState = ScreenMuxState.pending.rawValue
+                session.videoStartHostTimeNanos = Int64(clamping: videoStartHostTime.nanoseconds)
+                session.audioAnchorHostTimeNanos = Int64(clamping: audioAnchorHostTime.nanoseconds)
+            }
             if activeCaptureDisplayID != nil && !shouldRunScreenMux {
                 session.screenCaptureWarning = "Screen recording failed — the display may have been off, disconnected, or not capturable."
                 logger.warning(
@@ -1184,42 +1196,12 @@ actor RecordingService: RecordingServiceProtocol {
             // Release capture writer resources before background mixdown starts.
             await cleanupRecordingState(deleteScreenTmpVideo: !shouldRunScreenMux)
 
-            let timelineEnabled = AudioSyncConfig.isTimelineMixdownEnabled
-            let audioAnchorHostTime = Self.audioAnchorHostTime(mic: micStartHostTime, app: appStartHostTime)
-
-            Task { [weak self] in
-                await self?.runMixdown(
-                    sessionID: sessionID,
-                    micURL: finalRecordingURLs.mic,
-                    appURL: finalRecordingURLs.app,
-                    mixdownURL: mixdownURL,
-                    micStartHostTime: micStartHostTime,
-                    appStartHostTime: appStartHostTime
-                )
-
-                // Timeline path: mux the drift-corrected mixdown audio (produced above) into
-                // the video, so the video gets the same aligned audio and we avoid the
-                // raw-WAV delete race.
-                if timelineEnabled, let videoStartHostTime, shouldRunScreenMux {
-                    let request = ScreenVideoMuxRequest(
-                        sessionID: sessionID,
-                        screenTmpURL: screenTmpVideoURL,
-                        screenVideoURL: finalScreenVideoURL,
-                        micURL: finalRecordingURLs.mic,
-                        appURL: finalRecordingURLs.app,
-                        micStartHostTime: micStartHostTime,
-                        appStartHostTime: appStartHostTime,
-                        videoStartHostTime: videoStartHostTime,
-                        timelineAudioURL: mixdownURL,
-                        audioAnchorHostTime: audioAnchorHostTime
-                    )
-                    await self?.screenVideoMuxer.runMux(request: request)
-                }
-            }
-
-            // Legacy path: mux the raw mic/app tracks concurrently (unchanged default behavior).
-            if !timelineEnabled, let videoStartHostTime, shouldRunScreenMux {
-                let request = ScreenVideoMuxRequest(
+            // Timeline path: mux the drift-corrected mixdown audio into the video. Legacy path:
+            // mux the raw mic/app tracks, which the finalizer keeps until the mux has finished.
+            var screenMux: ScreenVideoMuxRequest?
+            if shouldRunScreenMux, let videoStartHostTime {
+                let timelineEnabled = AudioSyncConfig.isTimelineMixdownEnabled
+                screenMux = ScreenVideoMuxRequest(
                     sessionID: sessionID,
                     screenTmpURL: screenTmpVideoURL,
                     screenVideoURL: finalScreenVideoURL,
@@ -1227,12 +1209,20 @@ actor RecordingService: RecordingServiceProtocol {
                     appURL: finalRecordingURLs.app,
                     micStartHostTime: micStartHostTime,
                     appStartHostTime: appStartHostTime,
-                    videoStartHostTime: videoStartHostTime
+                    videoStartHostTime: videoStartHostTime,
+                    timelineAudioURL: timelineEnabled ? mixdownURL : nil,
+                    audioAnchorHostTime: timelineEnabled ? audioAnchorHostTime : nil
                 )
-                Task { [weak self] in
-                    await self?.screenVideoMuxer.runMux(request: request)
-                }
             }
+            await finalizer.schedule(RecordingFinalizationJob(
+                sessionID: sessionID,
+                micURL: finalRecordingURLs.mic,
+                appURL: finalRecordingURLs.app,
+                mixdownURL: mixdownURL,
+                micStartHostTime: micStartHostTime,
+                appStartHostTime: appStartHostTime,
+                screenMux: screenMux
+            ))
 
             return sessionID
         } catch {
@@ -1684,7 +1674,7 @@ actor RecordingService: RecordingServiceProtocol {
         micStartHostTime: HostNanoseconds,
         appStartHostTime: HostNanoseconds?
     ) async {
-        await mixdownCoordinator.runMixdown(
+        _ = await mixdownCoordinator.runMixdown(
             sessionID: sessionID,
             micURL: micURL,
             appURL: appURL,
