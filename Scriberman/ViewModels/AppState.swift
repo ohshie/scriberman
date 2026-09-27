@@ -179,6 +179,11 @@ final class AppState {
 
         // Before anything that can load the batch diarizer (recovery sweep, retranscription).
         if workspace != nil {
+            do {
+                try await backgroundServices.modelInstallService.clearStaging()
+            } catch {
+                workspaceErrorMessage = error.localizedDescription
+            }
             await backgroundServices.modelInstallService.stampDiarizerRevisionIfMissing()
         }
 

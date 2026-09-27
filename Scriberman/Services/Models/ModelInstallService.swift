@@ -28,7 +28,8 @@ protocol ModelInstallServicing: Actor {
         progress: (@Sendable (ModelGroupReadinessState) -> Void)?,
         downloadProgress: (@Sendable (Double) -> Void)?
     ) async throws -> URL
-    func warmUpModels(workspace: Workspace) async
+    func clearStaging() async throws
+    func warmUpModels(workspace: Workspace) async -> [ModelGroup: String]
 }
 
 actor ModelInstallService: ModelInstallServicing {
@@ -36,8 +37,19 @@ actor ModelInstallService: ModelInstallServicing {
     private let fileManager = FileManager.default
     private let modelPathResolver = ModelPathResolver()
 
-    init(workspaceService: WorkspaceService) {
+    typealias Downloader = @Sendable (ModelGroup, URL, ProgressHandler?) async throws -> Void
+    private let downloader: Downloader?
+    private var warmUpErrors: [ModelGroup: String] = [:]
+    private var warmUpWorkspaceURL: URL?
+
+    init(workspaceService: WorkspaceService, downloader: Downloader? = nil) {
         self.workspaceService = workspaceService
+        self.downloader = downloader
+    }
+
+    func clearStaging() async throws {
+        let workspace = try await ensureWorkspaceWriteAccess()
+        try removeIfExists(workspace.modelsURL.appendingPathComponent(".staging", isDirectory: true))
     }
 
     func ensureWorkspaceWriteAccess() async throws -> Workspace {
@@ -60,14 +72,17 @@ actor ModelInstallService: ModelInstallServicing {
 
         let repoURL = workspace.modelsURL.appendingPathComponent(group.repoFolderName, isDirectory: true)
         do {
-            return try validateInstalledRepo(for: group, at: repoURL) ? .ready : .missing
+            guard try isCurrentInstall(for: group, at: repoURL) else { return .missing }
+            return warmUpWorkspaceURL == workspace.rootURL && warmUpErrors[group] != nil ? .error : .ready
         } catch {
             return .error
         }
     }
 
-    func warmUpModels(workspace: Workspace) async {
-        await warmUpModelsInternal(
+    func warmUpModels(workspace: Workspace) async -> [ModelGroup: String] {
+        warmUpWorkspaceURL = workspace.rootURL
+        warmUpErrors = [:]
+        return await warmUpModelsInternal(
             warmUpASR: {
                 let asrDirectory = try self.modelPathResolver.modelDirectory(for: .asrParakeetUltra, in: workspace)
                 _ = try await AsrModels.load(from: asrDirectory, version: ModelPathResolver.asrModelVersion, encoderComputeUnits: .cpuAndGPU)
@@ -96,29 +111,26 @@ actor ModelInstallService: ModelInstallServicing {
     }
 
     private func warmUpModelsInternal(
-        warmUpASR: () async throws -> Void,
-        warmUpDiarizer: () async throws -> Void,
-        warmUpVAD: () async throws -> Void,
-        warmUpTurnDiarizer: () async throws -> Void
-    ) async {
-        do {
-            try await warmUpASR()
-            try await warmUpDiarizer()
-
+        warmUpASR: @escaping () async throws -> Void,
+        warmUpDiarizer: @escaping () async throws -> Void,
+        warmUpVAD: @escaping () async throws -> Void,
+        warmUpTurnDiarizer: @escaping () async throws -> Void
+    ) async -> [ModelGroup: String] {
+        let operations: [(ModelGroup, () async throws -> Void)] = [
+            (.asrParakeetUltra, warmUpASR),
+            (.offlineDiarization, warmUpDiarizer),
+            (.vadSilero, warmUpVAD),
+            (.nemotron3Diarization, warmUpTurnDiarizer)
+        ]
+        for (group, operation) in operations {
             do {
-                try await warmUpVAD()
+                try await operation()
+                warmUpErrors[group] = nil
             } catch {
-                NSLog("[ModelInstallService] VAD CoreML warm-up failed (non-fatal): %@", String(describing: error))
+                warmUpErrors[group] = error.localizedDescription
             }
-
-            do {
-                try await warmUpTurnDiarizer()
-            } catch {
-                NSLog("[ModelInstallService] Turn diarizer CoreML warm-up failed (non-fatal): %@", String(describing: error))
-            }
-        } catch {
-            NSLog("[ModelInstallService] CoreML warm-up failed (non-fatal): %@", String(describing: error))
         }
+        return warmUpErrors
     }
 
     @discardableResult
@@ -140,19 +152,38 @@ actor ModelInstallService: ModelInstallServicing {
         )
         let installedURL = workspace.modelsURL.appendingPathComponent(group.repoFolderName, isDirectory: true)
 
+        if try isCurrentInstall(for: group, at: installedURL) {
+            progress?(.ready)
+            return installedURL
+        }
+
+        let stagingRoot = workspace.modelsURL.appendingPathComponent(".staging", isDirectory: true)
+        let stagedURL = stagingRoot.appendingPathComponent(group.repoFolderName, isDirectory: true)
+        try fileManager.createDirectory(at: stagingRoot, withIntermediateDirectories: true)
+        try removeIfExists(stagedURL)
+        defer { try? removeIfExists(stagedURL) }
+
         progress?(.downloading)
         do {
-            try removeIfExists(installedURL)
-            try await downloadDirectly(for: group, to: workspace.modelsURL, progressHandler: progressHandler)
+            if let downloader {
+                try await downloader(group, stagingRoot, progressHandler)
+            } else {
+                try await downloadDirectly(for: group, to: stagingRoot, progressHandler: progressHandler)
+            }
         } catch {
             throw mapDownloadError(error, for: group)
         }
 
-        let isValid = try validateInstalledRepo(for: group, at: installedURL)
-        guard isValid else {
-            throw ModelInstallError.validationFailed(group, path: installedURL)
+        guard try isCurrentInstall(for: group, at: stagedURL) else {
+            throw ModelInstallError.validationFailed(group, path: stagedURL)
         }
 
+        if fileManager.fileExists(atPath: installedURL.path) {
+            _ = try fileManager.replaceItemAt(installedURL, withItemAt: stagedURL)
+        } else {
+            try fileManager.moveItem(at: stagedURL, to: installedURL)
+        }
+        warmUpErrors[group] = nil
         removeReplacedInstall(of: group, in: workspace.modelsURL)
         return installedURL
     }
@@ -336,6 +367,17 @@ actor ModelInstallService: ModelInstallServicing {
 
     // MARK: - Validation
 
+    private func isCurrentInstall(for group: ModelGroup, at repoURL: URL) throws -> Bool {
+        guard try validateInstalledRepo(for: group, at: repoURL) else { return false }
+        if group == .offlineDiarization, Repo.diarizer.revision != "main" {
+            let marker = repoURL.appendingPathComponent(Self.revisionMarkerFileName)
+            let revision = try? String(contentsOf: marker, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return revision == Repo.diarizer.revision
+        }
+        return true
+    }
+
     private func validateInstalledRepo(for group: ModelGroup, at repoURL: URL) throws -> Bool {
         switch group {
         case .asrParakeetUltra:
@@ -391,13 +433,15 @@ extension ModelInstallService {
         removeReplacedInstall(of: group, in: modelsURL)
     }
 
+    @discardableResult
     func warmUpModelsForTesting(
-        warmUpASR: () async throws -> Void,
-        warmUpDiarizer: () async throws -> Void,
-        warmUpVAD: () async throws -> Void,
-        warmUpTurnDiarizer: () async throws -> Void
-    ) async {
-        await warmUpModelsInternal(
+        warmUpASR: @escaping () async throws -> Void,
+        warmUpDiarizer: @escaping () async throws -> Void,
+        warmUpVAD: @escaping () async throws -> Void,
+        warmUpTurnDiarizer: @escaping () async throws -> Void
+    ) async -> [ModelGroup: String] {
+        warmUpWorkspaceURL = await workspaceService.currentWorkspace()?.rootURL
+        return await warmUpModelsInternal(
             warmUpASR: warmUpASR,
             warmUpDiarizer: warmUpDiarizer,
             warmUpVAD: warmUpVAD,

@@ -205,7 +205,8 @@ private actor PipelineSettingsTestsMockModelInstallService: ModelInstallServicin
     ) async throws -> URL {
         throw ModelInstallError.noWorkspace
     }
-    func warmUpModels(workspace: Workspace) async {}
+    func clearStaging() async throws {}
+    func warmUpModels(workspace: Workspace) async -> [ModelGroup: String] { [:] }
 }
 
 private enum ModelInstallError: Error {
