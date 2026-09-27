@@ -79,6 +79,27 @@ final class M4AChannelExtractorTests {
         #expect(extracted.mic.count == 16_000 * durationSeconds)
     }
 
+    @Test
+    func testFrameCapacityAcceptsMaximumFrameCount() throws {
+        let length = AVAudioFramePosition(AVAudioFrameCount.max)
+
+        #expect(try M4AChannelExtractor.frameCapacity(forLength: length) == AVAudioFrameCount.max)
+    }
+
+    @Test
+    func testFrameCapacityThrowsWhenLengthExceedsMaximumFrameCount() {
+        let length = AVAudioFramePosition(AVAudioFrameCount.max) + 1
+
+        do {
+            _ = try M4AChannelExtractor.frameCapacity(forLength: length)
+            Issue.record("Expected frame capacity to throw for a length above AVAudioFrameCount.max")
+        } catch M4AChannelExtractorError.fileTooLong(let frameCount) {
+            #expect(frameCount == length)
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
     private func writeM4A(channels: [[Float]], sampleRate: Double, to url: URL) throws {
         guard !channels.isEmpty else {
             Issue.record("Expected at least one channel.")
