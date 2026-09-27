@@ -312,6 +312,27 @@ final class JobsViewModelTests {
         #expect(try context.fetch(FetchDescriptor<RecordingSession>()).isEmpty)
     }
 
+    @Test(arguments: ["Recording Mar 28 at 14-30 a3", "2026-03-28 14-30"])
+    func testDeletingARecordingRemovesItsFolderInEitherNameFormat(folderName: String) async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
+        workspaceService.currentWorkspaceResult = workspace
+        let folder = try makePopulatedSessionFolder(in: workspace.recordingsURL, named: folderName)
+
+        let session = RecordingSession(
+            duration: 60,
+            micAudioURL: folder.appendingPathComponent("mic.wav").path,
+            title: folderName
+        )
+        context.insert(session)
+        try context.save()
+
+        await viewModel.delete(session: session, context: context)
+
+        #expect(!FileManager.default.fileExists(atPath: folder.path))
+        #expect(try context.fetch(FetchDescriptor<RecordingSession>()).isEmpty)
+    }
+
     @Test
     func testDeletingARecordingWithNoFilesLeftStillRemovesTheRecord() async throws {
         let workspace = try makeTemporaryWorkspace()

@@ -205,6 +205,35 @@ final class RecordingRecoveryServiceTests {
         #expect(recovered.status == .recorded)
     }
 
+    @Test(arguments: ["Recording Mar 28 at 14-30 a3", "2026-03-28 14-30"])
+    func testRecoveryMixesIntoTheSessionFolderInEitherNameFormat(folderName: String) async throws {
+        let workspace = makeWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
+        let folder = workspace.recordingsURL.appendingPathComponent(folderName, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let micPath = folder.appendingPathComponent("mic.wav").path
+        FileManager.default.createFile(atPath: micPath, contents: Data())
+
+        let container = try makeContainer()
+        let context = ModelContext(container)
+        let session = makeSession(micAudioURL: micPath)
+        context.insert(session)
+        try context.save()
+
+        let workspaceService = MockWorkspaceService()
+        workspaceService.currentWorkspaceResult = workspace
+        let service = RecordingRecoveryService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            performMixdown: { _, _, _ in }
+        )
+
+        await service.sweepIncompleteSessions()
+
+        let recovered = try #require(try RecordingSession.fetch(id: session.id, in: ModelContext(container)))
+        #expect(recovered.mixdownURL == folder.appendingPathComponent("recording.m4a").path)
+    }
+
     @Test
     func testFailedMixdownIncrementsAttemptCount() async throws {
         let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
