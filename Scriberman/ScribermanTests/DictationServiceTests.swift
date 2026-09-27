@@ -1,4 +1,5 @@
 import CoreAudio
+import FluidAudio
 import Foundation
 import Testing
 @testable import Scriberman
@@ -310,4 +311,141 @@ private struct FailingDictationConverter: DictationAudioConverting {
         throw AudioResamplerError.conversionFailed("Injected failure")
     }
     func finish() throws -> [Float] { [] }
+}
+
+@MainActor
+struct DictationPrewarmTests {
+    private let workspace = Workspace(rootURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true))
+
+    @Test
+    func pressDuringPrewarmWaitsForThatLoad() async throws {
+        let loads = AsrLoadProbe()
+        let service = DictationService(
+            recordingService: MockRecordingService(),
+            captureSession: MockDictationCapture(),
+            loadAsr: loads.load
+        )
+
+        let prewarm = Task { await service.prewarm(workspace: workspace) }
+        #expect(await loads.waitForLoads(1))
+        #expect(service.state == .prewarming)
+
+        let press = Task { await service.start(deviceID: nil) }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(service.state == .prewarming)
+
+        loads.release()
+        await prewarm.value
+        await press.value
+
+        #expect(loads.count == 1)
+        #expect(service.state == .listening)
+        await service.stop()
+    }
+
+    @Test
+    func concurrentPrewarmsShareOneLoad() async {
+        let loads = AsrLoadProbe()
+        let service = DictationService(
+            recordingService: MockRecordingService(),
+            captureSession: MockDictationCapture(),
+            loadAsr: loads.load
+        )
+
+        let first = Task { await service.prewarm(workspace: workspace) }
+        let second = Task { await service.prewarm(workspace: workspace) }
+        #expect(await loads.waitForLoads(1))
+        loads.release()
+        await first.value
+        await second.value
+        await service.prewarm(workspace: workspace)
+
+        #expect(loads.count == 1)
+        #expect(service.state == .idle)
+    }
+
+    @Test
+    func failedPrewarmIsRetried() async {
+        let loads = AsrLoadProbe(failures: 1)
+        loads.release()
+        let service = DictationService(
+            recordingService: MockRecordingService(),
+            captureSession: MockDictationCapture(),
+            loadAsr: loads.load
+        )
+
+        await service.prewarm(workspace: workspace)
+        await service.prewarm(workspace: workspace)
+
+        #expect(loads.count == 2)
+        #expect(service.state == .idle)
+    }
+}
+
+/// Counts ASR loads; each load waits until `release()` and the first
+/// `failures` loads throw.
+private final class AsrLoadProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var loads = 0
+    private var failures: Int
+    private var released = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(failures: Int = 0) {
+        self.failures = failures
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return loads
+    }
+
+    func release() {
+        lock.lock()
+        released = true
+        let pending = waiters
+        waiters.removeAll()
+        lock.unlock()
+        pending.forEach { $0.resume() }
+    }
+
+    func waitForLoads(_ expected: Int) async -> Bool {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while count < expected, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return count >= expected
+    }
+
+    var load: @Sendable (Workspace) async throws -> AsrManager {
+        { _ in
+            let shouldFail = self.begin()
+            await withCheckedContinuation { continuation in
+                self.lock.lock()
+                if self.released {
+                    self.lock.unlock()
+                    continuation.resume()
+                } else {
+                    self.waiters.append(continuation)
+                    self.lock.unlock()
+                }
+            }
+            if shouldFail { throw AsrLoadProbeError.failed }
+            return AsrManager(config: ASRConfig())
+        }
+    }
+
+    private func begin() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        loads += 1
+        guard failures > 0 else { return false }
+        failures -= 1
+        return true
+    }
+}
+
+private enum AsrLoadProbeError: Error {
+    case failed
 }
