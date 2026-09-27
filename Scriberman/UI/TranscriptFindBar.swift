@@ -35,6 +35,8 @@ struct TranscriptFindBar: View {
                         Image(systemName: "chevron.up")
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Previous match")
+                    .help("Previous match")
 
                     Button {
                         searchState.next()
@@ -42,6 +44,8 @@ struct TranscriptFindBar: View {
                         Image(systemName: "chevron.down")
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Next match")
+                    .help("Next match")
                 }
             }
 
@@ -52,6 +56,8 @@ struct TranscriptFindBar: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Close find")
+            .help("Close find")
             .keyboardShortcut(.escape, modifiers: [])
         }
         .padding(.horizontal, 16)

@@ -41,6 +41,9 @@ struct AITransformationPreviewCard: View {
                     )
                 }
                 .clipped()
+
+            Button("Read full result", action: onTap)
+                .buttonStyle(.link)
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
