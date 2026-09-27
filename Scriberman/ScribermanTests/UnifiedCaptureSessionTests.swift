@@ -135,3 +135,98 @@ struct UnifiedCaptureSessionTests {
         #expect(session.currentMicDeviceUID == "device-a")
     }
 }
+
+struct CaptureStartRetryTests {
+    private func makeSession(unified: Bool) -> (
+        start: (RetryCaptureStream) async throws -> Void,
+        stop: () async -> Void
+    ) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        if unified {
+            let session = UnifiedCaptureSession(micFileURL: root.appendingPathComponent("mic.wav"), appFileURL: root.appendingPathComponent("app.wav"), processID: 1234, micDeviceUID: nil)
+            return ({ try await session.start(stream: $0, retryDelay: .zero) }, { await session.stop() })
+        }
+        let session = AppAudioCaptureSession(fileURL: root.appendingPathComponent("app.wav"), processID: 1234)
+        return ({ try await session.start(stream: $0, retryDelay: .zero) }, { await session.stop() })
+    }
+
+    @Test(arguments: [false, true])
+    func failedStartStopsBeforeRetryAndSuccessfulStreamIsRetained(unified: Bool) async throws {
+        let session = makeSession(unified: unified)
+        let stream = RetryCaptureStream(failures: 1)
+        try await session.start(stream)
+        #expect(stream.events == ["start", "failure", "stop", "start"])
+        await session.stop()
+        #expect(stream.events == ["start", "failure", "stop", "start", "stop"])
+    }
+
+    @Test(arguments: [false, true])
+    func finalFailedAttemptIsAlsoStopped(unified: Bool) async {
+        let session = makeSession(unified: unified)
+        let stream = RetryCaptureStream(failures: 3)
+        do {
+            try await session.start(stream)
+            Issue.record("Expected startup failure")
+        } catch {
+            #expect(error is RecordingError)
+        }
+        #expect(stream.events == ["start", "failure", "stop", "start", "failure", "stop", "start", "failure", "stop"])
+        await session.stop()
+        #expect(stream.events.count == 9)
+    }
+
+    @Test(arguments: [false, true])
+    func cleanupFailurePreventsRetry(unified: Bool) async {
+        let session = makeSession(unified: unified)
+        let stream = RetryCaptureStream(failures: 1, stopFails: true)
+        do {
+            try await session.start(stream)
+            Issue.record("Expected cleanup failure")
+        } catch {
+            #expect(error.localizedDescription.contains("Capture cleanup failed"))
+        }
+        #expect(stream.events == ["start", "failure", "stop"])
+    }
+
+    @Test(arguments: [false, true])
+    func cancellationStopsTheAttemptWithoutRetry(unified: Bool) async {
+        let session = makeSession(unified: unified)
+        let stream = RetryCaptureStream(failures: 1, cancelled: true)
+        do {
+            try await session.start(stream)
+            Issue.record("Expected cancellation")
+        } catch {
+            #expect(error is CancellationError)
+        }
+        #expect(stream.events == ["start", "failure", "stop"])
+    }
+}
+
+private final class RetryCaptureStream: UnifiedCaptureStreaming, @unchecked Sendable {
+    private var failures: Int
+    private let stopFails: Bool
+    private let cancelled: Bool
+    private(set) var events: [String] = []
+
+    init(failures: Int, stopFails: Bool = false, cancelled: Bool = false) {
+        self.failures = failures
+        self.stopFails = stopFails
+        self.cancelled = cancelled
+    }
+
+    func startCapture() async throws {
+        events.append("start")
+        if failures > 0 {
+            failures -= 1
+            events.append("failure")
+            if cancelled { throw CancellationError() }
+            throw StubUpdateError()
+        }
+    }
+    func stopCapture() async throws {
+        events.append("stop")
+        if stopFails { throw StubUpdateError() }
+    }
+    func addStreamOutput(_: SCStreamOutput, type: SCStreamOutputType, sampleHandlerQueue: DispatchQueue?) throws {}
+    func updateConfiguration(_: SCStreamConfiguration) async throws {}
+}

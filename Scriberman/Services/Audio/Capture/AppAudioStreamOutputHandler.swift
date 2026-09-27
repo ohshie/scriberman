@@ -12,7 +12,7 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
     let streamer: AudioFileStreamer
     private var monoFormat: AVAudioFormat?
     private var firstBufferHostTime: HostNanoseconds?
-    private let liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation?
+    private let liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation?
     var onFirstBufferHostTime: (@Sendable (HostNanoseconds) -> Void)?
     private let layoutTracker = UnsupportedPCMLayoutTracker(source: "app")
 
@@ -41,7 +41,7 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
     private var hasPrepared = false
 
     init(
-        liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil,
+        liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation? = nil,
         streamer: AudioFileStreamer = AudioFileStreamer(label: "app")
     ) {
         self.liveAudioContinuation = liveAudioContinuation
@@ -150,7 +150,7 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
         }
 
         streamer.write(buffer: monoBuffer, hostTimeNanos: bufferHostNanos)
-        liveAudioContinuation?.yield((monoSamples, .app, format.sampleRate))
+        liveAudioContinuation?.yield(LiveAudioChunk(samples: monoSamples, source: .app, sampleRate: format.sampleRate, hostTime: bufferHostNanos.map { HostNanoseconds(nanoseconds: $0) }))
     }
 
     private func createPCMBuffer(from sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {

@@ -126,3 +126,94 @@ struct AudioResampler {
         }
     }
 }
+
+/// Used only by the dictation drain task. Input exhaustion between callbacks is
+/// temporary; end-of-stream is sent once, after capture has stopped.
+protocol DictationAudioConverting: Sendable {
+    func convert(_ samples: [Float]) throws -> [Float]
+    func finish() throws -> [Float]
+}
+
+final class ContinuousAudioResampler: DictationAudioConverting, @unchecked Sendable {
+    private let converter: AVAudioConverter
+    private let input: AVAudioPCMBuffer
+    private let output: AVAudioPCMBuffer
+    private var ended = false
+
+    private final class InputState: @unchecked Sendable {
+        var delivered = false
+    }
+
+    init(sourceSampleRate: Double, targetSampleRate: Double = 16_000) throws {
+        guard let source = AVAudioFormat(standardFormatWithSampleRate: sourceSampleRate, channels: 1),
+              let target = AVAudioFormat(standardFormatWithSampleRate: targetSampleRate, channels: 1) else {
+            throw AudioResamplerError.failedToCreateFormat
+        }
+        guard let converter = AVAudioConverter(from: source, to: target) else {
+            throw AudioResamplerError.failedToCreateConverter
+        }
+        guard let input = AVAudioPCMBuffer(pcmFormat: source, frameCapacity: 1_024),
+              let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: 4_096) else {
+            throw AudioResamplerError.failedToAllocateBuffer
+        }
+        converter.sampleRateConverterAlgorithm = AVSampleRateConverterAlgorithm_Normal
+        converter.sampleRateConverterQuality = AVAudioQuality.high.rawValue
+        self.converter = converter
+        self.input = input
+        self.output = output
+    }
+
+    func convert(_ samples: [Float]) throws -> [Float] {
+        guard !ended else { return [] }
+        var result: [Float] = []
+        for offset in stride(from: 0, to: samples.count, by: Int(input.frameCapacity)) {
+            let count = min(Int(input.frameCapacity), samples.count - offset)
+            input.frameLength = AVAudioFrameCount(count)
+            samples.withUnsafeBufferPointer { buffer in
+                input.floatChannelData![0].update(from: buffer.baseAddress! + offset, count: count)
+            }
+            result.append(contentsOf: try drain(endOfStream: false))
+        }
+        return result
+    }
+
+    func finish() throws -> [Float] {
+        guard !ended else { return [] }
+        ended = true
+        return try drain(endOfStream: true)
+    }
+
+    private func drain(endOfStream: Bool) throws -> [Float] {
+        let state = InputState()
+        let input = self.input
+        var result: [Float] = []
+        while true {
+            output.frameLength = 0
+            var error: NSError?
+            let status = converter.convert(to: output, error: &error) { _, status in
+                if endOfStream {
+                    status.pointee = .endOfStream
+                    return nil
+                }
+                guard !state.delivered else {
+                    status.pointee = .noDataNow
+                    return nil
+                }
+                state.delivered = true
+                status.pointee = .haveData
+                return input
+            }
+            if let error { throw AudioResamplerError.conversionFailed(error.localizedDescription) }
+            if status == .error { throw AudioResamplerError.conversionFailed("Audio converter returned error status.") }
+            if let channel = output.floatChannelData?[0] {
+                result.append(contentsOf: UnsafeBufferPointer(start: channel, count: Int(output.frameLength)))
+            }
+            switch status {
+            case .haveData: continue
+            case .inputRanDry, .endOfStream: return result
+            case .error: throw AudioResamplerError.conversionFailed("Audio converter returned error status.")
+            @unknown default: throw AudioResamplerError.conversionFailed("Audio converter returned unknown status.")
+            }
+        }
+    }
+}

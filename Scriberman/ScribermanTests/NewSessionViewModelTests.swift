@@ -23,7 +23,8 @@ struct NewSessionViewModelTests {
         screenRecordingStatus: PermissionStatus = .notDetermined,
         initialSelectedApp: CapturedApp? = nil,
         availableDisplays: [CaptureDisplay] = [],
-        selectedDisplayID: CGDirectDisplayID? = nil
+        selectedDisplayID: CGDirectDisplayID? = nil,
+        transcriber: (any LiveTranscribing)? = nil
     ) -> Fixture {
         let workspaceService = MockWorkspaceService()
         let recordingService = MockRecordingService()
@@ -53,7 +54,8 @@ struct NewSessionViewModelTests {
             appAudioService: appAudioService,
             screenCaptureService: screenCaptureService,
             permissionService: permissionService,
-            userDefaults: userDefaults
+            userDefaults: userDefaults,
+            liveTranscriptionService: transcriber
         )
         let menuBarSettings = MenuBarSettings(userDefaults: userDefaults)
         viewModel.menuBarSettings = menuBarSettings
@@ -69,6 +71,38 @@ struct NewSessionViewModelTests {
             context,
             { userDefaults.removePersistentDomain(forName: userDefaultsSuiteName) }
         )
+    }
+
+    @Test
+    func stopDrainsInFlightAudioAndPersistsFinalWordsAcrossTwoRecordings() async throws {
+        let transcriber = SuspendedLiveTranscriber()
+        let fixture = makeFixture(transcriber: transcriber)
+        defer { fixture.cleanup() }
+        var oldContinuation: AsyncStream<LiveAudioChunk>.Continuation?
+        for index in 1...2 {
+            let recording = RecordingSession(createdAt: .now, duration: 0, micAudioURL: "/tmp/live-test.wav", title: "Live", status: .recording)
+            fixture.context.insert(recording)
+            try fixture.context.save()
+            fixture.recordingService.startReturns = recording.id
+            fixture.recordingService.stopReturns = recording.id
+            _ = await fixture.viewModel.startRecording(title: "Live", context: fixture.context)
+            let continuation = try #require(fixture.recordingService.liveAudioContinuation)
+            oldContinuation?.yield(LiveAudioChunk(samples: [99], source: .mic, sampleRate: 16_000, hostTime: nil))
+            continuation.yield(LiveAudioChunk(samples: [Float(index)], source: .mic, sampleRate: 16_000, hostTime: nil))
+            await transcriber.waitUntilProcessing()
+            let stop = Task { await fixture.viewModel.stopRecording(context: fixture.context)?.id }
+            let concurrentStop = Task { await fixture.viewModel.stopRecording(context: fixture.context)?.id }
+            // Stop must wait until the fake's suspended inference completes.
+            await Task.yield()
+            #expect(await transcriber.stopCount == index - 1)
+            await transcriber.releaseProcessing()
+            #expect(await stop.value == recording.id)
+            #expect(await concurrentStop.value == recording.id)
+            #expect(await transcriber.stopCount == index)
+            #expect(recording.transcriptSegments.map(\.text) == ["final words \(index)"])
+            #expect(await transcriber.processed == Array(1...index).map(Float.init))
+            oldContinuation = continuation
+        }
     }
 
     @Test
@@ -1382,5 +1416,42 @@ private final class MockScreenCaptureService: ScreenCaptureServiceProtocol {
 
     func refreshAvailableDisplays() async {
         refreshCalls += 1
+    }
+}
+
+private actor SuspendedLiveTranscriber: LiveTranscribing {
+    private var results: AsyncStream<TranscriptSegment>.Continuation?
+    private var processing: CheckedContinuation<Void, Never>?
+    private var waiting: CheckedContinuation<Void, Never>?
+    private(set) var processed: [Float] = []
+    private(set) var stopCount = 0
+
+    func prepare(workspace: Workspace, config: LiveTranscriptionPipelineSettings) async {}
+    func start(workspace: Workspace, config: LiveTranscriptionPipelineSettings, resultContinuation: AsyncStream<TranscriptSegment>.Continuation) async throws {
+        results = resultContinuation
+    }
+    func process(_ chunk: LiveAudioChunk, anchor: HostNanoseconds?) async {
+        await withCheckedContinuation { continuation in
+            processing = continuation
+            waiting?.resume()
+            waiting = nil
+        }
+        processed.append(contentsOf: chunk.samples)
+    }
+    func waitUntilProcessing() async {
+        if processing != nil { return }
+        await withCheckedContinuation { waiting = $0 }
+    }
+    func releaseProcessing() {
+        processing?.resume()
+        processing = nil
+    }
+    func stop() async -> [TranscriptSegment] {
+        stopCount += 1
+        let segment = TranscriptSegment(speakerId: "speaker", text: "final words \(stopCount)", startTime: 0, endTime: 1, audioSource: .mic, isFinal: true)
+        results?.yield(segment)
+        results?.finish()
+        // No backfill: this test requires the result consumer to persist the segment.
+        return []
     }
 }

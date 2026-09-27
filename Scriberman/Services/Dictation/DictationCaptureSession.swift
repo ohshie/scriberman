@@ -6,7 +6,7 @@ import OSLog
 /// Capture abstraction so `DictationService` state logic is unit-testable
 /// without a live microphone.
 protocol DictationCapturing: Sendable {
-    func start(deviceID: AudioDeviceID?) async throws -> AsyncStream<[Float]>
+    func start(deviceID: AudioDeviceID?) async throws -> AsyncThrowingStream<[Float], Error>
     func stop() async
     func setLevelHandler(_ handler: @escaping @Sendable (Float) -> Void) async
 }
@@ -20,7 +20,7 @@ actor DictationCaptureSession: DictationCapturing {
     // rebuilt only when the input device changes.
     private var audioEngine: AVAudioEngine?
     private var configuredDeviceID: AudioDeviceID?
-    private var continuation: AsyncStream<[Float]>.Continuation?
+    private var pipeline: DictationAudioPipeline?
     private var levelHandler: (@Sendable (Float) -> Void)?
 
     func setLevelHandler(_ handler: @escaping @Sendable (Float) -> Void) {
@@ -28,31 +28,27 @@ actor DictationCaptureSession: DictationCapturing {
     }
 
     // Starts the mic tap for the given device (nil = system default).
-    // Returns an AsyncStream of mono 16 kHz Float samples.
-    func start(deviceID: AudioDeviceID?) throws -> AsyncStream<[Float]> {
-        endCapture()
+    // Returns mono 16 kHz samples; conversion errors terminate the stream.
+    func start(deviceID: AudioDeviceID?) async throws -> AsyncThrowingStream<[Float], Error> {
+        await endCapture()
 
         let normalizedDeviceID = (deviceID != nil && deviceID != 0) ? deviceID : nil
         let engine = try engineReady(for: normalizedDeviceID)
 
-        let (stream, continuation) = AsyncStream<[Float]>.makeStream()
-        self.continuation = continuation
-
         let inputNode = engine.inputNode
         let inputFormat = inputNode.inputFormat(forBus: 0)
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
-            continuation.finish()
-            self.continuation = nil
             teardownEngine()
             throw DictationCaptureError.invalidFormat
         }
 
-        let resampler = AudioResampler(targetSampleRate: Self.targetSampleRate)
-        let sourceSampleRate = inputFormat.sampleRate
+        let converter = try ContinuousAudioResampler(sourceSampleRate: inputFormat.sampleRate, targetSampleRate: Self.targetSampleRate)
+        let pipeline = DictationAudioPipeline(converter: converter)
+        self.pipeline = pipeline
         let reportLevel = levelHandler
 
         inputNode.removeTap(onBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { buffer, _ in
             let mono = AudioDownmixer.toMono(buffer: buffer)
             guard !mono.isEmpty else { return }
             if let reportLevel {
@@ -62,9 +58,7 @@ actor DictationCaptureSession: DictationCapturing {
                 }
                 reportLevel(sqrt(sumOfSquares / Float(mono.count)))
             }
-            let resampled = (try? resampler.resample(mono, from: sourceSampleRate)) ?? mono
-            guard !resampled.isEmpty else { return }
-            Task { await self?.emit(resampled) }
+            pipeline.append(mono, generation: pipeline.generation)
         }
 
         engine.prepare()
@@ -72,28 +66,29 @@ actor DictationCaptureSession: DictationCapturing {
             try engine.start()
         } catch {
             inputNode.removeTap(onBus: 0)
-            continuation.finish()
-            self.continuation = nil
+            await pipeline.stop()
+            self.pipeline = nil
             teardownEngine()
             throw error
         }
         logger.info("Dictation capture started (device: \(normalizedDeviceID.map { String($0) } ?? "default"))")
-        return stream
+        return pipeline.stream
     }
 
-    func stop() {
-        endCapture()
+    func stop() async {
+        await endCapture()
         logger.info("Dictation capture stopped (engine retained)")
     }
 
     // Stops the current tap/stream but retains the prepared engine for reuse.
-    private func endCapture() {
+    private func endCapture() async {
         if let engine = audioEngine {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
         }
-        continuation?.finish()
-        continuation = nil
+        let current = pipeline
+        pipeline = nil
+        await current?.stop()
     }
 
     private func engineReady(for deviceID: AudioDeviceID?) throws -> AVAudioEngine {
@@ -123,10 +118,6 @@ actor DictationCaptureSession: DictationCapturing {
         audioEngine?.stop()
         audioEngine = nil
         configuredDeviceID = nil
-    }
-
-    private func emit(_ samples: [Float]) {
-        continuation?.yield(samples)
     }
 
     private func setInputDevice(_ deviceID: AudioDeviceID, on inputNode: AVAudioInputNode) throws {
@@ -164,5 +155,69 @@ enum DictationCaptureError: LocalizedError {
         case .deviceSelectionFailed(let status):
             return "Failed to select audio device (status: \(status))."
         }
+    }
+}
+
+/// Tap callbacks only copy into this queue. One task owns conversion and output.
+/// Each pipeline has a token and permanently closes its queue at stop.
+final class DictationAudioPipeline: @unchecked Sendable {
+    let generation = UUID()
+    let stream: AsyncThrowingStream<[Float], Error>
+    private let lock = NSLock()
+    private var buffers: [[Float]] = []
+    private var closed = false
+    private let wake: AsyncStream<Void>.Continuation
+    private var consumer: Task<Void, Never>?
+
+    init(converter: any DictationAudioConverting) {
+        let output = AsyncThrowingStream<[Float], Error>.makeStream()
+        stream = output.stream
+        let signals = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        wake = signals.continuation
+        consumer = Task { [self] in
+            do {
+                for await _ in signals.stream {
+                    for samples in takeBuffers() {
+                        let converted = try converter.convert(samples)
+                        if !converted.isEmpty { output.continuation.yield(converted) }
+                    }
+                }
+                let tail = try converter.finish()
+                if !tail.isEmpty { output.continuation.yield(tail) }
+                output.continuation.finish()
+            } catch {
+                close(discard: true)
+                output.continuation.finish(throwing: error)
+            }
+        }
+    }
+
+    func append(_ samples: [Float], generation: UUID) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !closed, generation == self.generation else { return }
+        buffers.append(samples)
+        wake.yield(())
+    }
+
+    private func takeBuffers() -> [[Float]] {
+        lock.lock()
+        defer { lock.unlock() }
+        let pending = buffers
+        buffers.removeAll(keepingCapacity: true)
+        return pending
+    }
+
+    private func close(discard: Bool = false) {
+        lock.lock()
+        defer { lock.unlock() }
+        closed = true
+        if discard { buffers.removeAll() }
+        wake.finish()
+    }
+
+    func stop() async {
+        close()
+        await consumer?.value
     }
 }
