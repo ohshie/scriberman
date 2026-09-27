@@ -183,7 +183,7 @@ struct TranscriptDetailView: View {
         } label: {
             Label("Transform", systemImage: "sparkles")
         }
-        .disabled(viewModel.isRunningTransformation || viewModel.finalTranscriptText.isEmpty)
+        .disabled(viewModel.isAIEnabled == false || viewModel.isRunningTransformation || viewModel.finalTranscriptText.isEmpty)
     }
 
     private var transcriptBody: some View {

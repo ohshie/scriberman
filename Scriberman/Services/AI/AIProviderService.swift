@@ -7,6 +7,7 @@ import OSLog
 @Observable
 final class AIProviderService: AIProviderServiceProtocol {
     enum AITransformationError: LocalizedError, Equatable {
+        case disabled
         case noAPIKeyConfigured
         case noModelSelected
         case emptyTranscript
@@ -15,6 +16,8 @@ final class AIProviderService: AIProviderServiceProtocol {
         case providerFailure(String)
         var errorDescription: String? {
             switch self {
+            case .disabled:
+                return "AI is turned off. Enable AI in Settings and try again."
             case .noAPIKeyConfigured:
                 return "AI is not configured. Add a valid API key in Settings and try again."
             case .noModelSelected:
@@ -197,13 +200,17 @@ final class AIProviderService: AIProviderServiceProtocol {
         refreshAvailableModels()
     }
 
-    func performTransformation(transcript: String, systemPrompt: String) async throws -> String {
-        let normalizedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+    func performTransformation(_ request: AITransformationRequest) async throws -> AITransformationResult {
+        guard isEnabled else {
+            throw AITransformationError.disabled
+        }
+
+        let normalizedTranscript = request.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard normalizedTranscript.isEmpty == false else {
             throw AITransformationError.emptyTranscript
         }
 
-        let normalizedPrompt = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedPrompt = request.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard normalizedPrompt.isEmpty == false else {
             throw AITransformationError.emptyPrompt
         }
@@ -214,7 +221,8 @@ final class AIProviderService: AIProviderServiceProtocol {
         guard let client = makeClient() else {
             throw AITransformationError.noAPIKeyConfigured
         }
-        guard let modelID = selectedModelID, modelID.isEmpty == false else {
+        let modelID = request.modelID
+        guard modelID.isEmpty == false else {
             throw AITransformationError.noModelSelected
         }
 
@@ -233,7 +241,11 @@ final class AIProviderService: AIProviderServiceProtocol {
             guard let outputText = Self.extractOutputText(from: response), outputText.isEmpty == false else {
                 throw AITransformationError.noOutput
             }
-            return outputText
+            return AITransformationResult(
+                text: outputText,
+                promptName: request.promptName,
+                modelID: modelID
+            )
         } catch let error as AITransformationError {
             logger.error("AI transformation failed: \(error.localizedDescription, privacy: .public)")
             throw error

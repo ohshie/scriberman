@@ -16,7 +16,7 @@ final class MockAIProviderService: AIProviderServiceProtocol {
     var fetchModelsCallCount = 0
     var addCustomModelCalls: [String] = []
     var removeCustomModelCalls: [String] = []
-    var performedTransformations: [(transcript: String, systemPrompt: String)] = []
+    var performedTransformations: [AITransformationRequest] = []
 
     var transformationResult = ""
     var addCustomModelError: Error?
@@ -58,12 +58,16 @@ final class MockAIProviderService: AIProviderServiceProtocol {
         }
     }
 
-    func performTransformation(transcript: String, systemPrompt: String) async throws -> String {
-        performedTransformations.append((transcript, systemPrompt))
+    func performTransformation(_ request: AITransformationRequest) async throws -> AITransformationResult {
+        performedTransformations.append(request)
         if let transformationError {
             throw transformationError
         }
-        return transformationResult
+        return AITransformationResult(
+            text: transformationResult,
+            promptName: request.promptName,
+            modelID: request.modelID
+        )
     }
 
     func shouldWarnAboutTranscriptLength(_ transcript: String) -> Bool {
