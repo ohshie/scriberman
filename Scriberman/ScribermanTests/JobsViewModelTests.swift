@@ -1019,6 +1019,35 @@ final class JobsViewModelTests {
     // MARK: - Search: snippets and match locations
 
     @Test
+    func testContentChangeRefreshesMatchesWithAnUnchangedQuery() async throws {
+        let session = makeSearchableSession(day: 20, title: "Standup", spokenText: "migration next week")
+        viewModel.searchQuery = "migration"
+        let items: [JobsViewModel.SessionListItem] = [.recording(session)]
+        let originalKey = JobsViewModel.SearchTaskKey(
+            query: viewModel.searchQuery, revision: viewModel.searchContentRevision(for: items)
+        )
+        #expect(originalKey.revision == viewModel.searchContentRevision(for: items))
+        await viewModel.updateSearchMatches(for: items, debounce: .zero)
+        let originalMatch = try #require(viewModel.searchMatches[items[0].id])
+
+        let replacement = TranscriptSegment(
+            speakerId: "A", text: "migration moved to next month", startTime: 30, endTime: 35
+        )
+        session.retranscript = Transcript(fullText: replacement.text, segments: [replacement], speakers: [])
+        #expect(session.searchableText == replacement.text)
+        let updatedKey = JobsViewModel.SearchTaskKey(
+            query: viewModel.searchQuery, revision: viewModel.searchContentRevision(for: items)
+        )
+        #expect(updatedKey != originalKey)
+        #expect(updatedKey.query == originalKey.query)
+        await viewModel.updateSearchMatches(for: items, debounce: .zero)
+        let updatedMatch = try #require(viewModel.searchMatches[items[0].id])
+        #expect(updatedMatch.snippet.text == replacement.text)
+        #expect(updatedMatch.blockID == replacement.id)
+        #expect(updatedMatch.blockID != originalMatch.blockID)
+    }
+
+    @Test
     func testATranscriptResultCarriesASnippetAndABlockID() async {
         let session = makeSearchableSession(
             day: 20,

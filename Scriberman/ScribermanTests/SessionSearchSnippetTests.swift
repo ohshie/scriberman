@@ -6,6 +6,23 @@ import Testing
 /// study view finds for the same query.
 @MainActor
 struct SessionSearchSnippetTests {
+    @Test
+    func testLegacyMatchTargetsTheBlockFromASeparateDecode() throws {
+        let data = Data("""
+        {"fullText":"Introduction. The migration is next week.","speakers":[],"segments":[
+          {"speakerId":"A","text":"Introduction.","startTime":0,"endTime":1},
+          {"speakerId":"B","text":"The migration is next week.","startTime":30,"endTime":35}
+        ]}
+        """.utf8)
+        let searchTranscript = try JSONDecoder().decode(Transcript.self, from: data)
+        let match = try #require(SessionSearchSnippetBuilder.match(query: "migration", in: searchTranscript))
+        let studyTranscript = try JSONDecoder().decode(Transcript.self, from: data)
+        let blocks = TranscriptGrouper.makeBlocks(from: studyTranscript)
+        let target = try #require(blocks.first { $0.id == match.blockID })
+        #expect(target.text == "The migration is next week.")
+        #expect(target.startTime == 30)
+    }
+
     private func transcript(_ lines: [String]) -> Transcript {
         let segments = lines.enumerated().map { index, line in
             TranscriptSegment(

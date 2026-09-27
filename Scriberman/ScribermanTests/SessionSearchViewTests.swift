@@ -148,13 +148,14 @@ struct SessionSearchViewTests {
         #expect(source.contains("emptyState(title: \"No Results\", systemImage: \"magnifyingglass\")"))
     }
 
-    /// Locating runs off a `.task(id:)` keyed on the query, which is what cancels an in-flight
-    /// debounce when the user keeps typing.
+    /// Query and content changes restart the cancellable match task.
     @Test(.tags(.sourceLint))
-    func testLocatingIsKeyedOnTheQuery() throws {
+    func testLocatingIsKeyedOnTheQueryAndContent() throws {
         let source = try jobsViewSource()
 
-        #expect(source.contains(".task(id: viewModel.searchQuery)"))
+        #expect(source.contains(".task(id: JobsViewModel.SearchTaskKey("))
+        #expect(source.contains("query: viewModel.searchQuery"))
+        #expect(source.contains("revision: viewModel.searchContentRevision(for: items)"))
         #expect(source.contains("await viewModel.updateSearchMatches(for: items)"))
     }
 

@@ -85,9 +85,11 @@ struct JobsView: View {
         .task {
             await viewModel.refresh()
         }
-        // Restarts on every keystroke, which is what cancels an in-flight debounce: transcripts are
-        // decoded for the query the user stopped on, not for each one they typed through.
-        .task(id: viewModel.searchQuery) {
+        // Query and content changes cancel the previous debounce and refresh match locations.
+        .task(id: JobsViewModel.SearchTaskKey(
+            query: viewModel.searchQuery,
+            revision: viewModel.searchContentRevision(for: items)
+        )) {
             await viewModel.updateSearchMatches(for: items)
         }
         .onChange(of: selection) { _, newSelection in
