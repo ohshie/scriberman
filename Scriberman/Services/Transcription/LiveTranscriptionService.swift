@@ -151,6 +151,117 @@ private struct PendingAttribution {
     let longestClusterSegment: TimedSpeakerSegment?
 }
 
+/// Settings that shape how models are constructed (`VadConfig`,
+/// `VadSegmentationConfig`, `DiarizerConfig`). A change starts a new
+/// preparation (design D3).
+struct LiveConstructionSettings: Hashable, Sendable {
+    let vadThreshold: Double
+    let vadMinSpeechDuration: Double
+    let speakerSimilarityThreshold: Double
+    let minSilenceGap: Double
+
+    init(_ settings: LiveTranscriptionPipelineSettings) {
+        vadThreshold = settings.vadThreshold
+        vadMinSpeechDuration = settings.vadMinSpeechDuration
+        speakerSimilarityThreshold = settings.speakerSimilarityThreshold
+        minSilenceGap = settings.minSilenceGap
+    }
+}
+
+struct LivePreparationKey: Hashable, Sendable {
+    let workspaceRoot: URL
+    let modelRevision: String
+    let construction: LiveConstructionSettings
+}
+
+/// Loaded models from one preparation. The factories build the stateful
+/// per-recording objects in `start` (design D3).
+struct LivePreparedModels: Sendable {
+    let asrManager: AsrManager
+    let vadProcessor: any LiveVADStreamingProcessing
+    let makeDiarizer: @Sendable () -> DiarizerManager
+    let makeTurnDiarizers: @Sendable () -> [AudioSource: any StreamingTurnDiarizing]
+}
+
+/// Model loading steps used by a preparation. Tests inject their own.
+struct LiveModelLoader: Sendable {
+    var loadAsr: @Sendable (Workspace) async throws -> AsrManager
+    var loadDiarizer: @Sendable (Workspace, LiveConstructionSettings) async throws -> @Sendable () -> DiarizerManager
+    var loadVad: @Sendable (Workspace, LiveConstructionSettings) async throws -> any LiveVADStreamingProcessing
+    var loadTurnDiarizers: @Sendable (Workspace) async throws -> @Sendable () -> [AudioSource: any StreamingTurnDiarizing]
+
+    static let workspace = LiveModelLoader(
+        loadAsr: { workspace in
+            let asr = AsrManager(config: ASRConfig())
+            let asrDirectory = try ModelPathResolver().modelDirectory(for: .asrParakeetUltra, in: workspace)
+            let asrModels = try await AsrModels.load(from: asrDirectory, version: ModelPathResolver.asrModelVersion, encoderComputeUnits: .cpuAndGPU)
+            try await asr.loadModels(asrModels)
+            return asr
+        },
+        loadDiarizer: { workspace, construction in
+            let diarizerRepo = try ModelPathResolver().modelDirectory(for: .offlineDiarization, in: workspace)
+            let segmentationURL = diarizerRepo.appendingPathComponent("pyannote_segmentation.mlmodelc", isDirectory: true)
+            let embeddingURL = diarizerRepo.appendingPathComponent("wespeaker_v2.mlmodelc", isDirectory: true)
+            let fileManager = FileManager.default
+            guard fileManager.fileExists(atPath: segmentationURL.path),
+                  fileManager.fileExists(atPath: embeddingURL.path)
+            else {
+                throw LiveTranscriptionError.initializationFailed
+            }
+            let models = try await DiarizerModels.load(
+                localSegmentationModel: segmentationURL,
+                localEmbeddingModel: embeddingURL
+            )
+            let diarizerConfig = DiarizerConfig(
+                clusteringThreshold: Float(construction.speakerSimilarityThreshold),
+                minSpeechDuration: Float(construction.vadMinSpeechDuration),
+                minSilenceGap: Float(construction.minSilenceGap)
+            )
+            // DiarizerManager accumulates speakers across calls, so each
+            // recording gets a new one.
+            return {
+                let manager = DiarizerManager(config: diarizerConfig)
+                manager.initialize(models: models)
+                return manager
+            }
+        },
+        loadVad: { workspace, construction in
+            let vadDirectory = try ModelPathResolver().modelDirectory(for: .vadSilero, in: workspace)
+            let vadModelURL = vadDirectory.appendingPathComponent(ModelNames.VAD.sileroVadFile, isDirectory: true)
+            let mlConfig = MLModelConfiguration()
+            mlConfig.computeUnits = .cpuAndNeuralEngine
+            let mlModel = try await MLModel.load(contentsOf: vadModelURL, configuration: mlConfig)
+            let manager = VadManager(config: VadConfig(defaultThreshold: Float(construction.vadThreshold)), vadModel: mlModel)
+            return VadManagerStreamProcessor(manager: manager)
+        },
+        loadTurnDiarizers: { workspace in
+            let repoDirectory = try ModelPathResolver().modelDirectory(for: .nemotron3Diarization, in: workspace)
+            let config = ModelPathResolver.nemotron3LoadConfig
+            let models = SharedNemotron3Models(try await Nemotron3Models.load(config: config, directory: repoDirectory))
+            // One model shared by per-source diarizers, each owning its own
+            // streaming state.
+            return {
+                var diarizers: [AudioSource: any StreamingTurnDiarizing] = [:]
+                for source in AudioSource.allCases {
+                    diarizers[source] = Nemotron3TurnDiarizer(config: config, models: models.value)
+                }
+                return diarizers
+            }
+        }
+    )
+}
+
+// @unchecked: Nemotron3Models holds reused scratch buffers. Only diarizers
+// driven by LiveTranscriptionService's actor use it, and the actor serializes
+// every feed/finish call without awaiting inside them.
+private final class SharedNemotron3Models: @unchecked Sendable {
+    let value: Nemotron3Models
+
+    init(_ value: Nemotron3Models) {
+        self.value = value
+    }
+}
+
 protocol LiveTranscribing: Sendable {
     func prepare(workspace: Workspace, config: LiveTranscriptionPipelineSettings) async
     func start(workspace: Workspace, config: LiveTranscriptionPipelineSettings, resultContinuation: AsyncStream<TranscriptSegment>.Continuation) async throws
@@ -163,11 +274,16 @@ actor LiveTranscriptionService: LiveTranscribing {
     private let fileManager = FileManager.default
     private let modelPathResolver = ModelPathResolver()
 
-    // Core managers
+    // Core managers for the current recording, taken from the preparation
+    // by start().
     private var asrManager: AsrManager?
     private var diarizer: DiarizerManager?
-    private var vadManager: VadManager?
     private var vadStreamProcessor: (any LiveVADStreamingProcessing)?
+
+    // Single-flight model preparation shared by prepare() and start()
+    // (design D3).
+    private let modelLoader: LiveModelLoader
+    private var preparation: (key: LivePreparationKey, task: Task<LivePreparedModels, Error>)?
 
     // Streaming turn diarization: one session-long diarizer per source
     // (sources have independent sample clocks; a shared instance would
@@ -192,7 +308,7 @@ actor LiveTranscriptionService: LiveTranscribing {
     private let speakerEmbeddingStore: SpeakerEmbeddingStore?
     private let speakerMatcher = SpeakerMatcher()
 
-    // Model initialization guard (tasks 4.1, 4.2)
+    // True while a started recording has its managers installed.
     private(set) var isInitialized = false
 
     // Audio processing constants (task 2.1: 5.0 → 10.0)
@@ -211,7 +327,12 @@ actor LiveTranscriptionService: LiveTranscribing {
     private var speechStartOffsets: [AudioSource: Float] = [:]
     private var recentPreRollChunks: [AudioSource: [[Float]]] = [:]
     private var vadInputRemainders: [AudioSource: [Float]] = [:]
+    // Samples received per source (after gap fill and overlap trim). The
+    // turn diarizer timeline and fallback offsets use this.
     private var totalSamplesProcessed: [AudioSource: Int] = [:]
+    // Samples per source already fed to the VAD; start of the next VAD chunk
+    // (design D1). Trails `totalSamplesProcessed` by the pending remainder.
+    private var vadConsumedSamples: [AudioSource: Int] = [:]
     private var lastFinalSegmentEndOffsets: [AudioSource: Float] = [:]
     private var decoderStates: [AudioSource: TdtDecoderState] = [:]
 #if DEBUG
@@ -238,152 +359,82 @@ actor LiveTranscriptionService: LiveTranscribing {
     private var captureAnchor: HostNanoseconds?
 
     // task 3.1: SpeakerEmbeddingStore injected via init
-    init(speakerEmbeddingStore: SpeakerEmbeddingStore? = nil) {
+    init(speakerEmbeddingStore: SpeakerEmbeddingStore? = nil, modelLoader: LiveModelLoader = .workspace) {
         self.speakerEmbeddingStore = speakerEmbeddingStore
+        self.modelLoader = modelLoader
     }
 
-    // MARK: - Model Pre-warming (task 4.1)
+    // MARK: - Model Preparation (design D3)
 
-    /// Loads ASR and diarizer models without starting the audio pipeline.
-    /// Idempotent: subsequent calls are no-ops if already initialized.
+    /// Loads models for `workspace` and `config` without starting a recording.
+    /// Joins a preparation already running or finished for the same key.
     func prepare(workspace: Workspace, config: LiveTranscriptionPipelineSettings = .defaults) async {
-        guard !isInitialized else {
-            logger.info("LiveTranscriptionService already initialized, skipping prepare()")
-            return
+        logger.info("Pre-warming live transcription models...")
+        do {
+            _ = try await preparedModels(workspace: workspace, config: config)
+            logger.info("LiveTranscriptionService pre-warming complete")
+        } catch {
+            logger.error("Model preparation failed: \(error). Live transcription unavailable.")
+        }
+    }
+
+    /// Returns the models for this key: the stored preparation when the key
+    /// matches, otherwise a new one that replaces it. A failed preparation is
+    /// cleared so the next call retries.
+    private func preparedModels(workspace: Workspace, config: LiveTranscriptionPipelineSettings) async throws -> LivePreparedModels {
+        let key = LivePreparationKey(
+            workspaceRoot: workspace.rootURL,
+            modelRevision: Self.modelRevision,
+            construction: LiveConstructionSettings(config)
+        )
+        let task: Task<LivePreparedModels, Error>
+        if let preparation, preparation.key == key {
+            task = preparation.task
+        } else {
+            let loader = modelLoader
+            let logger = logger
+            task = Task {
+                try await Self.loadModels(workspace: workspace, construction: key.construction, loader: loader, logger: logger)
+            }
+            // A replaced task still finishes for callers already awaiting it.
+            preparation = (key, task)
         }
 
-        logger.info("Pre-warming live transcription models...")
-        await prepare(
-            workspace: workspace,
-            config: config,
-            initializeAsr: { workspace in
-                let asrConfig = ASRConfig()
-                let asr = AsrManager(config: asrConfig)
-                let asrDirectory = try ModelPathResolver().modelDirectory(for: .asrParakeetUltra, in: workspace)
-                let asrModels = try await AsrModels.load(from: asrDirectory, version: ModelPathResolver.asrModelVersion, encoderComputeUnits: .cpuAndGPU)
-                try await asr.loadModels(asrModels)
-                return asr
-            },
-            initializeDiarizer: { workspace, config in
-                let diarizerConfig = DiarizerConfig(
-                    clusteringThreshold: Float(config.speakerSimilarityThreshold),
-                    minSpeechDuration: Float(config.vadMinSpeechDuration),
-                    minSilenceGap: Float(config.minSilenceGap)
-                )
-                let mgr = DiarizerManager(config: diarizerConfig)
-                let diarizerRepo = try ModelPathResolver().modelDirectory(for: .offlineDiarization, in: workspace)
-                let segmentationURL = diarizerRepo.appendingPathComponent("pyannote_segmentation.mlmodelc", isDirectory: true)
-                let embeddingURL = diarizerRepo.appendingPathComponent("wespeaker_v2.mlmodelc", isDirectory: true)
-                let fileManager = FileManager.default
-                guard fileManager.fileExists(atPath: segmentationURL.path),
-                      fileManager.fileExists(atPath: embeddingURL.path)
-                else {
-                    throw LiveTranscriptionError.initializationFailed
-                }
-
-                let models = try await DiarizerModels.load(
-                    localSegmentationModel: segmentationURL,
-                    localEmbeddingModel: embeddingURL
-                )
-                mgr.initialize(models: models)
-                return mgr
-            },
-            initializeVad: { workspace, config in
-                let vadDirectory = try ModelPathResolver().modelDirectory(for: .vadSilero, in: workspace)
-                let vadModelURL = vadDirectory.appendingPathComponent(ModelNames.VAD.sileroVadFile, isDirectory: true)
-                let mlConfig = MLModelConfiguration()
-                mlConfig.computeUnits = .cpuAndNeuralEngine
-                let mlModel = try await MLModel.load(contentsOf: vadModelURL, configuration: mlConfig)
-                let manager = VadManager(config: VadConfig(defaultThreshold: Float(config.vadThreshold)), vadModel: mlModel)
-                return (manager, VadManagerStreamProcessor(manager: manager))
-            },
-            initializeTurnDiarizers: { workspace in
-                // One model shared by per-source diarizers, each owning its own
-                // streaming state. Safe because this actor serializes every
-                // feed/finish call and none of them await (design D3).
-                let repoDirectory = try ModelPathResolver().modelDirectory(for: .nemotron3Diarization, in: workspace)
-                let config = ModelPathResolver.nemotron3LoadConfig
-                let models = try await Nemotron3Models.load(config: config, directory: repoDirectory)
-                var diarizers: [AudioSource: any StreamingTurnDiarizing] = [:]
-                for source in AudioSource.allCases {
-                    diarizers[source] = Nemotron3TurnDiarizer(config: config, models: models)
-                }
-                return diarizers
+        do {
+            return try await task.value
+        } catch {
+            if preparation?.task == task {
+                preparation = nil
             }
+            throw error
+        }
+    }
+
+    private static func loadModels(
+        workspace: Workspace,
+        construction: LiveConstructionSettings,
+        loader: LiveModelLoader,
+        logger: Logger
+    ) async throws -> LivePreparedModels {
+        let asrManager = try await loader.loadAsr(workspace)
+        logger.info("AsrManager initialized")
+        let makeDiarizer = try await loader.loadDiarizer(workspace, construction)
+        logger.info("Diarizer models loaded from workspace")
+        let vadProcessor = try await loader.loadVad(workspace, construction)
+        logger.info("VAD model loaded from workspace (threshold \(construction.vadThreshold))")
+        let makeTurnDiarizers = try await loader.loadTurnDiarizers(workspace)
+        logger.info("Turn diarizer models loaded from workspace")
+        return LivePreparedModels(
+            asrManager: asrManager,
+            vadProcessor: vadProcessor,
+            makeDiarizer: makeDiarizer,
+            makeTurnDiarizers: makeTurnDiarizers
         )
     }
 
-    private func prepare(
-        workspace: Workspace,
-        config: LiveTranscriptionPipelineSettings,
-        initializeAsr: @Sendable (Workspace) async throws -> AsrManager,
-        initializeDiarizer: @Sendable (Workspace, LiveTranscriptionPipelineSettings) async throws -> DiarizerManager,
-        initializeVad: @Sendable (Workspace, LiveTranscriptionPipelineSettings) async throws -> (VadManager, any LiveVADStreamingProcessing),
-        initializeTurnDiarizers: @Sendable (Workspace) async throws -> [AudioSource: any StreamingTurnDiarizing]
-    ) async {
-        storedConfig = config
-
-        // 1. Initialize ASR
-        do {
-            let asr = try await initializeAsr(workspace)
-            self.asrManager = asr
-            logger.info("AsrManager initialized")
-        } catch {
-            logger.error("ASR initialization failed during prepare(): \(error). Live transcription unavailable.")
-            // Leave isInitialized = false so start() can surface the error
-            asrManager = nil
-            diarizer = nil
-            vadManager = nil
-            vadStreamProcessor = nil
-            return
-        }
-
-        // 2. Initialize DiarizerManager
-        do {
-            let mgr = try await initializeDiarizer(workspace, config)
-            self.diarizer = mgr
-            logger.info("DiarizerManager initialized from workspace models")
-        } catch {
-            logger.error("Diarizer initialization failed during prepare(): \(error). Live transcription unavailable.")
-            asrManager = nil
-            diarizer = nil
-            vadManager = nil
-            vadStreamProcessor = nil
-            return
-        }
-
-        // 3. Initialize VAD
-        do {
-            let (manager, processor) = try await initializeVad(workspace, config)
-            self.vadManager = manager
-            self.vadStreamProcessor = processor
-            logger.info("VadManager initialized from workspace models")
-        } catch {
-            logger.error("VAD initialization failed during prepare(): \(error). Live transcription unavailable.")
-            asrManager = nil
-            diarizer = nil
-            vadManager = nil
-            vadStreamProcessor = nil
-            return
-        }
-
-        // 4. Initialize turn diarizers (one per audio source)
-        do {
-            let diarizers = try await initializeTurnDiarizers(workspace)
-            installTurnDiarizers(diarizers)
-            logger.info("Turn diarizers initialized from workspace models (\(self.turnDiarizers.count) sources)")
-        } catch {
-            logger.error("Turn diarizer initialization failed during prepare(): \(error). Live transcription unavailable.")
-            asrManager = nil
-            diarizer = nil
-            vadManager = nil
-            vadStreamProcessor = nil
-            installTurnDiarizers([:])
-            return
-        }
-
-        isInitialized = true
-        logger.info("LiveTranscriptionService pre-warming complete (diarizer available: \(self.diarizer != nil))")
+    /// Model versions every load path uses. Part of the preparation key.
+    private static var modelRevision: String {
+        "\(ModelPathResolver.asrModelVersion)|\(ModelPathResolver.nemotron3BundleRelativePath)"
     }
 
     // MARK: - Lifecycle
@@ -400,6 +451,7 @@ actor LiveTranscriptionService: LiveTranscribing {
         recentPreRollChunks.removeAll()
         vadInputRemainders.removeAll()
         totalSamplesProcessed.removeAll()
+        vadConsumedSamples.removeAll()
         lastFinalSegmentEndOffsets.removeAll()
         decoderStates.removeAll()
         collectedFinalSegments.removeAll()
@@ -407,25 +459,29 @@ actor LiveTranscriptionService: LiveTranscribing {
         sessionSpeakerIdentities.removeAll()
         turnUnreliableFromOffsets.removeAll()
         pendingAttributions.removeAll()
-        for turnDiarizer in turnDiarizers.values {
-            turnDiarizer.reset()
-        }
-        installTurnDiarizers(turnDiarizers)
 
         storedConfig = config
 
-        // task 4.2: skip model loading if already initialized by prepare()
-        if !isInitialized {
-            await prepare(workspace: workspace, config: config)
-        }
-
-        guard isInitialized, asrManager != nil, diarizer != nil, vadStreamProcessor != nil else {
+        let models: LivePreparedModels
+        do {
+            models = try await preparedModels(workspace: workspace, config: config)
+        } catch {
+            logger.error("Live transcription start failed: \(error)")
+            isInitialized = false
             resultContinuation.finish()
             self.resultContinuation = nil
             throw LiveTranscriptionError.initializationFailed
         }
 
-        logger.info("LiveTranscriptionService started (diarizer: \(self.diarizer != nil))")
+        // Per-recording objects are built here, not during preparation
+        // (design D3), so each recording starts from clean state.
+        asrManager = models.asrManager
+        vadStreamProcessor = models.vadProcessor
+        diarizer = models.makeDiarizer()
+        installTurnDiarizers(models.makeTurnDiarizers())
+        isInitialized = true
+
+        logger.info("LiveTranscriptionService started (turn diarizers: \(self.turnDiarizers.count))")
     }
 
     func stop() async -> [TranscriptSegment] {
@@ -434,6 +490,10 @@ actor LiveTranscriptionService: LiveTranscribing {
             resultContinuation?.finish()
             resultContinuation = nil
         }
+
+        // Audio received since the last whole VAD chunk goes through the VAD
+        // before anything is finished or flushed.
+        await processFinalVADRemainders()
 
         // Finish each turn diarizer stream first so its timeline covers all
         // audio before held buffers and the pending speech buffers below are
@@ -526,7 +586,7 @@ actor LiveTranscriptionService: LiveTranscribing {
 
         let segments = collectedFinalSegments
 
-        // Cleanup — reset isInitialized so next session creates a fresh DiarizerManager
+        // Cleanup: release the models; the next recording prepares again.
         collectedFinalSegments.removeAll()
         sessionSpeakers.removeAll()
         sessionSpeakerIdentities.removeAll()
@@ -537,12 +597,13 @@ actor LiveTranscriptionService: LiveTranscribing {
         recentPreRollChunks.removeAll()
         vadInputRemainders.removeAll()
         totalSamplesProcessed.removeAll()
+        vadConsumedSamples.removeAll()
         lastFinalSegmentEndOffsets.removeAll()
         decoderStates.removeAll()
         asrManager = nil
         diarizer = nil
-        vadManager = nil
         vadStreamProcessor = nil
+        preparation = nil
         installTurnDiarizers([:])
         turnUnreliableFromOffsets.removeAll()
         pendingAttributions.removeAll()
@@ -601,73 +662,96 @@ actor LiveTranscriptionService: LiveTranscribing {
             }
 
             guard processableCount > 0 else { return }
-            guard let vadStreamProcessor else { return }
-
-            let processableSamples = Array(combinedSamples.prefix(processableCount))
-            var currentChunkStartSamples = (totalSamplesProcessed[source] ?? 0) - processableCount
+            guard vadStreamProcessor != nil else { return }
 
             for startIndex in stride(from: 0, to: processableCount, by: chunkSize) {
-                let chunk = Array(processableSamples[startIndex..<(startIndex + chunkSize)])
-                let streamState = vadStreamStates[source] ?? .initial()
-                let vadSegmentationConfig = VadSegmentationConfig(minSpeechDuration: storedConfig.vadMinSpeechDuration)
-                let result = try await vadStreamProcessor.processStreamingChunk(
-                    chunk,
-                    state: streamState,
-                    config: vadSegmentationConfig
-                )
-                vadStreamStates[source] = result.state
-
-                if result.eventKind == LiveVADEventKind.speechStart {
-                    let preRollChunks = recentPreRollChunks[source] ?? []
-                    let preRollSamples = preRollChunks.flatMap { $0 }
-                    let prependedSampleCount = preRollSamples.count
-                    let triggerOffset = Float(currentChunkStartSamples) / Self.SAMPLE_RATE
-                    let adjustedOffset = max(
-                        lastFinalSegmentEndOffsets[source] ?? 0,
-                        max(0, triggerOffset - Float(prependedSampleCount) / Self.SAMPLE_RATE)
-                    )
-                    speechStartOffsets[source] = adjustedOffset
-                    speechAccumulationBuffers[source] = preRollSamples
-                    recentPreRollChunks[source] = []
-                }
-
-                if result.isTriggered {
-                    var speechBuffer = speechAccumulationBuffers[source] ?? []
-                    speechBuffer.append(contentsOf: chunk)
-                    speechAccumulationBuffers[source] = speechBuffer
-
-                    if speechBuffer.count >= Self.MAX_SPEECH_SAMPLES {
-                        await flushSpeechBuffer(for: source)
-                        speechAccumulationBuffers[source] = []
-                        speechStartOffsets[source] = nil
-                        recentPreRollChunks[source] = []
-                    }
-                }
-
-                if result.eventKind == LiveVADEventKind.speechEnd {
-                    // When VAD transitions triggered→false before the accumulation block above,
-                    // this final chunk was never added to the buffer. Include it now.
-                    if !result.isTriggered {
-                        var speechBuffer = speechAccumulationBuffers[source] ?? []
-                        speechBuffer.append(contentsOf: chunk)
-                        speechAccumulationBuffers[source] = speechBuffer
-                    }
-                    if let buffer = speechAccumulationBuffers[source], !buffer.isEmpty {
-                        await flushSpeechBuffer(for: source)
-                    }
-                    speechAccumulationBuffers[source] = []
-                    speechStartOffsets[source] = nil
-                    recentPreRollChunks[source] = []
-                }
-
-                if !result.isTriggered && result.eventKind != LiveVADEventKind.speechEnd {
-                    appendPreRollChunk(chunk, for: source)
-                }
-
-                currentChunkStartSamples += chunkSize
+                let chunk = Array(combinedSamples[startIndex..<(startIndex + chunkSize)])
+                try await processVADChunk(chunk, realCount: chunkSize, source: source)
             }
         } catch {
             logger.error("Error processing live audio (\(source.rawValue)): \(error.localizedDescription)")
+        }
+    }
+
+    /// Runs one `VAD_CHUNK_SIZE` chunk through the VAD. Only the first
+    /// `realCount` samples are audio; the rest is zero padding (stop-time
+    /// remainder, design D2) and never enters the speech buffer. The chunk
+    /// starts at `vadConsumedSamples`, which advances by `realCount`.
+    private func processVADChunk(_ chunk: [Float], realCount: Int, source: AudioSource) async throws {
+        guard let vadStreamProcessor else { return }
+        let chunkStartSamples = vadConsumedSamples[source] ?? 0
+        vadConsumedSamples[source] = chunkStartSamples + realCount
+        let realSamples = realCount == chunk.count ? chunk : Array(chunk.prefix(realCount))
+
+        let streamState = vadStreamStates[source] ?? .initial()
+        let vadSegmentationConfig = VadSegmentationConfig(minSpeechDuration: storedConfig.vadMinSpeechDuration)
+        let result = try await vadStreamProcessor.processStreamingChunk(
+            chunk,
+            state: streamState,
+            config: vadSegmentationConfig
+        )
+        vadStreamStates[source] = result.state
+
+        if result.eventKind == LiveVADEventKind.speechStart {
+            let preRollChunks = recentPreRollChunks[source] ?? []
+            let preRollSamples = preRollChunks.flatMap { $0 }
+            let prependedSampleCount = preRollSamples.count
+            let triggerOffset = Float(chunkStartSamples) / Self.SAMPLE_RATE
+            let adjustedOffset = max(
+                lastFinalSegmentEndOffsets[source] ?? 0,
+                max(0, triggerOffset - Float(prependedSampleCount) / Self.SAMPLE_RATE)
+            )
+            speechStartOffsets[source] = adjustedOffset
+            speechAccumulationBuffers[source] = preRollSamples
+            recentPreRollChunks[source] = []
+        }
+
+        if result.isTriggered {
+            var speechBuffer = speechAccumulationBuffers[source] ?? []
+            speechBuffer.append(contentsOf: realSamples)
+            speechAccumulationBuffers[source] = speechBuffer
+
+            if speechBuffer.count >= Self.MAX_SPEECH_SAMPLES {
+                await flushSpeechBuffer(for: source)
+                speechAccumulationBuffers[source] = []
+                speechStartOffsets[source] = nil
+                recentPreRollChunks[source] = []
+            }
+        }
+
+        if result.eventKind == LiveVADEventKind.speechEnd {
+            // When VAD transitions triggered→false before the accumulation block above,
+            // this final chunk was never added to the buffer. Include it now.
+            if !result.isTriggered {
+                var speechBuffer = speechAccumulationBuffers[source] ?? []
+                speechBuffer.append(contentsOf: realSamples)
+                speechAccumulationBuffers[source] = speechBuffer
+            }
+            if let buffer = speechAccumulationBuffers[source], !buffer.isEmpty {
+                await flushSpeechBuffer(for: source)
+            }
+            speechAccumulationBuffers[source] = []
+            speechStartOffsets[source] = nil
+            recentPreRollChunks[source] = []
+        }
+
+        if !result.isTriggered && result.eventKind != LiveVADEventKind.speechEnd {
+            appendPreRollChunk(realSamples, for: source)
+        }
+    }
+
+    /// Feeds each source's leftover samples, zero-padded to a full chunk, so
+    /// audio received since the last whole chunk reaches the VAD (design D2).
+    private func processFinalVADRemainders() async {
+        for source in Array(vadInputRemainders.keys) {
+            guard let remainder = vadInputRemainders[source], !remainder.isEmpty else { continue }
+            vadInputRemainders[source] = []
+            let padded = remainder + [Float](repeating: 0, count: Self.VAD_CHUNK_SIZE - remainder.count)
+            do {
+                try await processVADChunk(padded, realCount: remainder.count, source: source)
+            } catch {
+                logger.error("Error processing final VAD remainder (\(source.rawValue)): \(error.localizedDescription)")
+            }
         }
     }
 
@@ -1048,24 +1132,6 @@ extension LiveTranscriptionService {
 
     func processedSampleCountForTesting(source: AudioSource) -> Int {
         totalSamplesProcessed[source] ?? 0
-    }
-
-    func prepareForTesting(
-        workspace: Workspace,
-        config: LiveTranscriptionPipelineSettings = .defaults,
-        initializeAsr: @Sendable (Workspace) async throws -> AsrManager,
-        initializeDiarizer: @Sendable (Workspace, LiveTranscriptionPipelineSettings) async throws -> DiarizerManager,
-        initializeVad: @Sendable (Workspace, LiveTranscriptionPipelineSettings) async throws -> (VadManager, any LiveVADStreamingProcessing),
-        initializeTurnDiarizers: @Sendable (Workspace) async throws -> [AudioSource: any StreamingTurnDiarizing] = { _ in [:] }
-    ) async {
-        await prepare(
-            workspace: workspace,
-            config: config,
-            initializeAsr: initializeAsr,
-            initializeDiarizer: initializeDiarizer,
-            initializeVad: initializeVad,
-            initializeTurnDiarizers: initializeTurnDiarizers
-        )
     }
 
     func setTurnDiarizersForTesting(_ diarizers: [AudioSource: any StreamingTurnDiarizing]) {
