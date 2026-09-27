@@ -54,7 +54,7 @@ actor AudioImportService {
             try await mixdownService.mix(
                 micURL: inputURL,
                 appURL: nil,
-                micStartHostTime: 0,
+                micStartHostTime: HostNanoseconds(nanoseconds: 0),
                 appStartHostTime: nil,
                 into: outputURL,
                 deleteSourceFiles: false

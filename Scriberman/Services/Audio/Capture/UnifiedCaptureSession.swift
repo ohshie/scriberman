@@ -73,8 +73,8 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
         processID: pid_t,
         micDeviceUID: String?,
         liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil,
-        onMicFirstHostTime: (@Sendable (UInt64) -> Void)? = nil,
-        onAppFirstHostTime: (@Sendable (UInt64) -> Void)? = nil,
+        onMicFirstHostTime: (@Sendable (HostNanoseconds) -> Void)? = nil,
+        onAppFirstHostTime: (@Sendable (HostNanoseconds) -> Void)? = nil,
         notificationCenter: NotificationCenter = .default,
         reusingStreamers: (mic: AudioFileStreamer, app: AudioFileStreamer)? = nil
     ) {

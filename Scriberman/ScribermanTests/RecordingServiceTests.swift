@@ -149,7 +149,7 @@ final class RecordingServiceTests {
             micURL: URL(fileURLWithPath: "/tmp/does-not-exist-mic.wav"),
             appURL: nil,
             mixdownURL: outputURL,
-            micStartHostTime: 1,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1),
             appStartHostTime: nil
         )
 
@@ -191,14 +191,14 @@ final class RecordingServiceTests {
             appAudioSettings: appAudioSettings
         )
 
-        await service.captureMicStartHostTimeIfNeeded(1_000)
-        await service.captureMicStartHostTimeIfNeeded(2_000)
-        await service.captureAppStartHostTimeIfNeeded(3_000)
-        await service.captureAppStartHostTimeIfNeeded(4_000)
+        await service.captureMicStartHostTimeIfNeeded(HostNanoseconds(nanoseconds: 1_000))
+        await service.captureMicStartHostTimeIfNeeded(HostNanoseconds(nanoseconds: 2_000))
+        await service.captureAppStartHostTimeIfNeeded(HostNanoseconds(nanoseconds: 3_000))
+        await service.captureAppStartHostTimeIfNeeded(HostNanoseconds(nanoseconds: 4_000))
 
         let hostTimes = await service.capturedHostTimes()
-        #expect(hostTimes.mic == 1_000)
-        #expect(hostTimes.app == 3_000)
+        #expect(hostTimes.mic == HostNanoseconds(nanoseconds: 1_000))
+        #expect(hostTimes.app == HostNanoseconds(nanoseconds: 3_000))
     }
 
     @Test
@@ -263,7 +263,7 @@ final class RecordingServiceTests {
         let mixdownCoordinator = MockRecordingMixdownCoordinator()
         let screenVideoMuxer = MockScreenVideoMuxer()
         let screenSession = MockScreenCaptureSession()
-        screenSession.videoStartHostTime = 9_000
+        screenSession.videoStartHostTime = HostNanoseconds(nanoseconds: 9_000)
         let factoryProbe = ScreenCaptureSessionFactoryProbe(session: screenSession)
 
         let service = RecordingService(
@@ -300,6 +300,24 @@ final class RecordingServiceTests {
         let mixdownStart = try #require(await mixdownCoordinator.firstCallStartedAt())
         let muxStart = try #require(await screenVideoMuxer.firstCallStartedAt())
         #expect(abs(mixdownStart.timeIntervalSince(muxStart)) < 0.25)
+    }
+
+    @Test
+    func testEngineTapHostTimeConvertsToNanoseconds() {
+        let ticks = AVAudioTime.hostTime(forSeconds: 2.5)
+
+        #expect(AVAudioEngineMicCaptureController.hostTime(of: AVAudioTime(hostTime: ticks)) == HostNanoseconds(nanoseconds: 2_500_000_000))
+        #expect(AVAudioEngineMicCaptureController.hostTime(of: AVAudioTime(hostTime: 0)) == nil)
+    }
+
+    @Test
+    func testAudioAnchorIsTheEarlierStartTime() {
+        let mic = HostNanoseconds(nanoseconds: 2_000_000_000)
+        let app = HostNanoseconds(nanoseconds: 1_500_000_000)
+
+        #expect(RecordingService.audioAnchorHostTime(mic: mic, app: app) == app)
+        #expect(RecordingService.audioAnchorHostTime(mic: app, app: mic) == app)
+        #expect(RecordingService.audioAnchorHostTime(mic: mic, app: nil) == mic)
     }
 
     @Test
@@ -536,7 +554,7 @@ final class RecordingServiceTests {
         let mixdownCoordinator = MockRecordingMixdownCoordinator()
         let screenVideoMuxer = MockScreenVideoMuxer()
         let screenSession = MockScreenCaptureSession()
-        screenSession.videoStartHostTime = 5_000
+        screenSession.videoStartHostTime = HostNanoseconds(nanoseconds: 5_000)
         let factoryProbe = ScreenCaptureSessionFactoryProbe(session: screenSession)
 
         let service = RecordingService(
@@ -591,7 +609,7 @@ final class RecordingServiceTests {
         let mixdownCoordinator = MockRecordingMixdownCoordinator()
         let screenVideoMuxer = MockScreenVideoMuxer()
         let screenSession = MockScreenCaptureSession()
-        screenSession.videoStartHostTime = 5_000
+        screenSession.videoStartHostTime = HostNanoseconds(nanoseconds: 5_000)
         let stopBlocker = MockScreenCaptureStopBlocker()
         screenSession.blockNextStop(using: stopBlocker)
         let factoryProbe = ScreenCaptureSessionFactoryProbe(session: screenSession)
@@ -1077,11 +1095,11 @@ final class RecordingServiceTests {
             desiredMicDeviceUID: nil,
             micFileURL: micURL
         )
-        await fixture.service.captureMicStartHostTimeIfNeeded(1_000)
+        await fixture.service.captureMicStartHostTimeIfNeeded(HostNanoseconds(nanoseconds: 1_000))
         await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
-        await fixture.service.captureMicStartHostTimeIfNeeded(2_000)
+        await fixture.service.captureMicStartHostTimeIfNeeded(HostNanoseconds(nanoseconds: 2_000))
 
-        #expect(await fixture.service.capturedHostTimes().mic == 1_000)
+        #expect(await fixture.service.capturedHostTimes().mic == HostNanoseconds(nanoseconds: 1_000))
     }
 
     @Test
@@ -1842,7 +1860,7 @@ private final class ScreenCaptureSessionFactoryProbe: @unchecked Sendable {
 
 private final class MockScreenCaptureSession: ScreenCaptureSessionControlling, @unchecked Sendable {
     var onError: (@Sendable (Error) -> Void)?
-    var videoStartHostTime: UInt64?
+    var videoStartHostTime: HostNanoseconds?
     var startError: Error?
     private(set) var startedVideoURL: URL?
     private(set) var stopCallCount = 0
@@ -1936,8 +1954,8 @@ private actor MockRecordingMixdownCoordinator: RecordingMixdownCoordinating {
         micURL _: URL,
         appURL _: URL?,
         mixdownURL _: URL,
-        micStartHostTime _: UInt64,
-        appStartHostTime _: UInt64?
+        micStartHostTime _: HostNanoseconds,
+        appStartHostTime _: HostNanoseconds?
     ) async {
         calls.append(Call(startedAt: Date()))
         let continuations = waiters
@@ -2019,7 +2037,7 @@ private final class MockMicCaptureController: MicCaptureControlling, @unchecked 
         micStreamer _: AudioFileStreamer,
         voiceProcessingEnabled _: Bool,
         applyVoiceProcessing _: @Sendable (AVAudioInputNode, Bool) -> Void,
-        onFirstHostTime _: @escaping @Sendable (UInt64) -> Void,
+        onFirstHostTime _: @escaping @Sendable (HostNanoseconds) -> Void,
         onBuffer _: @escaping @Sendable ([Float], Double) -> Void
     ) throws {
         if !startCaptureErrors.isEmpty {

@@ -59,7 +59,7 @@ protocol MicCaptureControlling: AnyObject {
         micStreamer: AudioFileStreamer,
         voiceProcessingEnabled: Bool,
         applyVoiceProcessing: @Sendable (AVAudioInputNode, Bool) -> Void,
-        onFirstHostTime: @escaping @Sendable (UInt64) -> Void,
+        onFirstHostTime: @escaping @Sendable (HostNanoseconds) -> Void,
         onBuffer: @escaping @Sendable ([Float], Double) -> Void
     ) throws
     func stopCapture()
@@ -78,7 +78,7 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
         micStreamer: AudioFileStreamer,
         voiceProcessingEnabled: Bool,
         applyVoiceProcessing: @Sendable (AVAudioInputNode, Bool) -> Void,
-        onFirstHostTime: @escaping @Sendable (UInt64) -> Void,
+        onFirstHostTime: @escaping @Sendable (HostNanoseconds) -> Void,
         onBuffer: @escaping @Sendable ([Float], Double) -> Void
     ) throws {
         stopCapture()
@@ -115,8 +115,9 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
                 return
             }
 
-            if audioTime.hostTime != 0 {
-                onFirstHostTime(audioTime.hostTime)
+            let hostTime = Self.hostTime(of: audioTime)
+            if let hostTime {
+                onFirstHostTime(hostTime)
             }
 
             let outputBuffer: AVAudioPCMBuffer
@@ -129,10 +130,7 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
                 outputBuffer = buffer
             }
 
-            let hostNanos: UInt64? = audioTime.hostTime != 0
-                ? HostClock.nanoseconds(machTime: audioTime.hostTime)
-                : nil
-            micStreamer.write(buffer: outputBuffer, hostTimeNanos: hostNanos)
+            micStreamer.write(buffer: outputBuffer, hostTimeNanos: hostTime?.nanoseconds)
             let samples = AudioDownmixer.toMono(buffer: outputBuffer)
             onBuffer(samples, outputBuffer.format.sampleRate)
         }
@@ -140,6 +138,11 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
         engine.prepare()
         try engine.start()
         audioEngine = engine
+    }
+
+    /// Host time of a tap buffer, or nil when the tap reports none.
+    static func hostTime(of audioTime: AVAudioTime) -> HostNanoseconds? {
+        audioTime.hostTime != 0 ? HostNanoseconds(machTicks: audioTime.hostTime) : nil
     }
 
     func stopCapture() {
@@ -259,9 +262,9 @@ actor RecordingService: RecordingServiceProtocol {
     private var recordingFolderURL: URL?
     private var currentSessionID: UUID?
     private var appAudioURL: URL?
-    private var micStartHostTime: UInt64?
-    private var appStartHostTime: UInt64?
-    private var videoStartHostTime: UInt64?
+    private var micStartHostTime: HostNanoseconds?
+    private var appStartHostTime: HostNanoseconds?
+    private var videoStartHostTime: HostNanoseconds?
     private var activeCaptureDisplayID: CGDirectDisplayID?
     private var desiredMicDeviceUID: String?
     private var currentCaptureDeviceID: AudioDeviceID?
@@ -443,7 +446,7 @@ actor RecordingService: RecordingServiceProtocol {
         pendingTitle: String? = nil,
         currentSessionID: UUID? = nil,
         screenCaptureSession: (any ScreenCaptureSessionControlling)? = nil,
-        videoStartHostTime: UInt64? = nil,
+        videoStartHostTime: HostNanoseconds? = nil,
         shouldSkipScreenMux: Bool = false,
         activeAppFileURL: URL? = nil,
         activeAppProcessID: pid_t? = nil
@@ -1123,7 +1126,7 @@ actor RecordingService: RecordingServiceProtocol {
         )
 
         do {
-            let micStartHostTime = self.micStartHostTime ?? self.appStartHostTime ?? 0
+            let micStartHostTime = self.micStartHostTime ?? self.appStartHostTime ?? HostNanoseconds(nanoseconds: 0)
             let appStartHostTime = self.appStartHostTime
             let videoStartHostTime = shouldSkipScreenMux ? nil : self.videoStartHostTime
             let mixdownURL = finalRecordingURLs.mic.deletingLastPathComponent().appendingPathComponent("recording.m4a")
@@ -1133,7 +1136,7 @@ actor RecordingService: RecordingServiceProtocol {
                 logger.warning("Mic start host time missing for session \(sessionID, privacy: .public); using fallback for mixdown alignment.")
             }
             logger.info(
-                "Scheduling mixdown for session \(sessionID, privacy: .public). micStart=\(micStartHostTime, privacy: .public) appStart=\(appStartHostTime ?? 0, privacy: .public) hasApp=\(finalRecordingURLs.app != nil, privacy: .public)"
+                "Scheduling mixdown for session \(sessionID, privacy: .public). micStart=\(micStartHostTime, privacy: .public) appStart=\(appStartHostTime?.description ?? "0", privacy: .public) hasApp=\(finalRecordingURLs.app != nil, privacy: .public)"
             )
 
             let context = ModelContext(modelContainer)
@@ -1161,7 +1164,7 @@ actor RecordingService: RecordingServiceProtocol {
             await cleanupRecordingState(deleteScreenTmpVideo: !shouldRunScreenMux)
 
             let timelineEnabled = AudioSyncConfig.isTimelineMixdownEnabled
-            let audioAnchorHostTime = appStartHostTime.map { min(micStartHostTime, $0) } ?? micStartHostTime
+            let audioAnchorHostTime = Self.audioAnchorHostTime(mic: micStartHostTime, app: appStartHostTime)
 
             Task { [weak self] in
                 await self?.runMixdown(
@@ -1606,28 +1609,33 @@ actor RecordingService: RecordingServiceProtocol {
         hasRegisteredHardwareListeners = false
     }
 
-    func captureMicStartHostTimeIfNeeded(_ hostTime: UInt64) {
+    /// The earlier of the two audio start times, which the timeline mixdown is anchored to.
+    static func audioAnchorHostTime(mic: HostNanoseconds, app: HostNanoseconds?) -> HostNanoseconds {
+        app.map { min(mic, $0) } ?? mic
+    }
+
+    func captureMicStartHostTimeIfNeeded(_ hostTime: HostNanoseconds) {
         guard micStartHostTime == nil else {
             return
         }
         micStartHostTime = hostTime
     }
 
-    func captureAppStartHostTimeIfNeeded(_ hostTime: UInt64) {
+    func captureAppStartHostTimeIfNeeded(_ hostTime: HostNanoseconds) {
         guard appStartHostTime == nil else {
             return
         }
         appStartHostTime = hostTime
     }
 
-    func captureVideoStartHostTimeIfNeeded(_ hostTime: UInt64?) {
+    func captureVideoStartHostTimeIfNeeded(_ hostTime: HostNanoseconds?) {
         guard videoStartHostTime == nil, let hostTime else {
             return
         }
         videoStartHostTime = hostTime
     }
 
-    func capturedHostTimes() -> (mic: UInt64?, app: UInt64?, video: UInt64?) {
+    func capturedHostTimes() -> (mic: HostNanoseconds?, app: HostNanoseconds?, video: HostNanoseconds?) {
         (micStartHostTime, appStartHostTime, videoStartHostTime)
     }
 
@@ -1649,8 +1657,8 @@ actor RecordingService: RecordingServiceProtocol {
         micURL: URL,
         appURL: URL?,
         mixdownURL: URL,
-        micStartHostTime: UInt64,
-        appStartHostTime: UInt64?
+        micStartHostTime: HostNanoseconds,
+        appStartHostTime: HostNanoseconds?
     ) async {
         await mixdownCoordinator.runMixdown(
             sessionID: sessionID,

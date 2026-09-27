@@ -30,7 +30,7 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, SCStreamOutput, @u
     private var frameDeliveryTimeoutTask: Task<Void, Never>?
 
     var onError: (@Sendable (Error) -> Void)?
-    var videoStartHostTime: UInt64?
+    var videoStartHostTime: HostNanoseconds?
 
     init(displayProvider: @escaping DisplayProvider) {
         self.displayProvider = displayProvider
@@ -160,19 +160,7 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, SCStreamOutput, @u
             return
         }
 
-        let presentationTimestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        let hostTimeClock = CMClockGetHostTimeClock()
-        let hostTime = CMSyncConvertTime(
-            presentationTimestamp,
-            from: hostTimeClock,
-            to: hostTimeClock
-        )
-
-        guard CMTIME_IS_VALID(hostTime), CMTIME_IS_NUMERIC(hostTime) else {
-            return
-        }
-
-        videoStartHostTime = CMClockConvertHostTimeToSystemUnits(hostTime)
+        videoStartHostTime = HostNanoseconds(presentationTimeOf: sampleBuffer)
     }
 
     func handleStreamStop(_ error: Error) {

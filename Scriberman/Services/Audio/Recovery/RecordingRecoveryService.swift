@@ -34,7 +34,7 @@ actor RecordingRecoveryService {
                 try await mixdownService.mix(
                     micURL: micURL,
                     appURL: appURL,
-                    micStartHostTime: 0,
+                    micStartHostTime: HostNanoseconds(nanoseconds: 0),
                     appStartHostTime: nil,
                     into: outputURL
                 )
