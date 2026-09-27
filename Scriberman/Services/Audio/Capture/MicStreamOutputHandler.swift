@@ -16,7 +16,7 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
     /// Injected so a mid-session capture restart can rebuild the stream and its handlers while
     /// continuing to write into the same file, with its accumulated timing segments intact.
     let streamer: AudioFileStreamer
-    private let liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation?
+    private let liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation?
     private let targetFormat: AVAudioFormat
     private var fileURL: URL?
     private var converter: AVAudioConverter?
@@ -46,7 +46,7 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
     var writeFailureCount: Int { streamer.writeFailureCount }
 
     init(
-        liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil,
+        liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation? = nil,
         streamer: AudioFileStreamer = AudioFileStreamer(label: "mic")
     ) {
         self.liveAudioContinuation = liveAudioContinuation
@@ -146,7 +146,7 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
         streamer.write(buffer: converted, hostTimeNanos: hostNanos)
         let monoSamples = AudioDownmixer.toMono(buffer: converted)
         if !monoSamples.isEmpty {
-            liveAudioContinuation?.yield((monoSamples, .mic, targetFormat.sampleRate))
+            liveAudioContinuation?.yield(LiveAudioChunk(samples: monoSamples, source: .mic, sampleRate: targetFormat.sampleRate, hostTime: hostTime))
         }
     }
 

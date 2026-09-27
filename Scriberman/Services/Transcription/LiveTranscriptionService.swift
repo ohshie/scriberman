@@ -151,7 +151,14 @@ private struct PendingAttribution {
     let longestClusterSegment: TimedSpeakerSegment?
 }
 
-actor LiveTranscriptionService {
+protocol LiveTranscribing: Sendable {
+    func prepare(workspace: Workspace, config: LiveTranscriptionPipelineSettings) async
+    func start(workspace: Workspace, config: LiveTranscriptionPipelineSettings, resultContinuation: AsyncStream<TranscriptSegment>.Continuation) async throws
+    func process(_ chunk: LiveAudioChunk, anchor: HostNanoseconds?) async
+    func stop() async -> [TranscriptSegment]
+}
+
+actor LiveTranscriptionService: LiveTranscribing {
     private let logger = Logger(subsystem: "Scriberman", category: "LiveTranscriptionService")
     private let fileManager = FileManager.default
     private let modelPathResolver = ModelPathResolver()
@@ -227,16 +234,12 @@ actor LiveTranscriptionService {
     // record (accumulated embeddings + sticky profile binding).
     private(set) var sessionSpeakerIdentities: [AudioSource: [Int: SessionSpeakerIdentity]] = [:]
 
-    private let resultsTuple: (stream: AsyncStream<TranscriptSegment>, continuation: AsyncStream<TranscriptSegment>.Continuation)
-
-    var transcriptStream: AsyncStream<TranscriptSegment> {
-        resultsTuple.stream
-    }
+    private var resultContinuation: AsyncStream<TranscriptSegment>.Continuation?
+    private var captureAnchor: HostNanoseconds?
 
     // task 3.1: SpeakerEmbeddingStore injected via init
     init(speakerEmbeddingStore: SpeakerEmbeddingStore? = nil) {
         self.speakerEmbeddingStore = speakerEmbeddingStore
-        self.resultsTuple = AsyncStream<TranscriptSegment>.makeStream()
     }
 
     // MARK: - Model Pre-warming (task 4.1)
@@ -385,9 +388,11 @@ actor LiveTranscriptionService {
 
     // MARK: - Lifecycle
 
-    func start(workspace: Workspace, config: LiveTranscriptionPipelineSettings = .defaults) async throws {
+    func start(workspace: Workspace, config: LiveTranscriptionPipelineSettings = .defaults, resultContinuation: AsyncStream<TranscriptSegment>.Continuation) async throws {
+        self.resultContinuation = resultContinuation
         logger.info("Starting live transcription service (Offline Chunking Mode)")
 
+        captureAnchor = nil
         audioConverters.removeAll()
         vadStreamStates.removeAll()
         speechAccumulationBuffers.removeAll()
@@ -415,6 +420,8 @@ actor LiveTranscriptionService {
         }
 
         guard isInitialized, asrManager != nil, diarizer != nil, vadStreamProcessor != nil else {
+            resultContinuation.finish()
+            self.resultContinuation = nil
             throw LiveTranscriptionError.initializationFailed
         }
 
@@ -423,6 +430,10 @@ actor LiveTranscriptionService {
 
     func stop() async -> [TranscriptSegment] {
         logger.info("Stopping live transcription service")
+        defer {
+            resultContinuation?.finish()
+            resultContinuation = nil
+        }
 
         // Finish each turn diarizer stream first so its timeline covers all
         // audio before held buffers and the pending speech buffers below are
@@ -543,12 +554,30 @@ actor LiveTranscriptionService {
 
     // MARK: - Audio Processing
 
-    func process(samples: [Float], source: AudioSource, sampleRate: Double) async {
+    func process(_ chunk: LiveAudioChunk, anchor: HostNanoseconds? = nil) async {
+        if captureAnchor == nil { captureAnchor = anchor }
+        await process(samples: chunk.samples, source: chunk.source, sampleRate: chunk.sampleRate, hostTime: chunk.hostTime)
+    }
+
+    func process(samples: [Float], source: AudioSource, sampleRate: Double, hostTime: HostNanoseconds? = nil) async {
         do {
             if audioConverters[source] == nil {
                 audioConverters[source] = AudioConverter()
             }
-            let resampled = try audioConverters[source]!.resample(samples, from: sampleRate)
+            var resampled = try audioConverters[source]!.resample(samples, from: sampleRate)
+            if let hostTime {
+                if captureAnchor == nil { captureAnchor = hostTime }
+                let timeline = SynchronizedAudioTimeline(sampleRate: Double(Self.SAMPLE_RATE), referenceTime: 0)
+                let position = hostTime.seconds(since: captureAnchor!)
+                let written = totalSamplesProcessed[source] ?? 0
+                let gap = timeline.gapFrames(before: position, writtenFrames: written)
+                // Match saved audio placement, including overlapping capture buffers.
+                if gap > 0 {
+                    resampled.insert(contentsOf: repeatElement(0, count: gap), at: 0)
+                } else if let expected = timeline.expectedStartFrame(for: position), expected < written {
+                    resampled.removeFirst(min(written - expected, resampled.count))
+                }
+            }
             guard !resampled.isEmpty else { return }
             totalSamplesProcessed[source] = (totalSamplesProcessed[source] ?? 0) + resampled.count
 
@@ -958,7 +987,7 @@ actor LiveTranscriptionService {
         )
         collectedFinalSegments.append(segment)
         lastFinalSegmentEndOffsets[source] = segment.endTime
-        resultsTuple.continuation.yield(segment)
+        resultContinuation?.yield(segment)
     }
 
     private func decoderStateForSource(_ source: AudioSource, asrManager: AsrManager) async throws -> TdtDecoderState {
@@ -1013,6 +1042,14 @@ actor LiveTranscriptionService {
 
 #if DEBUG
 extension LiveTranscriptionService {
+    func setResultContinuationForTesting(_ continuation: AsyncStream<TranscriptSegment>.Continuation) {
+        resultContinuation = continuation
+    }
+
+    func processedSampleCountForTesting(source: AudioSource) -> Int {
+        totalSamplesProcessed[source] ?? 0
+    }
+
     func prepareForTesting(
         workspace: Workspace,
         config: LiveTranscriptionPipelineSettings = .defaults,

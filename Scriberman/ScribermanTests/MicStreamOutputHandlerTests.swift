@@ -94,6 +94,30 @@ struct MicStreamOutputHandlerTests {
     }
 
     @Test
+    func captureHandlersEmitHostTimesForEveryLiveChunk() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let audio = AsyncStream<LiveAudioChunk>.makeStream()
+        let mic = MicStreamOutputHandler(liveAudioContinuation: audio.continuation)
+        let app = AppAudioStreamOutputHandler(liveAudioContinuation: audio.continuation)
+        mic.configureOutput(url: root.appendingPathComponent("mic.wav"))
+        app.configureOutput(url: root.appendingPathComponent("app.wav"))
+        for time: UInt64 in [1_000_000_000, 1_010_000_000] {
+            let buffer = try makeSampleBuffer(sampleRate: 48_000, channels: 1, frameCount: 480, hostTimeNanos: time)
+            mic.processSampleBufferForTesting(buffer)
+            app.processSampleBufferForTesting(buffer)
+        }
+        mic.closeOutput()
+        app.closeOutput()
+        audio.continuation.finish()
+        var chunks: [LiveAudioChunk] = []
+        for await chunk in audio.stream { chunks.append(chunk) }
+        #expect(chunks.map(\.source) == [.mic, .app, .mic, .app])
+        #expect(chunks.map { $0.hostTime?.nanoseconds } == [1_000_000_000, 1_000_000_000, 1_010_000_000, 1_010_000_000])
+    }
+
+    @Test
     func testAppHandlerRejectsInt16Buffers() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

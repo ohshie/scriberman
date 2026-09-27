@@ -72,7 +72,7 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
         appFileURL: URL,
         processID: pid_t,
         micDeviceUID: String?,
-        liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil,
+        liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation? = nil,
         onMicFirstHostTime: (@Sendable (HostNanoseconds) -> Void)? = nil,
         onAppFirstHostTime: (@Sendable (HostNanoseconds) -> Void)? = nil,
         notificationCenter: NotificationCenter = .default,
@@ -125,16 +125,32 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
         try stream.addStreamOutput(appHandler, type: .audio, sampleHandlerQueue: appQueue)
         try stream.addStreamOutput(micHandler, type: .microphone, sampleHandlerQueue: micQueue)
 
+        try await start(stream: stream)
+    }
+
+    /// Drives the same retry path for real streams and hardware-free test streams.
+    func start(stream: any UnifiedCaptureStreaming, retryDelay: Duration = .milliseconds(300)) async throws {
         var lastError: Error?
         for attempt in 0..<3 {
+            try Task.checkCancellation()
             do {
                 try await stream.startCapture()
+                try Task.checkCancellation()
                 setStream(stream)
                 return
             } catch {
-                lastError = error
+                let startError = error
+                lastError = startError
+                do {
+                    try await stream.stopCapture()
+                } catch {
+                    throw RecordingError.failedToStart("\(startError.localizedDescription) Capture cleanup failed: \(error.localizedDescription)")
+                }
+                await drainSampleCallbacks()
+                if startError is CancellationError { throw startError }
+                try Task.checkCancellation()
                 if attempt < 2 {
-                    try? await Task.sleep(for: .milliseconds(300))
+                    try await Task.sleep(for: retryDelay)
                 }
             }
         }
@@ -199,6 +215,7 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
         if let stream = takeStream() {
             try? await stream.stopCapture()
         }
+        await drainSampleCallbacks()
         appHandler.closeOutput()
         micHandler.closeOutput()
     }
@@ -212,6 +229,16 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
     func stopStreamPreservingOutput() async {
         if let stream = takeStream() {
             try? await stream.stopCapture()
+        }
+        await drainSampleCallbacks()
+    }
+
+    private func drainSampleCallbacks() async {
+        await withCheckedContinuation { continuation in
+            appQueue.async { continuation.resume() }
+        }
+        await withCheckedContinuation { continuation in
+            micQueue.async { continuation.resume() }
         }
     }
 

@@ -14,11 +14,7 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
     var retargetMicCalls: [String?] = []
     var pendingError: RecordingError?
 
-    func liveAudioStream() async -> AsyncStream<([Float], AudioSource, Double)> {
-        AsyncStream { continuation in
-            continuation.finish()
-        }
-    }
+    var liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation?
 
     func isRecording() async -> Bool {
         isRecordingOverride
@@ -92,7 +88,9 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
         captureDisplayID: CGDirectDisplayID?,
         capturedAppName: String?,
         appProcessID: pid_t?,
-        title: String?
+        title: String?,
+        liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation?,
+        liveAudioClock: LiveCaptureClock?
     ) async throws(RecordingError) -> UUID {
         startCalls.append((
             workspace: workspace,
@@ -108,11 +106,14 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
         if let startShouldThrow {
             throw startShouldThrow
         }
+        self.liveAudioContinuation = liveAudioContinuation
         return startReturns
     }
 
     func stopRecording() async -> UUID? {
-        stopReturns
+        liveAudioContinuation?.finish()
+        liveAudioContinuation = nil
+        return stopReturns
     }
 
     func consumePendingError() async -> RecordingError? {

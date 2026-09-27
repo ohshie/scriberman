@@ -178,7 +178,7 @@ struct DictationServiceTests {
 // MARK: - Test doubles
 
 private actor MockDictationCapture: DictationCapturing {
-    private var continuation: AsyncStream<[Float]>.Continuation?
+    private var continuation: AsyncThrowingStream<[Float], Error>.Continuation?
     private var startCalls = 0
     private var startDelayNanoseconds: UInt64 = 0
     private var samplesOnStop: [[Float]] = []
@@ -200,7 +200,7 @@ private actor MockDictationCapture: DictationCapturing {
         startCalls
     }
 
-    func start(deviceID: AudioDeviceID?) async throws -> AsyncStream<[Float]> {
+    func start(deviceID: AudioDeviceID?) async throws -> AsyncThrowingStream<[Float], Error> {
         startCalls += 1
         if let startError {
             throw startError
@@ -208,7 +208,7 @@ private actor MockDictationCapture: DictationCapturing {
         if startDelayNanoseconds > 0 {
             try? await Task.sleep(nanoseconds: startDelayNanoseconds)
         }
-        let (stream, continuation) = AsyncStream<[Float]>.makeStream()
+        let (stream, continuation) = AsyncThrowingStream<[Float], Error>.makeStream()
         self.continuation = continuation
         return stream
     }
@@ -272,4 +272,42 @@ private final class StateRecorder: @unchecked Sendable {
         defer { lock.unlock() }
         storage.append(state)
     }
+}
+
+@MainActor
+struct DictationConversionFailureTests {
+    @Test
+    func failedConverterReportsCaptureFailureAndInsertsNothing() async {
+        let capture = FailingConversionCapture()
+        let inserted = InsertedTextRecorder()
+        let service = DictationService(recordingService: MockRecordingService(), captureSession: capture) { text in
+            inserted.record(text)
+            return .insertedDirectly
+        }
+        service.transcribeHookForTesting = { _ in "must not insert" }
+        await service.start(deviceID: nil)
+        await service.stop()
+        #expect(service.lastOutcome == .failed(.captureFailed))
+        #expect(service.state == .idle)
+        #expect(inserted.texts.isEmpty)
+    }
+}
+
+private actor FailingConversionCapture: DictationCapturing {
+    private var pipeline: DictationAudioPipeline?
+    func start(deviceID: AudioDeviceID?) async throws -> AsyncThrowingStream<[Float], Error> {
+        let pipeline = DictationAudioPipeline(converter: FailingDictationConverter())
+        self.pipeline = pipeline
+        pipeline.append([1], generation: pipeline.generation)
+        return pipeline.stream
+    }
+    func stop() async { await pipeline?.stop() }
+    func setLevelHandler(_ handler: @escaping @Sendable (Float) -> Void) async {}
+}
+
+private struct FailingDictationConverter: DictationAudioConverting {
+    func convert(_ samples: [Float]) throws -> [Float] {
+        throw AudioResamplerError.conversionFailed("Injected failure")
+    }
+    func finish() throws -> [Float] { [] }
 }

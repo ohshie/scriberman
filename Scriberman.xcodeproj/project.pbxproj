@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		DA0100010000000000000002 /* LiveRecordingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA0100010000000000000001 /* LiveRecordingSession.swift */; };
 		06B30512C65DF04AFA9A0026 /* MarkdownRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC3C4EF936A2E2BEA0BD4CAF /* MarkdownRenderer.swift */; };
 		0779163432BE273DD07FC2E9 /* TranscriptAlignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D3289E92C029611DDA5CB75 /* TranscriptAlignerTests.swift */; };
 		0A81963A9F600E19F5F698ED /* ModelsSettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AD764C83EECDAD9A42F5993 /* ModelsSettingsScreen.swift */; };
@@ -299,6 +300,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		DA0100010000000000000001 /* LiveRecordingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveRecordingSession.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F708192A3B4C5 /* RecordingSession.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RecordingSession.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F708192A3B4C6 /* RecordingStatus.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RecordingStatus.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F708192A3B4C7 /* Transcript.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Transcript.swift; sourceTree = "<group>"; };
@@ -890,6 +892,7 @@
 				8A2AEE3DB783526C01DF1552 /* TranscriptionServiceProtocol.swift */,
 				1A2B3C4D5E6F708192A3B4CB /* TranscriptionService.swift */,
 				791009582F783E6300225294 /* RetranscriptionService.swift */,
+				DA0100010000000000000001 /* LiveRecordingSession.swift */,
 				7987325B2F7B157200570A03 /* LiveTranscriptionService.swift */,
 				A7F3E1D2C4B5968700113355 /* LiveSpeakerTimeline.swift */,
 				B3C4D5E6F7A8091B2C3D4E01 /* LiveSegmentSanitizer.swift */,
@@ -1380,6 +1383,7 @@
 				BE05D8275352276E509B5A6A /* WorkspacePicker.swift in Sources */,
 				79A11C212F859FA90084F195 /* RecordingFileLayout.swift in Sources */,
 				3428B3A8DAFDF0891C460E3C /* ModelGroup.swift in Sources */,
+				DA0100010000000000000002 /* LiveRecordingSession.swift in Sources */,
 				7987325C2F7B157200570A03 /* LiveTranscriptionService.swift in Sources */,
 				A7F3E1D2C4B5968700113356 /* LiveSpeakerTimeline.swift in Sources */,
 				B3C4D5E6F7A8091B2C3D4E02 /* LiveSegmentSanitizer.swift in Sources */,

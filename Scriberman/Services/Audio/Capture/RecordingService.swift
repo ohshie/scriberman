@@ -60,7 +60,7 @@ protocol MicCaptureControlling: AnyObject {
         voiceProcessingEnabled: Bool,
         applyVoiceProcessing: @Sendable (AVAudioInputNode, Bool) -> Void,
         onFirstHostTime: @escaping @Sendable (HostNanoseconds) -> Void,
-        onBuffer: @escaping @Sendable ([Float], Double) -> Void
+        onBuffer: @escaping @Sendable ([Float], Double, HostNanoseconds?) -> Void
     ) throws
     func stopCapture()
     func retargetDevice(_ deviceID: AudioDeviceID?) throws
@@ -79,7 +79,7 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
         voiceProcessingEnabled: Bool,
         applyVoiceProcessing: @Sendable (AVAudioInputNode, Bool) -> Void,
         onFirstHostTime: @escaping @Sendable (HostNanoseconds) -> Void,
-        onBuffer: @escaping @Sendable ([Float], Double) -> Void
+        onBuffer: @escaping @Sendable ([Float], Double, HostNanoseconds?) -> Void
     ) throws {
         stopCapture()
 
@@ -132,7 +132,7 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
 
             micStreamer.write(buffer: outputBuffer, hostTimeNanos: hostTime?.nanoseconds)
             let samples = AudioDownmixer.toMono(buffer: outputBuffer)
-            onBuffer(samples, outputBuffer.format.sampleRate)
+            onBuffer(samples, outputBuffer.format.sampleRate, hostTime)
         }
 
         engine.prepare()
@@ -300,7 +300,8 @@ actor RecordingService: RecordingServiceProtocol {
     private var writeFailureOverrideForTesting: Int?
 #endif
     private var micRecoveryRetryTask: Task<Void, Never>?
-    private let liveAudioStreamTuple: (stream: AsyncStream<([Float], AudioSource, Double)>, continuation: AsyncStream<([Float], AudioSource, Double)>.Continuation)
+    private var liveAudioClock: LiveCaptureClock?
+    private var liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation?
     // nonisolated(unsafe): written once in init on the actor; read only in deinit; lifetime matches the actor
     nonisolated(unsafe) private var engineConfigurationObserver: NSObjectProtocol?
     // nonisolated(unsafe): initialized once and used for CoreAudio C callback registration/removal lifecycle.
@@ -331,10 +332,6 @@ actor RecordingService: RecordingServiceProtocol {
     private var recorderFallbackActiveForTesting = false
     private var stopRecordingCallCount = 0
 #endif
-
-    func liveAudioStream() async -> AsyncStream<([Float], AudioSource, Double)> {
-        liveAudioStreamTuple.stream
-    }
 
     init(
         workspaceService: WorkspaceServiceProtocol,
@@ -375,7 +372,6 @@ actor RecordingService: RecordingServiceProtocol {
             workspaceService: workspaceService,
             modelContainer: modelContainer
         )
-        self.liveAudioStreamTuple = AsyncStream<([Float], AudioSource, Double)>.makeStream()
         self.hardwarePropertyListener = { [weak self] _, _ in
             Task {
                 await self?.handleHardwareChange()
@@ -449,8 +445,10 @@ actor RecordingService: RecordingServiceProtocol {
         videoStartHostTime: HostNanoseconds? = nil,
         shouldSkipScreenMux: Bool = false,
         activeAppFileURL: URL? = nil,
-        activeAppProcessID: pid_t? = nil
+        activeAppProcessID: pid_t? = nil,
+        liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation? = nil
     ) {
+        self.liveAudioContinuation = liveAudioContinuation
         self.activeAppFileURL = activeAppFileURL
         self.activeAppProcessID = activeAppProcessID
         self.lifecycleState = isRecording ? .recording : .idle
@@ -655,11 +653,13 @@ actor RecordingService: RecordingServiceProtocol {
                     appFileURL: appFileURL,
                     processID: appProcessID,
                     micDeviceUID: desiredMicDeviceUID,
-                    liveAudioContinuation: liveAudioStreamTuple.continuation,
-                    onMicFirstHostTime: { [weak self] hostTime in
+                    liveAudioContinuation: liveAudioContinuation,
+                    onMicFirstHostTime: { [weak self, clock = liveAudioClock] hostTime in
+                        clock?.observe(hostTime)
                         Task { [weak self] in await self?.captureMicStartHostTimeIfNeeded(hostTime) }
                     },
-                    onAppFirstHostTime: { [weak self] hostTime in
+                    onAppFirstHostTime: { [weak self, clock = liveAudioClock] hostTime in
+                        clock?.observe(hostTime)
                         Task { [weak self] in await self?.captureAppStartHostTimeIfNeeded(hostTime) }
                     }
                 )
@@ -682,12 +682,13 @@ actor RecordingService: RecordingServiceProtocol {
             let appSession = AppAudioCaptureSession(
                 fileURL: appFileURL,
                 processID: appProcessID,
-                onFirstBufferHostTime: { [weak self] hostTime in
+                onFirstBufferHostTime: { [weak self, clock = liveAudioClock] hostTime in
+                    clock?.observe(hostTime)
                     Task { [weak self] in
                         await self?.captureAppStartHostTimeIfNeeded(hostTime)
                     }
                 },
-                liveAudioContinuation: liveAudioStreamTuple.continuation
+                liveAudioContinuation: liveAudioContinuation
             )
             appSession.onStreamStopped = { [weak self] error in
                 Task { [weak self] in await self?.reportCaptureStreamFailure(error) }
@@ -704,7 +705,7 @@ actor RecordingService: RecordingServiceProtocol {
             try await startMicCapture(
                 deviceUID: desiredMicDeviceUID,
                 micFileURL: micFileURL,
-                liveContinuation: liveAudioStreamTuple.continuation
+                liveContinuation: liveAudioContinuation
             )
         } catch {
             // Bluetooth/external devices can fail explicit routing on some setups.
@@ -718,7 +719,7 @@ actor RecordingService: RecordingServiceProtocol {
                     try await startMicCapture(
                         deviceUID: nil,
                         micFileURL: micFileURL,
-                        liveContinuation: liveAudioStreamTuple.continuation
+                        liveContinuation: liveAudioContinuation
                     )
                 } catch {
                     logger.warning(
@@ -813,11 +814,13 @@ actor RecordingService: RecordingServiceProtocol {
             appFileURL: activeAppFileURL,
             processID: activeAppProcessID ?? 0,
             micDeviceUID: existing.currentMicDeviceUID,
-            liveAudioContinuation: liveAudioStreamTuple.continuation,
-            onMicFirstHostTime: { [weak self] hostTime in
+            liveAudioContinuation: liveAudioContinuation,
+            onMicFirstHostTime: { [weak self, clock = liveAudioClock] hostTime in
+                clock?.observe(hostTime)
                 Task { [weak self] in await self?.captureMicStartHostTimeIfNeeded(hostTime) }
             },
-            onAppFirstHostTime: { [weak self] hostTime in
+            onAppFirstHostTime: { [weak self, clock = liveAudioClock] hostTime in
+                clock?.observe(hostTime)
                 Task { [weak self] in await self?.captureAppStartHostTimeIfNeeded(hostTime) }
             },
             reusingStreamers: reused
@@ -868,12 +871,24 @@ actor RecordingService: RecordingServiceProtocol {
         captureDisplayID: CGDirectDisplayID? = nil,
         capturedAppName: String? = nil,
         appProcessID: pid_t? = nil,
-        title: String? = nil
+        title: String? = nil,
+        liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation? = nil,
+        liveAudioClock: LiveCaptureClock? = nil
     ) async throws(RecordingError) -> UUID {
         guard case .idle = lifecycleState else {
+            liveAudioContinuation?.finish()
             throw RecordingError.alreadyRecording
         }
         lifecycleState = .starting
+        self.liveAudioClock = liveAudioClock
+        self.liveAudioContinuation = liveAudioContinuation
+        var didStart = false
+        defer {
+            if !didStart {
+                self.liveAudioContinuation?.finish()
+                self.liveAudioContinuation = nil
+            }
+        }
 
         do {
             _ = try await workspaceService.requireWritableWorkspace()
@@ -984,6 +999,7 @@ actor RecordingService: RecordingServiceProtocol {
             try context.save()
             self.currentSessionID = session.id
             registerMicHardwareListeners()
+            didStart = true
             return session.id
         } catch {
             stopMicCapture()
@@ -1005,6 +1021,8 @@ actor RecordingService: RecordingServiceProtocol {
 #endif
         switch lifecycleState {
         case .idle, .starting:
+            liveAudioContinuation?.finish()
+            liveAudioContinuation = nil
             return nil
         case .stopping(let teardown):
             return await teardown.value
@@ -1069,6 +1087,9 @@ actor RecordingService: RecordingServiceProtocol {
         screenCaptureSession = nil
         await activeScreenCaptureSession?.stop()
         captureVideoStartHostTimeIfNeeded(activeScreenCaptureSession?.videoStartHostTime)
+
+        liveAudioContinuation?.finish()
+        liveAudioContinuation = nil
 
         let startedAt = recordingStartedAt ?? recordingCreatedAt ?? Date()
         let stoppedAt = Date()
@@ -1275,6 +1296,8 @@ actor RecordingService: RecordingServiceProtocol {
             await screenCaptureSession.stop()
         }
         self.screenCaptureSession = nil
+        liveAudioContinuation?.finish()
+        liveAudioContinuation = nil
         if deleteScreenTmpVideo, let screenTmpURL, fileManager.fileExists(atPath: screenTmpURL.path) {
             try? fileManager.removeItem(at: screenTmpURL)
         }
@@ -1430,7 +1453,7 @@ actor RecordingService: RecordingServiceProtocol {
     private func startMicCapture(
         deviceUID: String?,
         micFileURL: URL,
-        liveContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation
+        liveContinuation: AsyncStream<LiveAudioChunk>.Continuation?
     ) async throws {
         let vpEnabled = await MainActor.run { appAudioSettings.voiceProcessingEnabled }
         let deviceID = resolveDeviceID(for: deviceUID)
@@ -1443,13 +1466,14 @@ actor RecordingService: RecordingServiceProtocol {
             applyVoiceProcessing: { [weak self] inputNode, enabled in
                 self?.applyVoiceProcessingIfNeeded(to: inputNode, enabled: enabled)
             },
-            onFirstHostTime: { [weak self] hostTime in
+            onFirstHostTime: { [weak self, clock = liveAudioClock] hostTime in
+                clock?.observe(hostTime)
                 Task { [weak self] in
                     await self?.captureMicStartHostTimeIfNeeded(hostTime)
                 }
             },
-            onBuffer: { samples, sampleRate in
-                liveContinuation.yield((samples, .mic, sampleRate))
+            onBuffer: { samples, sampleRate, hostTime in
+                liveContinuation?.yield(LiveAudioChunk(samples: samples, source: .mic, sampleRate: sampleRate, hostTime: hostTime))
             }
         )
         self.audioRecorder = nil
@@ -1477,7 +1501,7 @@ actor RecordingService: RecordingServiceProtocol {
             try await startMicCapture(
                 deviceUID: desiredMicDeviceUID,
                 micFileURL: micFileURL,
-                liveContinuation: liveAudioStreamTuple.continuation
+                liveContinuation: liveAudioContinuation
             )
             return true
         } catch {

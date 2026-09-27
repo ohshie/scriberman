@@ -165,13 +165,22 @@ final class DictationService {
 
     // MARK: - Processing
 
-    private func startProcessing(stream: AsyncStream<[Float]>) {
+    private func startProcessing(stream: AsyncThrowingStream<[Float], Error>) {
         processingTask = Task { [weak self] in
             var allSamples: [Float] = []
-            for await samples in stream {
-                allSamples.append(contentsOf: samples)
+            do {
+                for try await samples in stream {
+                    allSamples.append(contentsOf: samples)
+                }
+                await self?.finishSession(samples: allSamples)
+            } catch {
+                guard let self else { return }
+                self.logger.error("Dictation conversion failed: \(error.localizedDescription)")
+                await self.captureSession.stop()
+                self.inputLevel = 0
+                self.lastOutcome = .failed(.captureFailed)
+                self.state = .idle
             }
-            await self?.finishSession(samples: allSamples)
         }
     }
 

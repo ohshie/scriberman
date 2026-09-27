@@ -13,6 +13,39 @@ final class RecordingServiceTests {
         return try #require(context.fetch(descriptor).first(where: { $0.id == id }))
     }
 
+    @Test(arguments: [false, true])
+    func stopFinishesLiveAudioWithMissingSession(isRecording: Bool) async throws {
+        let container = try ModelContainer(for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let settings = await MainActor.run { AppAudioSettings() }
+        let service = RecordingService(workspaceService: MockWorkspaceService(), modelContainer: container, appAudioSettings: settings)
+        let audio = AsyncStream<LiveAudioChunk>.makeStream()
+        await service.setRecordingStateForTesting(isRecording: isRecording, liveAudioContinuation: audio.continuation)
+        #expect(await service.stopRecording() == nil)
+        var iterator = audio.stream.makeAsyncIterator()
+        #expect(await iterator.next() == nil)
+    }
+
+    @Test
+    func engineMicPathPreservesCaptureTime() async throws {
+        let fixture = try await makeRecoveryFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        let audio = AsyncStream<LiveAudioChunk>.makeStream()
+        await fixture.service.setRecordingStateForTesting(isRecording: true, liveAudioContinuation: audio.continuation)
+        await fixture.service.setMicRecoveryStateForTesting(desiredMicDeviceUID: nil, micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav"))
+        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
+        let emit = try #require(fixture.micController.onBuffer)
+        let time = HostNanoseconds(nanoseconds: 2_000_000_000)
+        emit([1, 2], 48_000, time)
+        _ = await fixture.service.stopRecording()
+        var iterator = audio.stream.makeAsyncIterator()
+        let chunk = try #require(await iterator.next())
+        #expect(chunk.hostTime == time)
+        #expect(chunk.source == .mic)
+        #expect(chunk.samples == [1, 2])
+        #expect(await iterator.next() == nil)
+    }
+
     // MARK: - Folder layout
 
     private static let utc = TimeZone(identifier: "UTC")!
@@ -2027,6 +2060,7 @@ private final class MockMicCaptureController: MicCaptureControlling, @unchecked 
     var startCaptureError: Error?
     var startCaptureErrors: [Error] = []
     private(set) var startCaptureCalls: [StartCall] = []
+    var onBuffer: (@Sendable ([Float], Double, HostNanoseconds?) -> Void)?
     private(set) var stopCaptureCallCount = 0
     var isRunning = false
 
@@ -2038,7 +2072,7 @@ private final class MockMicCaptureController: MicCaptureControlling, @unchecked 
         voiceProcessingEnabled _: Bool,
         applyVoiceProcessing _: @Sendable (AVAudioInputNode, Bool) -> Void,
         onFirstHostTime _: @escaping @Sendable (HostNanoseconds) -> Void,
-        onBuffer _: @escaping @Sendable ([Float], Double) -> Void
+        onBuffer: @escaping @Sendable ([Float], Double, HostNanoseconds?) -> Void
     ) throws {
         if !startCaptureErrors.isEmpty {
             throw startCaptureErrors.removeFirst()
@@ -2046,6 +2080,7 @@ private final class MockMicCaptureController: MicCaptureControlling, @unchecked 
         if let startCaptureError {
             throw startCaptureError
         }
+        self.onBuffer = onBuffer
         startCaptureCalls.append(.init(deviceID: deviceID, targetSampleRate: targetFormat.sampleRate))
         isRunning = true
     }

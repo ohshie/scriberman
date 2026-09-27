@@ -5,7 +5,6 @@ import Foundation
 import SwiftData
 
 protocol RecordingServiceProtocol: Sendable {
-    func liveAudioStream() async -> AsyncStream<([Float], AudioSource, Double)>
     func isRecording() async -> Bool
     func audioLevel() async -> Float
     func audioLevels() async -> (mic: Float, app: Float)
@@ -40,7 +39,9 @@ protocol RecordingServiceProtocol: Sendable {
         captureDisplayID: CGDirectDisplayID?,
         capturedAppName: String?,
         appProcessID: pid_t?,
-        title: String?
+        title: String?,
+        liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation?,
+        liveAudioClock: LiveCaptureClock?
     ) async throws(RecordingError) -> UUID
     func stopRecording() async -> UUID?
     func consumePendingError() async -> RecordingError?
