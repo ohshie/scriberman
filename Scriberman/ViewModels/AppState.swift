@@ -26,6 +26,13 @@ final class AppState {
     private let restoreWorkspaceHandler: () async throws -> Workspace
     private let setWorkspaceHandler: (URL) async throws -> Workspace
 
+    @ObservationIgnored private var readinessTask: Task<Void, Never>?
+    private var preparedWorkspace: Workspace?
+    private var hasRegisteredHotkey = false
+    private var isChangingWorkspace = false
+    private let prepareDictationHandler: ((Workspace) async -> Void)?
+    private let registerHotkeyHandler: (() -> Void)?
+
     let dictationService: DictationService
     let hotkeyRegistrar = HotkeyRegistrar()
     let dictationHotkeySettings = DictationHotkeySettings()
@@ -81,8 +88,12 @@ final class AppState {
         services: ServiceContainer,
         updateService: UpdateService? = nil,
         restoreWorkspaceHandler: (() async throws -> Workspace)? = nil,
-        setWorkspaceHandler: ((URL) async throws -> Workspace)? = nil
+        setWorkspaceHandler: ((URL) async throws -> Workspace)? = nil,
+        prepareDictationHandler: ((Workspace) async -> Void)? = nil,
+        registerHotkeyHandler: (() -> Void)? = nil
     ) {
+        self.prepareDictationHandler = prepareDictationHandler
+        self.registerHotkeyHandler = registerHotkeyHandler
         self.mainServices = services.main
         self.backgroundServices = services.background
         self.permissionService = services.main.permissionService
@@ -182,16 +193,46 @@ final class AppState {
             Task { await recovery.sweepIncompleteSessions() }
         }
 
-        if requiredOnboardingStep == nil, let workspace {
-            await dictationService.prewarm(workspace: workspace)
-            wireHotkeyRegistrar()
+        applyReadiness()
+    }
+
+    func applyReadiness() {
+        guard requiredOnboardingStep == nil, let workspace,
+              preparedWorkspace != workspace else { return }
+        preparedWorkspace = workspace
+        readinessTask?.cancel()
+        dictationService.prepare(for: workspace)
+        readinessTask = Task { [dictationService, prepareDictationHandler] in
+            if let prepareDictationHandler {
+                await prepareDictationHandler(workspace)
+            } else {
+                await dictationService.prewarm(workspace: workspace)
+            }
+        }
+        if !hasRegisteredHotkey {
+            hasRegisteredHotkey = true
+            if let registerHotkeyHandler {
+                registerHotkeyHandler()
+            } else {
+                wireHotkeyRegistrar()
+            }
+        }
+    }
+
+    var isWorkspaceChangeAllowed: Bool {
+        guard !isChangingWorkspace, newSessionViewModel.isIdle,
+              dictationService.state == .idle || dictationService.state == .prewarming,
+              !jobsViewModel.isImporting, !jobsViewModel.isRetranscribing else { return false }
+        switch settingsViewModel.bundlePhase {
+        case .downloading, .warmingUp: return false
+        default: return true
         }
     }
 
     private func wireHotkeyRegistrar() {
         hotkeyRegistrar.onKeyDown = { [weak self] in
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, requiredOnboardingStep == nil, !isChangingWorkspace else { return }
                 dictationHUD.show(for: dictationService)
                 let deviceID = audioDeviceService.availableDevices.first {
                     $0.uid == menuBarSettings.lastUsedMicUID
@@ -209,22 +250,27 @@ final class AppState {
     }
 
     func selectWorkspace(url: URL) async {
+        guard isWorkspaceChangeAllowed else { return }
+        isChangingWorkspace = true
+        defer { isChangingWorkspace = false }
         do {
             let configuredWorkspace = try await setWorkspaceHandler(url)
+            settingsViewModel.bundlePhase = .idle
             workspace = configuredWorkspace
             workspaceErrorMessage = nil
             await backgroundServices.modelInstallService.stampDiarizerRevisionIfMissing()
         } catch {
-            workspace = nil
             workspaceErrorMessage = error.localizedDescription
+            return
         }
 
         await settingsViewModel.refresh()
+        applyReadiness()
     }
 
     func verifyWorkspaceForWrite() async -> Bool {
         do {
-            let writableWorkspace = try await backgroundServices.workspaceService.requireWritableWorkspace()
+            let writableWorkspace = try await backgroundServices.workspaceService.requireAuthorizedWorkspace()
             workspace = writableWorkspace
             workspaceErrorMessage = nil
             return true

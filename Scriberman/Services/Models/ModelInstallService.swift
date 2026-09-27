@@ -41,7 +41,7 @@ actor ModelInstallService: ModelInstallServicing {
     }
 
     func ensureWorkspaceWriteAccess() async throws -> Workspace {
-        try await workspaceService.requireWritableWorkspace()
+        try await workspaceService.requireAuthorizedWorkspace()
     }
 
     func canInstallModels() async -> Bool {

@@ -85,6 +85,11 @@ final class JobsViewModel {
         var title: String { group.title }
     }
 
+    private var activeImports = 0
+    private var activeRetranscriptions = 0
+    var isImporting: Bool { activeImports > 0 }
+    var isRetranscribing: Bool { activeRetranscriptions > 0 }
+
     private let workspaceService: WorkspaceServiceProtocol
     private let transcriptionService: TranscriptionServiceProtocol
     private let retranscriptionService: RetranscriptionService
@@ -453,7 +458,7 @@ final class JobsViewModel {
 
         Task {
             do {
-                let workspace = try await workspaceService.requireWritableWorkspace()
+                let workspace = try await workspaceService.requireAuthorizedWorkspace()
                 let transcript = try await transcriptionService.transcribe(
                     sessionID: sessionID,
                     modelContainer: modelContainer,
@@ -581,6 +586,8 @@ final class JobsViewModel {
     /// Imports `urls`, and returns the files whose session could not be recorded.
     @discardableResult
     func importAudio(urls: [URL], context: ModelContext) async -> [URL] {
+        activeImports += 1
+        defer { activeImports -= 1 }
         var failedImportURLs: [URL] = []
         let audioURLs = urls.filter { Self.isAudioURL($0) }
         guard !audioURLs.isEmpty else {
@@ -588,7 +595,7 @@ final class JobsViewModel {
         }
 
         do {
-            let workspace = try await workspaceService.requireWritableWorkspace()
+            let workspace = try await workspaceService.requireAuthorizedWorkspace()
             let modelContainer = context.container
             let pipelineSettings = currentPipelineSettings
             for audioURL in audioURLs {
@@ -622,9 +629,11 @@ final class JobsViewModel {
         let modelContainer = context.container
         let pipelineSettings = currentPipelineSettings
 
+        activeRetranscriptions += 1
         Task {
+            defer { activeRetranscriptions -= 1 }
             do {
-                let workspace = try await workspaceService.requireWritableWorkspace()
+                let workspace = try await workspaceService.requireAuthorizedWorkspace()
                 await retranscriptionService.retranscribe(
                     sessionID: sessionID,
                     modelContainer: modelContainer,
@@ -655,9 +664,11 @@ final class JobsViewModel {
         let modelContainer = context.container
         let pipelineSettings = currentPipelineSettings
 
+        activeRetranscriptions += 1
         Task {
+            defer { activeRetranscriptions -= 1 }
             do {
-                let workspace = try await workspaceService.requireWritableWorkspace()
+                let workspace = try await workspaceService.requireAuthorizedWorkspace()
                 await retranscriptionService.retranscribe(
                     sessionID: sessionID,
                     modelContainer: modelContainer,

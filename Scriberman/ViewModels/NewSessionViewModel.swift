@@ -359,7 +359,7 @@ final class NewSessionViewModel {
         errorMessage = nil
 
         do {
-            let workspace = try await workspaceService.requireWritableWorkspace()
+            let workspace = try await workspaceService.requireAuthorizedWorkspace()
             appAudioService.refreshRunningApps()
 
             var selectedCapturedAppName: String?
