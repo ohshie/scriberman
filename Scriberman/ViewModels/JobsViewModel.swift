@@ -287,9 +287,31 @@ final class JobsViewModel {
     /// would decode every surviving transcript again.
     static let searchMatchDebounce: Duration = .milliseconds(200)
 
+    struct SearchTaskKey: Equatable {
+        let query: String
+        let revision: Int
+    }
+
+    /// Reads the same stored text as filtering, without decoding transcripts.
+    func searchContentRevision(for items: [SessionListItem]) -> Int {
+        var hasher = Hasher()
+        for item in items {
+            hasher.combine(item.id)
+            switch item {
+            case .pending:
+                break
+            case .recording(let session):
+                hasher.combine(session.searchableText)
+            case .imported(let session):
+                hasher.combine(session.searchableText)
+            }
+        }
+        return hasher.finalize()
+    }
+
     /// Recomputes `searchMatches` for the current query once it settles.
     ///
-    /// Cancellable by design: called from a `.task(id:)` that restarts on every keystroke, so an
+    /// Cancellable by design: called from a `.task(id:)` that restarts on query or content changes, so an
     /// in-flight debounce is discarded rather than decoding for a query the user has moved past.
     func updateSearchMatches(
         for items: [SessionListItem],
