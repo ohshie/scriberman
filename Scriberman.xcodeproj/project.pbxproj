@@ -244,6 +244,7 @@
 		A55A55A55A55A55A55A55A55 /* OpenAI in Frameworks */ = {isa = PBXBuildFile; productRef = D11D11D11D11D11D11D11D11 /* OpenAI */; };
 		A66A66A66A66A66A66A66A66 /* MockKeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B66B66B66B66B66B66B66B66 /* MockKeychainStore.swift */; };
 		A77A77A77A77A77A77A77A77 /* AIProviderServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B77B77B77B77B77B77B77B77 /* AIProviderServiceTests.swift */; };
+		D19000000000000000000001 /* KeychainStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D19000000000000000000002 /* KeychainStoreTests.swift */; };
 		A88A88A88A88A88A88A88A88 /* ConnectionStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B88B88B88B88B88B88B88B88 /* ConnectionStatusTests.swift */; };
 		B1C2D3E4F5061728394A5B6C /* StatusTagViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E4F5061728394A5B6D /* StatusTagViewTests.swift */; };
 		B2FBF1E99346D1C849214837 /* TranscriptionServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A2AEE3DB783526C01DF1552 /* TranscriptionServiceProtocol.swift */; };
@@ -541,6 +542,7 @@
 		B66B66B66B66B66B66B66B66 /* MockKeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockKeychainStore.swift; sourceTree = "<group>"; };
 		B6D3426D4147C8FFE524865F /* TrimEditorView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrimEditorView.swift; sourceTree = "<group>"; };
 		B77B77B77B77B77B77B77B77 /* AIProviderServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderServiceTests.swift; sourceTree = "<group>"; };
+		D19000000000000000000002 /* KeychainStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStoreTests.swift; sourceTree = "<group>"; };
 		B88B88B88B88B88B88B88B88 /* ConnectionStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStatusTests.swift; sourceTree = "<group>"; };
 		BA65604F12187C96E37A1413 /* WorkspacePicker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WorkspacePicker.swift; sourceTree = "<group>"; };
 		C1B2C3D4E5F60718293A4B5D /* NewSessionViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionViewModelTests.swift; sourceTree = "<group>"; };
@@ -615,6 +617,7 @@
 			children = (
 				A9D1E2F3A4B5C6D7E8FB1004 /* UpdateServiceTests.swift */,
 				B77B77B77B77B77B77B77B77 /* AIProviderServiceTests.swift */,
+				D19000000000000000000002 /* KeychainStoreTests.swift */,
 				B88B88B88B88B88B88B88B88 /* ConnectionStatusTests.swift */,
 				B5871E10D502FAEB70EDC99F /* MarkdownRendererTests.swift */,
 				8E2E0F5F51DABC96146DE26B /* RecordingStatusTests.swift */,
@@ -1442,6 +1445,7 @@
 			files = (
 				A9D1E2F3A4B5C6D7E8FB1003 /* UpdateServiceTests.swift in Sources */,
 				A77A77A77A77A77A77A77A77 /* AIProviderServiceTests.swift in Sources */,
+				D19000000000000000000001 /* KeychainStoreTests.swift in Sources */,
 				7987328C2F7DB47F00570A03 /* ModelInstallServiceTests.swift in Sources */,
 				798732752F7D8EEA00570A03 /* AudioChannelReaderTests.swift in Sources */,
 				A88A88A88A88A88A88A88A88 /* ConnectionStatusTests.swift in Sources */,
