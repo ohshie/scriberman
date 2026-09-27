@@ -101,6 +101,10 @@ struct OnboardingView: View {
             ModelsOnboardingStep {
                 syncDisplayedStep(required: appState.requiredOnboardingStep, animate: true)
             }
+        case .calendar:
+            CalendarOnboardingStep {
+                syncDisplayedStep(required: appState.requiredOnboardingStep, animate: true)
+            }
         }
     }
 

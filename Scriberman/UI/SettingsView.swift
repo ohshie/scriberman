@@ -81,6 +81,8 @@ struct SettingsView: View {
                         }
                     }
 
+                    CalendarSettingsSection(controller: appState.calendarSuggestions)
+
                     Section("Updates") {
                         LabeledContent("Current version") {
                             Text(updateService.currentVersionText)

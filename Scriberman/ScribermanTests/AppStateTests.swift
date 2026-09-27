@@ -544,7 +544,262 @@ final class AppStateTests {
         }
     }
 
-    private func makeServiceContainer(permissionService: PermissionServiceProtocol) -> ServiceContainer {
+    // MARK: - Calendar suggestions
+
+    private func makeCalendarDefaults() -> UserDefaults {
+        UserDefaults(suiteName: "AppStateCalendarTests.\(UUID().uuidString)")!
+    }
+
+    private func makeReadyPermissions() -> MockPermissionService {
+        let permissionService = MockPermissionService()
+        permissionService.micStatus = .granted
+        permissionService.screenRecordingStatus = .granted
+        return permissionService
+    }
+
+    /// An AppState past the required steps, with the calendar step still unanswered.
+    private func makeCalendarStepAppState(
+        defaults: UserDefaults,
+        calendarService: MockCalendarService = MockCalendarService()
+    ) async -> AppState {
+        let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString, isDirectory: true))
+        let permissionService = makeReadyPermissions()
+        permissionService.verifyMicResult = true
+        permissionService.verifyScreenRecordingResult = true
+        let appState = AppState(
+            services: makeServiceContainer(
+                permissionService: permissionService,
+                calendarService: calendarService,
+                calendarPreferences: CalendarSuggestionPreferences(userDefaults: defaults)
+            ),
+            restoreWorkspaceHandler: { workspace },
+            prepareDictationHandler: { _ in },
+            registerHotkeyHandler: {}
+        )
+        await appState.bootstrapWorkspace()
+        appState.settingsViewModel.bundlePhase = .allReady
+        return appState
+    }
+
+    @Test
+    func calendarStepFollowsRequiredStepsForNewAndExistingInstallations() async {
+        // Absent invitation history is the same for a new install and an updated one.
+        let appState = await makeCalendarStepAppState(defaults: makeCalendarDefaults())
+        #expect(appState.requiredOnboardingStep == .calendar)
+    }
+
+    @Test
+    func calendarStepStaysUntilAnsweredAndIsNotShownAfterRelaunch() async {
+        let defaults = makeCalendarDefaults()
+        let appState = await makeCalendarStepAppState(defaults: defaults)
+        appState.markCalendarInvitationPresented()
+        #expect(appState.requiredOnboardingStep == .calendar)
+
+        // Terminated before answering.
+        let relaunched = await makeCalendarStepAppState(defaults: defaults)
+        #expect(relaunched.requiredOnboardingStep == nil)
+    }
+
+    @Test
+    func decliningCalendarStepRequestsNothingAndDoesNotReturn() async {
+        let defaults = makeCalendarDefaults()
+        let service = MockCalendarService()
+        let appState = await makeCalendarStepAppState(defaults: defaults, calendarService: service)
+        appState.markCalendarInvitationPresented()
+        await appState.resolveCalendarInvitation(enable: false)
+
+        #expect(appState.requiredOnboardingStep == nil)
+        #expect(!appState.calendarSuggestions.preferences.isEnabled)
+        #expect(service.read(\.accessRequestCount) == 0)
+        #expect(await makeCalendarStepAppState(defaults: defaults).requiredOnboardingStep == nil)
+    }
+
+    @Test
+    func acceptingWithDeniedPermissionCompletesStepAndLeavesFeatureOff() async {
+        let service = MockCalendarService()
+        service.update { $0.statusAfterRequest = .denied }
+        let appState = await makeCalendarStepAppState(defaults: makeCalendarDefaults(), calendarService: service)
+        appState.markCalendarInvitationPresented()
+        await appState.resolveCalendarInvitation(enable: true)
+
+        #expect(service.read(\.accessRequestCount) == 1)
+        #expect(appState.requiredOnboardingStep == nil)
+        #expect(!appState.calendarSuggestions.preferences.isEnabled)
+    }
+
+    @Test
+    func acceptingWithGrantedPermissionEnablesSuggestions() async {
+        let appState = await makeCalendarStepAppState(defaults: makeCalendarDefaults())
+        appState.markCalendarInvitationPresented()
+        await appState.resolveCalendarInvitation(enable: true)
+
+        #expect(appState.requiredOnboardingStep == nil)
+        #expect(appState.calendarSuggestions.preferences.isEnabled)
+    }
+
+    @Test
+    func calendarStepWaitsForActiveCapture() async {
+        let appState = await makeCalendarStepAppState(defaults: makeCalendarDefaults())
+        appState.newSessionViewModel.state = .recording(duration: 0, level: 0)
+        #expect(appState.requiredOnboardingStep == nil)
+        appState.newSessionViewModel.state = .idle
+        #expect(appState.requiredOnboardingStep == .calendar)
+    }
+
+    /// A ready AppState with suggestions enabled and one meeting starting in a minute.
+    private func makeSuggestingAppState(
+        title: String = "Design review"
+    ) async -> (AppState, MockCalendarService, CalendarOccurrenceID) {
+        let service = MockCalendarService(status: .fullAccess)
+        let start = Date.now.addingTimeInterval(60)
+        service.update {
+            $0.calendars = [CalendarSnapshot(id: "work", title: "Work", sourceTitle: "iCloud")]
+            $0.events = [.fixture(title: title, start: start)]
+        }
+        let appState = AppState(
+            services: makeServiceContainer(permissionService: makeReadyPermissions(), calendarService: service)
+        )
+        appState.calendarSuggestions.activate()
+        await appState.calendarSuggestions.setEnabled(true)
+        await appState.calendarSuggestions.refresh()
+        let id = appState.calendarSuggestions.suggestions.first!.id
+        return (appState, service, id)
+    }
+
+    @Test
+    func preparingCreatesAnEditableDraftNamedAfterTheMeetingWithoutRecording() async {
+        let (appState, _, id) = await makeSuggestingAppState()
+
+        #expect(await appState.prepareCalendarSession(id) == .prepared)
+        #expect(appState.pendingSession?.title == "Design review")
+        #expect(appState.newSessionViewModel.isIdle)
+        #expect(appState.calendarSuggestions.suggestions.isEmpty)
+
+        appState.pendingSession?.title = "Edited"
+        #expect(appState.pendingSession?.title == "Edited")
+    }
+
+    @Test
+    func preparingABlankTitledMeetingUsesTheDefaultTitle() async {
+        let (appState, _, id) = await makeSuggestingAppState(title: "  ")
+        #expect(await appState.prepareCalendarSession(id) == .prepared)
+        #expect(appState.pendingSession?.title.hasPrefix("Session ") == true)
+    }
+
+    @Test
+    func preparingAStaleMeetingChangesNothing() async {
+        let (appState, service, id) = await makeSuggestingAppState()
+        service.update { $0.events = $0.events.map { .fixture(title: $0.title, start: $0.start, status: .cancelled) } }
+
+        #expect(await appState.prepareCalendarSession(id) == .unavailable)
+        #expect(appState.pendingSession == nil)
+        #expect(appState.calendarSuggestions.suggestions.isEmpty)
+    }
+
+    @Test
+    func preparingDuringCaptureChangesNothing() async {
+        let (appState, _, id) = await makeSuggestingAppState()
+        appState.newSessionViewModel.state = .recording(duration: 0, level: 0)
+        appState.calendarSuggestions.setCaptureActive(true)
+
+        #expect(await appState.prepareCalendarSession(id) == .unavailable)
+        #expect(appState.pendingSession == nil)
+        #expect(!appState.newSessionViewModel.isIdle)
+        #expect(appState.calendarSuggestions.suggestions.count == 1)
+    }
+
+    @Test
+    func anExistingDraftNeedsConfirmationAndDecliningKeepsEverything() async {
+        let (appState, _, id) = await makeSuggestingAppState()
+        appState.selectPendingSession()
+        appState.pendingSession?.title = "My draft"
+        let draftID = appState.pendingSession!.id
+
+        #expect(await appState.prepareCalendarSession(id) == .needsTitleReplacement(draftID: draftID, meetingTitle: "Design review"))
+        #expect(appState.pendingSession?.title == "My draft")
+        #expect(appState.calendarSuggestions.suggestions.map(\.id) == [id])
+    }
+
+    @Test
+    func confirmingReplacementChangesOnlyTheTitle() async {
+        let (appState, _, id) = await makeSuggestingAppState()
+        appState.selectPendingSession()
+        appState.newSessionViewModel.recordScreen = true
+        let draftID = appState.pendingSession!.id
+
+        #expect(await appState.confirmCalendarTitleReplacement(id, draftID: draftID) == .prepared)
+        #expect(appState.pendingSession?.id == draftID)
+        #expect(appState.pendingSession?.title == "Design review")
+        #expect(appState.newSessionViewModel.recordScreen)
+        #expect(appState.calendarSuggestions.suggestions.isEmpty)
+    }
+
+    @Test
+    func confirmationIsRejectedWhenTheDraftOrCaptureChanged() async {
+        let (appState, _, id) = await makeSuggestingAppState()
+        appState.selectPendingSession()
+        let draftID = appState.pendingSession!.id
+
+        appState.discardPendingSession()
+        appState.selectPendingSession()
+        let replacementTitle = appState.pendingSession?.title
+        #expect(await appState.confirmCalendarTitleReplacement(id, draftID: draftID) == .unavailable)
+        #expect(appState.pendingSession?.title == replacementTitle)
+
+        let currentDraftID = appState.pendingSession!.id
+        appState.newSessionViewModel.state = .recording(duration: 0, level: 0)
+        #expect(await appState.confirmCalendarTitleReplacement(id, draftID: currentDraftID) == .unavailable)
+        #expect(appState.pendingSession?.title == replacementTitle)
+        #expect(!appState.newSessionViewModel.isIdle)
+    }
+
+    @Test
+    func laterCalendarChangesDoNotRenameAPreparedDraft() async {
+        let (appState, service, id) = await makeSuggestingAppState()
+        #expect(await appState.prepareCalendarSession(id) == .prepared)
+
+        service.update { $0.events = $0.events.map { .fixture(title: "Renamed", start: $0.start) } }
+        await appState.calendarSuggestions.refresh()
+        service.update { $0.events = [] }
+        await appState.calendarSuggestions.refresh()
+
+        #expect(appState.pendingSession?.title == "Design review")
+    }
+
+    @Test
+    func disablingDuringRecordingLeavesCaptureAndDraftAlone() async {
+        let (appState, _, _) = await makeSuggestingAppState()
+        appState.selectPendingSession()
+        let draft = appState.pendingSession
+        appState.newSessionViewModel.state = .recording(duration: 12, level: 0)
+
+        await appState.calendarSuggestions.setEnabled(false)
+
+        #expect(appState.calendarSuggestions.visibleSuggestions.isEmpty)
+        #expect(!appState.calendarSuggestions.hasRuntimeWork)
+        #expect(appState.pendingSession == draft)
+        #expect(!appState.newSessionViewModel.isIdle)
+    }
+
+    @Test
+    func reEnablingKeepsTheCalendarSelection() async {
+        let (appState, service, _) = await makeSuggestingAppState()
+        service.update { $0.calendars.append(CalendarSnapshot(id: "home", title: "Home", sourceTitle: "iCloud")) }
+        appState.calendarSuggestions.setCalendar("work", selected: false)
+
+        await appState.calendarSuggestions.setEnabled(false)
+        await appState.calendarSuggestions.setEnabled(true)
+        await appState.calendarSuggestions.refresh()
+
+        #expect(appState.calendarSuggestions.preferences.selectedCalendarIDs.isEmpty)
+        #expect(appState.calendarSuggestions.suggestions.isEmpty)
+    }
+
+    private func makeServiceContainer(
+        permissionService: PermissionServiceProtocol,
+        calendarService: CalendarServiceProtocol = MockCalendarService(),
+        calendarPreferences: CalendarSuggestionPreferences? = nil
+    ) -> ServiceContainer {
         let bookmarkStore = TestBookmarkStore()
         let workspaceService = WorkspaceService(bookmarkStore: bookmarkStore)
         let speakerEmbeddingStore = SpeakerEmbeddingStore(modelContainer: modelContainer)
@@ -557,6 +812,12 @@ final class AppStateTests {
         let aiProviderStore = AIProviderStore(defaults: userDefaults)
 
         let appAudioSettings = AppAudioSettings(userDefaults: userDefaults)
+        // Existing tests model an installation that already answered the calendar step.
+        let calendarPreferences = calendarPreferences ?? {
+            let preferences = CalendarSuggestionPreferences(userDefaults: userDefaults)
+            preferences.invitationShown = true
+            return preferences
+        }()
 
         return ServiceContainer(
             main: MainServiceContainer(
@@ -570,7 +831,9 @@ final class AppStateTests {
                 screenCaptureService: ScreenCaptureService(displayProvider: { [] }),
                 permissionService: permissionService,
                 transcriptExportService: TranscriptExportService(),
-                appAudioSettings: appAudioSettings
+                appAudioSettings: appAudioSettings,
+                calendarService: calendarService,
+                calendarPreferences: calendarPreferences
             ),
             background: BackgroundServiceContainer(
                 workspaceService: workspaceService,
