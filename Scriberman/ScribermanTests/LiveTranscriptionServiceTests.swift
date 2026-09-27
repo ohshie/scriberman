@@ -481,8 +481,9 @@ struct LiveTranscriptionServiceTests {
         }
 
         await service.process(samples: makeChunks([0.10, 0.11, 0.20, 0.30, 0.31]), source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        // Every segment is yielded before process returns; finishing lets the collector drain them.
+        results.continuation.finish()
+        await collectTask.value
 
         let first = try #require(receivedSegments.first)
         let second = try #require(receivedSegments.dropFirst().first)
@@ -663,8 +664,8 @@ struct LiveTranscriptionServiceTests {
 
         let loudSamples = Array(repeating: Float(0.1), count: 8192)
         await service.process(samples: loudSamples, source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
 
         #expect(receivedSegments.isEmpty)
     }
@@ -695,8 +696,8 @@ struct LiveTranscriptionServiceTests {
 
         let loudSamples = Array(repeating: Float(0.1), count: 8192)
         await service.process(samples: loudSamples, source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
 
         #expect(receivedSegments.count == 1)
     }
@@ -728,8 +729,8 @@ struct LiveTranscriptionServiceTests {
 
         let loudSamples = Array(repeating: Float(0.1), count: 8192)
         await service.process(samples: loudSamples, source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
 
         #expect(receivedSegments.count == 1)
     }
@@ -760,8 +761,8 @@ struct LiveTranscriptionServiceTests {
         }
 
         await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
 
         #expect(receivedSegments.isEmpty)
         #expect(await service.lastFinalSegmentEndOffsetForTesting(source: .mic) == nil)
@@ -791,8 +792,8 @@ struct LiveTranscriptionServiceTests {
         }
 
         await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
 
         #expect(receivedSegments.count == 1)
         #expect(receivedSegments.first?.text == "Yeah and then we should go")
@@ -855,8 +856,8 @@ struct LiveTranscriptionServiceTests {
         }
 
         await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
 
         #expect(receivedSegments.count == 1)
         #expect(receivedSegments.first?.text == "That's it.")
@@ -888,8 +889,8 @@ struct LiveTranscriptionServiceTests {
         }
 
         await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
 
         #expect(receivedSegments.isEmpty)
         #expect(await service.lastFinalSegmentEndOffsetForTesting(source: .mic) == nil)
@@ -921,8 +922,8 @@ struct LiveTranscriptionServiceTests {
         }
 
         await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
 
         #expect(receivedSegments.isEmpty)
     }
@@ -951,8 +952,8 @@ struct LiveTranscriptionServiceTests {
         }
 
         await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
 
         #expect(receivedSegments.count == 1)
         #expect(receivedSegments.first?.text == "huh, that's fine")
@@ -1102,8 +1103,8 @@ struct LiveTranscriptionServiceTests {
         }
 
         await service.process(samples: samples, source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
         return receivedSegments
     }
 

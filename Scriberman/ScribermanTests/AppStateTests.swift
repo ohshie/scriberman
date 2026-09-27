@@ -347,12 +347,11 @@ final class AppStateTests {
         delegate.handleWillSleep()
         delegate.handleDidWake()
 
-        await assertEventuallyTrue(
-            "Expected wake cleanup to run after the stop completed",
-            timeoutNanoseconds: 5_000_000_000
-        ) {
+        await assertEventuallyTrue("Expected wake cleanup to run after the stop completed") {
             stopWasCompleteAtCleanup != nil
         }
+        // The handlers capture the delegate weakly; keep it alive through the wait, as the app does.
+        withExtendedLifetime(delegate) {}
         #expect(stopWasCompleteAtCleanup == true)
     }
 
@@ -371,6 +370,7 @@ final class AppStateTests {
         await assertEventuallyTrue("Expected wake cleanup to run") {
             cleanupRan
         }
+        withExtendedLifetime(delegate) {}
     }
 
     @Test
@@ -598,7 +598,9 @@ final class AppStateTests {
 
     private func assertEventuallyTrue(
         _ message: String,
-        timeoutNanoseconds: UInt64 = 1_000_000_000,
+        // Generous because it returns as soon as the predicate holds; under the full parallel suite
+        // the work being waited on can queue for seconds behind other tests.
+        timeoutNanoseconds: UInt64 = 10_000_000_000,
         pollIntervalNanoseconds: UInt64 = 20_000_000,
         predicate: @escaping @MainActor () -> Bool
     ) async {
