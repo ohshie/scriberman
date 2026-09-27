@@ -53,8 +53,8 @@ final class AudioMixdownServiceTests {
         try await service.mix(
             micURL: micURL,
             appURL: appURL,
-            micStartHostTime: 1_000_000_000,
-            appStartHostTime: 1_000_000_000,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
             into: outputURL
         )
 
@@ -83,8 +83,8 @@ final class AudioMixdownServiceTests {
         try await service.mix(
             micURL: micURL,
             appURL: appURL,
-            micStartHostTime: 1_000_000_000,
-            appStartHostTime: 1_000_000_000,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
             into: outputURL
         )
 
@@ -107,8 +107,8 @@ final class AudioMixdownServiceTests {
         try await service.mix(
             micURL: micURL,
             appURL: appURL,
-            micStartHostTime: 1_000_000_000,
-            appStartHostTime: 1_000_000_000,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
             into: outputURL
         )
 
@@ -136,7 +136,7 @@ final class AudioMixdownServiceTests {
         try await service.mix(
             micURL: micURL,
             appURL: nil,
-            micStartHostTime: 2_000_000_000,
+            micStartHostTime: HostNanoseconds(nanoseconds: 2_000_000_000),
             appStartHostTime: nil,
             into: outputURL
         )
@@ -167,7 +167,7 @@ final class AudioMixdownServiceTests {
         try await service.mix(
             micURL: micURL,
             appURL: nil,
-            micStartHostTime: 2_000_000_000,
+            micStartHostTime: HostNanoseconds(nanoseconds: 2_000_000_000),
             appStartHostTime: nil,
             into: outputURL
         )
@@ -196,8 +196,8 @@ final class AudioMixdownServiceTests {
         try await service.mix(
             micURL: micURL,
             appURL: appURL,
-            micStartHostTime: 1_000_000_000,
-            appStartHostTime: 1_500_000_000,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: HostNanoseconds(nanoseconds: 1_500_000_000),
             into: outputURL
         )
 
@@ -225,7 +225,7 @@ final class AudioMixdownServiceTests {
         try await service.mix(
             micURL: micURL,
             appURL: nil,
-            micStartHostTime: 1_000_000_000,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
             appStartHostTime: nil,
             into: outputURL
         )
@@ -253,8 +253,8 @@ final class AudioMixdownServiceTests {
         try await service.mix(
             micURL: micURL,
             appURL: appURL,
-            micStartHostTime: 1_000_000_000,
-            appStartHostTime: 1_000_000_000,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
             into: outputURL
         )
 
@@ -288,8 +288,8 @@ final class AudioMixdownServiceTests {
         try await service.mix(
             micURL: micURL,
             appURL: appURL,
-            micStartHostTime: 1_000_000_000,
-            appStartHostTime: 1_000_000_000,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
             into: outputURL
         )
 
@@ -310,7 +310,7 @@ final class AudioMixdownServiceTests {
         try await service.mix(
             micURL: micURL,
             appURL: nil,
-            micStartHostTime: 1_000_000_000,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
             appStartHostTime: nil,
             into: outputURL,
             deleteSourceFiles: false
@@ -354,13 +354,24 @@ final class AudioMixdownServiceTests {
             micURL: micURL,
             appURL: nil,
             mixdownURL: mixdownURL,
-            micStartHostTime: 1_000_000_000,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
             appStartHostTime: nil
         )
 
         let persisted = try #require(try RecordingSession.fetch(id: session.id, in: ModelContext(container)))
         #expect(persisted.mixdownURL == mixdownURL.path)
         #expect(FileManager.default.fileExists(atPath: mixdownURL.path))
+    }
+
+    @Test
+    func testLegacyOffsetIsCorrectOnANonUnitTimebase() async {
+        let timebase = HostClock.Timebase(numer: 125, denom: 3)
+        let offset = await AudioMixdownService().computeOffsetSamples(
+            micStartHostTime: HostNanoseconds(machTicks: 24_000_000, timebase: timebase),
+            appStartHostTime: HostNanoseconds(machTicks: 36_000_000, timebase: timebase)
+        )
+
+        #expect(offset == 24_000)
     }
 
     private func writeMonoWAV(samples: [Float], to url: URL) throws {

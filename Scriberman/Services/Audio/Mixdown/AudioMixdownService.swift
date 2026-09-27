@@ -38,8 +38,8 @@ actor AudioMixdownService {
     func mix(
         micURL: URL,
         appURL: URL?,
-        micStartHostTime: UInt64,
-        appStartHostTime: UInt64?,
+        micStartHostTime: HostNanoseconds,
+        appStartHostTime: HostNanoseconds?,
         into outputURL: URL,
         deleteSourceFiles: Bool = true
     ) async throws {
@@ -47,7 +47,7 @@ actor AudioMixdownService {
             "Mix request received. mic=\(micURL.path, privacy: .public) app=\(appURL?.path ?? "nil", privacy: .public) out=\(outputURL.path, privacy: .public) format=\(String(describing: self.outputFormat), privacy: .public)"
         )
         logger.info(
-            "Mix timing input. micStart=\(micStartHostTime, privacy: .public) appStart=\(appStartHostTime ?? 0, privacy: .public)"
+            "Mix timing input. micStart=\(micStartHostTime, privacy: .public) appStart=\(appStartHostTime?.description ?? "0", privacy: .public)"
         )
         logger.info(
             "Input existence. micExists=\(self.fileManager.fileExists(atPath: micURL.path), privacy: .public) appExists=\(appURL.map { self.fileManager.fileExists(atPath: $0.path) } ?? false, privacy: .public)"
@@ -213,16 +213,15 @@ actor AudioMixdownService {
         return true
     }
 
-    private func computeOffsetSamples(
-        micStartHostTime: UInt64,
-        appStartHostTime: UInt64?
+    func computeOffsetSamples(
+        micStartHostTime: HostNanoseconds,
+        appStartHostTime: HostNanoseconds?
     ) -> Int {
         guard let appStartHostTime else {
             return 0
         }
 
-        let deltaNanoseconds = Double(Int64(appStartHostTime) - Int64(micStartHostTime))
-        return Int((deltaNanoseconds / 1_000_000_000.0 * outputSampleRate).rounded())
+        return Int((appStartHostTime.seconds(since: micStartHostTime) * outputSampleRate).rounded())
     }
 
     func writeMonoAAC(samples: [Float], to outputURL: URL) throws {

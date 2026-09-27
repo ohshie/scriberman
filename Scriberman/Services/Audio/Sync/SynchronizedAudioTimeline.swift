@@ -1,3 +1,4 @@
+import CoreMedia
 import Foundation
 
 /// One written capture buffer: the host time of its first frame (nanoseconds) and
@@ -18,22 +19,71 @@ struct CaptureTimingSidecar: Codable, Sendable {
     var totalFrames: Int { segments.reduce(0) { $0 + $1.frameCount } }
 }
 
-/// Converts a mach host-time value to nanoseconds using the system timebase. On
-/// Apple Silicon the timebase is 1/1 (host units already are nanoseconds); this stays
-/// correct on any timebase.
+/// Converts a Mach host-time value to nanoseconds.
 enum HostClock {
-    static func nanoseconds(machTime: UInt64) -> UInt64 {
-        var info = mach_timebase_info_data_t()
-        mach_timebase_info(&info)
-        if info.numer == info.denom || info.denom == 0 {
+    /// The ratio that turns Mach ticks into nanoseconds (`ns = ticks × numer / denom`).
+    struct Timebase: Equatable, Sendable {
+        let numer: UInt32
+        let denom: UInt32
+
+        static let system: Timebase = {
+            var info = mach_timebase_info_data_t()
+            mach_timebase_info(&info)
+            return Timebase(numer: info.numer, denom: info.denom)
+        }()
+    }
+
+    static func nanoseconds(machTime: UInt64, timebase: Timebase = .system) -> UInt64 {
+        if timebase.numer == timebase.denom || timebase.denom == 0 {
             return machTime
         }
-        // Use 128-bit-safe scaling to avoid overflow on long uptimes.
-        let numer = UInt64(info.numer)
-        let denom = UInt64(info.denom)
+        // Divide before multiplying so long uptimes cannot overflow.
+        let numer = UInt64(timebase.numer)
+        let denom = UInt64(timebase.denom)
         let whole = machTime / denom * numer
         let remainder = machTime % denom * numer / denom
         return whole + remainder
+    }
+}
+
+/// A host-clock time in nanoseconds.
+///
+/// Every capture start time is held in this type so a raw Mach tick value cannot be mixed with a
+/// nanosecond one. `init(machTicks:)` is the only way in from ticks, and it is called where the
+/// value is read from the capture framework.
+struct HostNanoseconds: Comparable, Hashable, Sendable, CustomStringConvertible {
+    let nanoseconds: UInt64
+
+    init(nanoseconds: UInt64) {
+        self.nanoseconds = nanoseconds
+    }
+
+    init(machTicks: UInt64, timebase: HostClock.Timebase = .system) {
+        self.nanoseconds = HostClock.nanoseconds(machTime: machTicks, timebase: timebase)
+    }
+
+    /// Host time of a sample buffer's first frame, or nil if the buffer carries none.
+    init?(presentationTimeOf sampleBuffer: CMSampleBuffer) {
+        let presentationTimestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        let hostTimeClock = CMClockGetHostTimeClock()
+        let hostTime = CMSyncConvertTime(presentationTimestamp, from: hostTimeClock, to: hostTimeClock)
+        guard CMTIME_IS_VALID(hostTime), CMTIME_IS_NUMERIC(hostTime) else {
+            return nil
+        }
+        self.init(machTicks: CMClockConvertHostTimeToSystemUnits(hostTime))
+    }
+
+    /// Signed seconds from `other` to this time.
+    func seconds(since other: HostNanoseconds) -> Double {
+        Double(Int64(nanoseconds) - Int64(other.nanoseconds)) / 1_000_000_000
+    }
+
+    static func < (lhs: HostNanoseconds, rhs: HostNanoseconds) -> Bool {
+        lhs.nanoseconds < rhs.nanoseconds
+    }
+
+    var description: String {
+        String(nanoseconds)
     }
 }
 

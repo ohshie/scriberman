@@ -90,6 +90,29 @@ struct MicStreamOutputHandlerTests {
     }
 
     @Test
+    func testAppHandlerReportsFirstBufferHostTimeInNanoseconds() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let anchors = AnchorRecorder()
+        let handler = AppAudioStreamOutputHandler()
+        handler.onFirstBufferHostTime = { anchors.record($0.nanoseconds) }
+        handler.configureOutput(url: root.appendingPathComponent("app.wav"))
+
+        handler.processSampleBufferForTesting(
+            try makeSampleBuffer(sampleRate: 48_000, channels: 1, frameCount: 480, hostTimeNanos: 1_500_000_000)
+        )
+        handler.processSampleBufferForTesting(
+            try makeSampleBuffer(sampleRate: 48_000, channels: 1, frameCount: 480, hostTimeNanos: 1_510_000_000)
+        )
+        handler.closeOutput()
+
+        #expect(anchors.values == [1_500_000_000])
+    }
+
+    @Test
     func testNativeFormatChangeMidStreamKeepsOneFileAndOneTimelineAnchor() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -99,7 +122,7 @@ struct MicStreamOutputHandlerTests {
 
         let anchors = AnchorRecorder()
         let handler = MicStreamOutputHandler()
-        handler.onFirstBufferHostTime = { anchors.record($0) }
+        handler.onFirstBufferHostTime = { anchors.record($0.nanoseconds) }
         handler.configureOutput(url: micURL)
 
         // Device A: 44.1 kHz mono.

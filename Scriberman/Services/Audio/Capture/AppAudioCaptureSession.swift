@@ -58,7 +58,7 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Senda
     init(
         fileURL: URL,
         processID: pid_t,
-        onFirstBufferHostTime: (@Sendable (UInt64) -> Void)? = nil,
+        onFirstBufferHostTime: (@Sendable (HostNanoseconds) -> Void)? = nil,
         liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil,
         notificationCenter: NotificationCenter = .default
     ) {

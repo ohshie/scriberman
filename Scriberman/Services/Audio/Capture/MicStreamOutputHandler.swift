@@ -20,10 +20,10 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
     private var fileURL: URL?
     private var converter: AVAudioConverter?
     private var converterSourceFormat: AVAudioFormat?
-    private var firstBufferHostTime: UInt64?
+    private var firstBufferHostTime: HostNanoseconds?
     private var hasPrepared = false
 
-    var onFirstBufferHostTime: (@Sendable (UInt64) -> Void)?
+    var onFirstBufferHostTime: (@Sendable (HostNanoseconds) -> Void)?
 
     var audioLevel: Float { streamer.audioLevel }
 
@@ -99,8 +99,9 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
 #endif
 
     private func process(_ sampleBuffer: CMSampleBuffer) {
-        let hostNanos = Self.hostTimeNanos(from: sampleBuffer)
-        captureFirstBufferHostTimeIfNeeded(hostNanos)
+        let hostTime = HostNanoseconds(presentationTimeOf: sampleBuffer)
+        let hostNanos = hostTime?.nanoseconds
+        captureFirstBufferHostTimeIfNeeded(hostTime)
 
         guard let nativeBuffer = Self.makePCMBuffer(from: sampleBuffer) else {
             return
@@ -138,18 +139,18 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
         }
     }
 
-    private func captureFirstBufferHostTimeIfNeeded(_ hostNanos: UInt64?) {
-        guard let hostNanos else { return }
+    private func captureFirstBufferHostTimeIfNeeded(_ hostTime: HostNanoseconds?) {
+        guard let hostTime else { return }
         var didCapture = false
         lock.lock()
         if firstBufferHostTime == nil {
-            firstBufferHostTime = hostNanos
+            firstBufferHostTime = hostTime
             didCapture = true
         }
         let callback = onFirstBufferHostTime
         lock.unlock()
         if didCapture {
-            callback?(hostNanos)
+            callback?(hostTime)
         }
     }
 
@@ -183,14 +184,6 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
         default:
             return nil
         }
-    }
-
-    private static func hostTimeNanos(from sampleBuffer: CMSampleBuffer) -> UInt64? {
-        let presentationTimestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        let hostTimeClock = CMClockGetHostTimeClock()
-        let hostTime = CMSyncConvertTime(presentationTimestamp, from: hostTimeClock, to: hostTimeClock)
-        guard CMTIME_IS_VALID(hostTime), CMTIME_IS_NUMERIC(hostTime) else { return nil }
-        return HostClock.nanoseconds(machTime: CMClockConvertHostTimeToSystemUnits(hostTime))
     }
 
     private static func makePCMBuffer(from sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {

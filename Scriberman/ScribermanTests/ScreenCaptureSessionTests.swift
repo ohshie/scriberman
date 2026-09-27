@@ -33,17 +33,23 @@ final class ScreenCaptureSessionTests {
     @Test
     func testVideoStartHostTimeCapturesFirstFrameOnly() throws {
         let session = ScreenCaptureSession(displayProvider: { [] })
-        let firstSample = try makeVideoSampleBuffer(hostTime: 1_111)
-        let secondSample = try makeVideoSampleBuffer(hostTime: 2_222)
-        let expectedHostTime = convertedHostTime(from: firstSample)
+        let firstSample = try makeVideoSampleBuffer(hostTimeNanos: 1_111_000_000)
+        let secondSample = try makeVideoSampleBuffer(hostTimeNanos: 2_222_000_000)
 
         session.captureVideoStartHostTimeIfNeeded(from: firstSample)
         session.captureVideoStartHostTimeIfNeeded(from: secondSample)
 
-        #expect(session.videoStartHostTime == expectedHostTime)
+        #expect(session.videoStartHostTime == HostNanoseconds(nanoseconds: 1_111_000_000))
     }
 
-    private func makeVideoSampleBuffer(hostTime: UInt64) throws -> CMSampleBuffer {
+    @Test
+    func testPresentationTimeConvertsToNanoseconds() throws {
+        let sample = try makeVideoSampleBuffer(hostTimeNanos: 2_500_000_000)
+
+        #expect(HostNanoseconds(presentationTimeOf: sample) == HostNanoseconds(nanoseconds: 2_500_000_000))
+    }
+
+    private func makeVideoSampleBuffer(hostTimeNanos: Int64) throws -> CMSampleBuffer {
         var pixelBuffer: CVPixelBuffer?
         let createStatus = CVPixelBufferCreate(
             nil,
@@ -69,7 +75,7 @@ final class ScreenCaptureSessionTests {
 
         var timing = CMSampleTimingInfo(
             duration: CMTime(value: 1, timescale: 30),
-            presentationTimeStamp: CMClockMakeHostTimeFromSystemUnits(hostTime),
+            presentationTimeStamp: CMTime(value: hostTimeNanos, timescale: 1_000_000_000),
             decodeTimeStamp: .invalid
         )
         var sampleBuffer: CMSampleBuffer?
@@ -85,22 +91,6 @@ final class ScreenCaptureSessionTests {
         }
 
         return sampleBuffer
-    }
-
-    private func convertedHostTime(from sampleBuffer: CMSampleBuffer) -> UInt64? {
-        let presentationTimestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        let hostTimeClock = CMClockGetHostTimeClock()
-        let hostTime = CMSyncConvertTime(
-            presentationTimestamp,
-            from: hostTimeClock,
-            to: hostTimeClock
-        )
-
-        guard CMTIME_IS_VALID(hostTime), CMTIME_IS_NUMERIC(hostTime) else {
-            return nil
-        }
-
-        return CMClockConvertHostTimeToSystemUnits(hostTime)
     }
 }
 

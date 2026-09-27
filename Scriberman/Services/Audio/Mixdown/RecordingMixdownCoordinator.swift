@@ -8,8 +8,8 @@ protocol RecordingMixdownCoordinating: Sendable {
         micURL: URL,
         appURL: URL?,
         mixdownURL: URL,
-        micStartHostTime: UInt64,
-        appStartHostTime: UInt64?
+        micStartHostTime: HostNanoseconds,
+        appStartHostTime: HostNanoseconds?
     ) async
 }
 
@@ -37,8 +37,8 @@ actor RecordingMixdownCoordinator: RecordingMixdownCoordinating {
         micURL: URL,
         appURL: URL?,
         mixdownURL: URL,
-        micStartHostTime: UInt64,
-        appStartHostTime: UInt64?
+        micStartHostTime: HostNanoseconds,
+        appStartHostTime: HostNanoseconds?
     ) async {
         var scopedWorkspaceRoot: URL?
         var didStartScopedAccess = false
@@ -67,7 +67,7 @@ actor RecordingMixdownCoordinator: RecordingMixdownCoordinating {
             "Mixdown input sizes for session \(sessionID, privacy: .public). micBytes=\(micSize, privacy: .public) appBytes=\(appSize, privacy: .public)"
         )
         logger.info(
-            "Mixdown timing for session \(sessionID, privacy: .public). micStart=\(micStartHostTime, privacy: .public) appStart=\(appStartHostTime ?? 0, privacy: .public)"
+            "Mixdown timing for session \(sessionID, privacy: .public). micStart=\(micStartHostTime, privacy: .public) appStart=\(appStartHostTime?.description ?? "0", privacy: .public)"
         )
         do {
             try await mixdownService.mix(
