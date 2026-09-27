@@ -35,6 +35,7 @@ struct UpdateConfiguration: Equatable {
 protocol UpdateEngine: AnyObject {
     var onStateChange: (() -> Void)? { get set }
     var canCheckForUpdates: Bool { get }
+    var sessionInProgress: Bool { get }
     var automaticallyChecksForUpdates: Bool { get set }
     func checkForUpdates()
 }
@@ -55,6 +56,9 @@ private final class SparkleUpdateEngine: UpdateEngine {
             controller.updater.observe(\.canCheckForUpdates) { [weak self] _, _ in
                 Task { @MainActor [weak self] in self?.onStateChange?() }
             },
+            controller.updater.observe(\.sessionInProgress) { [weak self] _, _ in
+                Task { @MainActor [weak self] in self?.onStateChange?() }
+            },
             controller.updater.observe(\.automaticallyChecksForUpdates) { [weak self] _, _ in
                 Task { @MainActor [weak self] in self?.onStateChange?() }
             },
@@ -63,6 +67,10 @@ private final class SparkleUpdateEngine: UpdateEngine {
 
     var canCheckForUpdates: Bool {
         controller.updater.canCheckForUpdates
+    }
+
+    var sessionInProgress: Bool {
+        controller.updater.sessionInProgress
     }
 
     var automaticallyChecksForUpdates: Bool {
@@ -92,7 +100,7 @@ final class UpdateService {
         buildVersion: String
     ) {
         self.engine = engine
-        canCheckForUpdates = engine?.canCheckForUpdates ?? false
+        canCheckForUpdates = engine.map { $0.canCheckForUpdates && !$0.sessionInProgress } ?? false
         automaticallyChecksForUpdates = engine?.automaticallyChecksForUpdates ?? false
         currentVersionText = "Version \(shortVersion) (\(buildVersion))"
         engine?.onStateChange = { [weak self] in
@@ -119,7 +127,8 @@ final class UpdateService {
     }
 
     private func refreshState() {
-        canCheckForUpdates = engine?.canCheckForUpdates ?? false
+        // Sparkle permits focusing its UI during a session; our action starts a new check.
+        canCheckForUpdates = engine.map { $0.canCheckForUpdates && !$0.sessionInProgress } ?? false
         automaticallyChecksForUpdates = engine?.automaticallyChecksForUpdates ?? false
     }
 
@@ -138,7 +147,7 @@ final class UpdateService {
             errorMessage = "Update checks are unavailable in this build."
             return
         }
-        guard engine.canCheckForUpdates else {
+        guard engine.canCheckForUpdates && !engine.sessionInProgress else {
             errorMessage = "An update check is already in progress."
             return
         }
