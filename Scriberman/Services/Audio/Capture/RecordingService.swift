@@ -1105,11 +1105,7 @@ actor RecordingService: RecordingServiceProtocol {
             )
 
             let context = ModelContext(modelContainer)
-            var descriptor = FetchDescriptor<RecordingSession>()
-            descriptor.fetchLimit = 1_000
-            guard let sessions = try? context.fetch(descriptor),
-                  let session = sessions.first(where: { $0.id == sessionID })
-            else {
+            guard let session = try? RecordingSession.fetch(id: sessionID, in: context) else {
                 await cleanupRecordingState()
                 return nil
             }

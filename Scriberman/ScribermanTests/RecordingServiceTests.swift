@@ -588,6 +588,74 @@ final class RecordingServiceTests {
     }
 
     @Test
+    func testStopRecordingFinalizesActiveSessionInLibraryOfFifteenHundred() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        let storeDirectory = workspace.rootURL.appendingPathComponent("store", isDirectory: true)
+        try FileManager.default.createDirectory(at: storeDirectory, withIntermediateDirectories: true)
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(url: storeDirectory.appendingPathComponent("store.sqlite"))
+        )
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        let mixdownCoordinator = MockRecordingMixdownCoordinator()
+        let service = RecordingService(
+            workspaceService: MockWorkspaceService(),
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            mixdownCoordinator: mixdownCoordinator
+        )
+
+        let recordingCreatedAt = Date().addingTimeInterval(-5)
+        let recordingIdentifier = "test-id-large-library"
+        let sessionURLs = RecordingService.recordingFileURLs(
+            in: workspace,
+            createdAt: recordingCreatedAt,
+            recordingIdentifier: recordingIdentifier
+        )
+        try FileManager.default.createDirectory(
+            at: sessionURLs.mic.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        _ = FileManager.default.createFile(atPath: sessionURLs.mic.path, contents: Data("mic".utf8))
+
+        let seedContext = ModelContext(container)
+        for index in 0..<1_499 {
+            seedContext.insert(
+                RecordingSession(duration: 0, micAudioURL: "/tmp/mic-\(index).wav", title: "Recording \(index)", status: .recorded)
+            )
+        }
+        let activeSession = RecordingSession(
+            createdAt: recordingCreatedAt,
+            duration: 0,
+            micAudioURL: sessionURLs.mic.path,
+            title: "Active",
+            status: .recording
+        )
+        seedContext.insert(activeSession)
+        try seedContext.save()
+
+        await service.setRecordingStateForTesting(
+            isRecording: true,
+            recordingIdentifier: recordingIdentifier,
+            recordingWorkspaceRootURL: workspace.rootURL,
+            recordingCreatedAt: recordingCreatedAt,
+            currentSessionID: activeSession.id
+        )
+
+        let sessionID = await service.stopRecording()
+        #expect(sessionID == activeSession.id)
+
+        await mixdownCoordinator.waitForCall()
+        #expect(await mixdownCoordinator.callCount() == 1)
+
+        let fetched = try #require(try RecordingSession.fetch(id: activeSession.id, in: ModelContext(container)))
+        #expect(fetched.duration >= 5)
+        #expect(fetched.status == .recorded)
+    }
+
+    @Test
 
     func testStopRecordingFallbacksToDefaultTitleWhenNoPendingTitle() async throws {
         let workspace = makeWorkspace()

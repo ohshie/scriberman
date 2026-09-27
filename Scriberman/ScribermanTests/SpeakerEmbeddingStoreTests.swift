@@ -15,6 +15,31 @@ struct SpeakerEmbeddingStoreTests {
         self.store = SpeakerEmbeddingStore(modelContainer: container)
     }
 
+    @Test("Fetch a profile by ID beyond the first 1,000 rows of an on-disk store")
+    func fetchProfileByIDBeyondFirstThousand() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let onDiskContainer = try ModelContainer(
+            for: SpeakerProfile.self,
+            configurations: ModelConfiguration(url: directory.appendingPathComponent("store.sqlite"))
+        )
+        let context = ModelContext(onDiskContainer)
+        var insertedIDs: [UUID] = []
+        for index in 0..<1_500 {
+            let profile = SpeakerProfile(name: "Speaker \(index)", embedding: [Float(index)])
+            context.insert(profile)
+            insertedIDs.append(profile.id)
+        }
+        try context.save()
+
+        let targetID = insertedIDs[1_400]
+        let fetched = try SpeakerProfile.fetch(id: targetID, in: ModelContext(onDiskContainer))
+
+        #expect(fetched?.id == targetID)
+        #expect(fetched?.name == "Speaker 1400")
+    }
+
     @Test("Enroll a new speaker")
     func enrollNewSpeaker() async throws {
         let embedding: [Float] = Array(repeating: 0.1, count: 256)

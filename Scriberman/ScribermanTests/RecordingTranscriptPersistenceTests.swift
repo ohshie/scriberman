@@ -126,4 +126,56 @@ struct RecordingTranscriptPersistenceTests {
         #expect(formatTranscriptTimestamp(0) == "0.00")
         #expect(formatTranscriptTimestamp(12.345) == "12.35")
     }
+
+    // MARK: - Lookup by ID
+
+    private func makeOnDiskContainer(at directory: URL) throws -> ModelContainer {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(url: directory.appendingPathComponent("store.sqlite"))
+        )
+    }
+
+    @Test
+    func testRecordingSessionFetchByIDFindsRowBeyondFirstThousand() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeOnDiskContainer(at: directory)
+        let context = ModelContext(container)
+        var insertedIDs: [UUID] = []
+        for index in 0..<1_500 {
+            let session = RecordingSession(duration: 0, micAudioURL: "/tmp/mic-\(index).wav", title: "Recording \(index)", status: .recorded)
+            context.insert(session)
+            insertedIDs.append(session.id)
+        }
+        try context.save()
+
+        let targetID = insertedIDs[1_400]
+        let fetched = try RecordingSession.fetch(id: targetID, in: ModelContext(container))
+
+        #expect(fetched?.id == targetID)
+        #expect(fetched?.title == "Recording 1400")
+    }
+
+    @Test
+    func testImportedSessionFetchByIDFindsRowBeyondFirstThousand() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeOnDiskContainer(at: directory)
+        let context = ModelContext(container)
+        var insertedIDs: [UUID] = []
+        for index in 0..<1_500 {
+            let session = ImportedSession(duration: 0, title: "Import \(index)", originalFileName: "file-\(index).mp3", originalFormat: "mp3")
+            context.insert(session)
+            insertedIDs.append(session.id)
+        }
+        try context.save()
+
+        let targetID = insertedIDs[1_400]
+        let fetched = try ImportedSession.fetch(id: targetID, in: ModelContext(container))
+
+        #expect(fetched?.id == targetID)
+        #expect(fetched?.title == "Import 1400")
+    }
 }

@@ -52,20 +52,11 @@ actor RetranscriptionService {
         
         var session: (any TranscribableSession)?
 
-        let recordingDescriptor = FetchDescriptor<RecordingSession>()
-        let importedDescriptor = FetchDescriptor<ImportedSession>()
-
-        if let recordings = try? context.fetch(recordingDescriptor) {
-            for recording in recordings where recording.id == sessionID {
-                session = recording
-                break
-            }
+        if let recording = try? RecordingSession.fetch(id: sessionID, in: context) {
+            session = recording
         }
-        if session == nil, let importedSessions = try? context.fetch(importedDescriptor) {
-            for imported in importedSessions where imported.id == sessionID {
-                session = imported
-                break
-            }
+        if session == nil, let imported = try? ImportedSession.fetch(id: sessionID, in: context) {
+            session = imported
         }
         
         guard let session = session else {
