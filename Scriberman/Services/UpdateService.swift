@@ -33,6 +33,7 @@ struct UpdateConfiguration: Equatable {
 
 @MainActor
 protocol UpdateEngine: AnyObject {
+    var onStateChange: (() -> Void)? { get set }
     var canCheckForUpdates: Bool { get }
     var automaticallyChecksForUpdates: Bool { get set }
     func checkForUpdates()
@@ -41,6 +42,8 @@ protocol UpdateEngine: AnyObject {
 @MainActor
 private final class SparkleUpdateEngine: UpdateEngine {
     private let controller: SPUStandardUpdaterController
+    private var observations: [NSKeyValueObservation] = []
+    var onStateChange: (() -> Void)?
 
     init() {
         controller = SPUStandardUpdaterController(
@@ -48,6 +51,14 @@ private final class SparkleUpdateEngine: UpdateEngine {
             updaterDelegate: nil,
             userDriverDelegate: nil
         )
+        observations = [
+            controller.updater.observe(\.canCheckForUpdates) { [weak self] _, _ in
+                Task { @MainActor [weak self] in self?.onStateChange?() }
+            },
+            controller.updater.observe(\.automaticallyChecksForUpdates) { [weak self] _, _ in
+                Task { @MainActor [weak self] in self?.onStateChange?() }
+            },
+        ]
     }
 
     var canCheckForUpdates: Bool {
@@ -69,6 +80,9 @@ private final class SparkleUpdateEngine: UpdateEngine {
 final class UpdateService {
     @ObservationIgnored private let engine: (any UpdateEngine)?
 
+    private(set) var canCheckForUpdates: Bool
+    private(set) var automaticallyChecksForUpdates: Bool
+
     let currentVersionText: String
     private(set) var errorMessage: String?
 
@@ -78,7 +92,12 @@ final class UpdateService {
         buildVersion: String
     ) {
         self.engine = engine
+        canCheckForUpdates = engine?.canCheckForUpdates ?? false
+        automaticallyChecksForUpdates = engine?.automaticallyChecksForUpdates ?? false
         currentVersionText = "Version \(shortVersion) (\(buildVersion))"
+        engine?.onStateChange = { [weak self] in
+            self?.refreshState()
+        }
     }
 
     static func live(bundle: Bundle = .main) -> UpdateService {
@@ -99,20 +118,19 @@ final class UpdateService {
         engine != nil
     }
 
-    var canCheckForUpdates: Bool {
-        engine?.canCheckForUpdates ?? false
+    private func refreshState() {
+        canCheckForUpdates = engine?.canCheckForUpdates ?? false
+        automaticallyChecksForUpdates = engine?.automaticallyChecksForUpdates ?? false
     }
 
-    var automaticallyChecksForUpdates: Bool {
-        get { engine?.automaticallyChecksForUpdates ?? false }
-        set {
-            guard let engine else {
-                errorMessage = "Update checks are unavailable in this build."
-                return
-            }
-            engine.automaticallyChecksForUpdates = newValue
-            errorMessage = nil
+    func setAutomaticallyChecksForUpdates(_ enabled: Bool) {
+        guard let engine else {
+            errorMessage = "Update checks are unavailable in this build."
+            return
         }
+        engine.automaticallyChecksForUpdates = enabled
+        refreshState()
+        errorMessage = nil
     }
 
     func checkForUpdates() {
@@ -127,5 +145,6 @@ final class UpdateService {
 
         errorMessage = nil
         engine.checkForUpdates()
+        refreshState()
     }
 }
