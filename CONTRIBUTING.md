@@ -36,6 +36,6 @@ discussions, and bug reports requires no agreement.
 
 ## Development setup
 
-See the repository README. Local release signing uses a self-signed
-certificate (`scripts/setup-signing.sh`); never commit certificates, private
-keys, or other secrets.
+Open `Scriberman.xcodeproj` in Xcode and build the Scriberman scheme. Swift
+packages resolve automatically. Never commit certificates, private keys, or
+other secrets.

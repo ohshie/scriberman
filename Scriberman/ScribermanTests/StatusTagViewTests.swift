@@ -133,10 +133,10 @@ struct StatusTagViewTests {
 
     @Test
     func modelGroupTitlesMatchSettingsRows() {
-        #expect(ModelGroup.asrParakeetUltra.title == "ASR (Parakeet v3)")
+        #expect(ModelGroup.asrParakeetUltra.title == "ASR (Parakeet Ultra)")
         #expect(ModelGroup.vadSilero.title == "VAD (Silero CoreML)")
         #expect(ModelGroup.offlineDiarization.title == "Diarization (Global Offline)")
-        #expect(ModelGroup.nemotron3Diarization.title == "Turn Diarization (LS-EEND)")
+        #expect(ModelGroup.nemotron3Diarization.title == "Turn Diarization (Nemotron 3)")
     }
 
     private func statusTagViewSource() throws -> String {

@@ -11,13 +11,13 @@ enum ModelGroup: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .asrParakeetUltra:
-            return "ASR (Parakeet v3)"
+            return "ASR (Parakeet Ultra)"
         case .vadSilero:
             return "VAD (Silero CoreML)"
         case .offlineDiarization:
             return "Diarization (Global Offline)"
         case .nemotron3Diarization:
-            return "Turn Diarization (LS-EEND)"
+            return "Turn Diarization (Nemotron 3)"
         }
     }
 
