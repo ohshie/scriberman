@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import OSLog
 import ScreenCaptureKit
 
 /// Stream output for the microphone track of a unified `SCStream` (macOS 15+
@@ -22,8 +23,12 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
     private var converterSourceFormat: AVAudioFormat?
     private var firstBufferHostTime: HostNanoseconds?
     private var hasPrepared = false
+    private let layoutTracker = UnsupportedPCMLayoutTracker(source: "mic")
 
     var onFirstBufferHostTime: (@Sendable (HostNanoseconds) -> Void)?
+
+    /// Buffers dropped because their sample layout cannot be copied.
+    var unsupportedFormatCount: Int { layoutTracker.unsupportedFormatCount }
 
     var audioLevel: Float { streamer.audioLevel }
 
@@ -99,6 +104,9 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
 #endif
 
     private func process(_ sampleBuffer: CMSampleBuffer) {
+        guard layoutTracker.admit(sampleBuffer) else {
+            return
+        }
         let hostTime = HostNanoseconds(presentationTimeOf: sampleBuffer)
         let hostNanos = hostTime?.nanoseconds
         captureFirstBufferHostTimeIfNeeded(hostTime)
@@ -244,5 +252,52 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
             }
         }
         return pcmBuffer
+    }
+}
+
+/// Counts ScreenCaptureKit audio buffers whose sample layout the capture handlers cannot copy.
+///
+/// The handlers copy Float32 non-interleaved samples only. Any other layout would come out as an
+/// empty or partial buffer, so it is counted and logged, once per format, instead of written.
+final class UnsupportedPCMLayoutTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private let source: String
+    private let logger = Logger(subsystem: "Scriberman", category: "CapturePCMLayout")
+    private var count = 0
+    private var loggedFormats: Set<String> = []
+
+    init(source: String) {
+        self.source = source
+    }
+
+    var unsupportedFormatCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+
+    /// True when the buffer can be copied. Otherwise the buffer is counted and false is returned.
+    func admit(_ sampleBuffer: CMSampleBuffer) -> Bool {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription),
+              let format = AVAudioFormat(streamDescription: asbd)
+        else {
+            return true
+        }
+        if format.commonFormat == .pcmFormatFloat32, !format.isInterleaved {
+            return true
+        }
+
+        let formatDescriptionText = format.description
+        lock.lock()
+        count += 1
+        let isFirstOfFormat = loggedFormats.insert(formatDescriptionText).inserted
+        lock.unlock()
+        if isFirstOfFormat {
+            logger.error(
+                "Unsupported \(self.source, privacy: .public) sample layout; buffers are not written. format=\(formatDescriptionText, privacy: .public)"
+            )
+        }
+        return false
     }
 }

@@ -12,14 +12,16 @@ struct MicStreamOutputHandlerTests {
         sampleRate: Double,
         channels: AVAudioChannelCount,
         frameCount: Int,
-        hostTimeNanos: UInt64
+        hostTimeNanos: UInt64,
+        commonFormat: AVAudioCommonFormat = .pcmFormatFloat32,
+        interleaved: Bool = false
     ) throws -> CMSampleBuffer {
         let format = try #require(
             AVAudioFormat(
-                commonFormat: .pcmFormatFloat32,
+                commonFormat: commonFormat,
                 sampleRate: sampleRate,
                 channels: channels,
-                interleaved: false
+                interleaved: interleaved
             )
         )
         var asbd = format.streamDescription.pointee
@@ -42,11 +44,13 @@ struct MicStreamOutputHandlerTests {
             AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount))
         )
         pcmBuffer.frameLength = AVAudioFrameCount(frameCount)
-        for channel in 0..<Int(channels) {
-            let data = try #require(pcmBuffer.floatChannelData)[channel]
-            for frame in 0..<frameCount {
-                // A non-silent, non-constant signal so the level meter and activity tracker move.
-                data[frame] = sinf(Float(frame) * 0.05) * 0.5
+        if commonFormat == .pcmFormatFloat32, !interleaved {
+            for channel in 0..<Int(channels) {
+                let data = try #require(pcmBuffer.floatChannelData)[channel]
+                for frame in 0..<frameCount {
+                    // A non-silent, non-constant signal so the level meter and activity tracker move.
+                    data[frame] = sinf(Float(frame) * 0.05) * 0.5
+                }
             }
         }
 
@@ -87,6 +91,62 @@ struct MicStreamOutputHandlerTests {
             ) == noErr
         )
         return buffer
+    }
+
+    @Test
+    func testAppHandlerRejectsInt16Buffers() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let appURL = root.appendingPathComponent("app.wav")
+
+        let anchors = AnchorRecorder()
+        let handler = AppAudioStreamOutputHandler()
+        handler.onFirstBufferHostTime = { anchors.record($0.nanoseconds) }
+        handler.configureOutput(url: appURL)
+
+        handler.processSampleBufferForTesting(
+            try makeSampleBuffer(sampleRate: 48_000, channels: 1, frameCount: 480, hostTimeNanos: 1_000_000_000, commonFormat: .pcmFormatInt16)
+        )
+        handler.closeOutput()
+
+        #expect(handler.unsupportedFormatCount == 1)
+        #expect(anchors.values.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: appURL.path))
+    }
+
+    @Test
+    func testMicHandlerRejectsInterleavedStereoBuffers() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let micURL = root.appendingPathComponent("mic.wav")
+
+        let anchors = AnchorRecorder()
+        let handler = MicStreamOutputHandler()
+        handler.onFirstBufferHostTime = { anchors.record($0.nanoseconds) }
+        handler.configureOutput(url: micURL)
+
+        let interleaved = try makeSampleBuffer(
+            sampleRate: 48_000, channels: 2, frameCount: 480, hostTimeNanos: 1_000_000_000, interleaved: true
+        )
+        handler.processSampleBufferForTesting(interleaved)
+        handler.processSampleBufferForTesting(interleaved)
+
+        #expect(handler.unsupportedFormatCount == 2)
+        #expect(anchors.values.isEmpty)
+
+        // A supported buffer afterwards is written and anchors the timeline.
+        handler.processSampleBufferForTesting(
+            try makeSampleBuffer(sampleRate: 48_000, channels: 2, frameCount: 480, hostTimeNanos: 1_010_000_000)
+        )
+        handler.closeOutput()
+
+        #expect(handler.unsupportedFormatCount == 2)
+        #expect(anchors.values == [1_010_000_000])
+        #expect(try AVAudioFile(forReading: micURL).length > 0)
     }
 
     @Test
