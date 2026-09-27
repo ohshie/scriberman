@@ -896,7 +896,7 @@ actor RecordingService: RecordingServiceProtocol {
         }
 
         do {
-            _ = try await workspaceService.requireWritableWorkspace()
+            _ = try await workspaceService.requireAuthorizedWorkspace()
         } catch {
             lifecycleState = .idle
             throw RecordingError.invalidWorkspaceAccess

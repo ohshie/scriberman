@@ -40,6 +40,7 @@ struct SettingsView: View {
                         Button("Change Workspace") {
                             pickWorkspaceAndApply()
                         }
+                        .disabled(!appState.isWorkspaceChangeAllowed)
 
                         if let errorMessage = appState.workspaceErrorMessage {
                             Text(errorMessage)

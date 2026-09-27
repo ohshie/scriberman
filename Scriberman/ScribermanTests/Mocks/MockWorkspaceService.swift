@@ -9,7 +9,7 @@ final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked Sendable 
         currentWorkspaceResult
     }
 
-    func requireWritableWorkspace() async throws(WorkspaceError) -> Workspace {
+    func requireAuthorizedWorkspace() async throws(WorkspaceError) -> Workspace {
         try requireWritableResult.get()
     }
 }

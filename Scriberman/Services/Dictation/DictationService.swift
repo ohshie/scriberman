@@ -62,6 +62,8 @@ final class DictationService {
     // this task; a failed load clears it so the next call retries.
     @ObservationIgnored private var prewarmLoad: (key: PrewarmKey, task: Task<Void, Never>)?
 
+    private var preparedWorkspace: Workspace?
+
     private struct PrewarmKey: Equatable {
         let workspaceRoot: URL
         let modelRevision: String
@@ -96,7 +98,18 @@ final class DictationService {
 
     // MARK: - Pre-warm
 
+    func prepare(for workspace: Workspace) {
+        guard preparedWorkspace != workspace else { return }
+        preparedWorkspace = workspace
+        prewarmLoad?.task.cancel()
+        prewarmLoad = nil
+        asrManager = nil
+        if state == .prewarming { state = .idle }
+    }
+
     func prewarm(workspace: Workspace) async {
+        guard !Task.isCancelled else { return }
+        prepare(for: workspace)
         let key = PrewarmKey(workspaceRoot: workspace.rootURL, modelRevision: "\(ModelPathResolver.asrModelVersion)")
         if let prewarmLoad, prewarmLoad.key == key {
             await prewarmLoad.task.value
@@ -112,9 +125,11 @@ final class DictationService {
         let task = Task { [weak self] in
             do {
                 let asr = try await loadAsr(workspace)
+                guard !Task.isCancelled else { return }
                 self?.asrManager = asr
                 self?.logger.info("DictationService pre-warm complete")
             } catch {
+                guard !Task.isCancelled else { return }
                 self?.logger.warning("DictationService pre-warm failed (non-fatal): \(error.localizedDescription)")
                 self?.asrManager = nil
                 if self?.prewarmLoad?.key == key {

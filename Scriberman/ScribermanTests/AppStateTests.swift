@@ -451,6 +451,99 @@ final class AppStateTests {
         #expect(appState.consumePendingSessionFocusRequest() == false)
     }
 
+    @Test
+    func readinessPreparesAfterOnboardingAndOncePerWorkspace() async {
+        let permissions = MockPermissionService()
+        permissions.verifyMicResult = true
+        permissions.verifyScreenRecordingResult = true
+        let first = Workspace(rootURL: URL(fileURLWithPath: "/tmp/readiness-first"))
+        let second = Workspace(rootURL: URL(fileURLWithPath: "/tmp/readiness-second"))
+        var prepared: [Workspace] = []
+        var registrations = 0
+        let appState = AppState(
+            services: makeServiceContainer(permissionService: permissions),
+            restoreWorkspaceHandler: { first },
+            setWorkspaceHandler: { Workspace(rootURL: $0) },
+            prepareDictationHandler: { prepared.append($0) },
+            registerHotkeyHandler: { registrations += 1 }
+        )
+        await appState.bootstrapWorkspace()
+        appState.applyReadiness()
+        #expect(prepared.isEmpty)
+        #expect(registrations == 0)
+
+        appState.settingsViewModel.bundlePhase = .allReady
+        appState.applyReadiness()
+        await assertEventuallyTrue("Expected preparation after onboarding") { prepared == [first] }
+        appState.applyReadiness()
+        permissions.micStatus = .denied
+        appState.applyReadiness()
+        permissions.micStatus = .granted
+        appState.applyReadiness()
+        #expect(registrations == 1)
+
+        await appState.selectWorkspace(url: second.rootURL)
+        #expect(appState.requiredOnboardingStep == .models)
+        appState.settingsViewModel.bundlePhase = .allReady
+        appState.applyReadiness()
+        await assertEventuallyTrue("Expected preparation for the new workspace") { prepared == [first, second] }
+        #expect(registrations == 1)
+    }
+
+    @Test
+    func failedWorkspaceSelectionPreservesWorkspaceAndReadiness() async {
+        let original = Workspace(rootURL: URL(fileURLWithPath: "/tmp/original"))
+        let appState = AppState(
+            services: makeServiceContainer(permissionService: MockPermissionService()),
+            restoreWorkspaceHandler: { original },
+            setWorkspaceHandler: { _ in throw WorkspaceError.failedToCreateBookmark }
+        )
+        await appState.bootstrapWorkspace()
+        appState.settingsViewModel.bundlePhase = .allReady
+        await appState.selectWorkspace(url: URL(fileURLWithPath: "/tmp/candidate"))
+        #expect(appState.workspace == original)
+        #expect(appState.workspaceErrorMessage == WorkspaceError.failedToCreateBookmark.localizedDescription)
+        #expect(appState.settingsViewModel.bundlePhase == .allReady)
+    }
+
+    @Test
+    func workspaceSelectionIsBlockedDuringRecordingAndModelInstallation() async {
+        var selections = 0
+        let appState = AppState(
+            services: makeServiceContainer(permissionService: MockPermissionService()),
+            setWorkspaceHandler: { selections += 1; return Workspace(rootURL: $0) }
+        )
+        let url = URL(fileURLWithPath: "/tmp/candidate")
+        #expect(appState.isWorkspaceChangeAllowed)
+        appState.newSessionViewModel.state = .recording(duration: 1, level: 0)
+        #expect(!appState.isWorkspaceChangeAllowed)
+        await appState.selectWorkspace(url: url)
+        appState.newSessionViewModel.state = .idle
+        for phase in [BundleInstallPhase.downloading(label: "ASR", progress: 0.5), .warmingUp] {
+            appState.settingsViewModel.bundlePhase = phase
+            #expect(!appState.isWorkspaceChangeAllowed)
+            await appState.selectWorkspace(url: url)
+        }
+        #expect(selections == 0)
+        appState.settingsViewModel.bundlePhase = .allReady
+        #expect(appState.isWorkspaceChangeAllowed)
+        await appState.selectWorkspace(url: url)
+        #expect(selections == 1)
+    }
+
+    @Test
+    func workspaceSelectionIsBlockedUntilRetranscriptionFinishes() async {
+        let appState = AppState(services: makeServiceContainer(permissionService: MockPermissionService()))
+        let session = RecordingSession(createdAt: .now, duration: 1, micAudioURL: "/tmp/audio.wav", title: "Test", status: .recorded)
+        session.mixdownURL = "/tmp/mixdown.wav"
+        modelContainer.mainContext.insert(session)
+        appState.jobsViewModel.reprocess(session: session, context: modelContainer.mainContext)
+        #expect(!appState.isWorkspaceChangeAllowed)
+        await assertEventuallyTrue("Expected busy state to clear after workspace failure") {
+            appState.isWorkspaceChangeAllowed
+        }
+    }
+
     private func makeServiceContainer(permissionService: PermissionServiceProtocol) -> ServiceContainer {
         let bookmarkStore = TestBookmarkStore()
         let workspaceService = WorkspaceService(bookmarkStore: bookmarkStore)
@@ -595,4 +688,51 @@ private final class FakeRecordingFinalizer: RecordingFinalizing, @unchecked Send
         }
         pending?.resume(returning: true)
     }
+}
+
+struct WorkspaceTransitionTests {
+    @Test(arguments: ["access", "folders", "bookmark", "success"])
+    func candidateIsCommittedOnlyAfterPreparation(stage: String) async throws {
+        let original = URL(fileURLWithPath: "/tmp/workspace-original")
+        let candidate = URL(fileURLWithPath: "/tmp/workspace-candidate")
+        let probe = WorkspaceAccessProbe()
+        let store = TestBookmarkStore()
+        let service = WorkspaceService(
+            bookmarkStore: store,
+            startAccess: { url in
+                if url == candidate && stage == "access" { return false }
+                probe.start(url)
+                return true
+            },
+            stopAccess: { probe.stop($0) },
+            createFolders: { workspace in
+                if workspace.rootURL == candidate && stage == "folders" {
+                    throw WorkspaceError.failedToCreateSubfolders
+                }
+            },
+            createBookmark: { url in
+                if url == candidate && stage == "bookmark" { throw WorkspaceError.failedToCreateBookmark }
+                return Data(url.path.utf8)
+            }
+        )
+        _ = try await service.setWorkspace(url: original)
+        do {
+            _ = try await service.setWorkspace(url: candidate)
+            #expect(stage == "success")
+        } catch {
+            #expect(stage != "success")
+        }
+        let expected = stage == "success" ? candidate : original
+        #expect(await service.currentWorkspace() == Workspace(rootURL: expected))
+        #expect(store.loadWorkspaceBookmark() == Data(expected.path.utf8))
+        #expect(probe.active == [expected])
+    }
+}
+
+private final class WorkspaceAccessProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var urls: Set<URL> = []
+    var active: Set<URL> { lock.withLock { urls } }
+    func start(_ url: URL) { _ = lock.withLock { urls.insert(url) } }
+    func stop(_ url: URL) { _ = lock.withLock { urls.remove(url) } }
 }

@@ -365,6 +365,40 @@ struct DictationPrewarmTests {
     }
 
     @Test
+    func changingWorkspaceDropsLoadedModels() async {
+        let loads = AsrLoadProbe()
+        loads.release()
+        let capture = MockDictationCapture()
+        await capture.setSamplesOnStop([[Float](repeating: 0.05, count: 8_000)])
+        let service = DictationService(recordingService: MockRecordingService(), captureSession: capture, loadAsr: loads.load)
+        await service.prewarm(workspace: workspace)
+        let other = Workspace(rootURL: workspace.rootURL.appendingPathComponent("other"))
+        service.prepare(for: other)
+        await service.start(deviceID: nil)
+        await service.stop()
+        #expect(service.lastOutcome == .failed(.noModel))
+        await service.prewarm(workspace: other)
+        #expect(loads.count == 2)
+    }
+
+    @Test
+    func cancelledWorkspaceLoadCannotRestoreOldModels() async {
+        let loads = AsrLoadProbe()
+        let capture = MockDictationCapture()
+        await capture.setSamplesOnStop([[Float](repeating: 0.05, count: 8_000)])
+        let service = DictationService(recordingService: MockRecordingService(), captureSession: capture, loadAsr: loads.load)
+        let oldLoad = Task { await service.prewarm(workspace: workspace) }
+        #expect(await loads.waitForLoads(1))
+        service.prepare(for: Workspace(rootURL: workspace.rootURL.appendingPathComponent("other")))
+        loads.release()
+        await oldLoad.value
+        await service.start(deviceID: nil)
+        await service.stop()
+        #expect(service.lastOutcome == .failed(.noModel))
+        #expect(service.state == .idle)
+    }
+
+    @Test
     func failedPrewarmIsRetried() async {
         let loads = AsrLoadProbe(failures: 1)
         loads.release()
