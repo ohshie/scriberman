@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import OSLog
 import ScreenCaptureKit
 
 /// Stream output for the microphone track of a unified `SCStream` (macOS 15+
@@ -22,8 +23,15 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
     private var converterSourceFormat: AVAudioFormat?
     private var firstBufferHostTime: HostNanoseconds?
     private var hasPrepared = false
+    private let layoutTracker = UnsupportedPCMLayoutTracker(source: "mic")
 
     var onFirstBufferHostTime: (@Sendable (HostNanoseconds) -> Void)?
+
+    /// Buffers dropped because their sample layout cannot be copied.
+    var unsupportedFormatCount: Int { layoutTracker.unsupportedFormatCount }
+
+    /// Distinct unsupported formats logged.
+    var loggedUnsupportedFormatCount: Int { layoutTracker.loggedFormatCount }
 
     var audioLevel: Float { streamer.audioLevel }
 
@@ -99,6 +107,9 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
 #endif
 
     private func process(_ sampleBuffer: CMSampleBuffer) {
+        guard layoutTracker.admit(sampleBuffer) else {
+            return
+        }
         let hostTime = HostNanoseconds(presentationTimeOf: sampleBuffer)
         let hostNanos = hostTime?.nanoseconds
         captureFirstBufferHostTimeIfNeeded(hostTime)
@@ -244,5 +255,67 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
             }
         }
         return pcmBuffer
+    }
+}
+
+/// Counts ScreenCaptureKit audio buffers whose sample layout the capture handlers cannot copy.
+///
+/// The handlers copy Float32 samples one channel buffer at a time. That covers non-interleaved
+/// buffers of any channel count and mono buffers flagged as interleaved, whose single channel has
+/// the same memory layout either way. Any other layout would come out as an empty or partial
+/// buffer, so it is counted and logged, once per format, instead of written.
+final class UnsupportedPCMLayoutTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private let source: String
+    private let logger = Logger(subsystem: "Scriberman", category: "CapturePCMLayout")
+    private var count = 0
+    private var loggedFormats: Set<String> = []
+
+    init(source: String) {
+        self.source = source
+    }
+
+    var unsupportedFormatCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+
+    /// Distinct unsupported formats seen, each of which was logged once.
+    var loggedFormatCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return loggedFormats.count
+    }
+
+    static func isSupported(_ format: AVAudioFormat) -> Bool {
+        format.commonFormat == .pcmFormatFloat32 && (!format.isInterleaved || format.channelCount == 1)
+    }
+
+    /// True when the buffer can be copied. Otherwise the buffer is counted and false is returned.
+    func admit(_ sampleBuffer: CMSampleBuffer) -> Bool {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription),
+              let format = AVAudioFormat(streamDescription: asbd)
+        else {
+            return true
+        }
+        if Self.isSupported(format) {
+            return true
+        }
+
+        // Built from the format's fields: `AVAudioFormat.description` includes the object's
+        // address, which differs for every buffer.
+        let formatKey = "commonFormat=\(format.commonFormat.rawValue) channels=\(format.channelCount) sampleRate=\(format.sampleRate) interleaved=\(format.isInterleaved)"
+        lock.lock()
+        count += 1
+        let isFirstOfFormat = loggedFormats.insert(formatKey).inserted
+        lock.unlock()
+        if isFirstOfFormat {
+            logger.error(
+                "Unsupported \(self.source, privacy: .public) sample layout; buffers are not written. \(formatKey, privacy: .public)"
+            )
+        }
+        return false
     }
 }

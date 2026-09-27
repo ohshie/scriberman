@@ -14,6 +14,13 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
     private var firstBufferHostTime: HostNanoseconds?
     private let liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation?
     var onFirstBufferHostTime: (@Sendable (HostNanoseconds) -> Void)?
+    private let layoutTracker = UnsupportedPCMLayoutTracker(source: "app")
+
+    /// Buffers dropped because their sample layout cannot be copied.
+    var unsupportedFormatCount: Int { layoutTracker.unsupportedFormatCount }
+
+    /// Distinct unsupported formats logged.
+    var loggedUnsupportedFormatCount: Int { layoutTracker.loggedFormatCount }
 
     var audioLevel: Float {
         streamer.audioLevel
@@ -85,6 +92,9 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
 #endif
 
     private func process(_ sampleBuffer: CMSampleBuffer) {
+        guard layoutTracker.admit(sampleBuffer) else {
+            return
+        }
         captureFirstBufferHostTimeIfNeeded(from: sampleBuffer)
         let bufferHostNanos = HostNanoseconds(presentationTimeOf: sampleBuffer)?.nanoseconds
 
