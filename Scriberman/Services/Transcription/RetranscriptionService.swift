@@ -108,7 +108,7 @@ actor RetranscriptionService {
             }
 
             session.retranscript = Transcript(
-                fullText: merged.map(\.text).joined(separator: " "),
+                fullText: Transcript.fullText(joining: merged),
                 segments: merged,
                 speakers: speakers,
                 speakerEmbeddings: mergedEmbeddings

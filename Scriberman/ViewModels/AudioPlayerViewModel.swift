@@ -9,6 +9,7 @@ final class AudioPlayerViewModel {
     private var statusObservation: NSKeyValueObservation?
     private var periodicTimeObserver: Any?
     private var playbackEndedObserver: NSObjectProtocol?
+    private var loadedURL: URL?
 
     var isReady = false
     var isPlaying = false
@@ -29,6 +30,7 @@ final class AudioPlayerViewModel {
 
     func load(url: URL) {
         tearDownPlaybackEndedObserver()
+        loadedURL = url
 
         isReady = false
         isPlaying = false
@@ -77,6 +79,14 @@ final class AudioPlayerViewModel {
         }
     }
 
+    /// Loads the current URL again, so a file replaced on disk (by a trim or a restore) is played
+    /// and its duration shown instead of the item built for the file it replaced.
+    func reload() {
+        guard let loadedURL else { return }
+        stop()
+        load(url: loadedURL)
+    }
+
     func play() {
         player.play()
         isPlaying = true
@@ -106,6 +116,7 @@ final class AudioPlayerViewModel {
         statusObservation = nil
         tearDownPlaybackEndedObserver()
         player.replaceCurrentItem(with: nil)
+        loadedURL = nil
         isReady = false
         isScrubbing = false
         duration = 0

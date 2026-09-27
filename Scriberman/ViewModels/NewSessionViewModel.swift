@@ -595,7 +595,7 @@ final class NewSessionViewModel {
         }
 
         let transcript = Transcript(
-            fullText: finalSegments.map { $0.text }.joined(separator: " "),
+            fullText: Transcript.fullText(joining: finalSegments),
             segments: finalSegments,
             speakers: speakers
         )

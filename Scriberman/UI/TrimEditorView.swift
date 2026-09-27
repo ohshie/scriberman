@@ -69,19 +69,27 @@ struct TrimEditorView: View {
                 ProgressView()
             }
         }
-        .confirmationDialog(
-            "Restore Original?",
-            isPresented: $viewModel.showRestoreConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Restore", role: .destructive) {
-                Task {
-                    await viewModel.restore()
-                    if viewModel.error == nil {
-                        onDismiss()
-                    }
+        .restoreOriginalConfirmation(isPresented: $viewModel.showRestoreConfirmation) {
+            Task {
+                await viewModel.restore()
+                if viewModel.error == nil {
+                    onDismiss()
                 }
             }
+        }
+    }
+}
+
+extension View {
+    /// The confirmation shown before a trimmed recording is restored, shared by the trim sheet and
+    /// the detail toolbar.
+    func restoreOriginalConfirmation(isPresented: Binding<Bool>, onRestore: @escaping () -> Void) -> some View {
+        confirmationDialog(
+            "Restore Original?",
+            isPresented: isPresented,
+            titleVisibility: .visible
+        ) {
+            Button("Restore", role: .destructive, action: onRestore)
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Any retranscription done on the trimmed version will be lost.")
