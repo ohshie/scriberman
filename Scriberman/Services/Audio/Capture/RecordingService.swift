@@ -228,6 +228,7 @@ actor RecordingService: RecordingServiceProtocol {
     typealias ScopedAccessStopper = @Sendable (URL) -> Void
     typealias ScreenCaptureSessionFactory = @Sendable () -> any ScreenCaptureSessionControlling
     typealias DefaultTagApplier = @Sendable (RecordingSession, ModelContext) throws -> Void
+    typealias DateProvider = @Sendable () -> Date
 
     private let workspaceService: WorkspaceServiceProtocol
     private let modelContainer: ModelContainer
@@ -246,6 +247,7 @@ actor RecordingService: RecordingServiceProtocol {
     // Injected for testing; nil uses the real setVoiceProcessingEnabled(_:)
     private let voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)?
     private let applyDefaultTag: DefaultTagApplier
+    private let now: DateProvider
 
     private var audioEngine: AVAudioEngine?
     private let micStreamer = AudioFileStreamer(label: "mic")
@@ -253,6 +255,8 @@ actor RecordingService: RecordingServiceProtocol {
     private var recordingStartedAt: Date?
     private var recordingCreatedAt: Date?
     private var recordingIdentifier: String?
+    /// Chosen once at start and held until the recording is finalized.
+    private var recordingFolderURL: URL?
     private var currentSessionID: UUID?
     private var appAudioURL: URL?
     private var micStartHostTime: UInt64?
@@ -343,7 +347,8 @@ actor RecordingService: RecordingServiceProtocol {
         scopedAccessStopper: @escaping ScopedAccessStopper = { $0.stopAccessingSecurityScopedResource() },
         screenCaptureSessionFactory: @escaping ScreenCaptureSessionFactory = { ScreenCaptureSession() },
         voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)? = nil,
-        defaultTagApplier: @escaping DefaultTagApplier = { try TagService().applyDefaultTag(to: $0, in: $1) }
+        defaultTagApplier: @escaping DefaultTagApplier = { try TagService().applyDefaultTag(to: $0, in: $1) },
+        now: @escaping DateProvider = { Date() }
     ) {
         self.workspaceService = workspaceService
         self.modelContainer = modelContainer
@@ -357,6 +362,7 @@ actor RecordingService: RecordingServiceProtocol {
         self.makeScreenCaptureSession = screenCaptureSessionFactory
         self.voiceProcessingPropertySetter = voiceProcessingPropertySetter
         self.applyDefaultTag = defaultTagApplier
+        self.now = now
         self.hardwareListenerQueue = DispatchQueue(label: "Scriberman.RecordingService.HardwareListeners")
         self.mixdownCoordinator = mixdownCoordinator ?? RecordingMixdownCoordinator(
             workspaceService: workspaceService,
@@ -433,6 +439,7 @@ actor RecordingService: RecordingServiceProtocol {
         recordingIdentifier: String? = nil,
         recordingWorkspaceRootURL: URL? = nil,
         recordingCreatedAt: Date? = nil,
+        recordingFolderURL: URL? = nil,
         pendingTitle: String? = nil,
         currentSessionID: UUID? = nil,
         screenCaptureSession: (any ScreenCaptureSessionControlling)? = nil,
@@ -447,6 +454,7 @@ actor RecordingService: RecordingServiceProtocol {
         self.recordingIdentifier = recordingIdentifier
         self.recordingWorkspaceRootURL = recordingWorkspaceRootURL
         self.recordingCreatedAt = recordingCreatedAt
+        self.recordingFolderURL = recordingFolderURL
         self.pendingTitle = pendingTitle
         self.currentSessionID = currentSessionID
         self.screenCaptureSession = screenCaptureSession
@@ -886,28 +894,19 @@ actor RecordingService: RecordingServiceProtocol {
         recordingWorkspaceRootURL = workspace.rootURL
 
         do {
-            try fileManager.createDirectory(at: workspace.recordingsURL, withIntermediateDirectories: true)
-            let recordingCreatedAt = Date()
+            let recordingCreatedAt = now()
             let recordingIdentifier = UUID().uuidString
-            let recordingFolderURL = Self.recordingFolderURL(
+            let recordingFolderURL = try RecordingFileLayout.createRecordingFolder(
                 in: workspace,
                 createdAt: recordingCreatedAt,
-                recordingIdentifier: recordingIdentifier
+                fileManager: fileManager
             )
-            try fileManager.createDirectory(at: recordingFolderURL, withIntermediateDirectories: true)
+            self.recordingFolderURL = recordingFolderURL
 
-            let fileURLs = Self.recordingFileURLs(
-                in: workspace,
-                createdAt: recordingCreatedAt,
-                recordingIdentifier: recordingIdentifier
-            )
+            let fileURLs = RecordingFileLayout.recordingFileURLs(in: recordingFolderURL)
             let micFileURL = fileURLs.mic
             let appFileURL = fileURLs.app
-            let screenTmpVideoURL = RecordingFileLayout.screenTmpVideoURL(
-                in: workspace,
-                createdAt: recordingCreatedAt,
-                recordingIdentifier: recordingIdentifier
-            )
+            let screenTmpVideoURL = RecordingFileLayout.screenTmpVideoURL(in: recordingFolderURL)
             self.micStartHostTime = nil
             self.appStartHostTime = nil
             self.videoStartHostTime = nil
@@ -1069,21 +1068,15 @@ actor RecordingService: RecordingServiceProtocol {
         captureVideoStartHostTimeIfNeeded(activeScreenCaptureSession?.videoStartHostTime)
 
         let startedAt = recordingStartedAt ?? recordingCreatedAt ?? Date()
-        let createdAt = recordingCreatedAt ?? startedAt
         let stoppedAt = Date()
         let duration = max(0, stoppedAt.timeIntervalSince(startedAt))
 
-        guard let recordingIdentifier, let recordingWorkspaceRootURL, let sessionID = currentSessionID else {
+        guard recordingIdentifier != nil, let recordingFolderURL, let sessionID = currentSessionID else {
             await cleanupRecordingState()
             return nil
         }
 
-        let workspace = Workspace(rootURL: recordingWorkspaceRootURL)
-        let captureFileURLs = Self.recordingFileURLs(
-            in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: recordingIdentifier
-        )
+        let captureFileURLs = RecordingFileLayout.recordingFileURLs(in: recordingFolderURL)
 
         guard fileManager.fileExists(atPath: captureFileURLs.mic.path) else {
             await cleanupRecordingState()
@@ -1122,16 +1115,8 @@ actor RecordingService: RecordingServiceProtocol {
                 ? captureFileURLs.app
                 : nil
         )
-        let screenTmpVideoURL = RecordingFileLayout.screenTmpVideoURL(
-            in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: recordingIdentifier
-        )
-        let finalScreenVideoURL = RecordingFileLayout.screenVideoURL(
-            in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: recordingIdentifier
-        )
+        let screenTmpVideoURL = RecordingFileLayout.screenTmpVideoURL(in: recordingFolderURL)
+        let finalScreenVideoURL = RecordingFileLayout.screenVideoURL(in: recordingFolderURL)
 
         logger.info(
             "Prepared recording session folder. mic=\(finalRecordingURLs.mic.path, privacy: .public) app=\(finalRecordingURLs.app?.path ?? "nil", privacy: .public)"
@@ -1294,6 +1279,7 @@ actor RecordingService: RecordingServiceProtocol {
         recordingStartedAt = nil
         recordingCreatedAt = nil
         recordingIdentifier = nil
+        recordingFolderURL = nil
         currentSessionID = nil
         activeCapturedAppName = nil
         pendingTitle = nil
@@ -1332,17 +1318,7 @@ actor RecordingService: RecordingServiceProtocol {
     }
 
     private func makeCurrentScreenTmpVideoURL() -> URL? {
-        guard let recordingWorkspaceRootURL,
-              let recordingCreatedAt,
-              let recordingIdentifier
-        else {
-            return nil
-        }
-        return RecordingFileLayout.screenTmpVideoURL(
-            in: Workspace(rootURL: recordingWorkspaceRootURL),
-            createdAt: recordingCreatedAt,
-            recordingIdentifier: recordingIdentifier
-        )
+        recordingFolderURL.map(RecordingFileLayout.screenTmpVideoURL(in:))
     }
 
     private func handleAudioEngineConfigurationChange() async {
@@ -1684,37 +1660,6 @@ actor RecordingService: RecordingServiceProtocol {
             micStartHostTime: micStartHostTime,
             appStartHostTime: appStartHostTime
         )
-    }
-
-}
-
-extension RecordingService {
-    static func recordingFolderURL(
-        in workspace: Workspace,
-        createdAt: Date,
-        recordingIdentifier: String
-    ) -> URL {
-        RecordingFileLayout.recordingFolderURL(
-            in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: recordingIdentifier
-        )
-    }
-
-    static func recordingFileURLs(
-        in workspace: Workspace,
-        createdAt: Date,
-        recordingIdentifier: String
-    ) -> (mic: URL, app: URL) {
-        RecordingFileLayout.recordingFileURLs(
-            in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: recordingIdentifier
-        )
-    }
-
-    static func folderName(createdAt: Date, recordingIdentifier: String) -> String {
-        RecordingFileLayout.folderName(createdAt: createdAt, recordingIdentifier: recordingIdentifier)
     }
 
 }

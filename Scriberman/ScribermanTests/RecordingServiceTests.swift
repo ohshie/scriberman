@@ -13,108 +13,100 @@ final class RecordingServiceTests {
         return try #require(context.fetch(descriptor).first(where: { $0.id == id }))
     }
 
+    // MARK: - Folder layout
+
+    private static let utc = TimeZone(identifier: "UTC")!
+    private static let march28At1430 = Date(timeIntervalSince1970: 1_774_708_200) // 2026-03-28 14:30 UTC
+
     @Test
-
-    func testSessionRecordingFileURLsUseNamedFolderAndNotTmp() {
-        let workspace = makeWorkspace()
-        defer { removeWorkspace(at: workspace.rootURL) }
-        let createdAt = Date(timeIntervalSince1970: 1_743_171_000) // 2025-03-28 14:30 UTC
-        let identifier = "12345678-a3"
-        let urls = RecordingService.recordingFileURLs(
-            in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: identifier
-        )
-        let folderName = RecordingService.folderName(createdAt: createdAt, recordingIdentifier: identifier)
-
-        #expect(urls.mic.path.hasSuffix("/recordings/\(folderName)/mic.wav"))
-        #expect(urls.app.path.hasSuffix("/recordings/\(folderName)/app.wav"))
-        #expect(!urls.mic.path.contains("/recordings/tmp/"))
-        #expect(!urls.app.path.contains("/recordings/tmp/"))
+    func testFolderNameIsDateAndTime() {
+        #expect(RecordingFileLayout.folderName(createdAt: Self.march28At1430, timeZone: Self.utc) == "2026-03-28 14-30")
     }
 
     @Test
+    func testFileURLsAreInsideTheGivenFolder() {
+        let folderURL = URL(fileURLWithPath: "/tmp/workspace/recordings/2026-03-28 14-30", isDirectory: true)
+        let urls = RecordingFileLayout.recordingFileURLs(in: folderURL)
 
-    func testScreenVideoURLsUseNamedFolderAndStableFilenames() {
-        let workspace = makeWorkspace()
-        defer { removeWorkspace(at: workspace.rootURL) }
-
-        let createdAt = Date(timeIntervalSince1970: 1_743_171_000)
-        let identifier = "12345678-a3"
-        let folderName = RecordingService.folderName(createdAt: createdAt, recordingIdentifier: identifier)
-
-        let tmpURL = RecordingFileLayout.screenTmpVideoURL(
-            in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: identifier
-        )
-        let finalURL = RecordingFileLayout.screenVideoURL(
-            in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: identifier
-        )
-
-        #expect(tmpURL.path == workspace.recordingsURL.appendingPathComponent("\(folderName)/screen-tmp.mov").path)
-        #expect(finalURL.path == workspace.recordingsURL.appendingPathComponent("\(folderName)/screen.mov").path)
-        #expect(!tmpURL.lastPathComponent.contains(identifier))
-        #expect(!finalURL.lastPathComponent.contains(identifier))
+        #expect(urls.mic == folderURL.appendingPathComponent("mic.wav"))
+        #expect(urls.app == folderURL.appendingPathComponent("app.wav"))
+        #expect(RecordingFileLayout.screenTmpVideoURL(in: folderURL) == folderURL.appendingPathComponent("screen-tmp.mov"))
+        #expect(RecordingFileLayout.screenVideoURL(in: folderURL) == folderURL.appendingPathComponent("screen.mov"))
     }
 
     @Test
-
-    func testRecordingFolderURLUsesExistingNamedPattern() throws {
+    func testCreateRecordingFolderUsesDateAndTimeName() throws {
         let workspace = makeWorkspace()
         defer { removeWorkspace(at: workspace.rootURL) }
 
-        let createdAt = Date(timeIntervalSince1970: 1_743_171_000) // 2025-03-28 14:30 UTC
-        let folderURL = RecordingService.recordingFolderURL(
+        let folderURL = try RecordingFileLayout.createRecordingFolder(
             in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: "12345678-a3"
+            createdAt: Self.march28At1430,
+            timeZone: Self.utc
         )
-        try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
 
-        let folderName = folderURL.lastPathComponent
-        let expectedPattern = #"^Recording [A-Z][a-z]{2} \d{2} at \d{2}-\d{2} [A-Za-z0-9]{2}$"#
-
+        #expect(folderURL == workspace.recordingsURL.appendingPathComponent("2026-03-28 14-30", isDirectory: true))
         #expect(FileManager.default.fileExists(atPath: folderURL.path))
-        #expect(folderName.range(of: expectedPattern, options: .regularExpression) != nil)
     }
 
     @Test
-
-    func testSessionRecordingFolderPathUsesNamedFolderNotTmp() throws {
+    func testCreateRecordingFolderSkipsTakenNames() throws {
         let workspace = makeWorkspace()
         defer { removeWorkspace(at: workspace.rootURL) }
+        let first = workspace.recordingsURL.appendingPathComponent("2026-03-28 14-30", isDirectory: true)
+        let second = workspace.recordingsURL.appendingPathComponent("2026-03-28 14-30 2", isDirectory: true)
+        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
+        let existingMic = first.appendingPathComponent("mic.wav")
+        _ = FileManager.default.createFile(atPath: existingMic.path, contents: Data("first".utf8))
 
-        let createdAt = Date(timeIntervalSince1970: 1_743_171_000)
-        let result = RecordingService.recordingFileURLs(
+        let folderURL = try RecordingFileLayout.createRecordingFolder(
             in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: "abcdef12"
+            createdAt: Self.march28At1430,
+            timeZone: Self.utc
         )
-        let folderName = RecordingService.folderName(createdAt: createdAt, recordingIdentifier: "abcdef12")
 
-        #expect(result.mic.path.hasSuffix("/recordings/\(folderName)/mic.wav"))
-        #expect(!(result.mic.path.contains("/recordings/tmp/")))
+        #expect(folderURL.lastPathComponent == "2026-03-28 14-30 3")
+        #expect(try Data(contentsOf: existingMic) == Data("first".utf8))
     }
 
     @Test
-
-    func testFolderBasedPathExpectationUsesNamedFolderMicFile() throws {
+    func testCreateRecordingFolderInAnotherYearDoesNotCollide() throws {
         let workspace = makeWorkspace()
         defer { removeWorkspace(at: workspace.rootURL) }
-
-        let createdAt = Date(timeIntervalSince1970: 1_743_171_000)
-        let result = RecordingService.recordingFileURLs(
-            in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: "11111111-a3"
+        try FileManager.default.createDirectory(
+            at: workspace.recordingsURL.appendingPathComponent("2026-03-28 14-30", isDirectory: true),
+            withIntermediateDirectories: true
         )
-        let folderName = RecordingService.folderName(createdAt: createdAt, recordingIdentifier: "11111111-a3")
 
-        #expect(result.mic.path == workspace.recordingsURL.appendingPathComponent("\(folderName)/mic.wav").path)
-        #expect(result.app.path == workspace.recordingsURL.appendingPathComponent("\(folderName)/app.wav").path)
+        let folderURL = try RecordingFileLayout.createRecordingFolder(
+            in: workspace,
+            createdAt: Date(timeIntervalSince1970: 1_806_244_200), // 2027-03-28 14:30 UTC
+            timeZone: Self.utc
+        )
+
+        #expect(folderURL.lastPathComponent == "2027-03-28 14-30")
+    }
+
+    @Test
+    func testCreateRecordingFolderFailsAfterLastSuffix() throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        for suffix in 1...RecordingFileLayout.maximumFolderSuffix {
+            let name = suffix == 1 ? "2026-03-28 14-30" : "2026-03-28 14-30 \(suffix)"
+            try FileManager.default.createDirectory(
+                at: workspace.recordingsURL.appendingPathComponent(name, isDirectory: true),
+                withIntermediateDirectories: true
+            )
+        }
+
+        #expect(throws: CocoaError.self) {
+            try RecordingFileLayout.createRecordingFolder(
+                in: workspace,
+                createdAt: Self.march28At1430,
+                timeZone: Self.utc
+            )
+        }
     }
 
     @Test
@@ -308,6 +300,61 @@ final class RecordingServiceTests {
         let mixdownStart = try #require(await mixdownCoordinator.firstCallStartedAt())
         let muxStart = try #require(await screenVideoMuxer.firstCallStartedAt())
         #expect(abs(mixdownStart.timeIntervalSince(muxStart)) < 0.25)
+    }
+
+    @Test
+    func testTwoStartsInTheSameMinuteUseDistinctFolders() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+
+        let service = RecordingService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            micCaptureController: MockMicCaptureController(),
+            mixdownCoordinator: MockRecordingMixdownCoordinator(),
+            screenVideoMuxer: MockScreenVideoMuxer(),
+            permissionChecker: {},
+            scopedAccessStarter: { _ in true },
+            scopedAccessStopper: { _ in },
+            now: { Self.march28At1430 }
+        )
+
+        let firstID = try await service.startRecording(in: workspace, title: "First")
+        _ = await service.stopRecording()
+        let context = ModelContext(container)
+        let firstSession = try #require(try RecordingSession.fetch(id: firstID, in: context))
+        let firstFolder = URL(fileURLWithPath: firstSession.micAudioURL).deletingLastPathComponent()
+        _ = FileManager.default.createFile(
+            atPath: firstFolder.appendingPathComponent("sentinel").path,
+            contents: Data("first".utf8)
+        )
+        let firstContents = try folderSnapshot(at: firstFolder)
+
+        let secondID = try await service.startRecording(in: workspace, title: "Second")
+        _ = await service.stopRecording()
+        let secondSession = try #require(try RecordingSession.fetch(id: secondID, in: ModelContext(container)))
+        let secondFolder = URL(fileURLWithPath: secondSession.micAudioURL).deletingLastPathComponent()
+
+        #expect(secondFolder.lastPathComponent == firstFolder.lastPathComponent + " 2")
+        #expect(try folderSnapshot(at: firstFolder) == firstContents)
+    }
+
+    private func folderSnapshot(at folderURL: URL) throws -> [String: Data] {
+        var snapshot: [String: Data] = [:]
+        for name in try FileManager.default.contentsOfDirectory(atPath: folderURL.path) {
+            snapshot[name] = try Data(contentsOf: folderURL.appendingPathComponent(name))
+        }
+        return snapshot
     }
 
     @Test
@@ -662,11 +709,11 @@ final class RecordingServiceTests {
 
         let createdAt = Date(timeIntervalSince1970: 1_743_171_000)
         let recordingIdentifier = "cleanup-video"
-        let screenTmpURL = RecordingFileLayout.screenTmpVideoURL(
-            in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: recordingIdentifier
+        let folderURL = workspace.recordingsURL.appendingPathComponent(
+            RecordingFileLayout.folderName(createdAt: createdAt),
+            isDirectory: true
         )
+        let screenTmpURL = RecordingFileLayout.screenTmpVideoURL(in: folderURL)
         try FileManager.default.createDirectory(
             at: screenTmpURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -678,6 +725,7 @@ final class RecordingServiceTests {
             recordingIdentifier: recordingIdentifier,
             recordingWorkspaceRootURL: workspace.rootURL,
             recordingCreatedAt: createdAt,
+            recordingFolderURL: folderURL,
             currentSessionID: UUID(),
             screenCaptureSession: screenSession
         )
@@ -711,11 +759,11 @@ final class RecordingServiceTests {
         let customTitle = "My Custom Title"
         let recordingCreatedAt = Date(timeIntervalSince1970: 1_743_171_000)
         let recordingIdentifier = "test-id"
-        let sessionURLs = RecordingService.recordingFileURLs(
-            in: workspace,
-            createdAt: recordingCreatedAt,
-            recordingIdentifier: recordingIdentifier
+        let folderURL = workspace.recordingsURL.appendingPathComponent(
+            RecordingFileLayout.folderName(createdAt: recordingCreatedAt),
+            isDirectory: true
         )
+        let sessionURLs = RecordingFileLayout.recordingFileURLs(in: folderURL)
         try FileManager.default.createDirectory(
             at: sessionURLs.mic.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -738,6 +786,7 @@ final class RecordingServiceTests {
             recordingIdentifier: recordingIdentifier,
             recordingWorkspaceRootURL: workspace.rootURL,
             recordingCreatedAt: recordingCreatedAt,
+            recordingFolderURL: folderURL,
             pendingTitle: customTitle,
             currentSessionID: seededSession.id
         )
@@ -771,11 +820,11 @@ final class RecordingServiceTests {
 
         let recordingCreatedAt = Date().addingTimeInterval(-5)
         let recordingIdentifier = "test-id-large-library"
-        let sessionURLs = RecordingService.recordingFileURLs(
-            in: workspace,
-            createdAt: recordingCreatedAt,
-            recordingIdentifier: recordingIdentifier
+        let folderURL = workspace.recordingsURL.appendingPathComponent(
+            RecordingFileLayout.folderName(createdAt: recordingCreatedAt),
+            isDirectory: true
         )
+        let sessionURLs = RecordingFileLayout.recordingFileURLs(in: folderURL)
         try FileManager.default.createDirectory(
             at: sessionURLs.mic.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -803,6 +852,7 @@ final class RecordingServiceTests {
             recordingIdentifier: recordingIdentifier,
             recordingWorkspaceRootURL: workspace.rootURL,
             recordingCreatedAt: recordingCreatedAt,
+            recordingFolderURL: folderURL,
             currentSessionID: activeSession.id
         )
 
@@ -836,11 +886,11 @@ final class RecordingServiceTests {
 
         let recordingCreatedAt = Date(timeIntervalSince1970: 1_743_171_000)
         let recordingIdentifier = "test-id-default"
-        let sessionURLs = RecordingService.recordingFileURLs(
-            in: workspace,
-            createdAt: recordingCreatedAt,
-            recordingIdentifier: recordingIdentifier
+        let folderURL = workspace.recordingsURL.appendingPathComponent(
+            RecordingFileLayout.folderName(createdAt: recordingCreatedAt),
+            isDirectory: true
         )
+        let sessionURLs = RecordingFileLayout.recordingFileURLs(in: folderURL)
         try FileManager.default.createDirectory(
             at: sessionURLs.mic.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -862,6 +912,7 @@ final class RecordingServiceTests {
             recordingIdentifier: recordingIdentifier,
             recordingWorkspaceRootURL: workspace.rootURL,
             recordingCreatedAt: recordingCreatedAt,
+            recordingFolderURL: folderURL,
             pendingTitle: nil,
             currentSessionID: seededSession.id
         )

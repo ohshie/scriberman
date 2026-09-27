@@ -1,6 +1,7 @@
 import AVFoundation
 import AudioToolbox
 import Foundation
+import SwiftData
 import Testing
 @testable import Scriberman
 
@@ -324,6 +325,42 @@ final class AudioMixdownServiceTests {
         let channelCount: Int
         let frameCount: Int
         let channelSamples: [[Float]]
+    }
+
+    @Test(arguments: ["Recording Mar 28 at 14-30 a3", "2026-03-28 14-30"])
+    func testCoordinatorPersistsMixdownInEitherFolderNameFormat(folderName: String) async throws {
+        let folder = tempDirectoryURL.appendingPathComponent(folderName, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let micURL = folder.appendingPathComponent("mic.wav")
+        let mixdownURL = folder.appendingPathComponent("recording.m4a")
+        try writeMonoWAV(samples: Array(repeating: Float(0.25), count: 48_000), to: micURL)
+        try ensureReadableAudioFile(at: micURL)
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = ModelContext(container)
+        let session = RecordingSession(duration: 1, micAudioURL: micURL.path, title: folderName, status: .recorded)
+        context.insert(session)
+        try context.save()
+
+        let coordinator = RecordingMixdownCoordinator(
+            workspaceService: MockWorkspaceService(),
+            modelContainer: container
+        )
+        await coordinator.runMixdown(
+            sessionID: session.id,
+            micURL: micURL,
+            appURL: nil,
+            mixdownURL: mixdownURL,
+            micStartHostTime: 1_000_000_000,
+            appStartHostTime: nil
+        )
+
+        let persisted = try #require(try RecordingSession.fetch(id: session.id, in: ModelContext(container)))
+        #expect(persisted.mixdownURL == mixdownURL.path)
+        #expect(FileManager.default.fileExists(atPath: mixdownURL.path))
     }
 
     private func writeMonoWAV(samples: [Float], to url: URL) throws {
