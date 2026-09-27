@@ -430,7 +430,7 @@ final class AIPromptStoreTests {
 }
 
 final class SettingsViewSourceTests {
-    @Test
+    @Test(.tags(.sourceLint))
     func testSettingsViewUsesDedicatedAITab() throws {
         let source = try settingsSource()
 
@@ -443,7 +443,7 @@ final class SettingsViewSourceTests {
         #expect(!source.contains("Section(\"AI Integration\")"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testAISettingsViewContainsModelAndCustomModelControls() throws {
         let source = try aiSettingsSource()
 
@@ -457,7 +457,7 @@ final class SettingsViewSourceTests {
         #expect(!source.contains("Picker(\"Provider\""))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
 
     func testAITabSupportsPromptCRUDAndValidationHooks() throws {
         let settingsSource = try settingsSource()
@@ -479,7 +479,7 @@ final class SettingsViewSourceTests {
         #expect(promptViewModelSource.contains("\"Prompt name must be unique.\""))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testSettingsViewUsesContentFittingMinimumWidth() throws {
         let source = try settingsSource()
 

@@ -6,7 +6,7 @@ import os
 
 @MainActor
 struct StatusTagViewTests {
-    @Test
+    @Test(.tags(.sourceLint))
     func recordingRendersNoTagViaEmptyViewPath() throws {
         let source = try statusTagViewSource()
         #expect(source.contains("case .recording:"))
@@ -16,7 +16,7 @@ struct StatusTagViewTests {
 
     /// `.done` is the resting state and most of the list, so it carries no marker at all. A
     /// checkmark that is always present when the status is `.done` only repeats the status.
-    @Test
+    @Test(.tags(.sourceLint))
     func doneRendersNothing() throws {
         let source = try statusTagViewSource()
         let doneRange = try #require(source.range(of: "case .done:"))
@@ -31,7 +31,7 @@ struct StatusTagViewTests {
     /// Transcript and AI-transformation presence are no longer shown in the list, so the view no
     /// longer takes them. Leaving them as unused parameters would invite a caller to believe they
     /// still mean something.
-    @Test
+    @Test(.tags(.sourceLint))
     func doneCarriesNoTranscriptOrTransformationSignal() throws {
         let source = try statusTagViewSource()
         #expect(!source.contains("hasTranscript"))
@@ -39,7 +39,7 @@ struct StatusTagViewTests {
         #expect(!source.contains("doneCheckmarkCount"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func errorRendersXmarkIconPath() throws {
         let source = try statusTagViewSource()
         #expect(source.contains("case .error:"))

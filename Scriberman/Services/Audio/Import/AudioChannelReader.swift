@@ -1,8 +1,14 @@
 import AVFoundation
 import Foundation
 
+/// Decoded samples per channel, at the sample rate they were decoded at.
+struct DecodedAudio: Equatable, Sendable {
+    let channels: [[Float]]
+    let sampleRate: Double
+}
+
 struct AudioChannelReader {
-    func read(url: URL) throws -> [[Float]] {
+    func read(url: URL) throws -> DecodedAudio {
         let file: AVAudioFile
         do {
             file = try AVAudioFile(forReading: url)
@@ -31,12 +37,17 @@ struct AudioChannelReader {
         var samplesByChannel = Array(repeating: [Float](), count: channelCount)
         let frameCapacity: AVAudioFrameCount = 4_096
 
-        while true {
+        // Bounded by the file's own length. `AVAudioFile.read(into:frameCount:)` throws at end of
+        // file instead of returning an empty buffer, so waiting for a zero-length read discarded
+        // every complete decode and sent each import down the fallback path.
+        while file.framePosition < file.length {
             guard let buffer = AVAudioPCMBuffer(pcmFormat: readFormat, frameCapacity: frameCapacity) else {
                 throw RecordingError.failedToStart("Import failed: buffer allocation failed.")
             }
-            try file.read(into: buffer, frameCount: frameCapacity)
+            let remaining = file.length - file.framePosition
+            try file.read(into: buffer, frameCount: AVAudioFrameCount(min(Int64(frameCapacity), remaining)))
             guard buffer.frameLength > 0 else {
+                // Defensive: a short read with frames still outstanding would otherwise spin.
                 break
             }
             guard let channelData = buffer.floatChannelData else {
@@ -50,6 +61,6 @@ struct AudioChannelReader {
             }
         }
 
-        return samplesByChannel
+        return DecodedAudio(channels: samplesByChannel, sampleRate: inputFormat.sampleRate)
     }
 }

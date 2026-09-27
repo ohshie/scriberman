@@ -246,6 +246,11 @@
 		B2FBF1E99346D1C849214837 /* TranscriptionServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A2AEE3DB783526C01DF1552 /* TranscriptionServiceProtocol.swift */; };
 		B72B82B2F929E58EEF71508F /* AudioTrimServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE7D1E5C8F3850B4506BBA36 /* AudioTrimServiceTests.swift */; };
 		712E8E5BDF5B4757A330E0B2 /* TranscriptRowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58E915A568254101B1229E00 /* TranscriptRowTests.swift */; };
+		17A6B2D8252449F28C67CD03 /* TestTargetMembershipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55CC6D2AD3334083B03FAE55 /* TestTargetMembershipTests.swift */; };
+		3E10F6B7CA97475A9C5935CC /* TestTags.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91C9B8D8B6ED4422B1E336F2 /* TestTags.swift */; };
+		707274FA1AB649FCB7B26654 /* AudioIOAvailability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33B9710222CF4F0A8B7D3CC0 /* AudioIOAvailability.swift */; };
+		BA904A0871E14FF2B9983CDF /* TranscriptSegmentCodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14F6CC6CD55945E4B7D0BA2B /* TranscriptSegmentCodableTests.swift */; };
+		07FDA1B2DAC34E02BFC491A6 /* TranscriptExportServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6055DA603FA49D29FD45417 /* TranscriptExportServiceTests.swift */; };
 		1F20957094D44D95A3B274E3 /* SpeakerColourTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 586C1F03FD7C46C79E65D39E /* SpeakerColourTests.swift */; };
 		233F29BB5C134BFD9A9B37F3 /* TranscriptStudySearchSeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61171E08DCA9421193973B23 /* TranscriptStudySearchSeedTests.swift */; };
 		4A883C5A61AD4291BE14B034 /* SessionSearchViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D300B92E6E64C4C83C53007 /* SessionSearchViewTests.swift */; };
@@ -562,6 +567,11 @@
 		FE66D533306023D68A010DCE /* TrimFocusedValues.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrimFocusedValues.swift; sourceTree = "<group>"; };
 		FE7D1E5C8F3850B4506BBA36 /* AudioTrimServiceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AudioTrimServiceTests.swift; sourceTree = "<group>"; };
 		58E915A568254101B1229E00 /* TranscriptRowTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TranscriptRowTests.swift; sourceTree = "<group>"; };
+		55CC6D2AD3334083B03FAE55 /* TestTargetMembershipTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TestTargetMembershipTests.swift; sourceTree = "<group>"; };
+		91C9B8D8B6ED4422B1E336F2 /* TestTags.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TestTags.swift; sourceTree = "<group>"; };
+		33B9710222CF4F0A8B7D3CC0 /* AudioIOAvailability.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AudioIOAvailability.swift; sourceTree = "<group>"; };
+		14F6CC6CD55945E4B7D0BA2B /* TranscriptSegmentCodableTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TranscriptSegmentCodableTests.swift; sourceTree = "<group>"; };
+		F6055DA603FA49D29FD45417 /* TranscriptExportServiceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TranscriptExportServiceTests.swift; sourceTree = "<group>"; };
 		586C1F03FD7C46C79E65D39E /* SpeakerColourTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SpeakerColourTests.swift; sourceTree = "<group>"; };
 		61171E08DCA9421193973B23 /* TranscriptStudySearchSeedTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TranscriptStudySearchSeedTests.swift; sourceTree = "<group>"; };
 		0D300B92E6E64C4C83C53007 /* SessionSearchViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionSearchViewTests.swift; sourceTree = "<group>"; };
@@ -673,6 +683,11 @@
 				79AF5DC92F92DCD30075AA88 /* RecordingTranscriptPersistenceTests.swift */,
 				FE7D1E5C8F3850B4506BBA36 /* AudioTrimServiceTests.swift */,
 				58E915A568254101B1229E00 /* TranscriptRowTests.swift */,
+				55CC6D2AD3334083B03FAE55 /* TestTargetMembershipTests.swift */,
+				91C9B8D8B6ED4422B1E336F2 /* TestTags.swift */,
+				33B9710222CF4F0A8B7D3CC0 /* AudioIOAvailability.swift */,
+				14F6CC6CD55945E4B7D0BA2B /* TranscriptSegmentCodableTests.swift */,
+				F6055DA603FA49D29FD45417 /* TranscriptExportServiceTests.swift */,
 				586C1F03FD7C46C79E65D39E /* SpeakerColourTests.swift */,
 				61171E08DCA9421193973B23 /* TranscriptStudySearchSeedTests.swift */,
 				0D300B92E6E64C4C83C53007 /* SessionSearchViewTests.swift */,
@@ -1496,6 +1511,11 @@
 				7987328E2F7DBC2800570A03 /* SettingsViewModelTests.swift in Sources */,
 				B72B82B2F929E58EEF71508F /* AudioTrimServiceTests.swift in Sources */,
 				712E8E5BDF5B4757A330E0B2 /* TranscriptRowTests.swift in Sources */,
+				17A6B2D8252449F28C67CD03 /* TestTargetMembershipTests.swift in Sources */,
+				3E10F6B7CA97475A9C5935CC /* TestTags.swift in Sources */,
+				707274FA1AB649FCB7B26654 /* AudioIOAvailability.swift in Sources */,
+				BA904A0871E14FF2B9983CDF /* TranscriptSegmentCodableTests.swift in Sources */,
+				07FDA1B2DAC34E02BFC491A6 /* TranscriptExportServiceTests.swift in Sources */,
 				1F20957094D44D95A3B274E3 /* SpeakerColourTests.swift in Sources */,
 				233F29BB5C134BFD9A9B37F3 /* TranscriptStudySearchSeedTests.swift in Sources */,
 				4A883C5A61AD4291BE14B034 /* SessionSearchViewTests.swift in Sources */,

@@ -10,7 +10,7 @@ struct AudioImportProbeResult {
 
 actor AudioImportService {
     typealias ProbeAudio = @Sendable (URL) async throws -> AudioImportProbeResult
-    typealias ReadChannelSamples = @Sendable (URL) throws -> [[Float]]
+    typealias ReadChannelSamples = @Sendable (URL) throws -> DecodedAudio
     typealias CreateDirectory = @Sendable (URL) throws -> Void
     typealias WriteMonoAAC = @Sendable ([Float], URL) async throws -> Void
     typealias MixToMonoM4A = @Sendable (URL, URL) async throws -> Void
@@ -125,9 +125,13 @@ actor AudioImportService {
 
             let outputURL = importFolderURL.appendingPathComponent("recording.m4a")
             do {
-                let channelSamples = try readChannelSamples(url)
-                let monoSamples = AudioDownmixer.toMono(channelSamples: channelSamples)
-                try await writeMonoAAC(monoSamples, outputURL)
+                let decoded = try readChannelSamples(url)
+                let monoSamples = AudioDownmixer.toMono(channelSamples: decoded.channels)
+                // The writer is fixed at the mixdown output rate, so samples decoded at any other
+                // rate are converted first; written unconverted they would play at the wrong speed.
+                let outputSamples = try AudioResampler(targetSampleRate: AudioMixdownService.outputSampleRate)
+                    .resample(monoSamples, from: decoded.sampleRate)
+                try await writeMonoAAC(outputSamples, outputURL)
             } catch {
                 if shouldFallbackToMixdownService(for: error) {
                     try await mixToMonoM4A(url, outputURL)
