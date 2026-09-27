@@ -227,6 +227,7 @@ actor RecordingService: RecordingServiceProtocol {
     typealias ScopedAccessStarter = @Sendable (URL) -> Bool
     typealias ScopedAccessStopper = @Sendable (URL) -> Void
     typealias ScreenCaptureSessionFactory = @Sendable () -> any ScreenCaptureSessionControlling
+    typealias DefaultTagApplier = @Sendable (RecordingSession, ModelContext) throws -> Void
 
     private let workspaceService: WorkspaceServiceProtocol
     private let modelContainer: ModelContainer
@@ -244,7 +245,7 @@ actor RecordingService: RecordingServiceProtocol {
     private let makeScreenCaptureSession: ScreenCaptureSessionFactory
     // Injected for testing; nil uses the real setVoiceProcessingEnabled(_:)
     private let voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)?
-    private let tagService = TagService()
+    private let applyDefaultTag: DefaultTagApplier
 
     private var audioEngine: AVAudioEngine?
     private let micStreamer = AudioFileStreamer(label: "mic")
@@ -302,10 +303,26 @@ actor RecordingService: RecordingServiceProtocol {
     nonisolated(unsafe) private var hasRegisteredHardwareListeners = false
     private let hardwareListenerQueue: DispatchQueue
 
-    private var isRecordingValue = false
+    /// Where the service is in a recording's life. Each transition is written before the first
+    /// `await` of the method that makes it, so concurrent callers see it straight away.
+    private enum LifecycleState {
+        case idle
+        case starting
+        case recording
+        case stopping(Task<UUID?, Never>)
+    }
+
+    private var lifecycleState: LifecycleState = .idle
+    private var isRecordingValue: Bool {
+        if case .recording = lifecycleState {
+            return true
+        }
+        return false
+    }
     private var audioLevelValue: Float = 0
 #if DEBUG
     private var recorderFallbackActiveForTesting = false
+    private var stopRecordingCallCount = 0
 #endif
 
     func liveAudioStream() async -> AsyncStream<([Float], AudioSource, Double)> {
@@ -325,7 +342,8 @@ actor RecordingService: RecordingServiceProtocol {
         scopedAccessStarter: @escaping ScopedAccessStarter = { $0.startAccessingSecurityScopedResource() },
         scopedAccessStopper: @escaping ScopedAccessStopper = { $0.stopAccessingSecurityScopedResource() },
         screenCaptureSessionFactory: @escaping ScreenCaptureSessionFactory = { ScreenCaptureSession() },
-        voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)? = nil
+        voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)? = nil,
+        defaultTagApplier: @escaping DefaultTagApplier = { try TagService().applyDefaultTag(to: $0, in: $1) }
     ) {
         self.workspaceService = workspaceService
         self.modelContainer = modelContainer
@@ -338,6 +356,7 @@ actor RecordingService: RecordingServiceProtocol {
         self.scopedAccessStopper = scopedAccessStopper
         self.makeScreenCaptureSession = screenCaptureSessionFactory
         self.voiceProcessingPropertySetter = voiceProcessingPropertySetter
+        self.applyDefaultTag = defaultTagApplier
         self.hardwareListenerQueue = DispatchQueue(label: "Scriberman.RecordingService.HardwareListeners")
         self.mixdownCoordinator = mixdownCoordinator ?? RecordingMixdownCoordinator(
             workspaceService: workspaceService,
@@ -405,6 +424,10 @@ actor RecordingService: RecordingServiceProtocol {
     }
 
     #if DEBUG
+    func stopRecordingCallCountForTesting() -> Int {
+        stopRecordingCallCount
+    }
+
     func setRecordingStateForTesting(
         isRecording: Bool,
         recordingIdentifier: String? = nil,
@@ -420,7 +443,7 @@ actor RecordingService: RecordingServiceProtocol {
     ) {
         self.activeAppFileURL = activeAppFileURL
         self.activeAppProcessID = activeAppProcessID
-        self.isRecordingValue = isRecording
+        self.lifecycleState = isRecording ? .recording : .idle
         self.recordingIdentifier = recordingIdentifier
         self.recordingWorkspaceRootURL = recordingWorkspaceRootURL
         self.recordingCreatedAt = recordingCreatedAt
@@ -836,18 +859,26 @@ actor RecordingService: RecordingServiceProtocol {
         appProcessID: pid_t? = nil,
         title: String? = nil
     ) async throws(RecordingError) -> UUID {
-        guard !isRecordingValue else {
+        guard case .idle = lifecycleState else {
             throw RecordingError.alreadyRecording
         }
+        lifecycleState = .starting
 
         do {
             _ = try await workspaceService.requireWritableWorkspace()
         } catch {
+            lifecycleState = .idle
             throw RecordingError.invalidWorkspaceAccess
         }
-        try await permissionChecker()
+        do {
+            try await permissionChecker()
+        } catch {
+            lifecycleState = .idle
+            throw error
+        }
 
         if !scopedAccessStarter(workspace.rootURL) {
+            lifecycleState = .idle
             throw RecordingError.invalidWorkspaceAccess
         }
 
@@ -903,7 +934,7 @@ actor RecordingService: RecordingServiceProtocol {
             self.recordingStartedAt = Date()
             self.recordingCreatedAt = recordingCreatedAt
             self.recordingIdentifier = recordingIdentifier
-            self.isRecordingValue = true
+            self.lifecycleState = .recording
             self.audioLevelValue = 0
             self.pendingError = nil
             self.captureStreamFailureCount = 0
@@ -947,7 +978,7 @@ actor RecordingService: RecordingServiceProtocol {
             context.insert(session)
             // Applied here so the recording satisfies the one-to-three tag bound from the moment it
             // exists, rather than from the moment it is first displayed or first tagged.
-            try tagService.applyDefaultTag(to: session, in: context)
+            try applyDefaultTag(session, context)
             try context.save()
             self.currentSessionID = session.id
             registerMicHardwareListeners()
@@ -958,18 +989,34 @@ actor RecordingService: RecordingServiceProtocol {
             await appAudioCaptureSession?.stop()
             await cleanupRecordingState()
             releaseRecordingScopeIfNeeded()
+            audioLevelValue = 0
+            lifecycleState = .idle
             throw RecordingError.failedToStart(error.localizedDescription)
         }
     }
 
+    /// Stops the active recording. A call that arrives while a stop is in progress waits for that
+    /// stop and returns its result, so teardown and finalization run once per recording.
     func stopRecording() async -> UUID? {
-        guard isRecordingValue else {
+#if DEBUG
+        stopRecordingCallCount += 1
+#endif
+        switch lifecycleState {
+        case .idle, .starting:
             return nil
+        case .stopping(let teardown):
+            return await teardown.value
+        case .recording:
+            let teardown = Task { await self.finalizeActiveRecording() }
+            lifecycleState = .stopping(teardown)
+            return await teardown.value
         }
+    }
 
+    private func finalizeActiveRecording() async -> UUID? {
         defer {
             audioLevelValue = 0
-            isRecordingValue = false
+            lifecycleState = .idle
             releaseRecordingScopeIfNeeded()
         }
 
