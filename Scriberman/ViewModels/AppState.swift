@@ -7,6 +7,8 @@ enum OnboardingStep: Int, CaseIterable {
     case microphone
     case workspace
     case models
+    /// Optional: can be answered with "Not now". Shown once, after the required steps.
+    case calendar
 }
 
 @Observable
@@ -37,6 +39,9 @@ final class AppState {
     let hotkeyRegistrar = HotkeyRegistrar()
     let dictationHotkeySettings = DictationHotkeySettings()
     @ObservationIgnored let dictationHUD = DictationHUDController()
+    let calendarSuggestions: CalendarSuggestionController
+    /// True from presenting the calendar step until it is answered in this launch.
+    private(set) var isCalendarInvitationActive = false
 
     var pendingSession: PendingSession?
     /// The Settings tab a request to open Settings was actually asking for, or `nil` for whichever
@@ -63,6 +68,11 @@ final class AppState {
 
         if settingsViewModel.bundlePhase != .allReady {
             return .models
+        }
+
+        if isCalendarInvitationActive
+            || (!calendarSuggestions.preferences.invitationShown && !isCaptureActive) {
+            return .calendar
         }
 
         return nil
@@ -135,6 +145,88 @@ final class AppState {
         self.newSessionViewModel.menuBarSettings = self.menuBarSettings
         self.newSessionViewModel.settingsViewModel = self.settingsViewModel
         self.jobsViewModel.settingsViewModel = self.settingsViewModel
+        self.calendarSuggestions = CalendarSuggestionController(
+            service: services.main.calendarService,
+            preferences: services.main.calendarPreferences
+        )
+    }
+
+    /// Recording or dictation in progress. Calendar suggestions are hidden while this is true.
+    var isCaptureActive: Bool {
+        if !newSessionViewModel.isIdle {
+            return true
+        }
+        switch dictationService.state {
+        case .listening, .transcribing, .inserting:
+            return true
+        case .idle, .prewarming:
+            return false
+        }
+    }
+
+    // MARK: - Calendar suggestions
+
+    /// Records the calendar step as shown when it appears, so quitting before answering does
+    /// not bring it back. The step stays up for this launch until answered.
+    func markCalendarInvitationPresented() {
+        guard !calendarSuggestions.preferences.invitationShown else { return }
+        calendarSuggestions.preferences.invitationShown = true
+        isCalendarInvitationActive = true
+    }
+
+    /// Answers the calendar step. Enabling waits for the permission result; the step completes
+    /// either way.
+    func resolveCalendarInvitation(enable: Bool) async {
+        if enable {
+            await calendarSuggestions.setEnabled(true)
+        }
+        isCalendarInvitationActive = false
+    }
+
+    enum CalendarPreparationResult: Equatable {
+        case prepared
+        /// A draft exists; the user must confirm replacing its title.
+        case needsTitleReplacement(draftID: UUID, meetingTitle: String)
+        /// The meeting is no longer eligible, or capture is active. Nothing changed.
+        case unavailable
+    }
+
+    /// Prepares a draft named after the meeting, after re-checking the meeting against a fresh
+    /// query. Never starts capture.
+    func prepareCalendarSession(_ occurrenceID: CalendarOccurrenceID) async -> CalendarPreparationResult {
+        guard let suggestion = await calendarSuggestions.validatedSuggestion(occurrenceID),
+              !isCaptureActive else {
+            return .unavailable
+        }
+        if let draft = pendingSession {
+            return .needsTitleReplacement(draftID: draft.id, meetingTitle: sessionTitle(for: suggestion))
+        }
+        selectPendingSession()
+        pendingSession?.title = sessionTitle(for: suggestion)
+        calendarSuggestions.markPrepared(occurrenceID)
+        return .prepared
+    }
+
+    /// Replaces the title of the draft the user confirmed for, keeping its capture selections.
+    /// Everything is re-checked because the meeting, the draft or capture may have changed while
+    /// the confirmation was open.
+    func confirmCalendarTitleReplacement(
+        _ occurrenceID: CalendarOccurrenceID,
+        draftID: UUID
+    ) async -> CalendarPreparationResult {
+        guard let suggestion = await calendarSuggestions.validatedSuggestion(occurrenceID),
+              !isCaptureActive,
+              pendingSession?.id == draftID else {
+            return .unavailable
+        }
+        pendingSession?.title = sessionTitle(for: suggestion)
+        calendarSuggestions.markPrepared(occurrenceID)
+        return .prepared
+    }
+
+    private func sessionTitle(for suggestion: CalendarMeetingSuggestion) -> String {
+        let title = suggestion.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? Self.defaultPendingSessionTitle() : title
     }
 
     func selectPendingSession() {
@@ -202,6 +294,9 @@ final class AppState {
     }
 
     func applyReadiness() {
+        if requiredOnboardingStep == nil, workspace != nil {
+            calendarSuggestions.activate()
+        }
         guard requiredOnboardingStep == nil, let workspace,
               preparedWorkspace != workspace else { return }
         preparedWorkspace = workspace

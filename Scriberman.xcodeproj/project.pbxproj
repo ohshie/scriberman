@@ -7,6 +7,22 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		9E81C76C8C9B81DA6CA78608 /* CalendarSuggestionPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04C4982D4A91E2B28FA4D2E8 /* CalendarSuggestionPanelView.swift */; };
+		501253F24BF1C1D4D7E39B88 /* CalendarSuggestionPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = EED4653DA418BC121BF9026D /* CalendarSuggestionPanelController.swift */; };
+		5BC079418194DC96FF453974 /* CalendarSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8968B1CB856C12E41157B277 /* CalendarSettingsSection.swift */; };
+		32F6A158BEDD81B5E612A268 /* CalendarOnboardingStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E101697E9C929741E8CA121 /* CalendarOnboardingStep.swift */; };
+		B6E82DDA0309F08F825CC349 /* CalendarSuggestionControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C31EA2D15EBC7153940306A8 /* CalendarSuggestionControllerTests.swift */; };
+		9592B06344201DEA2CBC749E /* CalendarSuggestionPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FDE1CC0891AD427F0A9A1FF /* CalendarSuggestionPolicyTests.swift */; };
+		22ED86E8A118EA4696789401 /* MeetingLinkMatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BD2BC1CD4072A86AFF5D37 /* MeetingLinkMatcherTests.swift */; };
+		A14F1F6AE7304EF5FA460918 /* CalendarSuggestionPreferencesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E139E48C80C6FA0CE0746BE /* CalendarSuggestionPreferencesTests.swift */; };
+		816FF901FE991921C588D21B /* MockCalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35CA226089AF1CF8964B5308 /* MockCalendarService.swift */; };
+		545D1B89BFC3B48DDD442640 /* CalendarSuggestionPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C0851369372F31F8A3A2C6C /* CalendarSuggestionPreferences.swift */; };
+		D6A071FC1D638D415548260F /* CalendarSuggestionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F4C878BB737AD9EBEBCF7AE /* CalendarSuggestionController.swift */; };
+		64E5C73E5F5ACB524DB03BC5 /* CalendarSuggestionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E37ED5CF90E39615B235589 /* CalendarSuggestionPolicy.swift */; };
+		8139B82C82BC0C2FA00F8CB1 /* MeetingLinkMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B18F31750BE98A9F5CCF0471 /* MeetingLinkMatcher.swift */; };
+		B754509537729D4F0DAFDBA2 /* EventKitCalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A94F104E8249596F9CBF794 /* EventKitCalendarService.swift */; };
+		EF2D3D19B6BE39B4970B59B3 /* CalendarServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3950AF31F0BF731FD12656 /* CalendarServiceProtocol.swift */; };
+		D8F8CAF4DDA9C1EFA4A6776D /* CalendarModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 113CBFFA27CDCAB463C47AC0 /* CalendarModels.swift */; };
 		DA0100010000000000000002 /* LiveRecordingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA0100010000000000000001 /* LiveRecordingSession.swift */; };
 		06B30512C65DF04AFA9A0026 /* MarkdownRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC3C4EF936A2E2BEA0BD4CAF /* MarkdownRenderer.swift */; };
 		0779163432BE273DD07FC2E9 /* TranscriptAlignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D3289E92C029611DDA5CB75 /* TranscriptAlignerTests.swift */; };
@@ -294,6 +310,22 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		04C4982D4A91E2B28FA4D2E8 /* CalendarSuggestionPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/CalendarSuggestionPanelView.swift"; sourceTree = SOURCE_ROOT; };
+		EED4653DA418BC121BF9026D /* CalendarSuggestionPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Calendar/CalendarSuggestionPanelController.swift"; sourceTree = SOURCE_ROOT; };
+		8968B1CB856C12E41157B277 /* CalendarSettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/CalendarSettingsSection.swift"; sourceTree = SOURCE_ROOT; };
+		3E101697E9C929741E8CA121 /* CalendarOnboardingStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/Onboarding/CalendarOnboardingStep.swift"; sourceTree = SOURCE_ROOT; };
+		C31EA2D15EBC7153940306A8 /* CalendarSuggestionControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/CalendarSuggestionControllerTests.swift"; sourceTree = SOURCE_ROOT; };
+		0FDE1CC0891AD427F0A9A1FF /* CalendarSuggestionPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/CalendarSuggestionPolicyTests.swift"; sourceTree = SOURCE_ROOT; };
+		79BD2BC1CD4072A86AFF5D37 /* MeetingLinkMatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/MeetingLinkMatcherTests.swift"; sourceTree = SOURCE_ROOT; };
+		9E139E48C80C6FA0CE0746BE /* CalendarSuggestionPreferencesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/CalendarSuggestionPreferencesTests.swift"; sourceTree = SOURCE_ROOT; };
+		35CA226089AF1CF8964B5308 /* MockCalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/Mocks/MockCalendarService.swift"; sourceTree = SOURCE_ROOT; };
+		5C0851369372F31F8A3A2C6C /* CalendarSuggestionPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ViewModels/CalendarSuggestionPreferences.swift"; sourceTree = SOURCE_ROOT; };
+		9F4C878BB737AD9EBEBCF7AE /* CalendarSuggestionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Calendar/CalendarSuggestionController.swift"; sourceTree = SOURCE_ROOT; };
+		1E37ED5CF90E39615B235589 /* CalendarSuggestionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Calendar/CalendarSuggestionPolicy.swift"; sourceTree = SOURCE_ROOT; };
+		B18F31750BE98A9F5CCF0471 /* MeetingLinkMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Calendar/MeetingLinkMatcher.swift"; sourceTree = SOURCE_ROOT; };
+		0A94F104E8249596F9CBF794 /* EventKitCalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Calendar/EventKitCalendarService.swift"; sourceTree = SOURCE_ROOT; };
+		DD3950AF31F0BF731FD12656 /* CalendarServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Calendar/CalendarServiceProtocol.swift"; sourceTree = SOURCE_ROOT; };
+		113CBFFA27CDCAB463C47AC0 /* CalendarModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Calendar/CalendarModels.swift"; sourceTree = SOURCE_ROOT; };
 		DA0100010000000000000001 /* LiveRecordingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveRecordingSession.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F708192A3B4C5 /* RecordingSession.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RecordingSession.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F708192A3B4C6 /* RecordingStatus.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RecordingStatus.swift; sourceTree = "<group>"; };
@@ -594,9 +626,27 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		BD77B68B852EC69758632A3E /* Calendar */ = {
+			isa = PBXGroup;
+			children = (
+				EED4653DA418BC121BF9026D /* CalendarSuggestionPanelController.swift */,
+				9F4C878BB737AD9EBEBCF7AE /* CalendarSuggestionController.swift */,
+				1E37ED5CF90E39615B235589 /* CalendarSuggestionPolicy.swift */,
+				B18F31750BE98A9F5CCF0471 /* MeetingLinkMatcher.swift */,
+				0A94F104E8249596F9CBF794 /* EventKitCalendarService.swift */,
+				DD3950AF31F0BF731FD12656 /* CalendarServiceProtocol.swift */,
+				113CBFFA27CDCAB463C47AC0 /* CalendarModels.swift */,
+			);
+			name = Calendar;
+			sourceTree = "<group>";
+		};
 		07313C70AD2DAFE0C7770C81 /* ScribermanTests */ = {
 			isa = PBXGroup;
 			children = (
+				C31EA2D15EBC7153940306A8 /* CalendarSuggestionControllerTests.swift */,
+				0FDE1CC0891AD427F0A9A1FF /* CalendarSuggestionPolicyTests.swift */,
+				79BD2BC1CD4072A86AFF5D37 /* MeetingLinkMatcherTests.swift */,
+				9E139E48C80C6FA0CE0746BE /* CalendarSuggestionPreferencesTests.swift */,
 				A9D1E2F3A4B5C6D7E8FB1004 /* UpdateServiceTests.swift */,
 				B77B77B77B77B77B77B77B77 /* AIProviderServiceTests.swift */,
 				D19000000000000000000002 /* KeychainStoreTests.swift */,
@@ -700,6 +750,7 @@
 		5C7FDED408995E8535F576A9 /* Mocks */ = {
 			isa = PBXGroup;
 			children = (
+				35CA226089AF1CF8964B5308 /* MockCalendarService.swift */,
 				B66B66B66B66B66B66B66B66 /* MockKeychainStore.swift */,
 				EDB34ACA26BE9E4D8CC45D74 /* MockRecordingService.swift */,
 				C4A24E4069AF734D90C9236E /* MockWorkspaceService.swift */,
@@ -714,6 +765,7 @@
 		5DCD2C2DD0B3A966A7B0E096 /* ViewModels */ = {
 			isa = PBXGroup;
 			children = (
+				5C0851369372F31F8A3A2C6C /* CalendarSuggestionPreferences.swift */,
 				B1B2C3D4E5F60718293A4B5D /* NewSessionViewModel.swift */,
 				C4F2C579DEA6DCCA2A080BC3 /* JobsViewModel.swift */,
 				A8F3DE0F4D65F9DD94E5DEFC /* SettingsViewModel.swift */,
@@ -740,6 +792,8 @@
 		7873A0E448826250C7E4857D /* UI */ = {
 			isa = PBXGroup;
 			children = (
+				04C4982D4A91E2B28FA4D2E8 /* CalendarSuggestionPanelView.swift */,
+				8968B1CB856C12E41157B277 /* CalendarSettingsSection.swift */,
 				8762704F4A827AAB342E6E05 /* JobsView.swift */,
 				E01B42C4D525868024537572 /* SettingsView.swift */,
 				5BB3D5811B6745E46A81D7DE /* AppShellView.swift */,
@@ -936,6 +990,7 @@
 		79C2017E2F7F8BB1002A1163 /* Onboarding */ = {
 			isa = PBXGroup;
 			children = (
+				3E101697E9C929741E8CA121 /* CalendarOnboardingStep.swift */,
 				79C2017F2F7F8BEA002A1163 /* OnboardingView.swift */,
 				79C201812F7F8BEE002A1163 /* ScreenRecordingOnboardingStep.swift */,
 				79C201832F7F8BF2002A1163 /* MicrophoneOnboardingStep.swift */,
@@ -948,6 +1003,7 @@
 		80C4362271C3C0CE86FD7034 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				BD77B68B852EC69758632A3E /* Calendar */,
 				ADD6117B43940D993554EB33 /* ServiceContainer.swift */,
 				A9D1E2F3A4B5C6D7E8FB1002 /* UpdateService.swift */,
 				7987325F2F7D819800570A03 /* Audio */,
@@ -1228,6 +1284,17 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9E81C76C8C9B81DA6CA78608 /* CalendarSuggestionPanelView.swift in Sources */,
+				501253F24BF1C1D4D7E39B88 /* CalendarSuggestionPanelController.swift in Sources */,
+				5BC079418194DC96FF453974 /* CalendarSettingsSection.swift in Sources */,
+				32F6A158BEDD81B5E612A268 /* CalendarOnboardingStep.swift in Sources */,
+				545D1B89BFC3B48DDD442640 /* CalendarSuggestionPreferences.swift in Sources */,
+				D6A071FC1D638D415548260F /* CalendarSuggestionController.swift in Sources */,
+				64E5C73E5F5ACB524DB03BC5 /* CalendarSuggestionPolicy.swift in Sources */,
+				8139B82C82BC0C2FA00F8CB1 /* MeetingLinkMatcher.swift in Sources */,
+				B754509537729D4F0DAFDBA2 /* EventKitCalendarService.swift in Sources */,
+				EF2D3D19B6BE39B4970B59B3 /* CalendarServiceProtocol.swift in Sources */,
+				D8F8CAF4DDA9C1EFA4A6776D /* CalendarModels.swift in Sources */,
 				9B0A47F88ECCCF249F0581C9 /* ScribermanApp.swift in Sources */,
 				A9D1E2F3A4B5C6D7E8FB1001 /* UpdateService.swift in Sources */,
 				4540437FF944A6BA6E754CE5 /* ContentView.swift in Sources */,
@@ -1409,6 +1476,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B6E82DDA0309F08F825CC349 /* CalendarSuggestionControllerTests.swift in Sources */,
+				9592B06344201DEA2CBC749E /* CalendarSuggestionPolicyTests.swift in Sources */,
+				22ED86E8A118EA4696789401 /* MeetingLinkMatcherTests.swift in Sources */,
+				A14F1F6AE7304EF5FA460918 /* CalendarSuggestionPreferencesTests.swift in Sources */,
+				816FF901FE991921C588D21B /* MockCalendarService.swift in Sources */,
 				A9D1E2F3A4B5C6D7E8FB1003 /* UpdateServiceTests.swift in Sources */,
 				A77A77A77A77A77A77A77A77 /* AIProviderServiceTests.swift in Sources */,
 				D19000000000000000000001 /* KeychainStoreTests.swift in Sources */,

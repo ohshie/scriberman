@@ -12,6 +12,8 @@
     <true/>
     <key>com.apple.security.device.audio-input</key>
     <true/>
+    <key>com.apple.security.personal-information.calendars</key>
+    <true/>
     <!-- Sparkle sandbox services. Literal names, not $(PRODUCT_BUNDLE_IDENTIFIER):
          build-dmg.sh passes this file straight to codesign, which performs no
          build-variable expansion (only Xcode's own signing step does). -->
