@@ -126,4 +126,127 @@ struct RecordingTranscriptPersistenceTests {
         #expect(formatTranscriptTimestamp(0) == "0.00")
         #expect(formatTranscriptTimestamp(12.345) == "12.35")
     }
+
+    // MARK: - Lookup by ID
+
+    private func makeOnDiskContainer(at directory: URL) throws -> ModelContainer {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(url: directory.appendingPathComponent("store.sqlite"))
+        )
+    }
+
+    @Test
+    func testRecordingSessionFetchByIDFindsRowBeyondFirstThousand() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeOnDiskContainer(at: directory)
+        let context = ModelContext(container)
+        var insertedIDs: [UUID] = []
+        for index in 0..<1_500 {
+            let session = RecordingSession(duration: 0, micAudioURL: "/tmp/mic-\(index).wav", title: "Recording \(index)", status: .recorded)
+            context.insert(session)
+            insertedIDs.append(session.id)
+        }
+        try context.save()
+
+        let targetID = insertedIDs[1_400]
+        let fetched = try RecordingSession.fetch(id: targetID, in: ModelContext(container))
+
+        #expect(fetched?.id == targetID)
+        #expect(fetched?.title == "Recording 1400")
+    }
+
+    @Test
+    func testImportedSessionFetchByIDFindsRowBeyondFirstThousand() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try makeOnDiskContainer(at: directory)
+        let context = ModelContext(container)
+        var insertedIDs: [UUID] = []
+        for index in 0..<1_500 {
+            let session = ImportedSession(duration: 0, title: "Import \(index)", originalFileName: "file-\(index).mp3", originalFormat: "mp3")
+            context.insert(session)
+            insertedIDs.append(session.id)
+        }
+        try context.save()
+
+        let targetID = insertedIDs[1_400]
+        let fetched = try ImportedSession.fetch(id: targetID, in: ModelContext(container))
+
+        #expect(fetched?.id == targetID)
+        #expect(fetched?.title == "Import 1400")
+    }
+
+    // MARK: - Cascade
+
+    @Test
+    func testDeletingARecordingDeletesItsSegmentsOnDisk() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("default.store")
+        func open() throws -> ModelContext {
+            ModelContext(try ModelContainer(
+                for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self, RecordingTag.self,
+                configurations: ModelConfiguration(url: url)
+            ))
+        }
+
+        var context = try open()
+        let tag = RecordingTag(name: "Work", colorHex: "#FF0000")
+        let deleted = RecordingSession(duration: 10, micAudioURL: "/tmp/a/mic.wav", title: "Deleted")
+        let kept = RecordingSession(duration: 10, micAudioURL: "/tmp/b/mic.wav", title: "Kept")
+        context.insert(tag)
+        context.insert(deleted)
+        context.insert(kept)
+        deleted.tags = [tag]
+        kept.tags = [tag]
+        for index in 0..<3 {
+            context.insert(RecordingTranscriptSegment(
+                speakerId: "S1", text: "deleted \(index)", startTime: Float(index), endTime: Float(index + 1),
+                audioSource: .mic, session: deleted
+            ))
+        }
+        context.insert(RecordingTranscriptSegment(
+            speakerId: "S1", text: "kept", startTime: 0, endTime: 1, audioSource: .mic, session: kept
+        ))
+        try context.save()
+
+        context.delete(deleted)
+        try context.save()
+
+        context = try open()
+        let segments = try context.fetch(FetchDescriptor<RecordingTranscriptSegment>())
+        let recordings = try context.fetch(FetchDescriptor<RecordingSession>())
+        let tags = try context.fetch(FetchDescriptor<RecordingTag>())
+        #expect(segments.map(\.text) == ["kept"])
+        #expect(recordings.map(\.title) == ["Kept"])
+        #expect(tags.map(\.name) == ["Work"])
+        #expect(tags.first?.recordings.map(\.title) == ["Kept"])
+    }
+
+    @Test @MainActor
+    func testStartupRemovesOrphanedSegmentsOnly() throws {
+        let container = try makeContainer()
+        let context = ModelContext(container)
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/mic.wav", title: "Owner")
+        context.insert(session)
+        context.insert(RecordingTranscriptSegment(
+            speakerId: "S1", text: "owned", startTime: 0, endTime: 1, audioSource: .mic, session: session
+        ))
+        for index in 0..<2 {
+            context.insert(RecordingTranscriptSegment(
+                speakerId: "S1", text: "orphan \(index)", startTime: 0, endTime: 1, audioSource: .mic
+            ))
+        }
+        try context.save()
+
+        ScribermanApp.removeOrphanedTranscriptSegments(in: context)
+        ScribermanApp.removeOrphanedTranscriptSegments(in: context)
+
+        let remaining = try ModelContext(container).fetch(FetchDescriptor<RecordingTranscriptSegment>())
+        #expect(remaining.map(\.text) == ["owned"])
+    }
 }

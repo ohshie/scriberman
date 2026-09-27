@@ -1,9 +1,11 @@
 import AVFoundation
 import AudioToolbox
 import Foundation
+import SwiftData
 import Testing
 @testable import Scriberman
 
+@Suite(.enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason))
 final class AudioMixdownServiceTests {
     private let tempDirectoryURL: URL
 
@@ -48,18 +50,13 @@ final class AudioMixdownServiceTests {
         try writeSidecar(for: micURL, segmentCount: 50)
         try writeSidecar(for: appURL, segmentCount: 50)
 
-        do {
-            try await service.mix(
-                micURL: micURL,
-                appURL: appURL,
-                micStartHostTime: 1_000_000_000,
-                appStartHostTime: 1_000_000_000,
-                into: outputURL
-            )
-        } catch {
-            if shouldSkipForSandboxAudioIO(error) { return }
-            throw error
-        }
+        try await service.mix(
+            micURL: micURL,
+            appURL: appURL,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            into: outputURL
+        )
 
         let decoded = try decodePCM(from: outputURL)
         #expect(decoded.channelCount == 2)
@@ -83,18 +80,13 @@ final class AudioMixdownServiceTests {
         try writeSidecar(for: micURL, segmentCount: 60)
         try writeSidecar(for: appURL, segmentCount: 60)
 
-        do {
-            try await service.mix(
-                micURL: micURL,
-                appURL: appURL,
-                micStartHostTime: 1_000_000_000,
-                appStartHostTime: 1_000_000_000,
-                into: outputURL
-            )
-        } catch {
-            if shouldSkipForSandboxAudioIO(error) { return }
-            throw error
-        }
+        try await service.mix(
+            micURL: micURL,
+            appURL: appURL,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            into: outputURL
+        )
 
         let decoded = try decodePCM(from: outputURL)
         #expect(decoded.channelCount == 2)
@@ -112,23 +104,18 @@ final class AudioMixdownServiceTests {
         try ensureReadableAudioFile(at: micURL)
         try ensureReadableAudioFile(at: appURL)
 
-        do {
-            try await service.mix(
-                micURL: micURL,
-                appURL: appURL,
-                micStartHostTime: 1_000_000_000,
-                appStartHostTime: 1_000_000_000,
-                into: outputURL
-            )
-        } catch {
-            if shouldSkipForSandboxAudioIO(error) {
-                return
-            }
-            throw error
-        }
+        try await service.mix(
+            micURL: micURL,
+            appURL: appURL,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            into: outputURL
+        )
 
         let decoded = try decodePCM(from: outputURL)
         #expect(decoded.channelCount == 2)
+        #expect(decoded.sampleRate == 48_000)
+        #expect(decoded.frameCount == 48_000)
 
         let leftAverage = mean(decoded.channelSamples[0].prefix(20_000))
         let rightAverage = mean(decoded.channelSamples[1].prefix(20_000))
@@ -146,23 +133,18 @@ final class AudioMixdownServiceTests {
         try writeMonoWAV(samples: Array(repeating: Float(0.3), count: 24_000), to: micURL)
         try ensureReadableAudioFile(at: micURL)
 
-        do {
-            try await service.mix(
-                micURL: micURL,
-                appURL: nil,
-                micStartHostTime: 2_000_000_000,
-                appStartHostTime: nil,
-                into: outputURL
-            )
-        } catch {
-            if shouldSkipForSandboxAudioIO(error) {
-                return
-            }
-            throw error
-        }
+        try await service.mix(
+            micURL: micURL,
+            appURL: nil,
+            micStartHostTime: HostNanoseconds(nanoseconds: 2_000_000_000),
+            appStartHostTime: nil,
+            into: outputURL
+        )
 
         let decoded = try decodePCM(from: outputURL)
         #expect(decoded.channelCount == 1)
+        #expect(decoded.sampleRate == 48_000)
+        #expect(decoded.frameCount == 24_000)
         let average = mean(decoded.channelSamples[0].prefix(10_000))
         #expect(average > 0.15)
     }
@@ -182,23 +164,18 @@ final class AudioMixdownServiceTests {
         #expect(mean(source.channelSamples[0].prefix(5_000)) > 0.6)
         #expect(mean(source.channelSamples[1].prefix(5_000)) < -0.1)
 
-        do {
-            try await service.mix(
-                micURL: micURL,
-                appURL: nil,
-                micStartHostTime: 2_000_000_000,
-                appStartHostTime: nil,
-                into: outputURL
-            )
-        } catch {
-            if shouldSkipForSandboxAudioIO(error) {
-                return
-            }
-            throw error
-        }
+        try await service.mix(
+            micURL: micURL,
+            appURL: nil,
+            micStartHostTime: HostNanoseconds(nanoseconds: 2_000_000_000),
+            appStartHostTime: nil,
+            into: outputURL
+        )
 
         let decoded = try decodePCM(from: outputURL)
         #expect(decoded.channelCount == 1)
+        #expect(decoded.sampleRate == 48_000)
+        #expect(decoded.frameCount == 24_000)
         let average = mean(decoded.channelSamples[0].prefix(10_000))
         #expect(average > 0.20)
         #expect(average < 0.40)
@@ -216,23 +193,18 @@ final class AudioMixdownServiceTests {
         try ensureReadableAudioFile(at: micURL)
         try ensureReadableAudioFile(at: appURL)
 
-        do {
-            try await service.mix(
-                micURL: micURL,
-                appURL: appURL,
-                micStartHostTime: 1_000_000_000,
-                appStartHostTime: 1_500_000_000,
-                into: outputURL
-            )
-        } catch {
-            if shouldSkipForSandboxAudioIO(error) {
-                return
-            }
-            throw error
-        }
+        try await service.mix(
+            micURL: micURL,
+            appURL: appURL,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: HostNanoseconds(nanoseconds: 1_500_000_000),
+            into: outputURL
+        )
 
         let decoded = try decodePCM(from: outputURL)
         #expect(decoded.channelCount == 2)
+        #expect(decoded.sampleRate == 48_000)
+        #expect(decoded.frameCount == 60_000)
 
         let right = decoded.channelSamples[1]
         #expect(right.count > 26_000)
@@ -253,7 +225,7 @@ final class AudioMixdownServiceTests {
         try await service.mix(
             micURL: micURL,
             appURL: nil,
-            micStartHostTime: 1_000_000_000,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
             appStartHostTime: nil,
             into: outputURL
         )
@@ -278,20 +250,13 @@ final class AudioMixdownServiceTests {
         try ensureReadableAudioFile(at: micURL)
         try ensureReadableAudioFile(at: appURL)
 
-        do {
-            try await service.mix(
-                micURL: micURL,
-                appURL: appURL,
-                micStartHostTime: 1_000_000_000,
-                appStartHostTime: 1_000_000_000,
-                into: outputURL
-            )
-        } catch {
-            if shouldSkipForSandboxAudioIO(error) {
-                return
-            }
-            throw error
-        }
+        try await service.mix(
+            micURL: micURL,
+            appURL: appURL,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            into: outputURL
+        )
 
         #expect(FileManager.default.fileExists(atPath: outputURL.path))
         #expect(!(FileManager.default.fileExists(atPath: micURL.path)))
@@ -320,20 +285,13 @@ final class AudioMixdownServiceTests {
         try ensureReadableAudioFile(at: micURL)
         try ensureReadableAudioFile(at: appURL)
 
-        do {
-            try await service.mix(
-                micURL: micURL,
-                appURL: appURL,
-                micStartHostTime: 1_000_000_000,
-                appStartHostTime: 1_000_000_000,
-                into: outputURL
-            )
-        } catch {
-            if shouldSkipForSandboxAudioIO(error) {
-                return
-            }
-            throw error
-        }
+        try await service.mix(
+            micURL: micURL,
+            appURL: appURL,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            into: outputURL
+        )
 
         #expect(FileManager.default.fileExists(atPath: outputURL.path))
         #expect(!(FileManager.default.fileExists(atPath: micURL.path)))
@@ -349,29 +307,107 @@ final class AudioMixdownServiceTests {
         try writeMonoWAV(samples: Array(repeating: Float(0.2), count: 24_000), to: micURL)
         try ensureReadableAudioFile(at: micURL)
 
-        do {
-            try await service.mix(
-                micURL: micURL,
-                appURL: nil,
-                micStartHostTime: 1_000_000_000,
-                appStartHostTime: nil,
-                into: outputURL,
-                deleteSourceFiles: false
-            )
-        } catch {
-            if shouldSkipForSandboxAudioIO(error) {
-                return
-            }
-            throw error
-        }
+        try await service.mix(
+            micURL: micURL,
+            appURL: nil,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: nil,
+            into: outputURL,
+            deleteSourceFiles: false
+        )
 
         #expect(FileManager.default.fileExists(atPath: outputURL.path))
         #expect(FileManager.default.fileExists(atPath: micURL.path))
     }
 
     private struct DecodedPCM {
+        let sampleRate: Double
         let channelCount: Int
+        let frameCount: Int
         let channelSamples: [[Float]]
+    }
+
+    @Test(arguments: ["Recording Mar 28 at 14-30 a3", "2026-03-28 14-30"])
+    func testCoordinatorPersistsMixdownInEitherFolderNameFormat(folderName: String) async throws {
+        let folder = tempDirectoryURL.appendingPathComponent(folderName, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let micURL = folder.appendingPathComponent("mic.wav")
+        let mixdownURL = folder.appendingPathComponent("recording.m4a")
+        try writeMonoWAV(samples: Array(repeating: Float(0.25), count: 48_000), to: micURL)
+        try ensureReadableAudioFile(at: micURL)
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = ModelContext(container)
+        let session = RecordingSession(duration: 1, micAudioURL: micURL.path, title: folderName, status: .recorded)
+        context.insert(session)
+        try context.save()
+
+        let coordinator = RecordingMixdownCoordinator(
+            workspaceService: MockWorkspaceService(),
+            modelContainer: container
+        )
+        let committed = await coordinator.runMixdown(
+            sessionID: session.id,
+            micURL: micURL,
+            appURL: nil,
+            mixdownURL: mixdownURL,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: nil
+        )
+
+        let persisted = try #require(try RecordingSession.fetch(id: session.id, in: ModelContext(container)))
+        #expect(committed)
+        #expect(persisted.mixdownURL == mixdownURL.path)
+        #expect(FileManager.default.fileExists(atPath: mixdownURL.path))
+        #expect(FileManager.default.fileExists(atPath: micURL.path))
+    }
+
+    @Test
+    func testCoordinatorKeepsInputsWhenTheMixdownCannotBeSaved() async throws {
+        let folder = tempDirectoryURL.appendingPathComponent("unsaved", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let micURL = folder.appendingPathComponent("mic.wav")
+        let sidecarURL = AudioFileStreamer.timingSidecarURL(for: micURL)
+        let mixdownURL = folder.appendingPathComponent("recording.m4a")
+        try writeMonoWAV(samples: Array(repeating: Float(0.25), count: 48_000), to: micURL)
+        _ = FileManager.default.createFile(atPath: sidecarURL.path, contents: Data("timing".utf8))
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let coordinator = RecordingMixdownCoordinator(
+            workspaceService: MockWorkspaceService(),
+            modelContainer: container
+        )
+        // No session with this ID exists, so saving the location fails after the export.
+        let committed = await coordinator.runMixdown(
+            sessionID: UUID(),
+            micURL: micURL,
+            appURL: nil,
+            mixdownURL: mixdownURL,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: nil
+        )
+
+        #expect(!committed)
+        #expect(FileManager.default.fileExists(atPath: mixdownURL.path))
+        #expect(FileManager.default.fileExists(atPath: micURL.path))
+        #expect(FileManager.default.fileExists(atPath: sidecarURL.path))
+    }
+
+    @Test
+    func testLegacyOffsetIsCorrectOnANonUnitTimebase() async {
+        let timebase = HostClock.Timebase(numer: 125, denom: 3)
+        let offset = await AudioMixdownService().computeOffsetSamples(
+            micStartHostTime: HostNanoseconds(machTicks: 24_000_000, timebase: timebase),
+            appStartHostTime: HostNanoseconds(machTicks: 36_000_000, timebase: timebase)
+        )
+
+        #expect(offset == 24_000)
     }
 
     private func writeMonoWAV(samples: [Float], to url: URL) throws {
@@ -454,24 +490,36 @@ final class AudioMixdownServiceTests {
         }
     }
 
+    /// Reads the whole file in chunks bounded by its length. A single `read(into:)` sized to the
+    /// file returns whole 512-frame packets only, so it drops the tail of a 24,000-frame file.
     private func decodePCM(from url: URL) throws -> DecodedPCM {
         let file = try AVAudioFile(forReading: url)
         let format = file.processingFormat
-        guard let buffer = AVAudioPCMBuffer(
-            pcmFormat: format,
-            frameCapacity: AVAudioFrameCount(file.length)
-        ), let channelData = buffer.floatChannelData else {
-            throw RecordingError.failedToStart("Failed to decode mixed output for tests.")
-        }
-
-        try file.read(into: buffer)
-        let frameCount = Int(buffer.frameLength)
         let channelCount = Int(format.channelCount)
+        var channelSamples = Array(repeating: [Float](), count: channelCount)
 
-        let channelSamples = (0..<channelCount).map { channelIndex in
-            Array(UnsafeBufferPointer(start: channelData[channelIndex], count: frameCount))
+        while file.framePosition < file.length {
+            let framesToRead = AVAudioFrameCount(min(Int64(4_096), file.length - file.framePosition))
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: framesToRead),
+                  let channelData = buffer.floatChannelData else {
+                throw RecordingError.failedToStart("Failed to decode mixed output for tests.")
+            }
+            try file.read(into: buffer, frameCount: framesToRead)
+            guard buffer.frameLength > 0 else { break }
+            for channelIndex in 0..<channelCount {
+                channelSamples[channelIndex].append(
+                    contentsOf: UnsafeBufferPointer(start: channelData[channelIndex], count: Int(buffer.frameLength))
+                )
+            }
         }
-        return DecodedPCM(channelCount: channelCount, channelSamples: channelSamples)
+
+        let frameCount = channelSamples.first?.count ?? 0
+        return DecodedPCM(
+            sampleRate: format.sampleRate,
+            channelCount: channelCount,
+            frameCount: frameCount,
+            channelSamples: channelSamples
+        )
     }
 
     private func mean<S: Sequence>(_ sequence: S) -> Float where S.Element == Float {
@@ -497,29 +545,14 @@ final class AudioMixdownServiceTests {
     }
 
     private func ensureReadableAudioFile(at url: URL) throws {
-        do {
-            let file = try AVAudioFile(forReading: url)
-            guard let buffer = AVAudioPCMBuffer(
-                pcmFormat: file.processingFormat,
-                frameCapacity: 1
-            ) else {
-                throw RecordingError.failedToStart("Probe buffer allocation failed.")
-            }
-            try file.read(into: buffer, frameCount: 1)
-        } catch {
-            if shouldSkipForSandboxAudioIO(error) {
-                return
-            }
-            throw error
+        let file = try AVAudioFile(forReading: url)
+        guard let buffer = AVAudioPCMBuffer(
+            pcmFormat: file.processingFormat,
+            frameCapacity: 1
+        ) else {
+            throw RecordingError.failedToStart("Probe buffer allocation failed.")
         }
-    }
-
-    private func shouldSkipForSandboxAudioIO(_ error: Error) -> Bool {
-        let message = String(describing: error)
-        let nsError = error as NSError
-        return message.contains("Foundation._GenericObjCError")
-            || message.contains("nilError")
-            || (nsError.domain == "com.apple.coreaudio.avfaudio" && nsError.code == 2003334207)
+        try file.read(into: buffer, frameCount: 1)
     }
 
     private func readAudioStreamDescription(from url: URL) throws -> AudioStreamBasicDescription {

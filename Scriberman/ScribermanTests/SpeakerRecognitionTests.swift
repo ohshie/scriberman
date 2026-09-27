@@ -21,7 +21,7 @@ struct SpeakerRecognitionTests {
     func crossSessionRecognition() async throws {
         var aliceEmbedding: [Float] = Array(repeating: 0.0, count: 192)
         aliceEmbedding[0] = 1.0
-        try await store.enrollSpeaker(name: "Alice", embedding: aliceEmbedding)
+        try await store.enrollNamedSpeaker(name: "Alice", embedding: aliceEmbedding)
         
         var similarToAlice = aliceEmbedding
         similarToAlice[1] = 0.01 // Slight variation
@@ -42,8 +42,8 @@ struct SpeakerRecognitionTests {
         var bobEmbedding: [Float] = Array(repeating: 0.0, count: 192)
         bobEmbedding[1] = 1.0
         
-        try await store.enrollSpeaker(name: "Alice", embedding: aliceEmbedding)
-        try await store.enrollSpeaker(name: "Bob", embedding: bobEmbedding)
+        try await store.enrollNamedSpeaker(name: "Alice", embedding: aliceEmbedding)
+        try await store.enrollNamedSpeaker(name: "Bob", embedding: bobEmbedding)
         
         let diarizationResult = DiarizationResult(
             segments: [],
@@ -62,7 +62,7 @@ struct SpeakerRecognitionTests {
     func speakerProfilesConsistencyInDiarizationPass() async throws {
         var aliceEmbedding: [Float] = Array(repeating: 0.0, count: 192)
         aliceEmbedding[0] = 1.0
-        try await store.enrollSpeaker(name: "Alice", embedding: aliceEmbedding)
+        try await store.enrollNamedSpeaker(name: "Alice", embedding: aliceEmbedding)
 
         let diarizationResult = DiarizationResult(
             segments: [
@@ -131,7 +131,7 @@ struct SpeakerRecognitionTests {
         let oldDate = Date(timeIntervalSinceNow: -3600)
         var aliceEmbedding: [Float] = Array(repeating: 0.0, count: 192)
         aliceEmbedding[0] = 1.0
-        try await store.enrollSpeaker(name: "Alice", embedding: aliceEmbedding)
+        try await store.enrollNamedSpeaker(name: "Alice", embedding: aliceEmbedding)
         let enrolledProfiles = try await store.fetchAllSnapshots()
         let aliceID = try #require(enrolledProfiles.first?.id)
 

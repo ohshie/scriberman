@@ -133,7 +133,14 @@ final class SettingsViewModel {
             return
         }
 
-        bundlePhase = modelStates.values.allSatisfy { $0 == .ready } ? .allReady : .idle
+        let failures = ModelGroup.allCases.compactMap { group in
+            modelStates[group] == .error ? modelStatusMessages[group] : nil
+        }
+        if !failures.isEmpty {
+            bundlePhase = .error(failures.joined(separator: "\n"))
+        } else {
+            bundlePhase = modelStates.values.allSatisfy { $0 == .ready } ? .allReady : .idle
+        }
     }
 
     var currentModelNameText: String {
@@ -154,6 +161,7 @@ final class SettingsViewModel {
     }
 
     func downloadAllTapped() async {
+        guard !Self.isInProgress(bundlePhase) else { return }
         guard canDownloadModels else {
             bundlePhase = .error("Configure or re-authorize workspace before downloading.")
             return
@@ -170,7 +178,9 @@ final class SettingsViewModel {
         let segmentWidth = 0.2
         var activeGroup: ModelGroup?
 
+        bundlePhase = .downloading(label: groupsInOrder[0].label, progress: 0)
         do {
+            try await modelInstallService.clearStaging()
             for item in groupsInOrder {
                 let group = item.group
                 activeGroup = group
@@ -181,14 +191,18 @@ final class SettingsViewModel {
                     group,
                     progress: { [weak self] state in
                         Task { @MainActor in
-                            self?.modelStates[group] = state
+                            guard let self, Self.isInProgress(self.bundlePhase),
+                                  self.modelStates[group] == .downloading else { return }
+                            self.modelStates[group] = state
                         }
                     },
                     downloadProgress: { [weak self] value in
                         Task { @MainActor in
+                            guard let self, case .downloading(let label, _) = self.bundlePhase,
+                                  label == item.label else { return }
                             let clamped = min(max(value, 0.0), 1.0)
                             let progress = min(item.start + (clamped * segmentWidth), 0.8)
-                            self?.bundlePhase = .downloading(label: item.label, progress: progress)
+                            self.bundlePhase = .downloading(label: item.label, progress: progress)
                         }
                     }
                 )
@@ -200,7 +214,15 @@ final class SettingsViewModel {
 
             if let workspace = await workspaceService.currentWorkspace() {
                 bundlePhase = .warmingUp
-                await modelInstallService.warmUpModels(workspace: workspace)
+                let failures = await modelInstallService.warmUpModels(workspace: workspace)
+                for (group, reason) in failures {
+                    modelStates[group] = .error
+                    modelStatusMessages[group] = reason
+                }
+                if !failures.isEmpty {
+                    bundlePhase = .error(ModelGroup.allCases.compactMap { failures[$0] }.joined(separator: "\n"))
+                    return
+                }
             }
 
             bundlePhase = .allReady

@@ -16,7 +16,7 @@ final class M4AChannelExtractorTests {
         try? FileManager.default.removeItem(at: tempDirectoryURL)
     }
 
-    @Test
+    @Test(.enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason))
     func testExtractStereoReturnsMicAndAppSamples() throws {
         let extractor = M4AChannelExtractor()
         let url = tempDirectoryURL.appendingPathComponent("stereo.m4a")
@@ -24,14 +24,7 @@ final class M4AChannelExtractorTests {
         let mic = Array(repeating: Float(0.25), count: oneSecond48k)
         let app = Array(repeating: Float(-0.5), count: oneSecond48k)
 
-        do {
-            try writeM4A(channels: [mic, app], sampleRate: 48_000, to: url)
-        } catch {
-            if shouldSkipForSandboxAudioIO(error) {
-                return
-            }
-            throw error
-        }
+        try writeM4A(channels: [mic, app], sampleRate: 48_000, to: url)
 
         let extracted = try extractor.extract(url: url, isStereo: true)
 
@@ -42,21 +35,14 @@ final class M4AChannelExtractorTests {
         #expect(mean((extracted.app ?? []).prefix(8_000)) < -0.2)
     }
 
-    @Test
+    @Test(.enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason))
     func testExtractMonoReturnsMicOnly() throws {
         let extractor = M4AChannelExtractor()
         let url = tempDirectoryURL.appendingPathComponent("mono.m4a")
         let halfSecond48k = 24_000
         let mic = Array(repeating: Float(0.4), count: halfSecond48k)
 
-        do {
-            try writeM4A(channels: [mic], sampleRate: 48_000, to: url)
-        } catch {
-            if shouldSkipForSandboxAudioIO(error) {
-                return
-            }
-            throw error
-        }
+        try writeM4A(channels: [mic], sampleRate: 48_000, to: url)
 
         let extracted = try extractor.extract(url: url, isStereo: false)
 
@@ -79,7 +65,7 @@ final class M4AChannelExtractorTests {
         }
     }
 
-    @Test
+    @Test(.enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason))
     func testExtractResamplesTo16kHzByOutputLength() throws {
         let extractor = M4AChannelExtractor()
         let url = tempDirectoryURL.appendingPathComponent("duration-check.m4a")
@@ -87,17 +73,31 @@ final class M4AChannelExtractorTests {
         let inputSampleCount = 48_000 * durationSeconds
         let mic = Array(repeating: Float(0.2), count: inputSampleCount)
 
-        do {
-            try writeM4A(channels: [mic], sampleRate: 48_000, to: url)
-        } catch {
-            if shouldSkipForSandboxAudioIO(error) {
-                return
-            }
-            throw error
-        }
+        try writeM4A(channels: [mic], sampleRate: 48_000, to: url)
 
         let extracted = try extractor.extract(url: url, isStereo: false)
         #expect(extracted.mic.count == 16_000 * durationSeconds)
+    }
+
+    @Test
+    func testFrameCapacityAcceptsMaximumFrameCount() throws {
+        let length = AVAudioFramePosition(AVAudioFrameCount.max)
+
+        #expect(try M4AChannelExtractor.frameCapacity(forLength: length) == AVAudioFrameCount.max)
+    }
+
+    @Test
+    func testFrameCapacityThrowsWhenLengthExceedsMaximumFrameCount() {
+        let length = AVAudioFramePosition(AVAudioFrameCount.max) + 1
+
+        do {
+            _ = try M4AChannelExtractor.frameCapacity(forLength: length)
+            Issue.record("Expected frame capacity to throw for a length above AVAudioFrameCount.max")
+        } catch M4AChannelExtractorError.fileTooLong(let frameCount) {
+            #expect(frameCount == length)
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
     }
 
     private func writeM4A(channels: [[Float]], sampleRate: Double, to url: URL) throws {
@@ -163,11 +163,5 @@ final class M4AChannelExtractorTests {
         }
         guard count > 0 else { return 0 }
         return total / Float(count)
-    }
-
-    private func shouldSkipForSandboxAudioIO(_ error: Error) -> Bool {
-        let message = String(describing: error)
-        return message.contains("Foundation._GenericObjCError")
-            || message.contains("nilError")
     }
 }

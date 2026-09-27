@@ -25,13 +25,31 @@ enum WorkspaceError: LocalizedError {
 
 actor WorkspaceService: WorkspaceServiceProtocol {
     private let bookmarkStore: BookmarkStore
-    private let fileManager = FileManager.default
+    private let startAccess: @Sendable (URL) -> Bool
+    private let stopAccess: @Sendable (URL) -> Void
+    private let createFolders: @Sendable (Workspace) throws -> Void
+    private let createBookmark: @Sendable (URL) throws -> Data
 
     private var activeWorkspaceURL: URL?
     private var hasScopedAccess = false
 
-    init(bookmarkStore: BookmarkStore) {
+    init(
+        bookmarkStore: BookmarkStore,
+        startAccess: @escaping @Sendable (URL) -> Bool = { $0.startAccessingSecurityScopedResource() },
+        stopAccess: @escaping @Sendable (URL) -> Void = { $0.stopAccessingSecurityScopedResource() },
+        createFolders: @escaping @Sendable (Workspace) throws -> Void = { workspace in
+            try FileManager.default.createDirectory(at: workspace.modelsURL, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: workspace.jobsURL, withIntermediateDirectories: true)
+        },
+        createBookmark: @escaping @Sendable (URL) throws -> Data = { url in
+            try url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
+        }
+    ) {
         self.bookmarkStore = bookmarkStore
+        self.startAccess = startAccess
+        self.stopAccess = stopAccess
+        self.createFolders = createFolders
+        self.createBookmark = createBookmark
     }
 
     func restoreWorkspaceIfPossible() throws(WorkspaceError) -> Workspace {
@@ -53,19 +71,11 @@ actor WorkspaceService: WorkspaceServiceProtocol {
             throw WorkspaceError.invalidBookmark
         }
 
-        let workspace = try activateWorkspace(url: url)
-
-        if isStale {
-            try saveBookmark(for: workspace.rootURL)
-        }
-
-        return workspace
+        return try activateWorkspace(url: url, saveAuthorization: isStale)
     }
 
     func setWorkspace(url: URL) throws(WorkspaceError) -> Workspace {
-        let workspace = try activateWorkspace(url: url)
-        try saveBookmark(for: workspace.rootURL)
-        return workspace
+        try activateWorkspace(url: url, saveAuthorization: true)
     }
 
     func currentWorkspace() async -> Workspace? {
@@ -76,59 +86,46 @@ actor WorkspaceService: WorkspaceServiceProtocol {
         return Workspace(rootURL: activeWorkspaceURL)
     }
 
-    func requireWritableWorkspace() async throws(WorkspaceError) -> Workspace {
+    func requireAuthorizedWorkspace() async throws(WorkspaceError) -> Workspace {
         guard let workspace = await currentWorkspace() else {
             throw WorkspaceError.notConfigured
         }
 
-        guard workspace.rootURL.startAccessingSecurityScopedResource() else {
+        guard startAccess(workspace.rootURL) else {
             throw WorkspaceError.accessDenied
         }
 
-        workspace.rootURL.stopAccessingSecurityScopedResource()
+        stopAccess(workspace.rootURL)
         return workspace
     }
 
-    private func activateWorkspace(url: URL) throws(WorkspaceError) -> Workspace {
-        releaseActiveWorkspaceIfNeeded()
-
-        guard url.startAccessingSecurityScopedResource() else {
+    private func activateWorkspace(url: URL, saveAuthorization: Bool) throws(WorkspaceError) -> Workspace {
+        guard startAccess(url) else {
             throw WorkspaceError.accessDenied
         }
-
-        hasScopedAccess = true
-        activeWorkspaceURL = url
-
+        var committed = false
+        defer { if !committed { stopAccess(url) } }
         let workspace = Workspace(rootURL: url)
-
         do {
-            try initializeWorkspaceFolders(workspace)
+            try createFolders(workspace)
         } catch {
-            releaseActiveWorkspaceIfNeeded()
             throw WorkspaceError.failedToCreateSubfolders
         }
-
+        if saveAuthorization {
+            try saveBookmark(for: url)
+        }
+        releaseActiveWorkspaceIfNeeded()
+        activeWorkspaceURL = url
+        hasScopedAccess = true
+        committed = true
         return workspace
-    }
-
-    private func initializeWorkspaceFolders(_ workspace: Workspace) throws(WorkspaceError) {
-        do {
-            try fileManager.createDirectory(at: workspace.modelsURL, withIntermediateDirectories: true)
-            try fileManager.createDirectory(at: workspace.jobsURL, withIntermediateDirectories: true)
-        } catch {
-            throw WorkspaceError.failedToCreateSubfolders
-        }
     }
 
     private func saveBookmark(for url: URL) throws(WorkspaceError) {
         let bookmarkData: Data
 
         do {
-            bookmarkData = try url.bookmarkData(
-                options: [.withSecurityScope],
-                includingResourceValuesForKeys: nil,
-                relativeTo: nil
-            )
+            bookmarkData = try createBookmark(url)
         } catch {
             throw WorkspaceError.failedToCreateBookmark
         }
@@ -141,7 +138,7 @@ actor WorkspaceService: WorkspaceServiceProtocol {
             return
         }
 
-        activeWorkspaceURL.stopAccessingSecurityScopedResource()
+        stopAccess(activeWorkspaceURL)
         hasScopedAccess = false
         self.activeWorkspaceURL = nil
     }

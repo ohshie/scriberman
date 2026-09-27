@@ -3,6 +3,7 @@ import Foundation
 import Testing
 @testable import Scriberman
 
+@Suite(.enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason))
 final class AudioChannelReaderTests {
     private let tempDirectoryURL: URL
 
@@ -24,18 +25,12 @@ final class AudioChannelReaderTests {
         try writeStereoWAV(left: left, right: right, to: url)
 
         let reader = AudioChannelReader()
-        let channels: [[Float]]
-        do {
-            channels = try await Task.detached(priority: .userInitiated) {
-                try reader.read(url: url)
-            }.value
-        } catch {
-            if shouldSkipForSandboxAudioIO(error) {
-                return
-            }
-            throw error
-        }
+        let decoded = try await Task.detached(priority: .userInitiated) {
+            try reader.read(url: url)
+        }.value
+        let channels = decoded.channels
 
+        #expect(decoded.sampleRate == 48_000)
         #expect(channels.count == 2)
         #expect(channels[0].count == 4)
         #expect(channels[1].count == 4)
@@ -79,13 +74,5 @@ final class AudioChannelReaderTests {
         }
 
         try file.write(from: buffer)
-    }
-
-    private func shouldSkipForSandboxAudioIO(_ error: Error) -> Bool {
-        let message = String(describing: error)
-        let nsError = error as NSError
-        return message.contains("Foundation._GenericObjCError")
-            || message.contains("nilError")
-            || (nsError.domain == "com.apple.coreaudio.avfaudio" && nsError.code == 2003334207)
     }
 }

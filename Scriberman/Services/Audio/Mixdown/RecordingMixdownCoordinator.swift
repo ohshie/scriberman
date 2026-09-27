@@ -3,14 +3,16 @@ import OSLog
 import SwiftData
 
 protocol RecordingMixdownCoordinating: Sendable {
+    /// Writes the mixdown and saves its location on the session. Returns whether both happened.
+    /// Never deletes the raw inputs; `RecordingFinalizer` retires them (design D2).
     func runMixdown(
         sessionID: UUID,
         micURL: URL,
         appURL: URL?,
         mixdownURL: URL,
-        micStartHostTime: UInt64,
-        appStartHostTime: UInt64?
-    ) async
+        micStartHostTime: HostNanoseconds,
+        appStartHostTime: HostNanoseconds?
+    ) async -> Bool
 }
 
 actor RecordingMixdownCoordinator: RecordingMixdownCoordinating {
@@ -37,9 +39,9 @@ actor RecordingMixdownCoordinator: RecordingMixdownCoordinating {
         micURL: URL,
         appURL: URL?,
         mixdownURL: URL,
-        micStartHostTime: UInt64,
-        appStartHostTime: UInt64?
-    ) async {
+        micStartHostTime: HostNanoseconds,
+        appStartHostTime: HostNanoseconds?
+    ) async -> Bool {
         var scopedWorkspaceRoot: URL?
         var didStartScopedAccess = false
         if let workspace = await workspaceService.currentWorkspace(),
@@ -67,7 +69,7 @@ actor RecordingMixdownCoordinator: RecordingMixdownCoordinating {
             "Mixdown input sizes for session \(sessionID, privacy: .public). micBytes=\(micSize, privacy: .public) appBytes=\(appSize, privacy: .public)"
         )
         logger.info(
-            "Mixdown timing for session \(sessionID, privacy: .public). micStart=\(micStartHostTime, privacy: .public) appStart=\(appStartHostTime ?? 0, privacy: .public)"
+            "Mixdown timing for session \(sessionID, privacy: .public). micStart=\(micStartHostTime, privacy: .public) appStart=\(appStartHostTime?.description ?? "0", privacy: .public)"
         )
         do {
             try await mixdownService.mix(
@@ -75,37 +77,37 @@ actor RecordingMixdownCoordinator: RecordingMixdownCoordinating {
                 appURL: appURL,
                 micStartHostTime: micStartHostTime,
                 appStartHostTime: appStartHostTime,
-                into: mixdownURL
+                into: mixdownURL,
+                deleteSourceFiles: false
             )
         } catch {
             logger.error("Mixdown failed for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            return
+            return false
         }
 
         let existsAfterMix = fileManager.fileExists(atPath: mixdownURL.path)
         logger.info(
             "Mixdown finished for session \(sessionID, privacy: .public). outputExists=\(existsAfterMix, privacy: .public) path=\(mixdownURL.path, privacy: .public)"
         )
+        guard RecordingSourceFiles.isUsableMixdown(at: mixdownURL) else {
+            logger.error("Mixdown output for session \(sessionID, privacy: .public) is unreadable or empty; not saving it.")
+            return false
+        }
 
         do {
             let context = ModelContext(modelContainer)
-            let descriptor = FetchDescriptor<RecordingSession>()
-            let sessions = try context.fetch(descriptor)
-            var persistedSession: RecordingSession?
-            for session in sessions where session.id == sessionID {
-                persistedSession = session
-                break
-            }
-            guard let persistedSession else {
+            guard let persistedSession = try RecordingSession.fetch(id: sessionID, in: context) else {
                 logger.error("Mixdown succeeded but session \(sessionID, privacy: .public) was not found for persistence update.")
-                return
+                return false
             }
 
             persistedSession.mixdownURL = mixdownURL.path
             try context.save()
             logger.info("Persisted mixdownURL for session \(sessionID, privacy: .public): \(mixdownURL.path, privacy: .public)")
+            return true
         } catch {
             logger.error("Failed to persist mixdown URL for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 }

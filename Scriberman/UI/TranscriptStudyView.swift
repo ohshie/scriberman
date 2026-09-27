@@ -31,6 +31,9 @@ struct TranscriptStudyView: View {
     let audioPlayerViewModel: AudioPlayerViewModel
     @Binding var autoScrollEnabled: Bool
     @State private var transcript: Transcript
+    /// The transcript the caller passed in, kept to notice when the session's displayed
+    /// transcript changes while the view is open (a retranscription or a restore).
+    private let inputTranscript: Transcript
     let store: SpeakerEmbeddingStore?
     let showRawMarkdownToggle: Bool
     /// A search to apply on opening, or `nil` to open as the view always has — empty find bar, no
@@ -57,6 +60,7 @@ struct TranscriptStudyView: View {
         self.audioPlayerViewModel = audioPlayerViewModel
         self._autoScrollEnabled = autoScrollEnabled
         self._transcript = State(initialValue: transcript)
+        self.inputTranscript = transcript
         self.store = store
         self.showRawMarkdownToggle = showRawMarkdownToggle
         self.searchSeed = searchSeed
@@ -108,6 +112,12 @@ struct TranscriptStudyView: View {
         // whose session is already open changes no binding the view could otherwise notice.
         .task(id: searchSeed) {
             applySearchSeed()
+        }
+        // A retranscription or restore changes the session's displayed transcript while the view
+        // is open. The view's own speaker rename writes the same value back, so this is a no-op then.
+        .onChange(of: inputTranscript) {
+            transcript = inputTranscript
+            searchState.update(blocks: blocks)
         }
         .onChange(of: searchState.query) {
             searchState.update(blocks: blocks)
@@ -177,33 +187,55 @@ struct TranscriptStudyView: View {
     }
 
     private func renameSpeaker(id: String, to newName: String) {
-        var updatedTranscript = transcript
-        var updatedSpeakers = updatedTranscript.speakers
-        if let index = updatedSpeakers.firstIndex(where: { $0.id == id }) {
-            let oldSpeaker = updatedSpeakers[index]
-            updatedSpeakers[index] = TranscriptSpeaker(id: oldSpeaker.id, label: newName, colorHex: oldSpeaker.colorHex)
-            updatedTranscript = Transcript(
-                fullText: updatedTranscript.fullText,
-                segments: updatedTranscript.segments,
-                speakers: updatedSpeakers,
-                speakerEmbeddings: updatedTranscript.speakerEmbeddings
-            )
-            self.transcript = updatedTranscript
-            
-            // Persist back to session
-            if session.retranscript != nil {
-                session.retranscript = updatedTranscript
-            } else {
-                session.transcript = updatedTranscript
-            }
+        guard let updatedTranscript = Self.renameSpeaker(id: id, to: newName, in: transcript, of: session) else {
+            return
+        }
+        self.transcript = updatedTranscript
 
-            // Enroll in profile database if we have an embedding
-            if let embedding = updatedTranscript.speakerEmbeddings?[id], let store = store {
-                Task {
-                    try? await store.enrollSpeaker(name: newName, embedding: embedding)
-                }
+        // Enroll in profile database if we have an embedding
+        if let embedding = updatedTranscript.speakerEmbeddings?[id], let store = store {
+            Task {
+                try? await Self.enrollRenamedSpeaker(name: newName, embedding: embedding, in: store)
             }
         }
+    }
+
+    /// Gives the renamed speaker's voiceprint to the profile the user named: the existing profile
+    /// with that name (case-insensitive) is updated, otherwise a new one is created.
+    static func enrollRenamedSpeaker(name: String, embedding: [Float], in store: SpeakerEmbeddingStore) async throws {
+        if let profileID = try await store.profileID(forName: name) {
+            try await store.updateEmbedding(profileID: profileID, embedding: embedding)
+        } else {
+            try await store.enrollNamedSpeaker(name: name, embedding: embedding)
+        }
+    }
+
+    /// Renames a speaker in `transcript` and writes the result to `session`'s displayed pass.
+    /// Returns the updated transcript, or `nil` when the speaker is not in it.
+    ///
+    /// `session` is the only session written: the caller passes the one the view belongs to.
+    static func renameSpeaker(
+        id: String,
+        to newName: String,
+        in transcript: Transcript,
+        of session: any TranscribableSession
+    ) -> Transcript? {
+        var updatedSpeakers = transcript.speakers
+        guard let index = updatedSpeakers.firstIndex(where: { $0.id == id }) else { return nil }
+        let oldSpeaker = updatedSpeakers[index]
+        updatedSpeakers[index] = TranscriptSpeaker(id: oldSpeaker.id, label: newName, colorHex: oldSpeaker.colorHex)
+        let updatedTranscript = Transcript(
+            fullText: transcript.fullText,
+            segments: transcript.segments,
+            speakers: updatedSpeakers,
+            speakerEmbeddings: transcript.speakerEmbeddings
+        )
+        if session.retranscript != nil {
+            session.retranscript = updatedTranscript
+        } else {
+            session.transcript = updatedTranscript
+        }
+        return updatedTranscript
     }
 
     @ToolbarContentBuilder

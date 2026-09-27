@@ -9,7 +9,7 @@ struct SessionSearchViewTests {
         try readSourceFile(relativePathFromTests: "../UI/JobsView.swift")
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheSearchFieldIsTheSystemsOwn() throws {
         let source = try jobsViewSource()
 
@@ -21,7 +21,7 @@ struct SessionSearchViewTests {
         #expect(!source.contains("Capsule().fill(Color.secondary.opacity(0.12))"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheWrapperUsesAnNSSearchField() throws {
         let source = try readSourceFile(relativePathFromTests: "../UI/NativeSearchField.swift")
 
@@ -32,7 +32,7 @@ struct SessionSearchViewTests {
 
     /// Escape clears the query; Escape on an already empty field hands focus back, so the key
     /// belongs to the window rather than to the control.
-    @Test
+    @Test(.tags(.sourceLint))
     func testEscapeClearsThenReleasesFocus() throws {
         let source = try readSourceFile(relativePathFromTests: "../UI/NativeSearchField.swift")
 
@@ -44,7 +44,7 @@ struct SessionSearchViewTests {
     /// SwiftUI shortcuts are handled at the window level, so the transcript find bar's Escape took
     /// the key before the field's own editor saw it — Escape in the search field did nothing while
     /// a transcript was open.
-    @Test
+    @Test(.tags(.sourceLint))
     func testEscapeIsInterceptedWhileTheFieldIsBeingEdited() throws {
         let source = try readSourceFile(relativePathFromTests: "../UI/NativeSearchField.swift")
 
@@ -59,7 +59,7 @@ struct SessionSearchViewTests {
 
     /// One handler owns ⌘F, so what it means is decided in one place rather than by whichever of
     /// two views holds focus.
-    @Test
+    @Test(.tags(.sourceLint))
     func testOneHandlerOwnsTheFindShortcut() throws {
         let shell = try readSourceFile(relativePathFromTests: "../UI/AppShellView.swift")
         let study = try readSourceFile(relativePathFromTests: "../UI/TranscriptStudyView.swift")
@@ -75,7 +75,7 @@ struct SessionSearchViewTests {
 
     /// Present whether or not the list has anything in it: it is how the list is searched, so it
     /// cannot be the thing that disappears when the list empties.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheSearchFieldIsOutsideTheEmptyStateBranch() throws {
         let source = try jobsViewSource()
 
@@ -90,7 +90,7 @@ struct SessionSearchViewTests {
     /// Rows scrolled up behind the field and stayed there until the list was dragged back down. As
     /// a sibling in the stack the scroll view never reserved the space; as an inset it does, and
     /// the material hides whatever passes beneath.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheSearchRowReservesItsSpaceAndIsOpaque() throws {
         let source = try jobsViewSource()
 
@@ -99,7 +99,7 @@ struct SessionSearchViewTests {
     }
 
     /// The filter narrows the same set the query searches, so it stays in the search row.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheFilterStaysBesideTheField() throws {
         let source = try jobsViewSource()
         let bar = try #require(functionBody(named: "private var searchBar: some View {", in: source))
@@ -108,7 +108,7 @@ struct SessionSearchViewTests {
         #expect(bar.contains("tagFilterButton"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testTagSelectionLivesInAPopoverBehindTheFilterButton() throws {
         let source = try jobsViewSource()
 
@@ -120,7 +120,7 @@ struct SessionSearchViewTests {
 
     /// Without this a filtered list is indistinguishable from a short one, and the conclusion a
     /// user draws is that recordings are missing.
-    @Test
+    @Test(.tags(.sourceLint))
     func testAnActiveFilterShowsOnTheControlWithoutOpeningIt() throws {
         let source = try jobsViewSource()
         let button = try #require(functionBody(named: "private var tagFilterButton", in: source))
@@ -130,7 +130,7 @@ struct SessionSearchViewTests {
         #expect(button.contains("isFiltering ? Color.accentColor : Color.secondary"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testRowsAreGivenTheSnippetForTheirOwnMatch() throws {
         let source = try jobsViewSource()
         let row = try #require(functionBody(named: "private func row(for item:", in: source))
@@ -140,7 +140,7 @@ struct SessionSearchViewTests {
 
     /// A query that matches nothing is not an empty library, and saying "record or import audio"
     /// there would answer a question the user did not ask.
-    @Test
+    @Test(.tags(.sourceLint))
     func testAQueryMatchingNothingGetsItsOwnEmptyState() throws {
         let source = try jobsViewSource()
 
@@ -148,19 +148,20 @@ struct SessionSearchViewTests {
         #expect(source.contains("emptyState(title: \"No Results\", systemImage: \"magnifyingglass\")"))
     }
 
-    /// Locating runs off a `.task(id:)` keyed on the query, which is what cancels an in-flight
-    /// debounce when the user keeps typing.
-    @Test
-    func testLocatingIsKeyedOnTheQuery() throws {
+    /// Query and content changes restart the cancellable match task.
+    @Test(.tags(.sourceLint))
+    func testLocatingIsKeyedOnTheQueryAndContent() throws {
         let source = try jobsViewSource()
 
-        #expect(source.contains(".task(id: viewModel.searchQuery)"))
+        #expect(source.contains(".task(id: JobsViewModel.SearchTaskKey("))
+        #expect(source.contains("query: viewModel.searchQuery"))
+        #expect(source.contains("revision: viewModel.searchContentRevision(for: items)"))
         #expect(source.contains("await viewModel.updateSearchMatches(for: items)"))
     }
 
     /// The count sits outside the branch the empty state replaces, so a query matching nothing
     /// still says how much is being withheld.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheListCountIsOutsideTheEmptyStateBranch() throws {
         let source = try jobsViewSource()
         let branch = try #require(source.range(of: "if items.isEmpty && pendingSession == nil"))
@@ -174,7 +175,7 @@ struct SessionSearchViewTests {
 
     /// One moment, not three. Rows and the selection fill are drawn by AppKit, so a SwiftUI
     /// animation over them animates the whole table re-rendering — a wobble on every keystroke.
-    @Test
+    @Test(.tags(.sourceLint))
     func testOnlyTheEmptyStateSwapIsAnimated() throws {
         let source = try jobsViewSource()
 
@@ -185,7 +186,7 @@ struct SessionSearchViewTests {
         #expect(!source.contains("withAnimation"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testMotionIsShortAndHonoursReduceMotion() throws {
         let source = try jobsViewSource()
 

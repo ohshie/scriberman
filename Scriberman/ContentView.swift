@@ -3,15 +3,22 @@ import SwiftUI
 struct ContentView: View {
     @Environment(AppState.self) private var appState
 
-    @ViewBuilder
     var body: some View {
-        if appState.isBootstrapping {
-            Color.clear
-        } else if appState.requiredOnboardingStep != nil {
-            OnboardingView()
-                .frame(width: 560, height: 500)
-        } else {
-            AppShellView()
+        Group {
+            if appState.isBootstrapping {
+                Color.clear
+            } else if appState.requiredOnboardingStep != nil {
+                OnboardingView()
+                    .frame(width: 560, height: 500)
+            } else {
+                AppShellView()
+            }
+        }
+        .onChange(of: appState.requiredOnboardingStep) { _, _ in
+            appState.applyReadiness()
+        }
+        .onChange(of: appState.workspace) { _, _ in
+            appState.applyReadiness()
         }
     }
 }

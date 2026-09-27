@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 @testable import Scriberman
 
@@ -24,6 +25,22 @@ struct AppAudioSettingsTests {
 
         let restoredSettings = AppAudioSettings(userDefaults: userDefaults)
         #expect(restoredSettings.voiceProcessingEnabled == true)
+    }
+
+    @Test
+    func voiceProcessingEnabledNotifiesObservers() async {
+        let (settings, cleanup) = makeSubject()
+        defer { cleanup() }
+
+        await confirmation("Preference change is observed") { changed in
+            withObservationTracking {
+                _ = settings.voiceProcessingEnabled
+            } onChange: {
+                changed()
+            }
+            settings.voiceProcessingEnabled = true
+        }
+        #expect(settings.voiceProcessingEnabled == true)
     }
 
     private func makeSubject() -> (AppAudioSettings, () -> Void) {

@@ -2,6 +2,27 @@ import Testing
 @testable import Scriberman
 
 struct SynchronizedAudioTimelineTests {
+    private let timebase125Over3 = HostClock.Timebase(numer: 125, denom: 3)
+
+    @Test("Mach ticks convert to nanoseconds at a 125/3 timebase")
+    func machTicksConvertAtNonUnitTimebase() {
+        #expect(HostNanoseconds(machTicks: 24_000_000, timebase: timebase125Over3) == HostNanoseconds(nanoseconds: 1_000_000_000))
+    }
+
+    @Test("HostClock uses the injected timebase")
+    func hostClockUsesInjectedTimebase() {
+        #expect(HostClock.nanoseconds(machTime: 24_000_000, timebase: timebase125Over3) == 1_000_000_000)
+        #expect(HostClock.nanoseconds(machTime: 24_000_000, timebase: HostClock.Timebase(numer: 1, denom: 1)) == 24_000_000)
+    }
+
+    @Test("Start times one second apart in ticks differ by one second in nanoseconds")
+    func startTimesDifferByOneSecond() {
+        let mic = HostNanoseconds(machTicks: 48_000_000, timebase: timebase125Over3)
+        let app = HostNanoseconds(machTicks: 72_000_000, timebase: timebase125Over3)
+        #expect(app.nanoseconds - mic.nanoseconds == 1_000_000_000)
+        #expect(app.seconds(since: mic) == 1)
+    }
+
     private let sampleRate = 48_000.0
 
     @Test("First buffer anchors frame 0 regardless of absolute presentation time")

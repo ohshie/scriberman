@@ -155,7 +155,7 @@ struct TranscriptionPassRunnerTests {
         let store = SpeakerEmbeddingStore(modelContainer: modelContainer)
 
         let embedding = normalizedEmbedding(length: 192, activeIndex: 0)
-        try await store.enrollSpeaker(name: "Alice", embedding: embedding)
+        try await store.enrollNamedSpeaker(name: "Alice", embedding: embedding)
 
         let runner = TranscriptionPassRunner(
             speakerEmbeddingStore: store,

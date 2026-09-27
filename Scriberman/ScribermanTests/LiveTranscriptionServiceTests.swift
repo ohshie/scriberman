@@ -59,12 +59,40 @@ struct LiveTranscriptionServiceTests {
     }
 
     @Test
+    func stopEnrollsTwoNewSpeakersPastTheHighestNumberWithoutTouchingExisting() async throws {
+        let store = try makeStore()
+        let speaker3Embedding = Array(repeating: Float(0.3), count: 256)
+        try await store.enrollNamedSpeaker(name: "Speaker 2", embedding: Array(repeating: 0.2, count: 256))
+        let speaker3 = try await store.enrollNamedSpeaker(name: "Speaker 3", embedding: speaker3Embedding)
+        let service = LiveTranscriptionService(speakerEmbeddingStore: store)
+
+        await service.injectSessionSpeaker(
+            id: "speaker_SPEAKER_0",
+            embedding: Array(repeating: 0.6, count: 256),
+            wasMatched: false,
+            matchedProfileID: nil
+        )
+        await service.injectSessionSpeaker(
+            id: "speaker_SPEAKER_1",
+            embedding: Array(repeating: 0.7, count: 256),
+            wasMatched: false,
+            matchedProfileID: nil
+        )
+
+        _ = await service.stop()
+
+        let profiles = try await store.fetchAllSnapshots()
+        #expect(Set(profiles.map(\.name)) == ["Speaker 2", "Speaker 3", "Speaker 4", "Speaker 5"])
+        #expect(try await store.findProfileSnapshot(byID: speaker3)?.embedding == speaker3Embedding)
+    }
+
+    @Test
     func stopUpdatesLastSeenForMatchedSpeaker() async throws {
         let store = try makeStore()
         let oldDate = Date(timeIntervalSinceNow: -3600)
         let aliceEmbedding = Array(repeating: Float(0.1), count: 256)
 
-        try await store.enrollSpeaker(name: "Alice", embedding: aliceEmbedding)
+        try await store.enrollNamedSpeaker(name: "Alice", embedding: aliceEmbedding)
         let alice = try await store.fetchAllSnapshots().first { $0.name == "Alice" }
         let aliceID = try #require(alice?.id)
 
@@ -130,19 +158,107 @@ struct LiveTranscriptionServiceTests {
         #expect(domainApp.rawValue == "app")
     }
 
+    private func makeWorkspace() -> Workspace {
+        Workspace(rootURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true))
+    }
+
+    private func settings(vadThreshold: Double) -> LiveTranscriptionPipelineSettings {
+        var config = LiveTranscriptionPipelineSettings.defaults
+        config.vadThreshold = vadThreshold
+        return config
+    }
+
     @Test
     func prepareKeepsServiceUninitializedWhenVADInitializationFails() async throws {
-        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
-        let workspace = Workspace(rootURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true))
+        let loads = FakeModelLoads()
+        loads.vadFailuresRemaining = 1
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil, modelLoader: loads.loader)
 
-        await service.prepareForTesting(
-            workspace: workspace,
-            initializeAsr: { _ in AsrManager(config: ASRConfig()) },
-            initializeDiarizer: { _, _ in DiarizerManager(config: DiarizerConfig(clusteringThreshold: 0.5, minSpeechDuration: 0.5, minSilenceGap: 0.2)) },
-            initializeVad: { _, _ in throw TestError.vadInitializationFailed }
-        )
+        await service.prepare(workspace: makeWorkspace())
 
         #expect(await service.isInitialized == false)
+    }
+
+    @Test
+    func concurrentPrepareAndStartLoadModelsOnce() async throws {
+        let gate = LoadGate()
+        let loads = FakeModelLoads(gate: gate)
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil, modelLoader: loads.loader)
+        let workspace = makeWorkspace()
+
+        let warmup = Task { await service.prepare(workspace: workspace) }
+        #expect(await loads.waitForAsrLoads(1))
+        let (_, continuation) = AsyncStream<TranscriptSegment>.makeStream()
+        let start = Task { try await service.start(workspace: workspace, resultContinuation: continuation) }
+        try await Task.sleep(for: .milliseconds(100))
+        await gate.open()
+        await warmup.value
+        try await start.value
+
+        #expect(loads.asrLoadCount == 1)
+        #expect(loads.vadThresholds.count == 1)
+        #expect(await service.isInitialized)
+    }
+
+    @Test
+    func startRetriesPreparationAfterFailedWarmup() async throws {
+        let loads = FakeModelLoads()
+        loads.asrFailuresRemaining = 1
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil, modelLoader: loads.loader)
+        let workspace = makeWorkspace()
+
+        await service.prepare(workspace: workspace)
+        #expect(await service.isInitialized == false)
+
+        let (_, continuation) = AsyncStream<TranscriptSegment>.makeStream()
+        try await service.start(workspace: workspace, resultContinuation: continuation)
+
+        #expect(loads.asrLoadCount == 2)
+        #expect(await service.isInitialized)
+    }
+
+    @Test
+    func vadThresholdChangedAfterWarmupIsUsedByTheRecording() async throws {
+        let loads = FakeModelLoads()
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil, modelLoader: loads.loader)
+        let workspace = makeWorkspace()
+
+        await service.prepare(workspace: workspace, config: settings(vadThreshold: 0.5))
+        let (_, continuation) = AsyncStream<TranscriptSegment>.makeStream()
+        try await service.start(workspace: workspace, config: settings(vadThreshold: 0.7), resultContinuation: continuation)
+        await service.process(samples: Array(repeating: 0.1, count: 4_096), source: .mic, sampleRate: 16_000)
+
+        #expect(loads.vadThresholds == [0.5, 0.7])
+        #expect(loads.processedThresholds == [0.7])
+    }
+
+    @Test
+    func consecutiveRecordingsStartFromCleanState() async throws {
+        let loads = FakeModelLoads()
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil, modelLoader: loads.loader)
+        let workspace = makeWorkspace()
+        let flushProbe = FlushProbe()
+        await service.setProcessChunkHookForTesting { samples, source, offset in
+            await flushProbe.recordCall(samplesCount: samples.count, source: source, offset: offset)
+        }
+
+        let (_, first) = AsyncStream<TranscriptSegment>.makeStream()
+        try await service.start(workspace: workspace, resultContinuation: first)
+        await service.process(samples: Array(repeating: 0.9, count: 10_000), source: .mic, sampleRate: 16_000)
+        _ = await service.stop()
+        #expect(await flushProbe.lastOffset() == 0)
+        #expect(await flushProbe.lastSamplesCount() == 10_000)
+
+        let (_, second) = AsyncStream<TranscriptSegment>.makeStream()
+        try await service.start(workspace: workspace, resultContinuation: second)
+        await service.process(samples: Array(repeating: 0.9, count: 5_000), source: .mic, sampleRate: 16_000)
+        _ = await service.stop()
+
+        #expect(await flushProbe.callCount() == 2)
+        #expect(await flushProbe.lastOffset() == 0)
+        #expect(await flushProbe.lastSamplesCount() == 5_000)
+        #expect(loads.turnDiarizers.map(\.samples.count) == [10_000, 5_000])
+        #expect(loads.diarizerManagerCount == 2)
     }
 
     @Test
@@ -181,6 +297,83 @@ struct LiveTranscriptionServiceTests {
         #expect(await flushProbe.lastSamplesCount() == 8192)
         #expect(await flushProbe.lastOffset() == 0)
         #expect(await flushProbe.lastSource() == .mic)
+    }
+
+    @Test
+    func speechOffsetCountsFromSampleZeroWhenCallsLeaveARemainder() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+
+        let flushProbe = FlushProbe()
+        await service.setProcessChunkHookForTesting { samples, source, offset in
+            await flushProbe.recordCall(samplesCount: samples.count, source: source, offset: offset)
+        }
+
+        await service.process(samples: Array(repeating: 0.1, count: 5_000), source: .mic, sampleRate: 16_000)
+        await service.process(samples: Array(repeating: 0.1, count: 3_192), source: .mic, sampleRate: 16_000)
+
+        #expect(await flushProbe.callCount() == 1)
+        #expect(await flushProbe.lastSamplesCount() == 8_192)
+        #expect(await flushProbe.lastOffset() == 0)
+    }
+
+    @Test
+    func chunkedAndUnchunkedInputProduceEqualSegmentTimes() async {
+        let audio = [Float](repeating: 0, count: 10_000)
+            + [Float](repeating: 0.9, count: 30_000)
+            + [Float](repeating: 0, count: 20_000)
+            + [Float](repeating: 0.9, count: 12_000)
+            + [Float](repeating: 0, count: 16_000)
+
+        func segmentTimes(callLengths: [Int]) async -> [SegmentTimes] {
+            let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+            await service.setVADProcessorForTesting(AmplitudeVAD())
+            let probe = SegmentTimesProbe()
+            await service.setProcessChunkHookForTesting { samples, _, offset in
+                probe.record(SegmentTimes(start: offset, end: offset + Float(samples.count) / 16_000))
+            }
+            var position = 0
+            var lengths = callLengths[...]
+            while position < audio.count {
+                let length = min(lengths.popFirst() ?? audio.count, audio.count - position)
+                await service.process(samples: Array(audio[position..<(position + length)]), source: .mic, sampleRate: 16_000)
+                position += length
+            }
+            _ = await service.stop()
+            return probe.values()
+        }
+
+        let unchunked = await segmentTimes(callLengths: [audio.count])
+        let chunked = await segmentTimes(callLengths: [5_000, 3_192, 1_024, 7_777, 480, 12_000, 333] + Array(repeating: 2_048, count: 40))
+
+        #expect(unchunked.count == 2)
+        #expect(chunked == unchunked)
+    }
+
+    @Test
+    func stopFeedsVoicedRemainderIntoTheFinalSegment() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        await service.setVADProcessorForTesting(AmplitudeVAD())
+
+        let flushProbe = FlushProbe()
+        await service.setProcessChunkHookForTesting { samples, source, offset in
+            await flushProbe.recordCall(samples: samples, source: source, offset: offset)
+        }
+
+        await service.process(samples: Array(repeating: 0.9, count: 4_096), source: .mic, sampleRate: 16_000)
+        await service.process(samples: Array(repeating: 0.8, count: 3_000), source: .mic, sampleRate: 16_000)
+        #expect(await flushProbe.callCount() == 0)
+
+        _ = await service.stop()
+
+        let flushed = await flushProbe.lastSamples()
+        #expect(await flushProbe.callCount() == 1)
+        #expect(flushed?.count == 7_096)
+        #expect(flushed?.suffix(3_000).allSatisfy { $0 == 0.8 } == true)
+        #expect(await flushProbe.lastOffset() == 0)
     }
 
     @Test
@@ -262,6 +455,8 @@ struct LiveTranscriptionServiceTests {
     @Test
     func adjustedPreRollOffsetClampsToPreviousSegmentEnd() async throws {
         let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let results = AsyncStream<TranscriptSegment>.makeStream()
+        await service.setResultContinuationForTesting(results.continuation)
         await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
         await service.setAsrTranscribeHookForTesting { _, _, _ in
             ASRResult(text: "hello", confidence: 1.0, duration: 0.1, processingTime: 0.01)
@@ -277,7 +472,7 @@ struct LiveTranscriptionServiceTests {
 
         var receivedSegments: [TranscriptSegment] = []
         let collectTask = Task {
-            for await segment in await service.transcriptStream {
+            for await segment in results.stream {
                 receivedSegments.append(segment)
                 if receivedSegments.count == 2 {
                     break
@@ -286,8 +481,9 @@ struct LiveTranscriptionServiceTests {
         }
 
         await service.process(samples: makeChunks([0.10, 0.11, 0.20, 0.30, 0.31]), source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        // Every segment is yielded before process returns; finishing lets the collector drain them.
+        results.continuation.finish()
+        await collectTask.value
 
         let first = try #require(receivedSegments.first)
         let second = try #require(receivedSegments.dropFirst().first)
@@ -444,6 +640,8 @@ struct LiveTranscriptionServiceTests {
     @Test
     func lowConfidenceResultDiscardedWhenGateAboveZero() async {
         let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let results = AsyncStream<TranscriptSegment>.makeStream()
+        await service.setResultContinuationForTesting(results.continuation)
         var config = LiveTranscriptionPipelineSettings.defaults
         config.asrConfidenceGate = 0.30
         await service.setStoredConfigForTesting(config)
@@ -459,15 +657,15 @@ struct LiveTranscriptionServiceTests {
 
         var receivedSegments: [TranscriptSegment] = []
         let collectTask = Task {
-            for await segment in await service.transcriptStream {
+            for await segment in results.stream {
                 receivedSegments.append(segment)
             }
         }
 
         let loudSamples = Array(repeating: Float(0.1), count: 8192)
         await service.process(samples: loudSamples, source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
 
         #expect(receivedSegments.isEmpty)
     }
@@ -475,6 +673,8 @@ struct LiveTranscriptionServiceTests {
     @Test
     func confidenceGateDisabledPassesAllResults() async {
         let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let results = AsyncStream<TranscriptSegment>.makeStream()
+        await service.setResultContinuationForTesting(results.continuation)
         // Default gate is 0.0 — all results pass
         await service.setStoredConfigForTesting(.defaults)
         await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
@@ -489,15 +689,15 @@ struct LiveTranscriptionServiceTests {
 
         var receivedSegments: [TranscriptSegment] = []
         let collectTask = Task {
-            for await segment in await service.transcriptStream {
+            for await segment in results.stream {
                 receivedSegments.append(segment)
             }
         }
 
         let loudSamples = Array(repeating: Float(0.1), count: 8192)
         await service.process(samples: loudSamples, source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
 
         #expect(receivedSegments.count == 1)
     }
@@ -505,6 +705,8 @@ struct LiveTranscriptionServiceTests {
     @Test
     func highConfidenceResultAboveGatePasses() async {
         let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let results = AsyncStream<TranscriptSegment>.makeStream()
+        await service.setResultContinuationForTesting(results.continuation)
         var config = LiveTranscriptionPipelineSettings.defaults
         config.asrConfidenceGate = 0.30
         await service.setStoredConfigForTesting(config)
@@ -520,15 +722,15 @@ struct LiveTranscriptionServiceTests {
 
         var receivedSegments: [TranscriptSegment] = []
         let collectTask = Task {
-            for await segment in await service.transcriptStream {
+            for await segment in results.stream {
                 receivedSegments.append(segment)
             }
         }
 
         let loudSamples = Array(repeating: Float(0.1), count: 8192)
         await service.process(samples: loudSamples, source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
 
         #expect(receivedSegments.count == 1)
     }
@@ -538,6 +740,8 @@ struct LiveTranscriptionServiceTests {
     @Test
     func punctuationOnlyResultEmitsNoSegment() async {
         let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let results = AsyncStream<TranscriptSegment>.makeStream()
+        await service.setResultContinuationForTesting(results.continuation)
         await service.setStoredConfigForTesting(.defaults)
         await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
         await service.setAsrTranscribeHookForTesting { _, _, _ in
@@ -551,14 +755,14 @@ struct LiveTranscriptionServiceTests {
 
         var receivedSegments: [TranscriptSegment] = []
         let collectTask = Task {
-            for await segment in await service.transcriptStream {
+            for await segment in results.stream {
                 receivedSegments.append(segment)
             }
         }
 
         await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
 
         #expect(receivedSegments.isEmpty)
         #expect(await service.lastFinalSegmentEndOffsetForTesting(source: .mic) == nil)
@@ -567,6 +771,8 @@ struct LiveTranscriptionServiceTests {
     @Test
     func leadingPunctuationStrippedBeforeEmission() async {
         let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let results = AsyncStream<TranscriptSegment>.makeStream()
+        await service.setResultContinuationForTesting(results.continuation)
         await service.setStoredConfigForTesting(.defaults)
         await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
         await service.setAsrTranscribeHookForTesting { _, _, _ in
@@ -580,14 +786,14 @@ struct LiveTranscriptionServiceTests {
 
         var receivedSegments: [TranscriptSegment] = []
         let collectTask = Task {
-            for await segment in await service.transcriptStream {
+            for await segment in results.stream {
                 receivedSegments.append(segment)
             }
         }
 
         await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
 
         #expect(receivedSegments.count == 1)
         #expect(receivedSegments.first?.text == "Yeah and then we should go")
@@ -627,6 +833,8 @@ struct LiveTranscriptionServiceTests {
     @Test
     func cleanupRuleRemovesWordFromEmittedSegment() async {
         let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let results = AsyncStream<TranscriptSegment>.makeStream()
+        await service.setResultContinuationForTesting(results.continuation)
         var config = LiveTranscriptionPipelineSettings.defaults
         config.cleanupRules = [TranscriptCleanupRule(pattern: "huh", position: .anywhere, wholeWord: true)]
         await service.setStoredConfigForTesting(config)
@@ -642,14 +850,14 @@ struct LiveTranscriptionServiceTests {
 
         var receivedSegments: [TranscriptSegment] = []
         let collectTask = Task {
-            for await segment in await service.transcriptStream {
+            for await segment in results.stream {
                 receivedSegments.append(segment)
             }
         }
 
         await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
 
         #expect(receivedSegments.count == 1)
         #expect(receivedSegments.first?.text == "That's it.")
@@ -658,6 +866,8 @@ struct LiveTranscriptionServiceTests {
     @Test
     func cleanupRuleDropsSingleWordSegment() async {
         let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let results = AsyncStream<TranscriptSegment>.makeStream()
+        await service.setResultContinuationForTesting(results.continuation)
         var config = LiveTranscriptionPipelineSettings.defaults
         config.cleanupRules = [TranscriptCleanupRule(pattern: "huh", position: .anywhere, wholeWord: true)]
         await service.setStoredConfigForTesting(config)
@@ -673,14 +883,14 @@ struct LiveTranscriptionServiceTests {
 
         var receivedSegments: [TranscriptSegment] = []
         let collectTask = Task {
-            for await segment in await service.transcriptStream {
+            for await segment in results.stream {
                 receivedSegments.append(segment)
             }
         }
 
         await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
 
         #expect(receivedSegments.isEmpty)
         #expect(await service.lastFinalSegmentEndOffsetForTesting(source: .mic) == nil)
@@ -689,6 +899,8 @@ struct LiveTranscriptionServiceTests {
     @Test
     func cleanupRulesRunAfterBuiltInSanitizer() async {
         let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let results = AsyncStream<TranscriptSegment>.makeStream()
+        await service.setResultContinuationForTesting(results.continuation)
         var config = LiveTranscriptionPipelineSettings.defaults
         config.cleanupRules = [TranscriptCleanupRule(pattern: "huh", position: .anywhere, wholeWord: true)]
         await service.setStoredConfigForTesting(config)
@@ -704,14 +916,14 @@ struct LiveTranscriptionServiceTests {
 
         var receivedSegments: [TranscriptSegment] = []
         let collectTask = Task {
-            for await segment in await service.transcriptStream {
+            for await segment in results.stream {
                 receivedSegments.append(segment)
             }
         }
 
         await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
 
         #expect(receivedSegments.isEmpty)
     }
@@ -719,6 +931,8 @@ struct LiveTranscriptionServiceTests {
     @Test
     func emptyCleanupRulesLeaveEmissionUnchanged() async {
         let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let results = AsyncStream<TranscriptSegment>.makeStream()
+        await service.setResultContinuationForTesting(results.continuation)
         await service.setStoredConfigForTesting(.defaults)
         await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
         await service.setAsrTranscribeHookForTesting { _, _, _ in
@@ -732,14 +946,14 @@ struct LiveTranscriptionServiceTests {
 
         var receivedSegments: [TranscriptSegment] = []
         let collectTask = Task {
-            for await segment in await service.transcriptStream {
+            for await segment in results.stream {
                 receivedSegments.append(segment)
             }
         }
 
         await service.process(samples: makeChunks([0.10, 0.20]), source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
 
         #expect(receivedSegments.count == 1)
         #expect(receivedSegments.first?.text == "huh, that's fine")
@@ -796,6 +1010,8 @@ struct LiveTranscriptionServiceTests {
     @Test
     func bufferAboveAmplitudeGateProceeds() async {
         let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let results = AsyncStream<TranscriptSegment>.makeStream()
+        await service.setResultContinuationForTesting(results.continuation)
         var config = LiveTranscriptionPipelineSettings.defaults
         config.asrAmplitudeGate = 0.01
         await service.setStoredConfigForTesting(config)
@@ -849,6 +1065,8 @@ struct LiveTranscriptionServiceTests {
         diarizer: ScriptedTurnDiarizer
     ) async -> LiveTranscriptionService {
         let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let results = AsyncStream<TranscriptSegment>.makeStream()
+        await service.setResultContinuationForTesting(results.continuation)
         await service.setStoredConfigForTesting(.defaults)
         await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
         let textProbe = TextSequenceProbe(texts)
@@ -869,6 +1087,8 @@ struct LiveTranscriptionServiceTests {
         samples: [Float],
         vadStates: [(Bool, LiveVADEventKind?)]
     ) async -> [TranscriptSegment] {
+        let results = AsyncStream<TranscriptSegment>.makeStream()
+        await service.setResultContinuationForTesting(results.continuation)
         let processor = MockVADProcessor()
         for (triggered, event) in vadStates {
             await processor.enqueue(triggered: triggered, event: event)
@@ -877,22 +1097,24 @@ struct LiveTranscriptionServiceTests {
 
         var receivedSegments: [TranscriptSegment] = []
         let collectTask = Task {
-            for await segment in await service.transcriptStream {
+            for await segment in results.stream {
                 receivedSegments.append(segment)
             }
         }
 
         await service.process(samples: samples, source: .mic, sampleRate: 16_000)
-        try? await Task.sleep(for: .milliseconds(50))
-        collectTask.cancel()
+        results.continuation.finish()
+        await collectTask.value
         return receivedSegments
     }
 
     /// Collects every segment the service yields until cancelled.
-    private func startCollecting(from service: LiveTranscriptionService) -> (task: Task<Void, Never>, box: SegmentBox) {
+    private func startCollecting(from service: LiveTranscriptionService) async -> (task: Task<Void, Never>, box: SegmentBox) {
+        let results = AsyncStream<TranscriptSegment>.makeStream()
+        await service.setResultContinuationForTesting(results.continuation)
         let box = SegmentBox()
         let task = Task {
-            for await segment in await service.transcriptStream {
+            for await segment in results.stream {
                 await box.append(segment)
             }
         }
@@ -908,7 +1130,7 @@ struct LiveTranscriptionServiceTests {
         await processor.enqueue(triggered: true, event: .speechStart)
         await processor.enqueue(triggered: false, event: .speechEnd)
         await service.setVADProcessorForTesting(processor)
-        let (task, box) = startCollecting(from: service)
+        let (task, box) = await startCollecting(from: service)
         defer { task.cancel() }
 
         await service.process(samples: Array(repeating: Float(0.1), count: 8192), source: .mic, sampleRate: 16_000)
@@ -934,7 +1156,7 @@ struct LiveTranscriptionServiceTests {
         await processor.enqueue(triggered: true, event: .speechStart)
         await processor.enqueue(triggered: false, event: .speechEnd)
         await service.setVADProcessorForTesting(processor)
-        let (task, box) = startCollecting(from: service)
+        let (task, box) = await startCollecting(from: service)
         defer { task.cancel() }
 
         await service.process(samples: Array(repeating: Float(0.1), count: 16_384), source: .mic, sampleRate: 16_000)
@@ -973,7 +1195,7 @@ struct LiveTranscriptionServiceTests {
         await processor.enqueue(triggered: true, event: .speechStart)
         await processor.enqueue(triggered: false, event: .speechEnd)
         await service.setVADProcessorForTesting(processor)
-        let (task, box) = startCollecting(from: service)
+        let (task, box) = await startCollecting(from: service)
         defer { task.cancel() }
 
         await service.process(samples: Array(repeating: Float(0.1), count: 8192), source: .mic, sampleRate: 16_000)
@@ -1299,6 +1521,7 @@ extension LiveTranscriptionService {
 }
 
 private enum TestError: Error {
+    case modelLoadFailed
     case vadInitializationFailed
     case decoderStateCreationFailed
     case turnDiarizerFailed
@@ -1477,5 +1700,298 @@ private actor MockVADProcessor: LiveVADStreamingProcessing {
             isTriggered: next.0,
             eventKind: next.1
         )
+    }
+}
+
+private actor LoadGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        waiters.forEach { $0.resume() }
+        waiters.removeAll()
+    }
+}
+
+/// Model loader that counts loads, optionally fails, and records the VAD
+/// threshold of each load and of each processed chunk.
+private final class FakeModelLoads: @unchecked Sendable {
+    private let lock = NSLock()
+    private let gate: LoadGate?
+    private var asrLoads = 0
+    private var thresholds: [Double] = []
+    private var processed: [Double] = []
+    private var diarizers: [SampleRecordingDiarizer] = []
+    private var diarizerManagers = 0
+    private var asrFailures = 0
+    private var vadFailures = 0
+
+    init(gate: LoadGate? = nil) {
+        self.gate = gate
+    }
+
+    var asrFailuresRemaining: Int {
+        get { locked { asrFailures } }
+        set { locked { asrFailures = newValue } }
+    }
+    var vadFailuresRemaining: Int {
+        get { locked { vadFailures } }
+        set { locked { vadFailures = newValue } }
+    }
+    var asrLoadCount: Int { locked { asrLoads } }
+    var vadThresholds: [Double] { locked { thresholds } }
+    var processedThresholds: [Double] { locked { processed } }
+    var turnDiarizers: [SampleRecordingDiarizer] { locked { diarizers } }
+    var diarizerManagerCount: Int { locked { diarizerManagers } }
+
+    func waitForAsrLoads(_ count: Int) async -> Bool {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while asrLoadCount < count, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return asrLoadCount >= count
+    }
+
+    func recordProcessed(threshold: Double) {
+        locked { processed.append(threshold) }
+    }
+
+    var loader: LiveModelLoader {
+        LiveModelLoader(
+            loadAsr: { _ in
+                let shouldFail = self.locked {
+                    self.asrLoads += 1
+                    guard self.asrFailures > 0 else { return false }
+                    self.asrFailures -= 1
+                    return true
+                }
+                await self.gate?.wait()
+                if shouldFail { throw TestError.modelLoadFailed }
+                return AsrManager(config: ASRConfig())
+            },
+            loadDiarizer: { _, construction in
+                return {
+                    self.locked { self.diarizerManagers += 1 }
+                    return DiarizerManager(config: DiarizerConfig(
+                        clusteringThreshold: Float(construction.speakerSimilarityThreshold),
+                        minSpeechDuration: Float(construction.vadMinSpeechDuration),
+                        minSilenceGap: Float(construction.minSilenceGap)
+                    ))
+                }
+            },
+            loadVad: { _, construction in
+                let shouldFail = self.locked {
+                    guard self.vadFailures > 0 else { return false }
+                    self.vadFailures -= 1
+                    return true
+                }
+                if shouldFail { throw TestError.vadInitializationFailed }
+                self.locked { self.thresholds.append(construction.vadThreshold) }
+                return ThresholdRecordingVAD(threshold: construction.vadThreshold, loads: self)
+            },
+            loadTurnDiarizers: { _ in
+                return {
+                    let diarizer = SampleRecordingDiarizer()
+                    self.locked { self.diarizers.append(diarizer) }
+                    return [.mic: diarizer]
+                }
+            }
+        )
+    }
+
+    private func locked<T>(_ body: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body()
+    }
+}
+
+/// Triggered while the chunk's peak is above 0.5, with a start event on the
+/// transition. Records its construction threshold on every chunk.
+private actor ThresholdRecordingVAD: LiveVADStreamingProcessing {
+    let threshold: Double
+    let loads: FakeModelLoads
+    private var triggered = false
+
+    init(threshold: Double, loads: FakeModelLoads) {
+        self.threshold = threshold
+        self.loads = loads
+    }
+
+    func processStreamingChunk(
+        _ chunk: [Float],
+        state: VadStreamState,
+        config: VadSegmentationConfig
+    ) async throws -> LiveVADProcessingResult {
+        loads.recordProcessed(threshold: threshold)
+        let voiced = (chunk.map { abs($0) }.max() ?? 0) > 0.5
+        let event: LiveVADEventKind? = voiced && !triggered ? .speechStart : nil
+        triggered = voiced
+        return LiveVADProcessingResult(state: state, isTriggered: voiced, eventKind: event)
+    }
+}
+
+/// VAD that decides from the chunk's content only: triggered while the peak is
+/// above 0.5, with start and end events on each transition.
+private actor AmplitudeVAD: LiveVADStreamingProcessing {
+    private var triggered = false
+
+    func processStreamingChunk(
+        _ chunk: [Float],
+        state: VadStreamState,
+        config: VadSegmentationConfig
+    ) async throws -> LiveVADProcessingResult {
+        let voiced = (chunk.map { abs($0) }.max() ?? 0) > 0.5
+        let event: LiveVADEventKind? = voiced == triggered ? nil : (voiced ? .speechStart : .speechEnd)
+        triggered = voiced
+        return LiveVADProcessingResult(state: state, isTriggered: voiced, eventKind: event)
+    }
+}
+
+private struct SegmentTimes: Equatable {
+    let start: Float
+    let end: Float
+}
+
+private final class SegmentTimesProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var times: [SegmentTimes] = []
+
+    func record(_ value: SegmentTimes) {
+        lock.lock()
+        defer { lock.unlock() }
+        times.append(value)
+    }
+
+    func values() -> [SegmentTimes] {
+        lock.lock()
+        defer { lock.unlock() }
+        return times
+    }
+}
+
+@MainActor
+struct LiveRecordingSessionTests {
+    @Test
+    func endingSessionFinishesBothStreamsAndConsumers() async {
+        let session = LiveRecordingSession()
+        var audioEnded = false
+        var resultsEnded = false
+        session.audioConsumer = Task {
+            for await _ in session.audio.stream {}
+            audioEnded = true
+        }
+        session.resultConsumer = Task {
+            for await _ in session.results.stream {}
+            resultsEnded = true
+        }
+        session.finish()
+        await session.drainAudio()
+        await session.drainResults()
+        #expect(audioEnded && resultsEnded)
+        #expect(session.audioConsumer == nil && session.resultConsumer == nil)
+    }
+
+    @Test
+    func slowConsumerReportsOncePerSourceAndRecoversWithoutDroppingAudio() async {
+        let session = LiveRecordingSession()
+        var events: [String] = []
+        var count = 0
+        let now = HostNanoseconds(nanoseconds: 30_000_000_000)
+        session.audioConsumer = Task {
+            var monitor = LiveAudioQueueMonitor { source, delayed, _ in
+                events.append("\(source.rawValue):\(delayed)")
+            }
+            for await chunk in session.audio.stream {
+                monitor.observe(chunk, now: now)
+                try? await Task.sleep(for: .milliseconds(2))
+                count += 1
+            }
+        }
+        for source in [AudioSource.mic, .app] {
+            for second: UInt64 in [15, 16, 29, 30] {
+                session.audio.continuation.yield(LiveAudioChunk(samples: [1], source: source, sampleRate: 16_000, hostTime: HostNanoseconds(nanoseconds: second * 1_000_000_000)))
+            }
+        }
+        session.finish()
+        await session.drainAudio()
+        #expect(count == 8)
+        #expect(events == ["mic:true", "mic:false", "app:true", "app:false"])
+    }
+}
+
+struct LiveCaptureTimingTests {
+    @Test
+    func lateAppAndOutageFeedSilenceToDiarizationAndVAD() async {
+        let service = LiveTranscriptionService()
+        let diarizer = SampleRecordingDiarizer()
+        let vad = SampleRecordingVAD()
+        await service.setTurnDiarizersForTesting([.app: diarizer])
+        await service.setVADProcessorForTesting(vad)
+        await service.process(samples: [1], source: .mic, sampleRate: 16_000, hostTime: HostNanoseconds(nanoseconds: 1_000_000_000))
+        await service.process(samples: Array(repeating: 1, count: 16_000), source: .app, sampleRate: 16_000, hostTime: HostNanoseconds(nanoseconds: 4_000_000_000))
+        #expect(await service.processedSampleCountForTesting(source: .app) == 64_000)
+        await service.process(samples: Array(repeating: 2, count: 16_000), source: .app, sampleRate: 16_000, hostTime: HostNanoseconds(nanoseconds: 7_000_000_000))
+        let expected = Array(repeating: Float(0), count: 48_000) + Array(repeating: Float(1), count: 16_000)
+            + Array(repeating: Float(0), count: 32_000) + Array(repeating: Float(2), count: 16_000)
+        #expect(diarizer.samples == expected)
+        #expect(await vad.samples == Array(expected.prefix(expected.count / 4_096 * 4_096)))
+        #expect(await service.processedSampleCountForTesting(source: .app) == 112_000)
+    }
+
+    @Test
+    func absentHostTimeContinuesFromPriorPosition() async {
+        let service = LiveTranscriptionService()
+        await service.process(samples: Array(repeating: 1, count: 16_000), source: .mic, sampleRate: 16_000, hostTime: HostNanoseconds(nanoseconds: 1_000_000_000))
+        await service.process(samples: Array(repeating: 1, count: 16_000), source: .mic, sampleRate: 16_000)
+        #expect(await service.processedSampleCountForTesting(source: .mic) == 32_000)
+    }
+}
+
+private final class SampleRecordingDiarizer: StreamingTurnDiarizing, @unchecked Sendable {
+    let numSpeakers = 1
+    let frameSeconds: Float = 0.01
+    private(set) var samples: [Float] = []
+    func feed(_ samples: [Float]) throws -> [TurnDiarizerChunk] { self.samples += samples; return [] }
+    func finish() throws -> [TurnDiarizerChunk] { [] }
+    func reset() { samples = [] }
+}
+
+private actor SampleRecordingVAD: LiveVADStreamingProcessing {
+    private(set) var samples: [Float] = []
+    func processStreamingChunk(_ chunk: [Float], state: VadStreamState, config: VadSegmentationConfig) async throws -> LiveVADProcessingResult {
+        samples += chunk
+        return LiveVADProcessingResult(state: state, isTriggered: false, eventKind: nil)
+    }
+}
+
+extension LiveCaptureTimingTests {
+    @Test
+    func sharedCaptureAnchorDoesNotDependOnConsumerOrder() async {
+        let clock = LiveCaptureClock()
+        clock.observe(HostNanoseconds(nanoseconds: 4_000_000_000))
+        clock.observe(HostNanoseconds(nanoseconds: 1_000_000_000))
+        let service = LiveTranscriptionService()
+        let chunk = LiveAudioChunk(samples: Array(repeating: 1, count: 16_000), source: .app, sampleRate: 16_000, hostTime: HostNanoseconds(nanoseconds: 4_000_000_000))
+        await service.process(chunk, anchor: clock.anchor)
+        #expect(await service.processedSampleCountForTesting(source: .app) == 64_000)
+    }
+}
+
+extension LiveRecordingSessionTests {
+    @Test
+    func emptyQueueReportsRecoveryAtStop() {
+        var events: [Bool] = []
+        var monitor = LiveAudioQueueMonitor { _, delayed, _ in events.append(delayed) }
+        monitor.observe(LiveAudioChunk(samples: [1], source: .mic, sampleRate: 16_000, hostTime: HostNanoseconds(nanoseconds: 0)), now: HostNanoseconds(nanoseconds: 15_000_000_000))
+        monitor.finish()
+        monitor.finish()
+        #expect(events == [true, false])
     }
 }

@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import OSLog
 import ScreenCaptureKit
 
 /// Stream output for the microphone track of a unified `SCStream` (macOS 15+
@@ -15,15 +16,22 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
     /// Injected so a mid-session capture restart can rebuild the stream and its handlers while
     /// continuing to write into the same file, with its accumulated timing segments intact.
     let streamer: AudioFileStreamer
-    private let liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation?
+    private let liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation?
     private let targetFormat: AVAudioFormat
     private var fileURL: URL?
     private var converter: AVAudioConverter?
     private var converterSourceFormat: AVAudioFormat?
-    private var firstBufferHostTime: UInt64?
+    private var firstBufferHostTime: HostNanoseconds?
     private var hasPrepared = false
+    private let layoutTracker = UnsupportedPCMLayoutTracker(source: "mic")
 
-    var onFirstBufferHostTime: (@Sendable (UInt64) -> Void)?
+    var onFirstBufferHostTime: (@Sendable (HostNanoseconds) -> Void)?
+
+    /// Buffers dropped because their sample layout cannot be copied.
+    var unsupportedFormatCount: Int { layoutTracker.unsupportedFormatCount }
+
+    /// Distinct unsupported formats logged.
+    var loggedUnsupportedFormatCount: Int { layoutTracker.loggedFormatCount }
 
     var audioLevel: Float { streamer.audioLevel }
 
@@ -38,7 +46,7 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
     var writeFailureCount: Int { streamer.writeFailureCount }
 
     init(
-        liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil,
+        liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation? = nil,
         streamer: AudioFileStreamer = AudioFileStreamer(label: "mic")
     ) {
         self.liveAudioContinuation = liveAudioContinuation
@@ -99,8 +107,12 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
 #endif
 
     private func process(_ sampleBuffer: CMSampleBuffer) {
-        let hostNanos = Self.hostTimeNanos(from: sampleBuffer)
-        captureFirstBufferHostTimeIfNeeded(hostNanos)
+        guard layoutTracker.admit(sampleBuffer) else {
+            return
+        }
+        let hostTime = HostNanoseconds(presentationTimeOf: sampleBuffer)
+        let hostNanos = hostTime?.nanoseconds
+        captureFirstBufferHostTimeIfNeeded(hostTime)
 
         guard let nativeBuffer = Self.makePCMBuffer(from: sampleBuffer) else {
             return
@@ -134,22 +146,22 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
         streamer.write(buffer: converted, hostTimeNanos: hostNanos)
         let monoSamples = AudioDownmixer.toMono(buffer: converted)
         if !monoSamples.isEmpty {
-            liveAudioContinuation?.yield((monoSamples, .mic, targetFormat.sampleRate))
+            liveAudioContinuation?.yield(LiveAudioChunk(samples: monoSamples, source: .mic, sampleRate: targetFormat.sampleRate, hostTime: hostTime))
         }
     }
 
-    private func captureFirstBufferHostTimeIfNeeded(_ hostNanos: UInt64?) {
-        guard let hostNanos else { return }
+    private func captureFirstBufferHostTimeIfNeeded(_ hostTime: HostNanoseconds?) {
+        guard let hostTime else { return }
         var didCapture = false
         lock.lock()
         if firstBufferHostTime == nil {
-            firstBufferHostTime = hostNanos
+            firstBufferHostTime = hostTime
             didCapture = true
         }
         let callback = onFirstBufferHostTime
         lock.unlock()
         if didCapture {
-            callback?(hostNanos)
+            callback?(hostTime)
         }
     }
 
@@ -183,14 +195,6 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
         default:
             return nil
         }
-    }
-
-    private static func hostTimeNanos(from sampleBuffer: CMSampleBuffer) -> UInt64? {
-        let presentationTimestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        let hostTimeClock = CMClockGetHostTimeClock()
-        let hostTime = CMSyncConvertTime(presentationTimestamp, from: hostTimeClock, to: hostTimeClock)
-        guard CMTIME_IS_VALID(hostTime), CMTIME_IS_NUMERIC(hostTime) else { return nil }
-        return HostClock.nanoseconds(machTime: CMClockConvertHostTimeToSystemUnits(hostTime))
     }
 
     private static func makePCMBuffer(from sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {
@@ -251,5 +255,67 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
             }
         }
         return pcmBuffer
+    }
+}
+
+/// Counts ScreenCaptureKit audio buffers whose sample layout the capture handlers cannot copy.
+///
+/// The handlers copy Float32 samples one channel buffer at a time. That covers non-interleaved
+/// buffers of any channel count and mono buffers flagged as interleaved, whose single channel has
+/// the same memory layout either way. Any other layout would come out as an empty or partial
+/// buffer, so it is counted and logged, once per format, instead of written.
+final class UnsupportedPCMLayoutTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private let source: String
+    private let logger = Logger(subsystem: "Scriberman", category: "CapturePCMLayout")
+    private var count = 0
+    private var loggedFormats: Set<String> = []
+
+    init(source: String) {
+        self.source = source
+    }
+
+    var unsupportedFormatCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+
+    /// Distinct unsupported formats seen, each of which was logged once.
+    var loggedFormatCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return loggedFormats.count
+    }
+
+    static func isSupported(_ format: AVAudioFormat) -> Bool {
+        format.commonFormat == .pcmFormatFloat32 && (!format.isInterleaved || format.channelCount == 1)
+    }
+
+    /// True when the buffer can be copied. Otherwise the buffer is counted and false is returned.
+    func admit(_ sampleBuffer: CMSampleBuffer) -> Bool {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription),
+              let format = AVAudioFormat(streamDescription: asbd)
+        else {
+            return true
+        }
+        if Self.isSupported(format) {
+            return true
+        }
+
+        // Built from the format's fields: `AVAudioFormat.description` includes the object's
+        // address, which differs for every buffer.
+        let formatKey = "commonFormat=\(format.commonFormat.rawValue) channels=\(format.channelCount) sampleRate=\(format.sampleRate) interleaved=\(format.isInterleaved)"
+        lock.lock()
+        count += 1
+        let isFirstOfFormat = loggedFormats.insert(formatKey).inserted
+        lock.unlock()
+        if isFirstOfFormat {
+            logger.error(
+                "Unsupported \(self.source, privacy: .public) sample layout; buffers are not written. \(formatKey, privacy: .public)"
+            )
+        }
+        return false
     }
 }

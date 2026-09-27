@@ -27,12 +27,32 @@ final class ScreenVideoMuxerTests {
         let instructions = ScreenVideoMuxer.makeAudioInstructions(
             micURL: micURL,
             appURL: appURL,
-            micStartHostTime: 1_000,
-            appStartHostTime: 2_000,
-            videoStartHostTime: 1_000
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000),
+            appStartHostTime: HostNanoseconds(nanoseconds: 2_000),
+            videoStartHostTime: HostNanoseconds(nanoseconds: 1_000)
         )
 
         #expect(instructions.map(\.label) == ["mic", "app"])
+    }
+
+    @Test
+    func testOffsetIsCorrectOnANonUnitTimebase() throws {
+        let micURL = temporaryDirectoryURL.appendingPathComponent("mic.wav")
+        _ = FileManager.default.createFile(atPath: micURL.path, contents: Data("mic".utf8))
+        let timebase = HostClock.Timebase(numer: 125, denom: 3)
+
+        // Video at 1 s and audio at 1.5 s, both read as Mach ticks at 125/3.
+        let instructions = ScreenVideoMuxer.makeAudioInstructions(
+            micURL: micURL,
+            appURL: nil,
+            micStartHostTime: HostNanoseconds(machTicks: 36_000_000, timebase: timebase),
+            appStartHostTime: nil,
+            videoStartHostTime: HostNanoseconds(machTicks: 24_000_000, timebase: timebase)
+        )
+
+        let instruction = try #require(instructions.first)
+        #expect(instruction.sourceStart == .zero)
+        #expect(CMTimeGetSeconds(instruction.insertionTime) == 0.5)
     }
 
     @Test
@@ -42,8 +62,8 @@ final class ScreenVideoMuxerTests {
         // Anchor 0.5s after video start -> single "mixdown" track inserted at +0.5s.
         let instructions = ScreenVideoMuxer.makeTimelineAudioInstructions(
             timelineAudioURL: mixdownURL,
-            audioAnchorHostTime: 1_500_000_000,
-            videoStartHostTime: 1_000_000_000
+            audioAnchorHostTime: HostNanoseconds(nanoseconds: 1_500_000_000),
+            videoStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000)
         )
 
         #expect(instructions.map(\.label) == ["mixdown"])
@@ -60,8 +80,8 @@ final class ScreenVideoMuxerTests {
         // Anchor 0.5s before video start -> trim source, insert at zero.
         let instructions = ScreenVideoMuxer.makeTimelineAudioInstructions(
             timelineAudioURL: mixdownURL,
-            audioAnchorHostTime: 500_000_000,
-            videoStartHostTime: 1_000_000_000
+            audioAnchorHostTime: HostNanoseconds(nanoseconds: 500_000_000),
+            videoStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000)
         )
 
         let instruction = try #require(instructions.first)
@@ -79,16 +99,16 @@ final class ScreenVideoMuxerTests {
         let micOnly = ScreenVideoMuxer.makeAudioInstructions(
             micURL: micURL,
             appURL: nil,
-            micStartHostTime: 1_000,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000),
             appStartHostTime: nil,
-            videoStartHostTime: 1_000
+            videoStartHostTime: HostNanoseconds(nanoseconds: 1_000)
         )
         let appOnly = ScreenVideoMuxer.makeAudioInstructions(
             micURL: temporaryDirectoryURL.appendingPathComponent("missing.wav"),
             appURL: appURL,
             micStartHostTime: nil,
-            appStartHostTime: 2_000,
-            videoStartHostTime: 1_000
+            appStartHostTime: HostNanoseconds(nanoseconds: 2_000),
+            videoStartHostTime: HostNanoseconds(nanoseconds: 1_000)
         )
 
         #expect(micOnly.map(\.label) == ["mic"])
@@ -105,9 +125,9 @@ final class ScreenVideoMuxerTests {
         let instructions = ScreenVideoMuxer.makeAudioInstructions(
             micURL: micURL,
             appURL: appURL,
-            micStartHostTime: 500_000_000,
-            appStartHostTime: 1_500_000_000,
-            videoStartHostTime: 1_000_000_000
+            micStartHostTime: HostNanoseconds(nanoseconds: 500_000_000),
+            appStartHostTime: HostNanoseconds(nanoseconds: 1_500_000_000),
+            videoStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000)
         )
 
         let micInstruction = try #require(instructions.first(where: { $0.label == "mic" }))
@@ -123,7 +143,7 @@ final class ScreenVideoMuxerTests {
     }
 
     @Test
-    func testRunMuxFailureLeavesSessionUntouchedAndDeletesTmpVideo() async throws {
+    func testRunMuxFailureKeepsTmpVideoAndRecordsTheFailure() async throws {
         let container = try ModelContainer(
             for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
@@ -150,7 +170,9 @@ final class ScreenVideoMuxerTests {
 
         let refreshed = try fetchSession(id: session.id, container: container)
         #expect(refreshed.screenVideoURL == nil)
-        #expect(!FileManager.default.fileExists(atPath: request.screenTmpURL.path))
+        #expect(refreshed.status == .recorded)
+        #expect(refreshed.screenMuxState == ScreenMuxState.failed.rawValue)
+        #expect(FileManager.default.fileExists(atPath: request.screenTmpURL.path))
     }
 
     @Test
@@ -167,6 +189,7 @@ final class ScreenVideoMuxerTests {
             title: "Session",
             status: .recorded
         )
+        session.screenMuxState = ScreenMuxState.pending.rawValue
         context.insert(session)
         try context.save()
 
@@ -181,6 +204,7 @@ final class ScreenVideoMuxerTests {
 
         let refreshed = try fetchSession(id: session.id, container: container)
         #expect(refreshed.screenVideoURL == request.screenVideoURL.path)
+        #expect(refreshed.screenMuxState == nil)
         #expect(FileManager.default.fileExists(atPath: request.screenVideoURL.path))
         #expect(!FileManager.default.fileExists(atPath: request.screenTmpURL.path))
     }
@@ -204,9 +228,9 @@ final class ScreenVideoMuxerTests {
             screenVideoURL: screenURL,
             micURL: micURL,
             appURL: nil,
-            micStartHostTime: 1_000,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000),
             appStartHostTime: nil,
-            videoStartHostTime: 1_000
+            videoStartHostTime: HostNanoseconds(nanoseconds: 1_000)
         )
     }
 }

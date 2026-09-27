@@ -85,6 +85,11 @@ final class JobsViewModel {
         var title: String { group.title }
     }
 
+    private var activeImports = 0
+    private var activeRetranscriptions = 0
+    var isImporting: Bool { activeImports > 0 }
+    var isRetranscribing: Bool { activeRetranscriptions > 0 }
+
     private let workspaceService: WorkspaceServiceProtocol
     private let transcriptionService: TranscriptionServiceProtocol
     private let retranscriptionService: RetranscriptionService
@@ -92,6 +97,7 @@ final class JobsViewModel {
     private let transcriptExportService: TranscriptExportService
     private let markdownRenderer: MarkdownRenderer
     private let savePanelPresenter: @MainActor (_ suggestedName: String) -> URL?
+    private let saveContext: @MainActor (ModelContext) throws -> Void
     private let logger = Logger(subsystem: "Scriberman", category: "JobsViewModel")
 
     // Injected post-init by AppState (same pattern as NewSessionViewModel);
@@ -109,7 +115,8 @@ final class JobsViewModel {
         audioImportService: AudioImportService,
         transcriptExportService: TranscriptExportService = TranscriptExportService(),
         markdownRenderer: MarkdownRenderer = MarkdownRenderer(),
-        savePanelPresenter: @escaping @MainActor (_ suggestedName: String) -> URL? = JobsViewModel.defaultSavePanelPresenter(suggestedName:)
+        savePanelPresenter: @escaping @MainActor (_ suggestedName: String) -> URL? = JobsViewModel.defaultSavePanelPresenter(suggestedName:),
+        saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() }
     ) {
         self.workspaceService = workspaceService
         self.transcriptionService = transcriptionService
@@ -118,6 +125,7 @@ final class JobsViewModel {
         self.transcriptExportService = transcriptExportService
         self.markdownRenderer = markdownRenderer
         self.savePanelPresenter = savePanelPresenter
+        self.saveContext = saveContext
     }
 
     func refresh() async {
@@ -284,9 +292,31 @@ final class JobsViewModel {
     /// would decode every surviving transcript again.
     static let searchMatchDebounce: Duration = .milliseconds(200)
 
+    struct SearchTaskKey: Equatable {
+        let query: String
+        let revision: Int
+    }
+
+    /// Reads the same stored text as filtering, without decoding transcripts.
+    func searchContentRevision(for items: [SessionListItem]) -> Int {
+        var hasher = Hasher()
+        for item in items {
+            hasher.combine(item.id)
+            switch item {
+            case .pending:
+                break
+            case .recording(let session):
+                hasher.combine(session.searchableText)
+            case .imported(let session):
+                hasher.combine(session.searchableText)
+            }
+        }
+        return hasher.finalize()
+    }
+
     /// Recomputes `searchMatches` for the current query once it settles.
     ///
-    /// Cancellable by design: called from a `.task(id:)` that restarts on every keystroke, so an
+    /// Cancellable by design: called from a `.task(id:)` that restarts on query or content changes, so an
     /// in-flight debounce is discarded rather than decoding for a query the user has moved past.
     func updateSearchMatches(
         for items: [SessionListItem],
@@ -428,7 +458,7 @@ final class JobsViewModel {
 
         Task {
             do {
-                let workspace = try await workspaceService.requireWritableWorkspace()
+                let workspace = try await workspaceService.requireAuthorizedWorkspace()
                 let transcript = try await transcriptionService.transcribe(
                     sessionID: sessionID,
                     modelContainer: modelContainer,
@@ -460,44 +490,78 @@ final class JobsViewModel {
         try? context.save()
     }
 
+    /// What a deletion did, for the view to report.
+    enum DeletionResult: Equatable {
+        /// The record and its folder are gone.
+        case deleted
+        /// Saving the store failed. The record and its folder are both untouched.
+        case saveFailed(String)
+        /// The record is gone but its folder could not be removed.
+        case filesLeft(URL)
+    }
+
     /// Deletes a recording and everything it produced.
     ///
     /// The whole folder goes, not a list of known file names. That list has grown twice already —
     /// `.timing` sidecars, then trim backups — and each addition would have leaked silently until
     /// somebody remembered to extend it. Removing the container has no such failure mode.
     ///
-    /// The record is deleted even when the folder cannot be, so a session never becomes
-    /// undeletable because of something wrong with its path.
-    func delete(session: RecordingSession, context: ModelContext) async {
+    /// The store changes first and the disk second, so a record never points at deleted media. The
+    /// record is deleted even when the folder cannot be, so a session never becomes undeletable
+    /// because of something wrong with its path; the result then carries the folder left behind.
+    @discardableResult
+    func delete(session: RecordingSession, context: ModelContext) async -> DeletionResult {
         let folder = URL(fileURLWithPath: session.micAudioURL).deletingLastPathComponent()
-        await removeSessionFolder(folder)
-        context.delete(session)
-        try? context.save()
+        return await deleteRecord(session, folder: folder, context: context)
     }
 
-    /// Removes a session's folder, if it is one this application is allowed to remove.
+    /// Deletes `model` from the store, then removes `folder`.
     ///
-    /// A refusal is not a failure of the delete: the caller still drops the record. A session whose
-    /// stored path is wrong should stop appearing in the list, not become permanent.
-    private func removeSessionFolder(_ folder: URL) async {
+    /// A failed save is rolled back, so the record stays and the folder is never touched.
+    private func deleteRecord(
+        _ model: some PersistentModel,
+        folder: URL?,
+        context: ModelContext
+    ) async -> DeletionResult {
+        context.delete(model)
+        do {
+            try saveContext(context)
+        } catch {
+            context.rollback()
+            logger.error("Deleting a session failed to save: \(error.localizedDescription, privacy: .public)")
+            return .saveFailed(error.localizedDescription)
+        }
+        guard let folder else { return .deleted }
+        return await removeSessionFolder(folder) ? .deleted : .filesLeft(folder)
+    }
+
+    /// Removes a session's folder, if it is one this application is allowed to remove, and returns
+    /// whether it is gone.
+    ///
+    /// A refusal is not a failure of the delete: the record is already gone. A session whose stored
+    /// path is wrong should stop appearing in the list, not become permanent.
+    private func removeSessionFolder(_ folder: URL) async -> Bool {
         guard let workspace = await workspaceService.currentWorkspace() else {
             logger.error("Refusing to remove a session folder with no workspace available.")
-            return
+            return false
         }
         guard Self.isRemovableSessionFolder(folder, in: workspace) else {
             logger.error(
                 "Refusing to remove a session folder outside the workspace: \(folder.path, privacy: .public)"
             )
-            return
+            return false
         }
         do {
             try FileManager.default.removeItem(at: folder)
+            return true
         } catch CocoaError.fileNoSuchFile {
             // Already gone. Nothing to report.
+            return true
         } catch {
             logger.error(
                 "Failed to remove session folder \(folder.path, privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
+            return false
         }
     }
 
@@ -519,27 +583,38 @@ final class JobsViewModel {
         }
     }
 
-    func importAudio(urls: [URL], context: ModelContext) async {
+    /// Imports `urls`, and returns the files whose session could not be recorded.
+    @discardableResult
+    func importAudio(urls: [URL], context: ModelContext) async -> [URL] {
+        activeImports += 1
+        defer { activeImports -= 1 }
+        var failedImportURLs: [URL] = []
         let audioURLs = urls.filter { Self.isAudioURL($0) }
         guard !audioURLs.isEmpty else {
-            return
+            return []
         }
 
         do {
-            let workspace = try await workspaceService.requireWritableWorkspace()
+            let workspace = try await workspaceService.requireAuthorizedWorkspace()
             let modelContainer = context.container
             let pipelineSettings = currentPipelineSettings
             for audioURL in audioURLs {
-                await audioImportService.importAudio(
-                    from: audioURL,
-                    workspace: workspace,
-                    modelContainer: modelContainer,
-                    pipelineSettings: pipelineSettings
-                )
+                do {
+                    try await audioImportService.importAudio(
+                        from: audioURL,
+                        workspace: workspace,
+                        modelContainer: modelContainer,
+                        pipelineSettings: pipelineSettings
+                    )
+                } catch {
+                    logger.error("Import of \(audioURL.lastPathComponent, privacy: .public) could not be recorded: \(error.localizedDescription, privacy: .public)")
+                    failedImportURLs.append(audioURL)
+                }
             }
         } catch {
             logger.error("Import skipped because workspace is unavailable: \(error.localizedDescription, privacy: .public)")
         }
+        return failedImportURLs
     }
 
     func retryImported(session: ImportedSession, context: ModelContext) {
@@ -554,9 +629,11 @@ final class JobsViewModel {
         let modelContainer = context.container
         let pipelineSettings = currentPipelineSettings
 
+        activeRetranscriptions += 1
         Task {
+            defer { activeRetranscriptions -= 1 }
             do {
-                let workspace = try await workspaceService.requireWritableWorkspace()
+                let workspace = try await workspaceService.requireAuthorizedWorkspace()
                 await retranscriptionService.retranscribe(
                     sessionID: sessionID,
                     modelContainer: modelContainer,
@@ -587,9 +664,11 @@ final class JobsViewModel {
         let modelContainer = context.container
         let pipelineSettings = currentPipelineSettings
 
+        activeRetranscriptions += 1
         Task {
+            defer { activeRetranscriptions -= 1 }
             do {
-                let workspace = try await workspaceService.requireWritableWorkspace()
+                let workspace = try await workspaceService.requireAuthorizedWorkspace()
                 await retranscriptionService.retranscribe(
                     sessionID: sessionID,
                     modelContainer: modelContainer,
@@ -637,13 +716,10 @@ final class JobsViewModel {
     /// afterwards. Two rules for two session types would be a distinction with nothing behind it,
     /// and the old one was not even conservative — an unexpected file quietly preserved a folder
     /// nobody would look in again.
-    func deleteImported(session: ImportedSession, context: ModelContext) async {
-        if let mixdownPath = session.mixdownURL {
-            let folder = URL(fileURLWithPath: mixdownPath).deletingLastPathComponent()
-            await removeSessionFolder(folder)
-        }
-        context.delete(session)
-        try? context.save()
+    @discardableResult
+    func deleteImported(session: ImportedSession, context: ModelContext) async -> DeletionResult {
+        let folder = session.mixdownURL.map { URL(fileURLWithPath: $0).deletingLastPathComponent() }
+        return await deleteRecord(session, folder: folder, context: context)
     }
 
     private func displayedTranscript(for session: any TranscribableSession) -> Transcript? {

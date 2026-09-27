@@ -13,108 +13,133 @@ final class RecordingServiceTests {
         return try #require(context.fetch(descriptor).first(where: { $0.id == id }))
     }
 
-    @Test
-
-    func testSessionRecordingFileURLsUseNamedFolderAndNotTmp() {
-        let workspace = makeWorkspace()
-        defer { removeWorkspace(at: workspace.rootURL) }
-        let createdAt = Date(timeIntervalSince1970: 1_743_171_000) // 2025-03-28 14:30 UTC
-        let identifier = "12345678-a3"
-        let urls = RecordingService.recordingFileURLs(
-            in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: identifier
-        )
-        let folderName = RecordingService.folderName(createdAt: createdAt, recordingIdentifier: identifier)
-
-        #expect(urls.mic.path.hasSuffix("/recordings/\(folderName)/mic.wav"))
-        #expect(urls.app.path.hasSuffix("/recordings/\(folderName)/app.wav"))
-        #expect(!urls.mic.path.contains("/recordings/tmp/"))
-        #expect(!urls.app.path.contains("/recordings/tmp/"))
+    @Test(arguments: [false, true])
+    func stopFinishesLiveAudioWithMissingSession(isRecording: Bool) async throws {
+        let container = try ModelContainer(for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let settings = await MainActor.run { AppAudioSettings() }
+        let service = RecordingService(workspaceService: MockWorkspaceService(), modelContainer: container, appAudioSettings: settings)
+        let audio = AsyncStream<LiveAudioChunk>.makeStream()
+        await service.setRecordingStateForTesting(isRecording: isRecording, liveAudioContinuation: audio.continuation)
+        #expect(await service.stopRecording() == nil)
+        var iterator = audio.stream.makeAsyncIterator()
+        #expect(await iterator.next() == nil)
     }
 
     @Test
+    func engineMicPathPreservesCaptureTime() async throws {
+        let fixture = try await makeRecoveryFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        let audio = AsyncStream<LiveAudioChunk>.makeStream()
+        await fixture.service.setRecordingStateForTesting(isRecording: true, liveAudioContinuation: audio.continuation)
+        await fixture.service.setMicRecoveryStateForTesting(desiredMicDeviceUID: nil, micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav"))
+        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
+        let emit = try #require(fixture.micController.onBuffer)
+        let time = HostNanoseconds(nanoseconds: 2_000_000_000)
+        emit([1, 2], 48_000, time)
+        _ = await fixture.service.stopRecording()
+        var iterator = audio.stream.makeAsyncIterator()
+        let chunk = try #require(await iterator.next())
+        #expect(chunk.hostTime == time)
+        #expect(chunk.source == .mic)
+        #expect(chunk.samples == [1, 2])
+        #expect(await iterator.next() == nil)
+    }
 
-    func testScreenVideoURLsUseNamedFolderAndStableFilenames() {
-        let workspace = makeWorkspace()
-        defer { removeWorkspace(at: workspace.rootURL) }
+    // MARK: - Folder layout
 
-        let createdAt = Date(timeIntervalSince1970: 1_743_171_000)
-        let identifier = "12345678-a3"
-        let folderName = RecordingService.folderName(createdAt: createdAt, recordingIdentifier: identifier)
+    private static let utc = TimeZone(identifier: "UTC")!
+    private static let march28At1430 = Date(timeIntervalSince1970: 1_774_708_200) // 2026-03-28 14:30 UTC
 
-        let tmpURL = RecordingFileLayout.screenTmpVideoURL(
-            in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: identifier
-        )
-        let finalURL = RecordingFileLayout.screenVideoURL(
-            in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: identifier
-        )
-
-        #expect(tmpURL.path == workspace.recordingsURL.appendingPathComponent("\(folderName)/screen-tmp.mov").path)
-        #expect(finalURL.path == workspace.recordingsURL.appendingPathComponent("\(folderName)/screen.mov").path)
-        #expect(!tmpURL.lastPathComponent.contains(identifier))
-        #expect(!finalURL.lastPathComponent.contains(identifier))
+    @Test
+    func testFolderNameIsDateAndTime() {
+        #expect(RecordingFileLayout.folderName(createdAt: Self.march28At1430, timeZone: Self.utc) == "2026-03-28 14-30")
     }
 
     @Test
+    func testFileURLsAreInsideTheGivenFolder() {
+        let folderURL = URL(fileURLWithPath: "/tmp/workspace/recordings/2026-03-28 14-30", isDirectory: true)
+        let urls = RecordingFileLayout.recordingFileURLs(in: folderURL)
 
-    func testRecordingFolderURLUsesExistingNamedPattern() throws {
+        #expect(urls.mic == folderURL.appendingPathComponent("mic.wav"))
+        #expect(urls.app == folderURL.appendingPathComponent("app.wav"))
+        #expect(RecordingFileLayout.screenTmpVideoURL(in: folderURL) == folderURL.appendingPathComponent("screen-tmp.mov"))
+        #expect(RecordingFileLayout.screenVideoURL(in: folderURL) == folderURL.appendingPathComponent("screen.mov"))
+    }
+
+    @Test
+    func testCreateRecordingFolderUsesDateAndTimeName() throws {
         let workspace = makeWorkspace()
         defer { removeWorkspace(at: workspace.rootURL) }
 
-        let createdAt = Date(timeIntervalSince1970: 1_743_171_000) // 2025-03-28 14:30 UTC
-        let folderURL = RecordingService.recordingFolderURL(
+        let folderURL = try RecordingFileLayout.createRecordingFolder(
             in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: "12345678-a3"
+            createdAt: Self.march28At1430,
+            timeZone: Self.utc
         )
-        try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
 
-        let folderName = folderURL.lastPathComponent
-        let expectedPattern = #"^Recording [A-Z][a-z]{2} \d{2} at \d{2}-\d{2} [A-Za-z0-9]{2}$"#
-
+        #expect(folderURL == workspace.recordingsURL.appendingPathComponent("2026-03-28 14-30", isDirectory: true))
         #expect(FileManager.default.fileExists(atPath: folderURL.path))
-        #expect(folderName.range(of: expectedPattern, options: .regularExpression) != nil)
     }
 
     @Test
-
-    func testSessionRecordingFolderPathUsesNamedFolderNotTmp() throws {
+    func testCreateRecordingFolderSkipsTakenNames() throws {
         let workspace = makeWorkspace()
         defer { removeWorkspace(at: workspace.rootURL) }
+        let first = workspace.recordingsURL.appendingPathComponent("2026-03-28 14-30", isDirectory: true)
+        let second = workspace.recordingsURL.appendingPathComponent("2026-03-28 14-30 2", isDirectory: true)
+        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
+        let existingMic = first.appendingPathComponent("mic.wav")
+        _ = FileManager.default.createFile(atPath: existingMic.path, contents: Data("first".utf8))
 
-        let createdAt = Date(timeIntervalSince1970: 1_743_171_000)
-        let result = RecordingService.recordingFileURLs(
+        let folderURL = try RecordingFileLayout.createRecordingFolder(
             in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: "abcdef12"
+            createdAt: Self.march28At1430,
+            timeZone: Self.utc
         )
-        let folderName = RecordingService.folderName(createdAt: createdAt, recordingIdentifier: "abcdef12")
 
-        #expect(result.mic.path.hasSuffix("/recordings/\(folderName)/mic.wav"))
-        #expect(!(result.mic.path.contains("/recordings/tmp/")))
+        #expect(folderURL.lastPathComponent == "2026-03-28 14-30 3")
+        #expect(try Data(contentsOf: existingMic) == Data("first".utf8))
     }
 
     @Test
-
-    func testFolderBasedPathExpectationUsesNamedFolderMicFile() throws {
+    func testCreateRecordingFolderInAnotherYearDoesNotCollide() throws {
         let workspace = makeWorkspace()
         defer { removeWorkspace(at: workspace.rootURL) }
-
-        let createdAt = Date(timeIntervalSince1970: 1_743_171_000)
-        let result = RecordingService.recordingFileURLs(
-            in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: "11111111-a3"
+        try FileManager.default.createDirectory(
+            at: workspace.recordingsURL.appendingPathComponent("2026-03-28 14-30", isDirectory: true),
+            withIntermediateDirectories: true
         )
-        let folderName = RecordingService.folderName(createdAt: createdAt, recordingIdentifier: "11111111-a3")
 
-        #expect(result.mic.path == workspace.recordingsURL.appendingPathComponent("\(folderName)/mic.wav").path)
-        #expect(result.app.path == workspace.recordingsURL.appendingPathComponent("\(folderName)/app.wav").path)
+        let folderURL = try RecordingFileLayout.createRecordingFolder(
+            in: workspace,
+            createdAt: Date(timeIntervalSince1970: 1_806_244_200), // 2027-03-28 14:30 UTC
+            timeZone: Self.utc
+        )
+
+        #expect(folderURL.lastPathComponent == "2027-03-28 14-30")
+    }
+
+    @Test
+    func testCreateRecordingFolderFailsAfterLastSuffix() throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        for suffix in 1...RecordingFileLayout.maximumFolderSuffix {
+            let name = suffix == 1 ? "2026-03-28 14-30" : "2026-03-28 14-30 \(suffix)"
+            try FileManager.default.createDirectory(
+                at: workspace.recordingsURL.appendingPathComponent(name, isDirectory: true),
+                withIntermediateDirectories: true
+            )
+        }
+
+        #expect(throws: CocoaError.self) {
+            try RecordingFileLayout.createRecordingFolder(
+                in: workspace,
+                createdAt: Self.march28At1430,
+                timeZone: Self.utc
+            )
+        }
     }
 
     @Test
@@ -157,7 +182,7 @@ final class RecordingServiceTests {
             micURL: URL(fileURLWithPath: "/tmp/does-not-exist-mic.wav"),
             appURL: nil,
             mixdownURL: outputURL,
-            micStartHostTime: 1,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1),
             appStartHostTime: nil
         )
 
@@ -199,14 +224,14 @@ final class RecordingServiceTests {
             appAudioSettings: appAudioSettings
         )
 
-        await service.captureMicStartHostTimeIfNeeded(1_000)
-        await service.captureMicStartHostTimeIfNeeded(2_000)
-        await service.captureAppStartHostTimeIfNeeded(3_000)
-        await service.captureAppStartHostTimeIfNeeded(4_000)
+        await service.captureMicStartHostTimeIfNeeded(HostNanoseconds(nanoseconds: 1_000))
+        await service.captureMicStartHostTimeIfNeeded(HostNanoseconds(nanoseconds: 2_000))
+        await service.captureAppStartHostTimeIfNeeded(HostNanoseconds(nanoseconds: 3_000))
+        await service.captureAppStartHostTimeIfNeeded(HostNanoseconds(nanoseconds: 4_000))
 
         let hostTimes = await service.capturedHostTimes()
-        #expect(hostTimes.mic == 1_000)
-        #expect(hostTimes.app == 3_000)
+        #expect(hostTimes.mic == HostNanoseconds(nanoseconds: 1_000))
+        #expect(hostTimes.app == HostNanoseconds(nanoseconds: 3_000))
     }
 
     @Test
@@ -271,7 +296,7 @@ final class RecordingServiceTests {
         let mixdownCoordinator = MockRecordingMixdownCoordinator()
         let screenVideoMuxer = MockScreenVideoMuxer()
         let screenSession = MockScreenCaptureSession()
-        screenSession.videoStartHostTime = 9_000
+        screenSession.videoStartHostTime = HostNanoseconds(nanoseconds: 9_000)
         let factoryProbe = ScreenCaptureSessionFactoryProbe(session: screenSession)
 
         let service = RecordingService(
@@ -307,7 +332,249 @@ final class RecordingServiceTests {
 
         let mixdownStart = try #require(await mixdownCoordinator.firstCallStartedAt())
         let muxStart = try #require(await screenVideoMuxer.firstCallStartedAt())
-        #expect(abs(mixdownStart.timeIntervalSince(muxStart)) < 0.25)
+        #expect(muxStart >= mixdownStart)
+
+        // Stop saves what recovery needs to retry the mux (design D3).
+        let stoppedID = try #require(sessionID)
+        let session = try #require(try RecordingSession.fetch(id: stoppedID, in: ModelContext(container)))
+        #expect(session.screenMuxState == ScreenMuxState.pending.rawValue)
+        #expect(session.videoStartHostTimeNanos == 9_000)
+        #expect(session.audioAnchorHostTimeNanos != nil)
+    }
+
+    @Test
+    func testEngineTapHostTimeConvertsToNanoseconds() {
+        let ticks = AVAudioTime.hostTime(forSeconds: 2.5)
+
+        #expect(AVAudioEngineMicCaptureController.hostTime(of: AVAudioTime(hostTime: ticks)) == HostNanoseconds(nanoseconds: 2_500_000_000))
+        #expect(AVAudioEngineMicCaptureController.hostTime(of: AVAudioTime(hostTime: 0)) == nil)
+    }
+
+    @Test
+    func testAudioAnchorIsTheEarlierStartTime() {
+        let mic = HostNanoseconds(nanoseconds: 2_000_000_000)
+        let app = HostNanoseconds(nanoseconds: 1_500_000_000)
+
+        #expect(RecordingService.audioAnchorHostTime(mic: mic, app: app) == app)
+        #expect(RecordingService.audioAnchorHostTime(mic: app, app: mic) == app)
+        #expect(RecordingService.audioAnchorHostTime(mic: mic, app: nil) == mic)
+    }
+
+    @Test
+    func testTwoStartsInTheSameMinuteUseDistinctFolders() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+
+        let service = RecordingService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            micCaptureController: MockMicCaptureController(),
+            mixdownCoordinator: MockRecordingMixdownCoordinator(),
+            screenVideoMuxer: MockScreenVideoMuxer(),
+            permissionChecker: {},
+            scopedAccessStarter: { _ in true },
+            scopedAccessStopper: { _ in },
+            now: { Self.march28At1430 }
+        )
+
+        let firstID = try await service.startRecording(in: workspace, title: "First")
+        _ = await service.stopRecording()
+        let context = ModelContext(container)
+        let firstSession = try #require(try RecordingSession.fetch(id: firstID, in: context))
+        let firstFolder = URL(fileURLWithPath: firstSession.micAudioURL).deletingLastPathComponent()
+        _ = FileManager.default.createFile(
+            atPath: firstFolder.appendingPathComponent("sentinel").path,
+            contents: Data("first".utf8)
+        )
+        let firstContents = try folderSnapshot(at: firstFolder)
+
+        let secondID = try await service.startRecording(in: workspace, title: "Second")
+        _ = await service.stopRecording()
+        let secondSession = try #require(try RecordingSession.fetch(id: secondID, in: ModelContext(container)))
+        let secondFolder = URL(fileURLWithPath: secondSession.micAudioURL).deletingLastPathComponent()
+
+        #expect(secondFolder.lastPathComponent == firstFolder.lastPathComponent + " 2")
+        #expect(try folderSnapshot(at: firstFolder) == firstContents)
+    }
+
+    private func folderSnapshot(at folderURL: URL) throws -> [String: Data] {
+        var snapshot: [String: Data] = [:]
+        for name in try FileManager.default.contentsOfDirectory(atPath: folderURL.path) {
+            snapshot[name] = try Data(contentsOf: folderURL.appendingPathComponent(name))
+        }
+        return snapshot
+    }
+
+    @Test
+    func testConcurrentStopRequestsShareOneTeardown() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        let mixdownCoordinator = MockRecordingMixdownCoordinator()
+        let screenSession = MockScreenCaptureSession()
+        let stopBlocker = MockScreenCaptureStopBlocker()
+        screenSession.blockNextStop(using: stopBlocker)
+        let factoryProbe = ScreenCaptureSessionFactoryProbe(session: screenSession)
+
+        let service = RecordingService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            micCaptureController: MockMicCaptureController(),
+            mixdownCoordinator: mixdownCoordinator,
+            screenVideoMuxer: MockScreenVideoMuxer(),
+            permissionChecker: {},
+            scopedAccessStarter: { _ in true },
+            scopedAccessStopper: { _ in },
+            screenCaptureSessionFactory: { factoryProbe.makeSession() }
+        )
+
+        _ = try await service.startRecording(
+            in: workspace,
+            micDeviceID: nil,
+            captureDisplayID: 42,
+            capturedAppName: nil,
+            appProcessID: nil,
+            title: "Session"
+        )
+
+        let firstStop = Task { await service.stopRecording() }
+        await stopBlocker.waitUntilStopStarts()
+        let secondStop = Task { await service.stopRecording() }
+        while await service.stopRecordingCallCountForTesting() < 2 {
+            await Task.yield()
+        }
+        await stopBlocker.release()
+
+        let firstID = await firstStop.value
+        let secondID = await secondStop.value
+        #expect(firstID != nil)
+        #expect(firstID == secondID)
+        await mixdownCoordinator.waitForCall()
+        #expect(await mixdownCoordinator.callCount() == 1)
+        #expect(screenSession.stopCallCount == 1)
+        #expect(await service.isRecording() == false)
+    }
+
+    @Test
+    func testConcurrentStartRequestsStartOneRecording() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        let permissionGate = MockScreenCaptureStopBlocker()
+
+        let service = RecordingService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            micCaptureController: MockMicCaptureController(),
+            mixdownCoordinator: MockRecordingMixdownCoordinator(),
+            screenVideoMuxer: MockScreenVideoMuxer(),
+            permissionChecker: {
+                await permissionGate.markStopStarted()
+                await permissionGate.waitUntilReleased()
+            },
+            scopedAccessStarter: { _ in true },
+            scopedAccessStopper: { _ in }
+        )
+
+        let firstStart = Task { try await service.startRecording(in: workspace, title: "First") }
+        await permissionGate.waitUntilStopStarts()
+
+        var secondError: RecordingError?
+        do {
+            _ = try await service.startRecording(in: workspace, title: "Second")
+        } catch {
+            secondError = error
+        }
+        guard case .alreadyRecording = secondError else {
+            Issue.record("Expected alreadyRecording, got \(String(describing: secondError))")
+            return
+        }
+
+        await permissionGate.release()
+        let firstID = try await firstStart.value
+        #expect(await service.isRecording())
+
+        let stoppedID = await service.stopRecording()
+        #expect(stoppedID == firstID)
+    }
+
+    @Test
+    func testFailedStartLeavesServiceReadyForNextStart() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        let tagCalls = VPCallCounter()
+
+        let service = RecordingService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            micCaptureController: MockMicCaptureController(),
+            mixdownCoordinator: MockRecordingMixdownCoordinator(),
+            screenVideoMuxer: MockScreenVideoMuxer(),
+            permissionChecker: {},
+            scopedAccessStarter: { _ in true },
+            scopedAccessStopper: { _ in },
+            defaultTagApplier: { session, context in
+                tagCalls.increment()
+                if tagCalls.callCount == 1 {
+                    throw NSError(domain: "RecordingServiceTests", code: 11)
+                }
+                try TagService().applyDefaultTag(to: session, in: context)
+            }
+        )
+
+        var firstError: RecordingError?
+        do {
+            _ = try await service.startRecording(in: workspace, title: "Fails")
+        } catch {
+            firstError = error
+        }
+        guard case .failedToStart = firstError else {
+            Issue.record("Expected failedToStart, got \(String(describing: firstError))")
+            return
+        }
+        #expect(await service.isRecording() == false)
+
+        let sessionID = try await service.startRecording(in: workspace, title: "Succeeds")
+        #expect(await service.isRecording())
+        #expect(await service.stopRecording() == sessionID)
     }
 
     @Test
@@ -327,7 +594,7 @@ final class RecordingServiceTests {
         let mixdownCoordinator = MockRecordingMixdownCoordinator()
         let screenVideoMuxer = MockScreenVideoMuxer()
         let screenSession = MockScreenCaptureSession()
-        screenSession.videoStartHostTime = 5_000
+        screenSession.videoStartHostTime = HostNanoseconds(nanoseconds: 5_000)
         let factoryProbe = ScreenCaptureSessionFactoryProbe(session: screenSession)
 
         let service = RecordingService(
@@ -382,7 +649,7 @@ final class RecordingServiceTests {
         let mixdownCoordinator = MockRecordingMixdownCoordinator()
         let screenVideoMuxer = MockScreenVideoMuxer()
         let screenSession = MockScreenCaptureSession()
-        screenSession.videoStartHostTime = 5_000
+        screenSession.videoStartHostTime = HostNanoseconds(nanoseconds: 5_000)
         let stopBlocker = MockScreenCaptureStopBlocker()
         screenSession.blockNextStop(using: stopBlocker)
         let factoryProbe = ScreenCaptureSessionFactoryProbe(session: screenSession)
@@ -500,11 +767,11 @@ final class RecordingServiceTests {
 
         let createdAt = Date(timeIntervalSince1970: 1_743_171_000)
         let recordingIdentifier = "cleanup-video"
-        let screenTmpURL = RecordingFileLayout.screenTmpVideoURL(
-            in: workspace,
-            createdAt: createdAt,
-            recordingIdentifier: recordingIdentifier
+        let folderURL = workspace.recordingsURL.appendingPathComponent(
+            RecordingFileLayout.folderName(createdAt: createdAt),
+            isDirectory: true
         )
+        let screenTmpURL = RecordingFileLayout.screenTmpVideoURL(in: folderURL)
         try FileManager.default.createDirectory(
             at: screenTmpURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -516,6 +783,7 @@ final class RecordingServiceTests {
             recordingIdentifier: recordingIdentifier,
             recordingWorkspaceRootURL: workspace.rootURL,
             recordingCreatedAt: createdAt,
+            recordingFolderURL: folderURL,
             currentSessionID: UUID(),
             screenCaptureSession: screenSession
         )
@@ -549,11 +817,11 @@ final class RecordingServiceTests {
         let customTitle = "My Custom Title"
         let recordingCreatedAt = Date(timeIntervalSince1970: 1_743_171_000)
         let recordingIdentifier = "test-id"
-        let sessionURLs = RecordingService.recordingFileURLs(
-            in: workspace,
-            createdAt: recordingCreatedAt,
-            recordingIdentifier: recordingIdentifier
+        let folderURL = workspace.recordingsURL.appendingPathComponent(
+            RecordingFileLayout.folderName(createdAt: recordingCreatedAt),
+            isDirectory: true
         )
+        let sessionURLs = RecordingFileLayout.recordingFileURLs(in: folderURL)
         try FileManager.default.createDirectory(
             at: sessionURLs.mic.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -576,6 +844,7 @@ final class RecordingServiceTests {
             recordingIdentifier: recordingIdentifier,
             recordingWorkspaceRootURL: workspace.rootURL,
             recordingCreatedAt: recordingCreatedAt,
+            recordingFolderURL: folderURL,
             pendingTitle: customTitle,
             currentSessionID: seededSession.id
         )
@@ -585,6 +854,75 @@ final class RecordingServiceTests {
         let ctx = ModelContext(container)
         let fetched = try fetchRecordingSession(id: try #require(sessionID), from: ctx)
         #expect(fetched.title == customTitle)
+    }
+
+    @Test
+    func testStopRecordingFinalizesActiveSessionInLibraryOfFifteenHundred() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        let storeDirectory = workspace.rootURL.appendingPathComponent("store", isDirectory: true)
+        try FileManager.default.createDirectory(at: storeDirectory, withIntermediateDirectories: true)
+
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(url: storeDirectory.appendingPathComponent("store.sqlite"))
+        )
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        let mixdownCoordinator = MockRecordingMixdownCoordinator()
+        let service = RecordingService(
+            workspaceService: MockWorkspaceService(),
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            mixdownCoordinator: mixdownCoordinator
+        )
+
+        let recordingCreatedAt = Date().addingTimeInterval(-5)
+        let recordingIdentifier = "test-id-large-library"
+        let folderURL = workspace.recordingsURL.appendingPathComponent(
+            RecordingFileLayout.folderName(createdAt: recordingCreatedAt),
+            isDirectory: true
+        )
+        let sessionURLs = RecordingFileLayout.recordingFileURLs(in: folderURL)
+        try FileManager.default.createDirectory(
+            at: sessionURLs.mic.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        _ = FileManager.default.createFile(atPath: sessionURLs.mic.path, contents: Data("mic".utf8))
+
+        let seedContext = ModelContext(container)
+        for index in 0..<1_499 {
+            seedContext.insert(
+                RecordingSession(duration: 0, micAudioURL: "/tmp/mic-\(index).wav", title: "Recording \(index)", status: .recorded)
+            )
+        }
+        let activeSession = RecordingSession(
+            createdAt: recordingCreatedAt,
+            duration: 0,
+            micAudioURL: sessionURLs.mic.path,
+            title: "Active",
+            status: .recording
+        )
+        seedContext.insert(activeSession)
+        try seedContext.save()
+
+        await service.setRecordingStateForTesting(
+            isRecording: true,
+            recordingIdentifier: recordingIdentifier,
+            recordingWorkspaceRootURL: workspace.rootURL,
+            recordingCreatedAt: recordingCreatedAt,
+            recordingFolderURL: folderURL,
+            currentSessionID: activeSession.id
+        )
+
+        let sessionID = await service.stopRecording()
+        #expect(sessionID == activeSession.id)
+
+        await mixdownCoordinator.waitForCall()
+        #expect(await mixdownCoordinator.callCount() == 1)
+
+        let fetched = try #require(try RecordingSession.fetch(id: activeSession.id, in: ModelContext(container)))
+        #expect(fetched.duration >= 5)
+        #expect(fetched.status == .recorded)
     }
 
     @Test
@@ -606,11 +944,11 @@ final class RecordingServiceTests {
 
         let recordingCreatedAt = Date(timeIntervalSince1970: 1_743_171_000)
         let recordingIdentifier = "test-id-default"
-        let sessionURLs = RecordingService.recordingFileURLs(
-            in: workspace,
-            createdAt: recordingCreatedAt,
-            recordingIdentifier: recordingIdentifier
+        let folderURL = workspace.recordingsURL.appendingPathComponent(
+            RecordingFileLayout.folderName(createdAt: recordingCreatedAt),
+            isDirectory: true
         )
+        let sessionURLs = RecordingFileLayout.recordingFileURLs(in: folderURL)
         try FileManager.default.createDirectory(
             at: sessionURLs.mic.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -632,6 +970,7 @@ final class RecordingServiceTests {
             recordingIdentifier: recordingIdentifier,
             recordingWorkspaceRootURL: workspace.rootURL,
             recordingCreatedAt: recordingCreatedAt,
+            recordingFolderURL: folderURL,
             pendingTitle: nil,
             currentSessionID: seededSession.id
         )
@@ -796,11 +1135,11 @@ final class RecordingServiceTests {
             desiredMicDeviceUID: nil,
             micFileURL: micURL
         )
-        await fixture.service.captureMicStartHostTimeIfNeeded(1_000)
+        await fixture.service.captureMicStartHostTimeIfNeeded(HostNanoseconds(nanoseconds: 1_000))
         await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
-        await fixture.service.captureMicStartHostTimeIfNeeded(2_000)
+        await fixture.service.captureMicStartHostTimeIfNeeded(HostNanoseconds(nanoseconds: 2_000))
 
-        #expect(await fixture.service.capturedHostTimes().mic == 1_000)
+        #expect(await fixture.service.capturedHostTimes().mic == HostNanoseconds(nanoseconds: 1_000))
     }
 
     @Test
@@ -1561,7 +1900,7 @@ private final class ScreenCaptureSessionFactoryProbe: @unchecked Sendable {
 
 private final class MockScreenCaptureSession: ScreenCaptureSessionControlling, @unchecked Sendable {
     var onError: (@Sendable (Error) -> Void)?
-    var videoStartHostTime: UInt64?
+    var videoStartHostTime: HostNanoseconds?
     var startError: Error?
     private(set) var startedVideoURL: URL?
     private(set) var stopCallCount = 0
@@ -1655,15 +1994,16 @@ private actor MockRecordingMixdownCoordinator: RecordingMixdownCoordinating {
         micURL _: URL,
         appURL _: URL?,
         mixdownURL _: URL,
-        micStartHostTime _: UInt64,
-        appStartHostTime _: UInt64?
-    ) async {
+        micStartHostTime _: HostNanoseconds,
+        appStartHostTime _: HostNanoseconds?
+    ) async -> Bool {
         calls.append(Call(startedAt: Date()))
         let continuations = waiters
         waiters.removeAll()
         for continuation in continuations {
             continuation.resume()
         }
+        return false
     }
 
     func waitForCall() async {
@@ -1728,6 +2068,7 @@ private final class MockMicCaptureController: MicCaptureControlling, @unchecked 
     var startCaptureError: Error?
     var startCaptureErrors: [Error] = []
     private(set) var startCaptureCalls: [StartCall] = []
+    var onBuffer: (@Sendable ([Float], Double, HostNanoseconds?) -> Void)?
     private(set) var stopCaptureCallCount = 0
     var isRunning = false
 
@@ -1738,8 +2079,8 @@ private final class MockMicCaptureController: MicCaptureControlling, @unchecked 
         micStreamer _: AudioFileStreamer,
         voiceProcessingEnabled _: Bool,
         applyVoiceProcessing _: @Sendable (AVAudioInputNode, Bool) -> Void,
-        onFirstHostTime _: @escaping @Sendable (UInt64) -> Void,
-        onBuffer _: @escaping @Sendable ([Float], Double) -> Void
+        onFirstHostTime _: @escaping @Sendable (HostNanoseconds) -> Void,
+        onBuffer: @escaping @Sendable ([Float], Double, HostNanoseconds?) -> Void
     ) throws {
         if !startCaptureErrors.isEmpty {
             throw startCaptureErrors.removeFirst()
@@ -1747,6 +2088,7 @@ private final class MockMicCaptureController: MicCaptureControlling, @unchecked 
         if let startCaptureError {
             throw startCaptureError
         }
+        self.onBuffer = onBuffer
         startCaptureCalls.append(.init(deviceID: deviceID, targetSampleRate: targetFormat.sampleRate))
         isRunning = true
     }

@@ -1,13 +1,15 @@
 import SwiftUI
 
 struct FlowingWaveView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let level: Float
     var appLevel: Float = 0
     let showAppWave: Bool
     let isRecording: Bool
 
     // Ballistics state lives in a reference box mutated inside the Canvas
-    // draw closure: TimelineView(.animation) drives redraws every frame, so
+    // draw closure: the animation timeline drives redraws every frame, so
     // no SwiftUI invalidation is needed or wanted (design D2).
     @State private var smoothing = WaveSmoothingBox()
 
@@ -38,7 +40,7 @@ struct FlowingWaveView: View {
     private static let appWaveColor = Color(red: 0.85, green: 0.35, blue: 0.19)
 
     var body: some View {
-        TimelineView(.animation) { timelineContext in
+        TimelineView(.animation(paused: reduceMotion)) { timelineContext in
             Canvas { graphicsContext, size in
                 guard size.width > 0, size.height > 0 else {
                     return
@@ -49,13 +51,13 @@ struct FlowingWaveView: View {
 
                 let micTarget = isRecording ? WaveBallistics.perceptualLevel(fromRMS: level) : 0
                 let appTarget = isRecording ? WaveBallistics.perceptualLevel(fromRMS: appLevel) : 0
-                let mic = CGFloat(smoothing.mic.step(target: micTarget, deltaTime: deltaTime))
-                let app = CGFloat(smoothing.app.step(target: appTarget, deltaTime: deltaTime))
+                let mic = CGFloat(reduceMotion ? micTarget : smoothing.mic.step(target: micTarget, deltaTime: deltaTime))
+                let app = CGFloat(reduceMotion ? appTarget : smoothing.app.step(target: appTarget, deltaTime: deltaTime))
 
-                let phase = now * waveSpeed
+                let phase = reduceMotion ? 0 : now * waveSpeed
                 // Never dead-flat while recording: a slow breathing floor
                 // signals the session is alive (design D3).
-                let breathing = 3 + 1.2 * CGFloat(sin(now * 1.1))
+                let breathing: CGFloat = reduceMotion ? 3 : 3 + 1.2 * CGFloat(sin(now * 1.1))
                 let micAmplitude = isRecording ? max(mic * maxAmplitude, breathing) : idleAmplitude
                 let vivid = isRecording ? 0.35 + 0.65 * Double(mic) : 0.55
 

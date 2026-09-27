@@ -156,7 +156,7 @@ struct RecordingStatusTests {
         #expect(fetched.first?.statusRawValue == "recording")
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testRecordingSessionRowShowsPulsingDotForRecordingStatus() throws {
         let source = try sourceForFile(named: "RecordingSessionRow.swift")
         #expect(source.contains("case .recording:"))
@@ -167,7 +167,7 @@ struct RecordingStatusTests {
 
     // MARK: - Interrupted-capture marker
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testRecordingSessionRowShowsTheInterruptedCaptureMarker() throws {
         let source = try sourceForFile(named: "RecordingSessionRow.swift")
         #expect(source.contains("session.wasCaptureInterrupted"))
@@ -177,7 +177,7 @@ struct RecordingStatusTests {
 
     /// An interrupted recording succeeded and its audio is usable, so it must not borrow the
     /// `.error` treatment.
-    @Test
+    @Test(.tags(.sourceLint))
     func testInterruptedCaptureIsNotShownAsAnError() throws {
         let source = try sourceForFile(named: "RecordingSessionRow.swift")
         let markerRange = try #require(source.range(of: "session.wasCaptureInterrupted"))
@@ -188,7 +188,7 @@ struct RecordingStatusTests {
 
     /// The screen-capture warning and the interrupted-capture marker are independent conditions;
     /// a recording that hit both shows both rather than one replacing the other.
-    @Test
+    @Test(.tags(.sourceLint))
     func testBothCaptureCaveatsCanAppearTogether() throws {
         let source = try sourceForFile(named: "RecordingSessionRow.swift")
         let screenWarning = try #require(source.range(of: "session.screenCaptureWarning != nil"))
@@ -205,7 +205,7 @@ struct RecordingStatusTests {
 
     /// The row and the detail header disagreed — 01:35 against 01:34 for the same recording —
     /// because each had its own formatter and they rounded differently.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheRowAndTheHeaderCannotDisagreeAboutDuration() throws {
         let row = try readSource(relativePathFromTests: "../UI/RecordingSessionRow.swift")
         let imported = try readSource(relativePathFromTests: "../UI/ImportedSessionRow.swift")
@@ -220,7 +220,7 @@ struct RecordingStatusTests {
 
     /// Glass takes its material from what is behind it, so without a fill of its own the chip read
     /// on a selected row and vanished on a plain one.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheTagChipCarriesItsOwnBackdrop() throws {
         let source = try readSource(relativePathFromTests: "../UI/SessionTagLineView.swift")
 
@@ -244,7 +244,7 @@ struct RecordingStatusTests {
         )
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheListOffersTagAssignmentOnRightClick() throws {
         let source = try jobsViewSource()
         #expect(source.contains(".contextMenu"))
@@ -253,7 +253,7 @@ struct RecordingStatusTests {
 
     /// Only recordings carry tags. An empty `contextMenu` body shows no menu, which is what pending
     /// and imported rows should do.
-    @Test
+    @Test(.tags(.sourceLint))
     func testOnlyRecordingRowsProduceATagMenu() throws {
         let source = try jobsViewSource()
         // Bounded to this function. A fixed-width window would spill into `deleteButton`, which
@@ -275,14 +275,14 @@ struct RecordingStatusTests {
         )
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheDefaultTagIsNotListedForAssignment() throws {
         let source = try assignmentMenuSource()
         // `assignableTags` excludes it; the menu does not filter separately.
         #expect(source.contains("assignableTags(in: modelContext)"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testAtThreeTagsFurtherTagsAreDisabledRatherThanHidden() throws {
         let source = try assignmentMenuSource()
         #expect(source.contains(".disabled(!isCarried && realCount >= TagService.maximumTagsPerRecording)"))
@@ -290,7 +290,7 @@ struct RecordingStatusTests {
         #expect(!source.contains("assignable.filter"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testCarriedTagsAreMarkedAndToggleBothWays() throws {
         let source = try assignmentMenuSource()
         #expect(source.contains("systemImage: \"checkmark\""))
@@ -300,7 +300,7 @@ struct RecordingStatusTests {
 
     /// The list and the detail toolbar share one menu body, so they cannot drift on which tags are
     /// offered or when they are unavailable.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheListAndTheDetailToolbarShareOneAssignmentMenu() throws {
         let jobs = try jobsViewSource()
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -313,7 +313,7 @@ struct RecordingStatusTests {
     }
 
     /// Tags are a session action, so the control sits with Transform and Delete.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheDetailToolbarCarriesATagsControl() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let detail = try String(
@@ -328,7 +328,7 @@ struct RecordingStatusTests {
     /// The search field and the filter control must survive a filter or query that matches
     /// nothing. They used to be chips inside the branch that the empty state replaces, so filtering
     /// to zero removed the only way to unfilter.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheSearchBarRendersOutsideTheEmptyStateBranch() throws {
         let source = try jobsViewSource()
         // An inset on the whole stack, so it is there whatever the branch inside renders. It is
@@ -342,7 +342,7 @@ struct RecordingStatusTests {
 
     /// A recording carrying only the default tag has nothing assignable, so without this the menu
     /// is empty and looks broken.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheAssignmentMenuIsNeverEmpty() throws {
         let source = try assignmentMenuSource()
         #expect(source.contains("Button(\"Add new tag\")"))
@@ -353,7 +353,7 @@ struct RecordingStatusTests {
         #expect(buttonRange.lowerBound > forEachRange.lowerBound)
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheNameFieldLosesFocusOnAClickElsewhere() throws {
         let source = try tagSettingsSourceForRow()
         #expect(source.contains("@FocusState private var focusedTagID"))
@@ -379,7 +379,7 @@ struct RecordingStatusTests {
         )
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testTagsAreNamedNotJustColoured() throws {
         let source = try tagLineSource()
         #expect(source.contains("Text(tag.name)"))
@@ -389,7 +389,7 @@ struct RecordingStatusTests {
     /// Without a backdrop the chip sits directly on the list's selection fill and a tag coloured
     /// near the accent disappears into it. A `List` gives no way to cut its selection around a
     /// subview, so the chip has to be drawn over it.
-    @Test
+    @Test(.tags(.sourceLint))
     func testEachTagChipHasItsOwnBackdrop() throws {
         let source = try tagLineSource()
         #expect(source.contains("glassEffect(.regular, in: Capsule())"))
@@ -398,7 +398,7 @@ struct RecordingStatusTests {
 
     /// Tag colours are random and user-chosen, so some would be unreadable as text. Colour stays in
     /// the dot and the tint.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheTagNameIsNotDrawnInTheTagColour() throws {
         let source = try tagLineSource()
         let nameRange = try #require(source.range(of: "Text(tag.name)"))
@@ -406,20 +406,20 @@ struct RecordingStatusTests {
         #expect(!rest.contains("foregroundStyle(Color(tagHex"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheDefaultTagIsNeverNamed() throws {
         let source = try tagLineSource()
         #expect(source.contains("tags.filter { !$0.isDefault }"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testAnUntaggedRecordingShowsNoTagLine() throws {
         let source = try tagLineSource()
         // The whole line is conditional on there being a named tag.
         #expect(source.contains("if !namedTags.isEmpty"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testNamesTruncateInOrderRatherThanWrapping() throws {
         let source = try tagLineSource()
         #expect(source.contains("lineLimit(1)"))
@@ -431,19 +431,19 @@ struct RecordingStatusTests {
 
     /// The chip reads on both backgrounds because of its own backdrop, so the row still never needs
     /// to know whether it is selected.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheChipWorksWithoutKnowingAboutSelection() throws {
         let source = try tagLineSource()
         #expect(!source.contains("isSelected"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheRowRendersTheTagLine() throws {
         let source = try sourceForFile(named: "RecordingSessionRow.swift")
         #expect(source.contains("SessionTagLineView(tags: session.tags)"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testImportedRowsHaveNoTagLine() throws {
         let source = try sourceForFile(named: "ImportedSessionRow.swift")
         #expect(!source.contains("SessionTagLineView"))
@@ -452,7 +452,7 @@ struct RecordingStatusTests {
     // MARK: - Deletion surfaces
 
     /// Deletion is done to a session you have opened and looked at, not flicked past in a list.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheSessionListOffersNoDeletion() throws {
         let source = try jobsViewSource()
         #expect(!source.contains("swipeActions"))
@@ -463,7 +463,7 @@ struct RecordingStatusTests {
     }
 
     /// The detail toolbar keeps the confirmation it already had, and is now the only route.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheDetailToolbarStillConfirmsBeforeDeleting() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let detail = try String(
@@ -477,7 +477,7 @@ struct RecordingStatusTests {
 
     // MARK: - Row layout
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheTimestampSharesTheDurationLine() throws {
         for file in ["RecordingSessionRow.swift", "ImportedSessionRow.swift"] {
             let source = try sourceForFile(named: file)
@@ -492,7 +492,7 @@ struct RecordingStatusTests {
         }
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheTimestampOccupiesNoLineOfItsOwn() throws {
         for file in ["RecordingSessionRow.swift", "ImportedSessionRow.swift"] {
             let source = try sourceForFile(named: file)
@@ -503,7 +503,7 @@ struct RecordingStatusTests {
     }
 
     /// The text column has to fill for a trailing alignment to resolve against anything.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheTextColumnFillsAvailableWidth() throws {
         for file in ["RecordingSessionRow.swift", "ImportedSessionRow.swift"] {
             let source = try sourceForFile(named: file)
@@ -514,7 +514,7 @@ struct RecordingStatusTests {
 
     // MARK: - Tag dots
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testRecordingRowHasNoLeadingElement() throws {
         let source = try sourceForFile(named: "RecordingSessionRow.swift")
         // No glyph, and no dots either — the 24pt leading column is gone entirely.
@@ -525,7 +525,7 @@ struct RecordingStatusTests {
         #expect(!source.contains("TagDotsView"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testDoneRowsRenderNoAccessory() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let statusTag = try String(
@@ -540,14 +540,14 @@ struct RecordingStatusTests {
     }
 
     /// The source is not lost — it is already caption text on the line below.
-    @Test
+    @Test(.tags(.sourceLint))
     func testRecordingRowStillNamesItsSource() throws {
         let source = try sourceForFile(named: "RecordingSessionRow.swift")
         #expect(source.contains("Text(sourceName)"))
         #expect(source.contains("capturedAppName ?? \"Microphone\""))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testImportedRowKeepsItsSourceGlyph() throws {
         let source = try sourceForFile(named: "ImportedSessionRow.swift")
         #expect(source.contains("sourceGlyph"))
@@ -563,7 +563,7 @@ struct RecordingStatusTests {
 
     // MARK: - Incomplete-capture marker
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testRecordingSessionRowShowsTheIncompleteCaptureMarker() throws {
         let source = try sourceForFile(named: "RecordingSessionRow.swift")
         #expect(source.contains("session.hasIncompleteCapturedAudio"))
@@ -571,7 +571,7 @@ struct RecordingStatusTests {
     }
 
     /// A recording with missing segments still succeeded, so it must not borrow the error look.
-    @Test
+    @Test(.tags(.sourceLint))
     func testIncompleteCaptureIsNotShownAsAnError() throws {
         let source = try sourceForFile(named: "RecordingSessionRow.swift")
         let markerRange = try #require(source.range(of: "session.hasIncompleteCapturedAudio"))
@@ -582,7 +582,7 @@ struct RecordingStatusTests {
 
     /// All four capture caveats are independent conditions, shown together rather than one
     /// replacing another.
-    @Test
+    @Test(.tags(.sourceLint))
     func testAllCaptureCaveatsCanAppearTogether() throws {
         let source = try sourceForFile(named: "RecordingSessionRow.swift")
         let screen = try #require(source.range(of: "session.screenCaptureWarning != nil"))
@@ -844,7 +844,7 @@ struct RecordingSessionTests {
 
     
     
-    @Test
+    @Test(.tags(.sourceLint))
     func testTranscriptDetailViewIncludesAITransformationUIElements() throws {
         let source = try transcriptDetailSource()
 
@@ -862,7 +862,7 @@ struct RecordingSessionTests {
 
     
     
-    @Test
+    @Test(.tags(.sourceLint))
     func testAITransformationPreviewCardIncludesCopyButtonContract() throws {
         let source = try sourceForFile(named: "AITransformationPreviewCard.swift")
 
@@ -874,7 +874,7 @@ struct RecordingSessionTests {
 
     
     
-    @Test
+    @Test(.tags(.sourceLint))
     func testTranscriptDetailViewIncludesPreviewAndStudyNavigation() throws {
         let source = try transcriptDetailSource()
 
@@ -886,7 +886,7 @@ struct RecordingSessionTests {
 
     
     
-    @Test
+    @Test(.tags(.sourceLint))
     func testTranscriptConversationViewsUseAdaptiveStylesForLightDarkMode() throws {
         let blockSource = try sourceForFile(named: "TranscriptBlockView.swift")
         let rowSource = try sourceForFile(named: "TranscriptRowView.swift")

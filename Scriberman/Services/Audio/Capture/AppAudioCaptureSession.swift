@@ -14,15 +14,15 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Senda
     /// Guards `_stream`, which is read and cleared from the nonisolated `SCStreamDelegate`
     /// callback as well as from the async start/stop context.
     private let streamLock = NSLock()
-    private var _stream: SCStream?
+    private var _stream: (any UnifiedCaptureStreaming)?
 
-    private var stream: SCStream? {
+    private var stream: (any UnifiedCaptureStreaming)? {
         streamLock.lock()
         defer { streamLock.unlock() }
         return _stream
     }
 
-    private func setStream(_ newValue: SCStream?) {
+    private func setStream(_ newValue: (any UnifiedCaptureStreaming)?) {
         streamLock.lock()
         _stream = newValue
         streamLock.unlock()
@@ -30,7 +30,7 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Senda
 
     /// Clears the retained stream and returns what it was, so a caller can stop it exactly once.
     @discardableResult
-    private func takeStream() -> SCStream? {
+    private func takeStream() -> (any UnifiedCaptureStreaming)? {
         streamLock.lock()
         defer { streamLock.unlock() }
         let existing = _stream
@@ -58,8 +58,8 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Senda
     init(
         fileURL: URL,
         processID: pid_t,
-        onFirstBufferHostTime: (@Sendable (UInt64) -> Void)? = nil,
-        liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil,
+        onFirstBufferHostTime: (@Sendable (HostNanoseconds) -> Void)? = nil,
+        liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation? = nil,
         notificationCenter: NotificationCenter = .default
     ) {
         self.fileURL = fileURL
@@ -98,16 +98,32 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Senda
             sampleHandlerQueue: sampleQueue
         )
 
+        try await start(stream: stream)
+    }
+
+    /// Drives the same retry path for real streams and hardware-free test streams.
+    func start(stream: any UnifiedCaptureStreaming, retryDelay: Duration = .milliseconds(300)) async throws {
         var lastError: Error?
         for attempt in 0..<3 {
+            try Task.checkCancellation()
             do {
                 try await stream.startCapture()
+                try Task.checkCancellation()
                 setStream(stream)
                 return
             } catch {
-                lastError = error
+                let startError = error
+                lastError = startError
+                do {
+                    try await stream.stopCapture()
+                } catch {
+                    throw RecordingError.failedToStart("\(startError.localizedDescription) Capture cleanup failed: \(error.localizedDescription)")
+                }
+                await drainSampleCallbacks()
+                if startError is CancellationError { throw startError }
+                try Task.checkCancellation()
                 if attempt < 2 {
-                    try? await Task.sleep(for: .milliseconds(300))
+                    try await Task.sleep(for: retryDelay)
                 }
             }
         }
@@ -119,6 +135,7 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Senda
         if let stream = takeStream() {
             try? await stream.stopCapture()
         }
+        await drainSampleCallbacks()
         outputHandler.closeOutput()
     }
 
@@ -128,6 +145,13 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Senda
     func stopStreamPreservingOutput() async {
         if let stream = takeStream() {
             try? await stream.stopCapture()
+        }
+        await drainSampleCallbacks()
+    }
+
+    private func drainSampleCallbacks() async {
+        await withCheckedContinuation { continuation in
+            sampleQueue.async { continuation.resume() }
         }
     }
 

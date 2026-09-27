@@ -1,6 +1,12 @@
 import Foundation
 import SwiftData
 
+/// Why an import could not begin.
+enum AudioImportError: Error, Equatable {
+    /// The new session could not be saved, so nothing was converted.
+    case couldNotRecord(String)
+}
+
 struct AudioImportProbeResult {
     let title: String
     let originalFileName: String
@@ -10,7 +16,7 @@ struct AudioImportProbeResult {
 
 actor AudioImportService {
     typealias ProbeAudio = @Sendable (URL) async throws -> AudioImportProbeResult
-    typealias ReadChannelSamples = @Sendable (URL) throws -> [[Float]]
+    typealias ReadChannelSamples = @Sendable (URL) throws -> DecodedAudio
     typealias CreateDirectory = @Sendable (URL) throws -> Void
     typealias WriteMonoAAC = @Sendable ([Float], URL) async throws -> Void
     typealias MixToMonoM4A = @Sendable (URL, URL) async throws -> Void
@@ -54,7 +60,7 @@ actor AudioImportService {
             try await mixdownService.mix(
                 micURL: inputURL,
                 appURL: nil,
-                micStartHostTime: 0,
+                micStartHostTime: HostNanoseconds(nanoseconds: 0),
                 appStartHostTime: nil,
                 into: outputURL,
                 deleteSourceFiles: false
@@ -73,12 +79,17 @@ actor AudioImportService {
         }
     }
 
+    /// Imports `url` as a new session.
+    ///
+    /// Throws only when the session itself cannot be saved: conversion does not start, since its
+    /// progress and result would belong to a record the store never took. Every later failure is
+    /// recorded on the session as its error status instead.
     func importAudio(
         from url: URL,
         workspace: Workspace,
         modelContainer: ModelContainer,
         pipelineSettings: LiveTranscriptionPipelineSettings = .defaults
-    ) async {
+    ) async throws {
         let context = ModelContext(modelContainer)
         let fallbackTitle = Self.defaultTitle(from: url)
         let fallbackFileName = url.lastPathComponent
@@ -104,8 +115,12 @@ actor AudioImportService {
         )
         
         context.insert(session)
-        try? saveContext(context)
-        
+        do {
+            try saveContext(context)
+        } catch {
+            throw AudioImportError.couldNotRecord(error.localizedDescription)
+        }
+
         let sessionID = session.id
 
         do {
@@ -125,9 +140,13 @@ actor AudioImportService {
 
             let outputURL = importFolderURL.appendingPathComponent("recording.m4a")
             do {
-                let channelSamples = try readChannelSamples(url)
-                let monoSamples = AudioDownmixer.toMono(channelSamples: channelSamples)
-                try await writeMonoAAC(monoSamples, outputURL)
+                let decoded = try readChannelSamples(url)
+                let monoSamples = AudioDownmixer.toMono(channelSamples: decoded.channels)
+                // The writer is fixed at the mixdown output rate, so samples decoded at any other
+                // rate are converted first; written unconverted they would play at the wrong speed.
+                let outputSamples = try AudioResampler(targetSampleRate: AudioMixdownService.outputSampleRate)
+                    .resample(monoSamples, from: decoded.sampleRate)
+                try await writeMonoAAC(outputSamples, outputURL)
             } catch {
                 if shouldFallbackToMixdownService(for: error) {
                     try await mixToMonoM4A(url, outputURL)

@@ -22,6 +22,7 @@ struct BackgroundServiceContainer: Sendable {
     let audioImportService: AudioImportService
     let speakerEmbeddingStore: SpeakerEmbeddingStore
     let recoveryService: RecordingRecoveryService
+    let recordingFinalizer: RecordingFinalizer
 }
 
 struct ServiceContainer {
@@ -37,6 +38,10 @@ struct ServiceContainer {
         let transcriptionService = TranscriptionService(speakerEmbeddingStore: speakerEmbeddingStore)
         let retranscriptionService = RetranscriptionService(transcriptionService: transcriptionService)
         let audioImportService = AudioImportService(retranscriptionService: retranscriptionService)
+        let recordingFinalizer = RecordingFinalizer(
+            mixdownCoordinator: RecordingMixdownCoordinator(workspaceService: workspaceService, modelContainer: modelContainer),
+            screenVideoMuxer: ScreenVideoMuxer(workspaceService: workspaceService, modelContainer: modelContainer)
+        )
         let appAudioSettings = AppAudioSettings()
 
         return ServiceContainer(
@@ -59,7 +64,8 @@ struct ServiceContainer {
                 recordingService: RecordingService(
                     workspaceService: workspaceService,
                     modelContainer: modelContainer,
-                    appAudioSettings: appAudioSettings
+                    appAudioSettings: appAudioSettings,
+                    finalizer: recordingFinalizer
                 ),
                 transcriptionService: transcriptionService,
                 retranscriptionService: retranscriptionService,
@@ -67,8 +73,10 @@ struct ServiceContainer {
                 speakerEmbeddingStore: speakerEmbeddingStore,
                 recoveryService: RecordingRecoveryService(
                     workspaceService: workspaceService,
-                    modelContainer: modelContainer
-                )
+                    modelContainer: modelContainer,
+                    isFinalizing: { recordingFinalizer.isFinalizing(sessionID: $0) }
+                ),
+                recordingFinalizer: recordingFinalizer
             )
         )
     }

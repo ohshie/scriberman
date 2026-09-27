@@ -64,6 +64,20 @@ struct ScribermanApp: App {
         }
     }
 
+    /// Removes live transcript segments left without a recording by versions that did not cascade
+    /// the delete. Idempotent; a failure costs only the cleanup, retried at the next launch.
+    static func removeOrphanedTranscriptSegments(in context: ModelContext) {
+        let logger = Logger(subsystem: "Scriberman", category: "ScribermanApp")
+        do {
+            let removed = try RecordingTranscriptSegment.deleteOrphans(in: context)
+            if removed > 0 {
+                logger.notice("Removed \(removed, privacy: .public) orphaned transcript segment(s).")
+            }
+        } catch {
+            logger.error("Removing orphaned transcript segments failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -77,6 +91,7 @@ struct ScribermanApp: App {
                     appState.appIconPreferences.apply()
                     ScribermanApp.prepareTags(in: modelContainer.mainContext)
                     ScribermanApp.prepareSearchText(in: modelContainer.mainContext)
+                    ScribermanApp.removeOrphanedTranscriptSegments(in: modelContainer.mainContext)
                     await appState.bootstrapWorkspace()
                 }
                 .onChange(of: appState.dictationService.state) { _, _ in

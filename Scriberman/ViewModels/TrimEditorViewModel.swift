@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftData
 
 @Observable
 @MainActor
@@ -12,10 +13,12 @@ final class TrimEditorViewModel {
 
     private let trimService = AudioTrimService()
     private let audioPlayer: AudioPlayerViewModel
+    private let context: ModelContext
 
-    init(session: RecordingSession, audioPlayer: AudioPlayerViewModel) {
+    init(session: RecordingSession, audioPlayer: AudioPlayerViewModel, context: ModelContext) {
         self.session = session
         self.audioPlayer = audioPlayer
+        self.context = context
         self.trimPosition = session.trimEnd ?? session.duration
     }
 
@@ -38,7 +41,8 @@ final class TrimEditorViewModel {
         isApplying = true
         error = nil
         do {
-            try await trimService.trim(session: session, end: trimPosition)
+            try await trimService.trim(session: session, end: trimPosition, context: context)
+            audioPlayer.reload()
         } catch {
             self.error = error
         }
@@ -46,10 +50,12 @@ final class TrimEditorViewModel {
     }
 
     func restore() async {
+        audioPlayer.stop()
         isApplying = true
         error = nil
         do {
-            try await trimService.restore(session: session)
+            try await trimService.restore(session: session, context: context)
+            audioPlayer.reload()
         } catch {
             self.error = error
         }

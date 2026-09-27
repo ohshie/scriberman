@@ -141,7 +141,7 @@ final class AppStateTests {
         #expect(permissionService.verifyScreenRecordingCalls == 1)
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testAppSourceDeclaresSettingsScene() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let appFileURL = testsDirectory
@@ -155,7 +155,7 @@ final class AppStateTests {
         )
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testAppSourceDeclaresApplicationDelegateAdaptor() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let appFileURL = testsDirectory
@@ -173,7 +173,7 @@ final class AppStateTests {
         )
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testMenuBarExtraViewSourceDeclaresRecordWithSections() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let viewFileURL = testsDirectory
@@ -187,7 +187,7 @@ final class AppStateTests {
         #expect(viewSource.contains("No App Audio"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testSettingsViewSourceDeclaresMenuBarTab() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let viewFileURL = testsDirectory
@@ -200,7 +200,7 @@ final class AppStateTests {
         #expect(viewSource.contains("MenuBarSettingsView("))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testMenuBarSettingsViewSourceDeclaresCloseActionAndReset() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let viewFileURL = testsDirectory
@@ -217,7 +217,7 @@ final class AppStateTests {
         #expect(viewSource.contains("return \"None\""))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testAppDelegateSourceGuardsOnboardingBeforeFirstTimeTrayAlert() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let delegateFileURL = testsDirectory
@@ -231,7 +231,7 @@ final class AppStateTests {
         #expect(delegateSource.contains("hasShownFirstTimeTrayAlert"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testAppDelegateSourceRemembersCloseChoiceWhenRequested() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let delegateFileURL = testsDirectory
@@ -244,7 +244,7 @@ final class AppStateTests {
         #expect(delegateSource.contains("appState.menuBarSettings.closeAction = keepInMenuBar ? .tray : .quit"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testAppDelegateSourceDeclaresStatusItemRecordingMenuActions() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let delegateFileURL = testsDirectory
@@ -293,6 +293,42 @@ final class AppStateTests {
     }
 
     @Test
+    func testApplicationShouldTerminateWaitsForFinalizationWithoutRecording() async {
+        let delegate = AppDelegate()
+        delegate.modelContext = modelContainer.mainContext
+        delegate.isRecordingForLifecycleHandler = { false }
+        let finalizer = FakeRecordingFinalizer(hasJobs: true)
+        delegate.recordingFinalizer = finalizer
+
+        var didReplyToTerminate = false
+        delegate.terminationReplyHandler = { didReplyToTerminate = $0 }
+
+        let result = delegate.applicationShouldTerminate(NSApp)
+
+        #expect(result == .terminateLater)
+        await assertEventuallyTrue("Expected quit to wait on the finalizer") {
+            finalizer.waitCount == 1
+        }
+        #expect(!didReplyToTerminate)
+        #expect(finalizer.lastTimeout == .seconds(15))
+
+        finalizer.finish()
+        await assertEventuallyTrue("Expected the termination reply after finalization") {
+            didReplyToTerminate
+        }
+    }
+
+    @Test
+    func testApplicationShouldTerminateReturnsTerminateNowWithNoFinalizationWork() {
+        let delegate = AppDelegate()
+        delegate.modelContext = modelContainer.mainContext
+        delegate.isRecordingForLifecycleHandler = { false }
+        delegate.recordingFinalizer = FakeRecordingFinalizer(hasJobs: false)
+
+        #expect(delegate.applicationShouldTerminate(NSApp) == .terminateNow)
+    }
+
+    @Test
     func testWakeCleanupWaitsForInFlightPreSleepStop() async {
         let delegate = AppDelegate()
         delegate.modelContext = modelContainer.mainContext
@@ -311,12 +347,11 @@ final class AppStateTests {
         delegate.handleWillSleep()
         delegate.handleDidWake()
 
-        await assertEventuallyTrue(
-            "Expected wake cleanup to run after the stop completed",
-            timeoutNanoseconds: 5_000_000_000
-        ) {
+        await assertEventuallyTrue("Expected wake cleanup to run after the stop completed") {
             stopWasCompleteAtCleanup != nil
         }
+        // The handlers capture the delegate weakly; keep it alive through the wait, as the app does.
+        withExtendedLifetime(delegate) {}
         #expect(stopWasCompleteAtCleanup == true)
     }
 
@@ -335,6 +370,7 @@ final class AppStateTests {
         await assertEventuallyTrue("Expected wake cleanup to run") {
             cleanupRan
         }
+        withExtendedLifetime(delegate) {}
     }
 
     @Test
@@ -415,6 +451,99 @@ final class AppStateTests {
         #expect(appState.consumePendingSessionFocusRequest() == false)
     }
 
+    @Test
+    func readinessPreparesAfterOnboardingAndOncePerWorkspace() async {
+        let permissions = MockPermissionService()
+        permissions.verifyMicResult = true
+        permissions.verifyScreenRecordingResult = true
+        let first = Workspace(rootURL: URL(fileURLWithPath: "/tmp/readiness-first"))
+        let second = Workspace(rootURL: URL(fileURLWithPath: "/tmp/readiness-second"))
+        var prepared: [Workspace] = []
+        var registrations = 0
+        let appState = AppState(
+            services: makeServiceContainer(permissionService: permissions),
+            restoreWorkspaceHandler: { first },
+            setWorkspaceHandler: { Workspace(rootURL: $0) },
+            prepareDictationHandler: { prepared.append($0) },
+            registerHotkeyHandler: { registrations += 1 }
+        )
+        await appState.bootstrapWorkspace()
+        appState.applyReadiness()
+        #expect(prepared.isEmpty)
+        #expect(registrations == 0)
+
+        appState.settingsViewModel.bundlePhase = .allReady
+        appState.applyReadiness()
+        await assertEventuallyTrue("Expected preparation after onboarding") { prepared == [first] }
+        appState.applyReadiness()
+        permissions.micStatus = .denied
+        appState.applyReadiness()
+        permissions.micStatus = .granted
+        appState.applyReadiness()
+        #expect(registrations == 1)
+
+        await appState.selectWorkspace(url: second.rootURL)
+        #expect(appState.requiredOnboardingStep == .models)
+        appState.settingsViewModel.bundlePhase = .allReady
+        appState.applyReadiness()
+        await assertEventuallyTrue("Expected preparation for the new workspace") { prepared == [first, second] }
+        #expect(registrations == 1)
+    }
+
+    @Test
+    func failedWorkspaceSelectionPreservesWorkspaceAndReadiness() async {
+        let original = Workspace(rootURL: URL(fileURLWithPath: "/tmp/original"))
+        let appState = AppState(
+            services: makeServiceContainer(permissionService: MockPermissionService()),
+            restoreWorkspaceHandler: { original },
+            setWorkspaceHandler: { _ in throw WorkspaceError.failedToCreateBookmark }
+        )
+        await appState.bootstrapWorkspace()
+        appState.settingsViewModel.bundlePhase = .allReady
+        await appState.selectWorkspace(url: URL(fileURLWithPath: "/tmp/candidate"))
+        #expect(appState.workspace == original)
+        #expect(appState.workspaceErrorMessage == WorkspaceError.failedToCreateBookmark.localizedDescription)
+        #expect(appState.settingsViewModel.bundlePhase == .allReady)
+    }
+
+    @Test
+    func workspaceSelectionIsBlockedDuringRecordingAndModelInstallation() async {
+        var selections = 0
+        let appState = AppState(
+            services: makeServiceContainer(permissionService: MockPermissionService()),
+            setWorkspaceHandler: { selections += 1; return Workspace(rootURL: $0) }
+        )
+        let url = URL(fileURLWithPath: "/tmp/candidate")
+        #expect(appState.isWorkspaceChangeAllowed)
+        appState.newSessionViewModel.state = .recording(duration: 1, level: 0)
+        #expect(!appState.isWorkspaceChangeAllowed)
+        await appState.selectWorkspace(url: url)
+        appState.newSessionViewModel.state = .idle
+        for phase in [BundleInstallPhase.downloading(label: "ASR", progress: 0.5), .warmingUp] {
+            appState.settingsViewModel.bundlePhase = phase
+            #expect(!appState.isWorkspaceChangeAllowed)
+            await appState.selectWorkspace(url: url)
+        }
+        #expect(selections == 0)
+        appState.settingsViewModel.bundlePhase = .allReady
+        #expect(appState.isWorkspaceChangeAllowed)
+        await appState.selectWorkspace(url: url)
+        #expect(selections == 1)
+    }
+
+    @Test
+    func workspaceSelectionIsBlockedUntilRetranscriptionFinishes() async {
+        let appState = AppState(services: makeServiceContainer(permissionService: MockPermissionService()))
+        let session = RecordingSession(createdAt: .now, duration: 1, micAudioURL: "/tmp/audio.wav", title: "Test", status: .recorded)
+        session.mixdownURL = "/tmp/mixdown.wav"
+        modelContainer.mainContext.insert(session)
+        appState.jobsViewModel.reprocess(session: session, context: modelContainer.mainContext)
+        #expect(!appState.isWorkspaceChangeAllowed)
+        await assertEventuallyTrue("Expected busy state to clear after workspace failure") {
+            appState.isWorkspaceChangeAllowed
+        }
+    }
+
     private func makeServiceContainer(permissionService: PermissionServiceProtocol) -> ServiceContainer {
         let bookmarkStore = TestBookmarkStore()
         let workspaceService = WorkspaceService(bookmarkStore: bookmarkStore)
@@ -458,6 +587,10 @@ final class AppStateTests {
                 recoveryService: RecordingRecoveryService(
                     workspaceService: workspaceService,
                     modelContainer: modelContainer
+                ),
+                recordingFinalizer: RecordingFinalizer(
+                    mixdownCoordinator: RecordingMixdownCoordinator(workspaceService: workspaceService, modelContainer: modelContainer),
+                    screenVideoMuxer: ScreenVideoMuxer(workspaceService: workspaceService, modelContainer: modelContainer)
                 )
             )
         )
@@ -465,7 +598,9 @@ final class AppStateTests {
 
     private func assertEventuallyTrue(
         _ message: String,
-        timeoutNanoseconds: UInt64 = 1_000_000_000,
+        // Generous because it returns as soon as the predicate holds; under the full parallel suite
+        // the work being waited on can queue for seconds behind other tests.
+        timeoutNanoseconds: UInt64 = 10_000_000_000,
         pollIntervalNanoseconds: UInt64 = 20_000_000,
         predicate: @escaping @MainActor () -> Bool
     ) async {
@@ -515,4 +650,91 @@ private final class TestBookmarkStore: BookmarkStore, @unchecked Sendable {
     func saveWorkspaceBookmark(_ data: Data) {
         bookmarkData = data
     }
+}
+
+/// Finalizer whose `waitForAll` returns only after `finish()`.
+private final class FakeRecordingFinalizer: RecordingFinalizing, @unchecked Sendable {
+    private let lock = NSLock()
+    private let jobs: Bool
+    private var waits = 0
+    private var timeout: Duration?
+    private var continuation: CheckedContinuation<Bool, Never>?
+    private var finished = false
+
+    init(hasJobs: Bool) {
+        jobs = hasJobs
+    }
+
+    var hasJobs: Bool { jobs }
+    var waitCount: Int { lock.withLock { waits } }
+    var lastTimeout: Duration? { lock.withLock { timeout } }
+
+    func waitForAll(timeout: Duration) async -> Bool {
+        await withCheckedContinuation { continuation in
+            let resumeNow = lock.withLock {
+                waits += 1
+                self.timeout = timeout
+                if finished { return true }
+                self.continuation = continuation
+                return false
+            }
+            if resumeNow { continuation.resume(returning: true) }
+        }
+    }
+
+    func finish() {
+        let pending = lock.withLock {
+            finished = true
+            defer { continuation = nil }
+            return continuation
+        }
+        pending?.resume(returning: true)
+    }
+}
+
+struct WorkspaceTransitionTests {
+    @Test(arguments: ["access", "folders", "bookmark", "success"])
+    func candidateIsCommittedOnlyAfterPreparation(stage: String) async throws {
+        let original = URL(fileURLWithPath: "/tmp/workspace-original")
+        let candidate = URL(fileURLWithPath: "/tmp/workspace-candidate")
+        let probe = WorkspaceAccessProbe()
+        let store = TestBookmarkStore()
+        let service = WorkspaceService(
+            bookmarkStore: store,
+            startAccess: { url in
+                if url == candidate && stage == "access" { return false }
+                probe.start(url)
+                return true
+            },
+            stopAccess: { probe.stop($0) },
+            createFolders: { workspace in
+                if workspace.rootURL == candidate && stage == "folders" {
+                    throw WorkspaceError.failedToCreateSubfolders
+                }
+            },
+            createBookmark: { url in
+                if url == candidate && stage == "bookmark" { throw WorkspaceError.failedToCreateBookmark }
+                return Data(url.path.utf8)
+            }
+        )
+        _ = try await service.setWorkspace(url: original)
+        do {
+            _ = try await service.setWorkspace(url: candidate)
+            #expect(stage == "success")
+        } catch {
+            #expect(stage != "success")
+        }
+        let expected = stage == "success" ? candidate : original
+        #expect(await service.currentWorkspace() == Workspace(rootURL: expected))
+        #expect(store.loadWorkspaceBookmark() == Data(expected.path.utf8))
+        #expect(probe.active == [expected])
+    }
+}
+
+private final class WorkspaceAccessProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var urls: Set<URL> = []
+    var active: Set<URL> { lock.withLock { urls } }
+    func start(_ url: URL) { _ = lock.withLock { urls.insert(url) } }
+    func stop(_ url: URL) { _ = lock.withLock { urls.remove(url) } }
 }

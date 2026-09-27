@@ -23,7 +23,7 @@ struct TranscriptRowTests {
 
     // MARK: - One card, two views
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testBothViewsDrawTheSharedRow() throws {
         let block = try source("../UI/TranscriptBlockView.swift")
         let live = try liveViewSource()
@@ -37,7 +37,7 @@ struct TranscriptRowTests {
 
     /// Diarization runs after the recording, so a live segment names its source where a finished
     /// block names its speaker. It must not show an empty speaker or invent one.
-    @Test
+    @Test(.tags(.sourceLint))
     func testALiveSegmentNamesItsSourceAndNoSpeaker() throws {
         let live = try liveViewSource()
 
@@ -50,7 +50,7 @@ struct TranscriptRowTests {
     }
 
     /// The finished block keeps everything the shared card does not own: seeking, renaming, search.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheFinishedBlockKeepsItsOwnBehaviour() throws {
         let block = try source("../UI/TranscriptBlockView.swift")
 
@@ -61,7 +61,7 @@ struct TranscriptRowTests {
 
     // MARK: - Reaching the text
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testLiveTextIsSelectable() throws {
         let live = try liveViewSource()
 
@@ -69,7 +69,7 @@ struct TranscriptRowTests {
     }
 
     /// A segment arriving must not pull the text out from under someone reading it.
-    @Test
+    @Test(.tags(.sourceLint))
     func testANewSegmentDoesNotScrollWhileThePointerIsInTheTranscript() throws {
         let live = try liveViewSource()
 
@@ -79,7 +79,7 @@ struct TranscriptRowTests {
 
     /// One scrolling region in the window, not two. Segments sit in the view's own flow, so
     /// arriving text pushes the Stop button and the source cards down rather than filling a pane.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheRecordingViewHasASingleScroll() throws {
         let live = try liveViewSource()
 
@@ -94,7 +94,7 @@ struct TranscriptRowTests {
 
     /// Following the transcript scrolls to the foot of the view, which is where Stop is — so the
     /// newest text and the button that ends the recording stay together.
-    @Test
+    @Test(.tags(.sourceLint))
     func testFollowingTheTranscriptKeepsStopInView() throws {
         let live = try liveViewSource()
 
@@ -109,7 +109,7 @@ struct TranscriptRowTests {
 
     /// The toolbar's Copy and the block's copy answer different questions: "put this conversation
     /// somewhere else" and "let me quote this line".
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheToolbarCopiesTheRenderedTranscript() throws {
         let shell = try source("../UI/AppShellView.swift")
 
@@ -117,7 +117,7 @@ struct TranscriptRowTests {
         #expect(!shell.contains("setString(transcript.fullText, forType: .string)"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheBlockControlStillCopiesThePassageAlone() throws {
         let row = try rowSource()
 
@@ -127,7 +127,7 @@ struct TranscriptRowTests {
 
     // MARK: - Copying one passage
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheCopyControlIsOnlyShownUnderThePointer() throws {
         let row = try rowSource()
 
@@ -135,7 +135,7 @@ struct TranscriptRowTests {
         #expect(row.contains(".onHover { hovering in"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheCopyControlCopiesTheTextAlone() throws {
         let row = try rowSource()
 
@@ -147,7 +147,7 @@ struct TranscriptRowTests {
     }
 
     /// A tap on a finished block seeks and plays; the copy control inside it must not.
-    @Test
+    @Test(.tags(.sourceLint))
     func testCopyingDoesNotSeekOrPlay() throws {
         let row = try rowSource()
 
@@ -158,7 +158,7 @@ struct TranscriptRowTests {
 
     /// A live segment carries the time it starts, as a finished block does. It carries no source
     /// icon: its identity pill already says where the audio came from.
-    @Test
+    @Test(.tags(.sourceLint))
     func testALiveRowCarriesItsStartTimeAndNoDuplicateSourceIcon() throws {
         let row = try rowSource()
         let live = try liveViewSource()
@@ -174,7 +174,7 @@ struct TranscriptRowTests {
 
     /// The bar used to float a spinner and "Getting recording ready…" over a recording still being
     /// made — a progress report on a file nobody had asked for, in the place the player would go.
-    @Test
+    @Test(.tags(.sourceLint))
     func testThePlayerBarIsAbsentUntilThereIsSomethingToPlay() throws {
         let bar = try source("../UI/AudioPlayerBar.swift")
 

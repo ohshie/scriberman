@@ -59,3 +59,22 @@ final class RecordingTranscriptSegment {
         )
     }
 }
+
+extension RecordingTranscriptSegment {
+    /// Deletes segments that belong to no recording and returns how many went.
+    ///
+    /// Before `RecordingSession.transcriptSegments` cascaded, deleting a recording left its
+    /// segments behind with a nil session. Idempotent: with no orphans it fetches and returns 0.
+    @discardableResult
+    static func deleteOrphans(in context: ModelContext) throws -> Int {
+        let orphans = try context.fetch(FetchDescriptor<RecordingTranscriptSegment>(
+            predicate: #Predicate { $0.session == nil }
+        ))
+        guard !orphans.isEmpty else { return 0 }
+        for orphan in orphans {
+            context.delete(orphan)
+        }
+        try context.save()
+        return orphans.count
+    }
+}

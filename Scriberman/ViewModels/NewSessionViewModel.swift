@@ -19,7 +19,9 @@ final class NewSessionViewModel {
     private let appAudioService: AppAudioServiceProtocol
     private let screenCaptureService: ScreenCaptureServiceProtocol
     private let permissionService: PermissionServiceProtocol
-    private let liveTranscriptionService: LiveTranscriptionService
+    private var liveRecordingSession: LiveRecordingSession?
+    private var stopTask: Task<UUID?, Never>?
+    private let liveTranscriptionService: any LiveTranscribing
     private var recordingMonitorTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
 
@@ -65,6 +67,13 @@ final class NewSessionViewModel {
     /// Set when a recording was stopped because it never started writing audio. The UI observes
     /// this to present the failure; the wording is owned by the view, not by this model.
     var didFailToStartRecording = false
+    /// How many live transcript segments of the last stopped recording could not be saved, or 0.
+    /// Set by stop after its final save fails; the UI observes it, and the wording is the view's.
+    var unsavedTranscriptSegmentCount = 0
+    /// Live segments inserted into the context whose save has not succeeded yet. They stay pending
+    /// in the context, so the next successful save writes them; the IDs are kept to report a count.
+    private var unsavedSegmentIDs: Set<UUID> = []
+    private let saveContext: @MainActor (ModelContext) throws -> Void
     private var startVerificationTask: Task<Void, Never>?
     private let sessionFailureLogWriter = SessionFailureLogWriter()
     private let logger = Logger(subsystem: "Scriberman", category: "NewSessionViewModel")
@@ -223,10 +232,13 @@ final class NewSessionViewModel {
         permissionService: PermissionServiceProtocol,
         speakerEmbeddingStore: SpeakerEmbeddingStore? = nil,
         userInputIdleProvider: any UserInputIdleProviding = SystemUserInputIdleProvider(),
-        userDefaults _: UserDefaults = .standard
+        userDefaults _: UserDefaults = .standard,
+        liveTranscriptionService: (any LiveTranscribing)? = nil,
+        saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() }
     ) {
+        self.saveContext = saveContext
         self.userInputIdleProvider = userInputIdleProvider
-        self.liveTranscriptionService = LiveTranscriptionService(speakerEmbeddingStore: speakerEmbeddingStore)
+        self.liveTranscriptionService = liveTranscriptionService ?? LiveTranscriptionService(speakerEmbeddingStore: speakerEmbeddingStore)
         self.workspaceService = workspaceService
         self.recordingService = recordingService
         self.audioDeviceService = audioDeviceService
@@ -338,6 +350,7 @@ final class NewSessionViewModel {
 
     @discardableResult
     func startRecording(title: String, context: ModelContext) async -> RecordingSession? {
+        guard liveRecordingSession == nil, stopTask == nil else { return nil }
         recordingMonitorTask?.cancel()
         recordingMonitorTask = nil
         if didFailToStartRecording {
@@ -346,7 +359,7 @@ final class NewSessionViewModel {
         errorMessage = nil
 
         do {
-            let workspace = try await workspaceService.requireWritableWorkspace()
+            let workspace = try await workspaceService.requireAuthorizedWorkspace()
             appAudioService.refreshRunningApps()
 
             var selectedCapturedAppName: String?
@@ -437,6 +450,8 @@ final class NewSessionViewModel {
 
             recordingStartedAt = .now
             activeRecordingSessionID = recordingSessionID
+            unsavedSegmentIDs = []
+            unsavedTranscriptSegmentCount = 0
             state = .recording(duration: 0, level: 0)
             liveSegments = []
             // The idle prompt only applies to mic + app sessions.
@@ -459,20 +474,12 @@ final class NewSessionViewModel {
                 captureStartedAt: recordingStartedAt ?? Date()
             )
 
-            let descriptor = FetchDescriptor<RecordingSession>()
-            let session = try? context.fetch(descriptor).first(where: { $0.id == recordingSessionID })
+            let session = try? RecordingSession.fetch(id: recordingSessionID, in: context)
             
-            // Start Live Transcription
-            do {
-                let pipelineConfig = settingsViewModel?.pipelineSettings ?? .defaults
-                try await liveTranscriptionService.start(workspace: workspace, config: pipelineConfig)
-                startLiveTranscriptionPipeline(context: context)
-            } catch LiveTranscriptionError.initializationFailed {
-                errorMessage = "Live transcription unavailable: Required models are missing. Open Settings → Models to install ASR and Speaker Diarization models."
-            } catch {
-                errorMessage = "Live transcription unavailable: \(error.localizedDescription)"
+            if let liveRecordingSession {
+                connectLiveRecordingSession(liveRecordingSession, workspace: workspace, context: context)
             }
-            
+
             startRecordingMonitor(workspace: workspace, context: context)
             return session
         } catch {
@@ -506,13 +513,26 @@ final class NewSessionViewModel {
     }
 
     func stopRecording(context: ModelContext) async -> RecordingSession? {
+        if let stopTask {
+            guard let id = await stopTask.value else { return nil }
+            return try? RecordingSession.fetch(id: id, in: context)
+        }
+        let task = Task { await self.performStopRecording(context: context)?.id }
+        stopTask = task
+        let id = await task.value
+        stopTask = nil
+        guard let id else { return nil }
+        return try? RecordingSession.fetch(id: id, in: context)
+    }
+
+    private func performStopRecording(context: ModelContext) async -> RecordingSession? {
         recordingMonitorTask?.cancel()
         recordingMonitorTask = nil
         startVerificationTask?.cancel()
         startVerificationTask = nil
 
-        let liveFinalSegments = await liveTranscriptionService.stop()
         let sessionID = await recordingService.stopRecording() ?? activeRecordingSessionID
+        let liveFinalSegments = await drainLiveRecordingSession()
         activeRecordingSessionID = nil
         // Tear the idle prompt down however the session ends (panel, UI button, menu bar,
         // app lifecycle), not just via reset().
@@ -525,13 +545,7 @@ final class NewSessionViewModel {
         
         var fetchedSession: RecordingSession?
         if let sessionID = sessionID {
-            let descriptor = FetchDescriptor<RecordingSession>()
-            if let sessions = try? context.fetch(descriptor) {
-                for session in sessions where session.id == sessionID {
-                    fetchedSession = session
-                    break
-                }
-            }
+            fetchedSession = try? RecordingSession.fetch(id: sessionID, in: context)
         }
         
         guard let session = fetchedSession else {
@@ -541,7 +555,14 @@ final class NewSessionViewModel {
 
         backfillPersistedSegments(liveFinalSegments, to: session, context: context)
         saveLiveTranscript(to: session)
-        try? context.save()
+        // The flush: every segment a failed save left pending is written here, or reported.
+        do {
+            try saveContext(context)
+            unsavedSegmentIDs = []
+        } catch {
+            unsavedTranscriptSegmentCount = unsavedSegmentIDs.count
+            logger.error("Saving the transcript at stop failed with \(self.unsavedSegmentIDs.count, privacy: .public) live segment(s) unsaved: \(error.localizedDescription, privacy: .public)")
+        }
         
         state = .idle
         return session
@@ -592,7 +613,7 @@ final class NewSessionViewModel {
         }
 
         let transcript = Transcript(
-            fullText: finalSegments.map { $0.text }.joined(separator: " "),
+            fullText: Transcript.fullText(joining: finalSegments),
             segments: finalSegments,
             speakers: speakers
         )
@@ -718,7 +739,7 @@ final class NewSessionViewModel {
         )
 
         _ = await recordingService.stopRecording()
-        _ = await liveTranscriptionService.stop()
+        _ = await drainLiveRecordingSession()
         recordingMonitorTask?.cancel()
         recordingMonitorTask = nil
         activeRecordingSessionID = nil
@@ -734,15 +755,11 @@ final class NewSessionViewModel {
 
         // Mark the session failed rather than deleting it: this reuses the status vocabulary the
         // jobs pipeline already uses for failures, and leaves the row to point at its log.
-        let descriptor = FetchDescriptor<RecordingSession>()
-        if let sessions = try? context.fetch(descriptor) {
-            for session in sessions where session.id == sessionID {
-                let reason = lastError ?? "Recording produced no audio."
-                session.status = .error(reason)
-                session.errorMessage = reason
-                try? context.save()
-                break
-            }
+        if let session = try? RecordingSession.fetch(id: sessionID, in: context) {
+            let reason = lastError ?? "Recording produced no audio."
+            session.status = .error(reason)
+            session.errorMessage = reason
+            try? context.save()
         }
 
         state = .idle
@@ -984,14 +1001,24 @@ final class NewSessionViewModel {
         appProcessID: pid_t?,
         title: String?
     ) async throws -> UUID {
-        try await recordingService.startRecording(
-            in: workspace,
-            micDeviceID: micDeviceID,
-            captureDisplayID: captureDisplayID,
-            capturedAppName: capturedAppName,
-            appProcessID: appProcessID,
-            title: title
-        )
+        let liveSession = LiveRecordingSession()
+        do {
+            let id = try await recordingService.startRecording(
+                in: workspace,
+                micDeviceID: micDeviceID,
+                captureDisplayID: captureDisplayID,
+                capturedAppName: capturedAppName,
+                appProcessID: appProcessID,
+                title: title,
+                liveAudioContinuation: liveSession.audio.continuation,
+                liveAudioClock: liveSession.clock
+            )
+            liveRecordingSession = liveSession
+            return id
+        } catch {
+            liveSession.finish()
+            throw error
+        }
     }
 
     private func refreshAvailableDisplays() async {
@@ -1009,23 +1036,50 @@ final class NewSessionViewModel {
         await recordingService.retargetMic(desiredDeviceUID: desiredDeviceUID)
     }
 
-    private func startLiveTranscriptionPipeline(context: ModelContext) {
-        // Pipeline: buffers -> processor
-        Task {
-            for await (samples, source, sampleRate) in await recordingService.liveAudioStream() {
-                await liveTranscriptionService.process(samples: samples, source: source, sampleRate: sampleRate)
-            }
-        }
-
-        // Pipeline: results -> UI
-        Task {
-            for await segment in await liveTranscriptionService.transcriptStream {
-                await MainActor.run {
-                    updateLiveSegments(with: segment)
-                    persistLiveTranscriptSegment(segment, context: context)
+    private func connectLiveRecordingSession(_ session: LiveRecordingSession, workspace: Workspace, context: ModelContext) {
+        let generation = session.generation
+        let config = settingsViewModel?.pipelineSettings ?? .defaults
+        let service = liveTranscriptionService
+        let audio = session.audio
+        let results = session.results
+        let clock = session.clock
+        session.audioConsumer = Task { [weak self] in
+            do {
+                try await service.start(workspace: workspace, config: config, resultContinuation: results.continuation)
+                var queueMonitor = LiveAudioQueueMonitor()
+                for await chunk in audio.stream {
+                    queueMonitor.observe(chunk)
+                    await service.process(chunk, anchor: clock.anchor)
                 }
+                queueMonitor.finish()
+            } catch LiveTranscriptionError.initializationFailed {
+                audio.continuation.finish()
+                results.continuation.finish()
+                guard let self, self.liveRecordingSession?.generation == generation else { return }
+                self.errorMessage = "Live transcription unavailable: Required models are missing. Open Settings → Models to install ASR and Speaker Diarization models."
+            } catch {
+                audio.continuation.finish()
+                results.continuation.finish()
+                guard let self, self.liveRecordingSession?.generation == generation else { return }
+                self.errorMessage = "Live transcription unavailable: \(error.localizedDescription)"
             }
         }
+        session.resultConsumer = Task { [weak self] in
+            for await segment in results.stream {
+                guard let self, self.liveRecordingSession?.generation == generation else { continue }
+                self.updateLiveSegments(with: segment)
+                self.persistLiveTranscriptSegment(segment, context: context)
+            }
+        }
+    }
+
+    private func drainLiveRecordingSession() async -> [TranscriptSegment] {
+        guard let session = liveRecordingSession else { return [] }
+        let segments = await session.drainTranscription(using: liveTranscriptionService)
+        if liveRecordingSession?.generation == session.generation {
+            liveRecordingSession = nil
+        }
+        return segments
     }
 
     private func persistLiveTranscriptSegment(_ segment: TranscriptSegment, context: ModelContext) {
@@ -1033,11 +1087,7 @@ final class NewSessionViewModel {
             return
         }
 
-        let descriptor = FetchDescriptor<RecordingSession>()
-        guard let sessions = try? context.fetch(descriptor),
-              let session = sessions.first(where: { $0.id == sessionID }),
-              session.status == .recording
-        else {
+        guard let session = try? RecordingSession.fetch(id: sessionID, in: context) else {
             return
         }
 
@@ -1047,8 +1097,20 @@ final class NewSessionViewModel {
 
         let persistedSegment = RecordingTranscriptSegment(segment: segment, session: session)
         context.insert(persistedSegment)
-        try? context.save()
+        unsavedSegmentIDs.insert(persistedSegment.id)
+        saveLiveSegments(context: context)
         appendSegmentToTranscriptMarkdown(persistedSegment, for: session)
+    }
+
+    /// Saves pending live segments. A failure keeps them pending for the next save, which retries
+    /// every one of them; stop makes the last attempt.
+    private func saveLiveSegments(context: ModelContext) {
+        do {
+            try saveContext(context)
+            unsavedSegmentIDs = []
+        } catch {
+            logger.error("Saving live transcript segments failed, \(self.unsavedSegmentIDs.count, privacy: .public) pending for retry: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     private func backfillPersistedSegments(
@@ -1066,6 +1128,7 @@ final class NewSessionViewModel {
                 session: session
             )
             context.insert(persistedSegment)
+            unsavedSegmentIDs.insert(persistedSegment.id)
             appendSegmentToTranscriptMarkdown(persistedSegment, for: session)
         }
     }

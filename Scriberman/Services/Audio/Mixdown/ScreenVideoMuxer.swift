@@ -7,7 +7,7 @@ import SwiftData
 
 protocol ScreenCaptureSessionControlling: AnyObject, Sendable {
     var onError: (@Sendable (Error) -> Void)? { get set }
-    var videoStartHostTime: UInt64? { get }
+    var videoStartHostTime: HostNanoseconds? { get }
     func start(displayID: CGDirectDisplayID, videoURL: URL) async throws
     func stop() async
 }
@@ -24,14 +24,14 @@ struct ScreenVideoMuxRequest: Sendable {
     let screenVideoURL: URL
     let micURL: URL
     let appURL: URL?
-    let micStartHostTime: UInt64?
-    let appStartHostTime: UInt64?
-    let videoStartHostTime: UInt64
+    let micStartHostTime: HostNanoseconds?
+    let appStartHostTime: HostNanoseconds?
+    let videoStartHostTime: HostNanoseconds
     /// When set (timeline path), the already-drift-corrected mixdown audio to mux as the
     /// video's single audio track instead of the raw mic/app files.
     var timelineAudioURL: URL? = nil
-    /// Shared timeline reference (host-time ns) the `timelineAudioURL` is anchored to.
-    var audioAnchorHostTime: UInt64? = nil
+    /// Shared timeline reference the `timelineAudioURL` is anchored to.
+    var audioAnchorHostTime: HostNanoseconds? = nil
 }
 
 struct ScreenVideoTrackInstruction: Equatable, Sendable {
@@ -93,8 +93,9 @@ actor ScreenVideoMuxer: ScreenVideoMuxing {
             )
             cleanupTemporaryVideo(at: request.screenTmpURL)
         } catch {
-            logger.error("Screen video mux failed for session \(request.sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            cleanupTemporaryVideo(at: request.screenTmpURL)
+            // screen-tmp.mov is the only input a retry can use, so it stays (design D3).
+            logger.error("Screen video mux failed for session \(request.sessionID, privacy: .public); keeping screen-tmp.mov: \(error.localizedDescription, privacy: .public)")
+            recordMuxFailure(sessionID: request.sessionID)
         }
     }
 
@@ -125,13 +126,23 @@ actor ScreenVideoMuxer: ScreenVideoMuxing {
         screenVideoURL: URL
     ) throws {
         let context = ModelContext(modelContainer)
-        let descriptor = FetchDescriptor<RecordingSession>()
-        let sessions = try context.fetch(descriptor)
-        guard let session = sessions.first(where: { $0.id == sessionID }) else {
+        guard let session = try RecordingSession.fetch(id: sessionID, in: context) else {
             throw RecordingError.failedToStart("Screen video mux succeeded but the session could not be found.")
         }
         session.screenVideoURL = screenVideoURL.path
+        session.screenMuxState = nil
         try context.save()
+    }
+
+    private func recordMuxFailure(sessionID: UUID) {
+        do {
+            let context = ModelContext(modelContainer)
+            guard let session = try RecordingSession.fetch(id: sessionID, in: context) else { return }
+            session.screenMuxState = ScreenMuxState.failed.rawValue
+            try context.save()
+        } catch {
+            logger.error("Recording the mux failure for session \(sessionID, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     private func cleanupTemporaryVideo(at url: URL) {
@@ -148,9 +159,9 @@ actor ScreenVideoMuxer: ScreenVideoMuxing {
     static func makeAudioInstructions(
         micURL: URL,
         appURL: URL?,
-        micStartHostTime: UInt64?,
-        appStartHostTime: UInt64?,
-        videoStartHostTime: UInt64,
+        micStartHostTime: HostNanoseconds?,
+        appStartHostTime: HostNanoseconds?,
+        videoStartHostTime: HostNanoseconds,
         fileManager: FileManager = .default
     ) -> [ScreenVideoTrackInstruction] {
         var instructions: [ScreenVideoTrackInstruction] = []
@@ -185,8 +196,8 @@ actor ScreenVideoMuxer: ScreenVideoMuxing {
     /// no per-source alignment is needed here.
     static func makeTimelineAudioInstructions(
         timelineAudioURL: URL,
-        audioAnchorHostTime: UInt64?,
-        videoStartHostTime: UInt64
+        audioAnchorHostTime: HostNanoseconds?,
+        videoStartHostTime: HostNanoseconds
     ) -> [ScreenVideoTrackInstruction] {
         [
             makeInstruction(
@@ -201,10 +212,10 @@ actor ScreenVideoMuxer: ScreenVideoMuxing {
     private static func makeInstruction(
         label: String,
         url: URL,
-        sourceStartHostTime: UInt64,
-        videoStartHostTime: UInt64
+        sourceStartHostTime: HostNanoseconds,
+        videoStartHostTime: HostNanoseconds
     ) -> ScreenVideoTrackInstruction {
-        let deltaSeconds = Double(Int64(sourceStartHostTime) - Int64(videoStartHostTime)) / 1_000_000_000
+        let deltaSeconds = sourceStartHostTime.seconds(since: videoStartHostTime)
         if deltaSeconds >= 0 {
             return ScreenVideoTrackInstruction(
                 label: label,

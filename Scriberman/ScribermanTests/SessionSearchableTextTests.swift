@@ -140,7 +140,7 @@ final class SessionSearchableTextTests {
     /// Every file outside `Domain/` that touches a transcript, checked for a direct assignment to
     /// the encoded blobs. Assigning them outside the model layer skips the searchable-text refresh,
     /// which nothing in the compiler catches.
-    @Test
+    @Test(.tags(.sourceLint))
     func testNoTranscriptBlobIsAssignedOutsideTheModelLayer() throws {
         let writers = [
             "../UI/TranscriptStudyView.swift",

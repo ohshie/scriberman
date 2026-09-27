@@ -97,3 +97,12 @@ final class ImportedSession {
 }
 
 extension ImportedSession: TranscribableSession {}
+
+extension ImportedSession {
+    static func fetch(id: UUID, in context: ModelContext) throws -> ImportedSession? {
+        let targetID = id
+        var descriptor = FetchDescriptor<ImportedSession>(predicate: #Predicate { $0.id == targetID })
+        descriptor.fetchLimit = 1
+        return try context.fetch(descriptor).first
+    }
+}

@@ -4,12 +4,20 @@ import SwiftData
 
 actor RecordingRecoveryService {
     static let maxMixdownAttempts = 3
+    /// Screen mux retries stop after the same number of attempts as mixdown recovery.
+    static let maxScreenMuxAttempts = maxMixdownAttempts
     typealias MixdownHandler = @Sendable (URL, URL?, URL) async throws -> Void
+    typealias MuxHandler = @Sendable (ScreenVideoMuxRequest) async -> Void
+    typealias RetireSources = @Sendable (_ micURL: URL, _ appURL: URL?) throws -> Void
 
     private let workspaceService: WorkspaceServiceProtocol
     private let modelContainer: ModelContainer
     private let fileManager: FileManager
     private let performMixdown: MixdownHandler
+    private let performMux: MuxHandler
+    private let retireSources: RetireSources
+    // Sessions whose finalization is running in this process are left to the finalizer.
+    private let isFinalizing: @Sendable (UUID) -> Bool
     // No capture survives a process boundary: a .recording session created
     // before this instant is crash-interrupted by definition (design D1).
     private let launchedAt: Date
@@ -20,7 +28,10 @@ actor RecordingRecoveryService {
         modelContainer: ModelContainer,
         fileManager: FileManager = .default,
         launchedAt: Date = .now,
-        performMixdown: MixdownHandler? = nil
+        performMixdown: MixdownHandler? = nil,
+        performMux: MuxHandler? = nil,
+        retireSources: @escaping RetireSources = { try RecordingSourceFiles.retire(micURL: $0, appURL: $1) },
+        isFinalizing: @escaping @Sendable (UUID) -> Bool = { _ in false }
     ) {
         self.workspaceService = workspaceService
         self.modelContainer = modelContainer
@@ -34,12 +45,21 @@ actor RecordingRecoveryService {
                 try await mixdownService.mix(
                     micURL: micURL,
                     appURL: appURL,
-                    micStartHostTime: 0,
+                    micStartHostTime: HostNanoseconds(nanoseconds: 0),
                     appStartHostTime: nil,
-                    into: outputURL
+                    into: outputURL,
+                    deleteSourceFiles: false
                 )
             }
         }
+        if let performMux {
+            self.performMux = performMux
+        } else {
+            let muxer = ScreenVideoMuxer(workspaceService: workspaceService, modelContainer: modelContainer)
+            self.performMux = { await muxer.runMux(request: $0) }
+        }
+        self.retireSources = retireSources
+        self.isFinalizing = isFinalizing
     }
 
     func sweepIncompleteSessions() async {
@@ -68,15 +88,120 @@ actor RecordingRecoveryService {
 
         // Exclude .recording sessions (capture still in progress — only
         // post-launch sessions can still carry this status after normalization)
-        let eligible = sessions.filter { session in
-            guard session.mixdownURL == nil else { return false }
+        // and sessions this process is still finalizing.
+        let candidates = sessions.filter { session in
             if case .recording = session.status { return false }
-            return fileManager.fileExists(atPath: session.micAudioURL)
+            return !isFinalizing(session.id)
+        }
+
+        var eligible: [RecordingSession] = []
+        for session in candidates where session.mixdownURL == nil {
+            if adoptCompletedMixdown(session, context: context) { continue }
+            if fileManager.fileExists(atPath: session.micAudioURL) {
+                eligible.append(session)
+            }
         }
 
         logger.info("Recovery sweep: \(eligible.count, privacy: .public) eligible session(s)")
         for session in eligible {
             await recoverSession(session, context: context)
+        }
+
+        for session in candidates {
+            await retryScreenMuxIfNeeded(session, context: context)
+        }
+        for session in candidates {
+            retireLeftoverSourcesIfNeeded(session)
+        }
+    }
+
+    private func mixdownURL(for session: RecordingSession) -> URL {
+        URL(fileURLWithPath: session.micAudioURL).deletingLastPathComponent().appendingPathComponent("recording.m4a")
+    }
+
+    /// Saves a readable `recording.m4a` left by an interrupted finalization as the session's
+    /// mixdown, so the raw inputs are not required (design D4).
+    private func adoptCompletedMixdown(_ session: RecordingSession, context: ModelContext) -> Bool {
+        let outputURL = mixdownURL(for: session)
+        guard fileManager.fileExists(atPath: outputURL.path),
+              RecordingSourceFiles.isUsableMixdown(at: outputURL)
+        else {
+            return false
+        }
+        session.mixdownURL = outputURL.path
+        switch session.status {
+        case .converting, .error:
+            session.status = .recorded
+        default:
+            break
+        }
+        do {
+            try context.save()
+            logger.info("Adopted existing mixdown for session \(session.id, privacy: .public)")
+            return true
+        } catch {
+            logger.error("Saving adopted mixdown failed for session \(session.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+    }
+
+    /// Retries a pending or failed screen mux with the mixdown as its audio (design D3). Each
+    /// attempt is counted before it starts, so a quit mid-mux still uses one up.
+    private func retryScreenMuxIfNeeded(_ session: RecordingSession, context: ModelContext) async {
+        guard let state = session.screenMuxState,
+              ScreenMuxState(rawValue: state) != nil,
+              let videoStartNanos = session.videoStartHostTimeNanos,
+              let mixdownPath = session.mixdownURL,
+              session.screenMuxAttemptCount < Self.maxScreenMuxAttempts
+        else {
+            return
+        }
+        let folderURL = URL(fileURLWithPath: session.micAudioURL).deletingLastPathComponent()
+        let screenTmpURL = RecordingFileLayout.screenTmpVideoURL(in: folderURL)
+        let mixdownURL = URL(fileURLWithPath: mixdownPath)
+        guard fileManager.fileExists(atPath: screenTmpURL.path),
+              fileManager.fileExists(atPath: mixdownURL.path)
+        else {
+            return
+        }
+
+        session.screenMuxAttemptCount += 1
+        let attempt = session.screenMuxAttemptCount
+        try? context.save()
+        logger.info("Retrying screen mux for session \(session.id, privacy: .public), attempt \(attempt, privacy: .public)")
+
+        let micURL = URL(fileURLWithPath: session.micAudioURL)
+        let anchor = session.audioAnchorHostTimeNanos.map { HostNanoseconds(nanoseconds: UInt64(clamping: $0)) }
+        await performMux(ScreenVideoMuxRequest(
+            sessionID: session.id,
+            screenTmpURL: screenTmpURL,
+            screenVideoURL: RecordingFileLayout.screenVideoURL(in: folderURL),
+            micURL: micURL,
+            appURL: session.appAudioURL.map { URL(fileURLWithPath: $0) },
+            micStartHostTime: nil,
+            appStartHostTime: nil,
+            videoStartHostTime: HostNanoseconds(nanoseconds: UInt64(clamping: videoStartNanos)),
+            timelineAudioURL: mixdownURL,
+            audioAnchorHostTime: anchor
+        ))
+    }
+
+    /// Deletes raw inputs a finished finalization left behind (design D2). Requires a usable
+    /// mixdown. A screen mux retry reads the mixdown, not these files.
+    private func retireLeftoverSourcesIfNeeded(_ session: RecordingSession) {
+        guard let mixdownPath = session.mixdownURL else { return }
+        let micURL = URL(fileURLWithPath: session.micAudioURL)
+        let appURL = session.appAudioURL.map { URL(fileURLWithPath: $0) }
+        guard RecordingSourceFiles.anyExist(micURL: micURL, appURL: appURL, fileManager: fileManager),
+              RecordingSourceFiles.isUsableMixdown(at: URL(fileURLWithPath: mixdownPath))
+        else {
+            return
+        }
+        do {
+            try retireSources(micURL, appURL)
+            logger.info("Retired leftover raw inputs for session \(session.id, privacy: .public)")
+        } catch {
+            logger.error("Retiring leftover raw inputs failed for session \(session.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -144,6 +269,7 @@ actor RecordingRecoveryService {
             session.status = .recorded
             try? context.save()
             logger.info("Recovery mixdown succeeded for session \(sessionID, privacy: .public)")
+            // The inputs are retired by the leftover-source step once the saved mixdown is usable.
         } catch {
             session.mixdownAttemptCount += 1
             let attempts = session.mixdownAttemptCount

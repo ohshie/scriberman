@@ -19,6 +19,8 @@ struct StatusTagView: View {
                 .foregroundStyle(Color("StatusErrorColor"))
                 .font(.caption.weight(.semibold))
                 .frame(width: 8, height: 8, alignment: .center)
+                .accessibilityLabel("Recording failed")
+                .help("Recording failed")
         case .recorded, .converting, .transcribing, .retranscribing:
             Text("Pending")
                 .font(.caption.weight(.semibold))

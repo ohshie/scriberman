@@ -20,50 +20,31 @@ final class MenuBarSettings {
 
     private let userDefaults: UserDefaults
     var isInTrayMode: Bool {
-        get { userDefaults.bool(forKey: Key.isInTrayMode) }
-        set {
-            userDefaults.set(newValue, forKey: Key.isInTrayMode)
-        }
+        didSet { userDefaults.set(isInTrayMode, forKey: Key.isInTrayMode) }
     }
 
     var closeAction: CloseAction {
-        get {
-            guard
-                let rawValue = userDefaults.string(forKey: Key.closeAction),
-                let action = CloseAction(rawValue: rawValue)
-            else {
-                return .ask
-            }
-
-            return action
-        }
-        set {
-            userDefaults.set(newValue.rawValue, forKey: Key.closeAction)
-        }
+        didSet { userDefaults.set(closeAction.rawValue, forKey: Key.closeAction) }
     }
 
     var hasShownFirstTimeTrayAlert: Bool {
-        get { userDefaults.bool(forKey: Key.hasShownFirstTimeTrayAlert) }
-        set {
-            userDefaults.set(newValue, forKey: Key.hasShownFirstTimeTrayAlert)
-        }
+        didSet { userDefaults.set(hasShownFirstTimeTrayAlert, forKey: Key.hasShownFirstTimeTrayAlert) }
     }
 
     var lastUsedMicUID: String? {
-        get { userDefaults.string(forKey: Key.lastUsedMicUID) }
-        set {
-            userDefaults.set(newValue, forKey: Key.lastUsedMicUID)
-        }
+        didSet { userDefaults.set(lastUsedMicUID, forKey: Key.lastUsedMicUID) }
     }
 
     var lastUsedAppBundleID: String? {
-        get { userDefaults.string(forKey: Key.lastUsedAppBundleID) }
-        set {
-            userDefaults.set(newValue, forKey: Key.lastUsedAppBundleID)
-        }
+        didSet { userDefaults.set(lastUsedAppBundleID, forKey: Key.lastUsedAppBundleID) }
     }
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
+        isInTrayMode = userDefaults.bool(forKey: Key.isInTrayMode)
+        closeAction = userDefaults.string(forKey: Key.closeAction).flatMap(CloseAction.init(rawValue:)) ?? .ask
+        hasShownFirstTimeTrayAlert = userDefaults.bool(forKey: Key.hasShownFirstTimeTrayAlert)
+        lastUsedMicUID = userDefaults.string(forKey: Key.lastUsedMicUID)
+        lastUsedAppBundleID = userDefaults.string(forKey: Key.lastUsedAppBundleID)
     }
 }

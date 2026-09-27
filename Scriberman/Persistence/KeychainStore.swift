@@ -24,22 +24,49 @@ enum KeychainStoreError: LocalizedError {
     }
 }
 
+protocol SecurityAPI {
+    func copyMatching(_ query: CFDictionary, _ result: UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus
+    func add(_ attributes: CFDictionary) -> OSStatus
+    func update(_ query: CFDictionary, _ attributes: CFDictionary) -> OSStatus
+    func delete(_ query: CFDictionary) -> OSStatus
+}
+
+struct LiveSecurityAPI: SecurityAPI {
+    func copyMatching(_ query: CFDictionary, _ result: UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus {
+        SecItemCopyMatching(query, result)
+    }
+
+    func add(_ attributes: CFDictionary) -> OSStatus {
+        SecItemAdd(attributes, nil)
+    }
+
+    func update(_ query: CFDictionary, _ attributes: CFDictionary) -> OSStatus {
+        SecItemUpdate(query, attributes)
+    }
+
+    func delete(_ query: CFDictionary) -> OSStatus {
+        SecItemDelete(query)
+    }
+}
+
 struct LiveKeychainStore: KeychainStore {
     private let service: String
+    private let security: any SecurityAPI
 
-    init(service: String = Bundle.main.bundleIdentifier ?? "Scriberman") {
+    init(service: String = Bundle.main.bundleIdentifier ?? "Scriberman", security: any SecurityAPI = LiveSecurityAPI()) {
         self.service = service
+        self.security = security
     }
 
     func save(key: String, value: String) throws {
         let encodedValue = Data(value.utf8)
         for (index, baseQuery) in queryVariants(for: key).enumerated() {
             var query = baseQuery
-            let status = SecItemCopyMatching(query as CFDictionary, nil)
+            let status = security.copyMatching(query as CFDictionary, nil)
 
             if status == errSecSuccess {
                 let attributes: [CFString: Any] = [kSecValueData: encodedValue]
-                let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+                let updateStatus = security.update(query as CFDictionary, attributes as CFDictionary)
                 if updateStatus == errSecSuccess {
                     return
                 }
@@ -52,7 +79,7 @@ struct LiveKeychainStore: KeychainStore {
             if status == errSecItemNotFound {
                 query[kSecValueData] = encodedValue
                 query[kSecAttrAccessible] = kSecAttrAccessibleWhenUnlocked
-                let addStatus = SecItemAdd(query as CFDictionary, nil)
+                let addStatus = security.add(query as CFDictionary)
                 if addStatus == errSecSuccess {
                     return
                 }
@@ -72,20 +99,36 @@ struct LiveKeychainStore: KeychainStore {
     }
 
     func read(key: String) -> String? {
-        for (index, baseQuery) in queryVariants(for: key).enumerated() {
+        let variants = queryVariants(for: key)
+        var dataProtectionItemMissing = false
+        for (index, baseQuery) in variants.enumerated() {
             var query = baseQuery
             query[kSecReturnData] = true
             query[kSecMatchLimit] = kSecMatchLimitOne
 
             var result: CFTypeRef?
-            let status = SecItemCopyMatching(query as CFDictionary, &result)
+            let status = security.copyMatching(query as CFDictionary, &result)
             if status == errSecSuccess {
-                guard let data = result as? Data else {
+                guard let data = result as? Data, let value = String(data: data, encoding: .utf8) else {
                     return nil
                 }
-                return String(data: data, encoding: .utf8)
+                if index == 0 {
+                    // Retry cleanup if an earlier migration could not remove the legacy copy.
+                    _ = security.delete(variants[1] as CFDictionary)
+                } else if dataProtectionItemMissing {
+                    var destination = variants[0]
+                    destination[kSecValueData] = data
+                    destination[kSecAttrAccessible] = kSecAttrAccessibleWhenUnlocked
+                    if security.add(destination as CFDictionary) == errSecSuccess {
+                        _ = security.delete(baseQuery as CFDictionary)
+                    }
+                }
+                return value
             }
 
+            if index == 0 && status == errSecItemNotFound {
+                dataProtectionItemMissing = true
+            }
             if status == errSecItemNotFound || shouldFallback(status: status, variantIndex: index) {
                 continue
             }
@@ -96,28 +139,21 @@ struct LiveKeychainStore: KeychainStore {
     }
 
     func delete(key: String) throws {
-        var sawItemNotFound = false
+        var firstFailure: OSStatus?
 
         for (index, query) in queryVariants(for: key).enumerated() {
-            let status = SecItemDelete(query as CFDictionary)
-            if status == errSecSuccess {
-                return
-            }
-            if status == errSecItemNotFound {
-                sawItemNotFound = true
+            let status = security.delete(query as CFDictionary)
+            if status == errSecSuccess || status == errSecItemNotFound || shouldFallback(status: status, variantIndex: index) {
                 continue
             }
-            if shouldFallback(status: status, variantIndex: index) {
-                continue
+            if firstFailure == nil {
+                firstFailure = status
             }
-            throw KeychainStoreError.unexpectedStatus(status)
         }
 
-        if sawItemNotFound {
-            return
+        if let firstFailure {
+            throw KeychainStoreError.unexpectedStatus(firstFailure)
         }
-
-        throw KeychainStoreError.unexpectedStatus(errSecMissingEntitlement)
     }
 
     private func queryVariants(for key: String) -> [[CFString: Any]] {

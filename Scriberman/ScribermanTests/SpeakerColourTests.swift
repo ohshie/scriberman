@@ -75,7 +75,7 @@ struct SpeakerColourTests {
 
     /// Tags were the fifth section of General, below the fold at the window's default size — and
     /// the assignment menu's "Add new tag" sent people exactly there.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTagsHaveTheirOwnSettingsTab() throws {
         let source = try settingsSource()
 
@@ -84,7 +84,7 @@ struct SpeakerColourTests {
         #expect(source.contains(".tag(SettingsTab.tags)"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testAddingATagFromASessionAsksForTheTagsTab() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let menu = try String(
@@ -96,7 +96,7 @@ struct SpeakerColourTests {
         #expect(menu.contains("openSettings()"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testSettingsHonoursARequestedTabAndClearsIt() throws {
         let source = try settingsSource()
 
@@ -116,7 +116,7 @@ struct SpeakerColourTests {
 
     /// A cue that exists only under the pointer tells nobody anything — and a session named after
     /// its own timestamp is the title most worth renaming.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheEditCueIsPresentAtRest() throws {
         let source = try modifierSource()
 
@@ -125,7 +125,7 @@ struct SpeakerColourTests {
         #expect(source.contains(".opacity(isHovering ? 1 : 0.45)"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testHoverStillRevealsTheFullTreatment() throws {
         let source = try modifierSource()
 
@@ -137,7 +137,7 @@ struct SpeakerColourTests {
 
     /// The modifier imposes no font or alignment, which is what lets one cue serve a centered
     /// title2 and a leading largeTitle — recordings and imports alike.
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheCueImposesNoFontOrAlignment() throws {
         let source = try modifierSource()
 
@@ -157,7 +157,7 @@ struct SpeakerColourTests {
 
     /// The study view is the app's only full reader, and the only way in was a click anywhere on
     /// the preview card, hinted at by a hover ring under a line reporting a limit.
-    @Test
+    @Test(.tags(.sourceLint))
     func testThePreviewOffersALabelledControlIntoTheStudyView() throws {
         let source = try previewSource()
 
@@ -169,7 +169,7 @@ struct SpeakerColourTests {
 
     /// A card that opens a different view when clicked is a gesture people already use; the control
     /// is added beside it, not in place of it.
-    @Test
+    @Test(.tags(.sourceLint))
     func testThePreviewCardStillOpensTheStudyViewWhenClicked() throws {
         let source = try previewSource()
 
@@ -179,7 +179,7 @@ struct SpeakerColourTests {
 
     /// No control where there is nowhere to go: the preview renders without one when it is not
     /// given a destination.
-    @Test
+    @Test(.tags(.sourceLint))
     func testNoControlIsShownWhenThePreviewHasNoDestination() throws {
         let source = try previewSource()
 
@@ -198,7 +198,7 @@ struct SpeakerColourTests {
 
     /// A block showed `00:00:10,240 - 00:00:40,448` — subtitle-editor precision, in a view built
     /// for reading, stating the same boundary as the next block.
-    @Test
+    @Test(.tags(.sourceLint))
     func testABlockShowsItsStartTimeAtSecondResolution() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let source = try String(
@@ -224,7 +224,7 @@ struct SpeakerColourTests {
     }
 
     /// One palette, because there are three writers of `TranscriptSpeaker` and they disagreed.
-    @Test
+    @Test(.tags(.sourceLint))
     func testEveryWriterUsesTheSharedPalette() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         for path in [

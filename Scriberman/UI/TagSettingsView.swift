@@ -60,7 +60,7 @@ struct TagSettingsView: View {
     private func row(for tag: RecordingTag) -> some View {
         HStack(spacing: 8) {
             ColorPicker(
-                "",
+                "Tag color",
                 selection: Binding(
                     get: { Color(tagHex: tag.colorHex) },
                     set: { recolor(tag, to: $0) }
@@ -68,6 +68,8 @@ struct TagSettingsView: View {
                 supportsOpacity: false
             )
             .labelsHidden()
+            .accessibilityLabel("Tag color")
+            .help("Tag color")
 
             TextField(
                 "Name",

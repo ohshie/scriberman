@@ -34,6 +34,16 @@ final class RecordingSession {
     /// correctly placed; the uncovered interval is silence. Stored as data, not a message.
     var partiallyCoveredSources: [String]?
     var mixdownAttemptCountValue: Int?
+    /// Screen video finalization state, as a `ScreenMuxState` raw value: `pending` from stop
+    /// until `screen.mov` is saved, `failed` after a failed attempt, `nil` when done or when the
+    /// recording has no video. `screen-tmp.mov` is kept while it is set.
+    var screenMuxState: String?
+    /// Host time of the first video frame, saved at stop so recovery can retry the mux.
+    var videoStartHostTimeNanos: Int64?
+    /// Host time the mixdown audio is anchored to, saved at stop so recovery can retry the mux.
+    var audioAnchorHostTimeNanos: Int64?
+    /// Screen video mux attempts started by recovery.
+    var screenMuxAttemptCountValue: Int?
     var transcriptData: Data?
     var retranscriptData: Data?
     var aiTransformationsData: Data?
@@ -41,6 +51,9 @@ final class RecordingSession {
     /// the transcript setters. Optional and absent from the initialiser: existing sessions have it
     /// backfilled at startup rather than through a migration.
     var searchableText: String?
+    /// Live transcript segments persisted during capture. They belong to this recording and go
+    /// with it: the default rule, nullify, left them in the store with no owner.
+    @Relationship(deleteRule: .cascade, inverse: \RecordingTranscriptSegment.session)
     var transcriptSegments: [RecordingTranscriptSegment] = []
     /// Tags carried by this recording — one to three, never zero.
     ///
@@ -87,6 +100,14 @@ final class RecordingSession {
         get { mixdownAttemptCountValue ?? 0 }
         set { mixdownAttemptCountValue = newValue }
     }
+
+    var screenMuxAttemptCount: Int {
+        get { screenMuxAttemptCountValue ?? 0 }
+        set { screenMuxAttemptCountValue = newValue }
+    }
+
+    /// Whether the screen video could not be produced and `screen-tmp.mov` is still waiting.
+    var didScreenVideoFinalizationFail: Bool { screenMuxState == ScreenMuxState.failed.rawValue }
 
     var transcript: Transcript? {
         get {
@@ -158,3 +179,17 @@ final class RecordingSession {
 }
 
 extension RecordingSession: TranscribableSession {}
+
+enum ScreenMuxState: String, Sendable {
+    case pending
+    case failed
+}
+
+extension RecordingSession {
+    static func fetch(id: UUID, in context: ModelContext) throws -> RecordingSession? {
+        let targetID = id
+        var descriptor = FetchDescriptor<RecordingSession>(predicate: #Predicate { $0.id == targetID })
+        descriptor.fetchLimit = 1
+        return try context.fetch(descriptor).first
+    }
+}

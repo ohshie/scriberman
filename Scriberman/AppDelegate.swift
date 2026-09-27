@@ -29,6 +29,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     var terminationReplyHandler: (Bool) -> Void = { shouldTerminate in
         NSApp.reply(toApplicationShouldTerminate: shouldTerminate)
     }
+    /// Finalization work quit waits for. Defaults to the app's finalizer; tests inject a fake.
+    var recordingFinalizer: (any RecordingFinalizing)?
+    /// How long quit waits for finalization. Work still running after it is resumed by recovery
+    /// on the next launch (design D5).
+    static let finalizationQuitTimeout: Duration = .seconds(15)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         registerLifecycleObservers()
@@ -46,7 +51,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             return .terminateNow
         }
 
-        guard isRecordingForLifecycle() else {
+        let isRecording = isRecordingForLifecycle()
+        let finalizer = recordingFinalizer ?? appState?.backgroundServices.recordingFinalizer
+        guard isRecording || finalizer?.hasJobs == true else {
             return .terminateNow
         }
 
@@ -55,7 +62,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 return
             }
 
-            await stopRecordingForLifecycle()
+            if isRecording {
+                await stopRecordingForLifecycle()
+            }
+            // Stopping schedules the recording's finalization, so wait after it.
+            if let finalizer, !(await finalizer.waitForAll(timeout: Self.finalizationQuitTimeout)) {
+                logger.notice("Quitting with finalization still running; recovery resumes it on next launch.")
+            }
             terminationReplyHandler(true)
         }
         return .terminateLater

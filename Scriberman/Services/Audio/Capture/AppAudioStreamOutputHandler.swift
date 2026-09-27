@@ -11,9 +11,16 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
     /// continuing to write into the same file, with its accumulated timing segments intact.
     let streamer: AudioFileStreamer
     private var monoFormat: AVAudioFormat?
-    private var firstBufferHostTime: UInt64?
-    private let liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation?
-    var onFirstBufferHostTime: (@Sendable (UInt64) -> Void)?
+    private var firstBufferHostTime: HostNanoseconds?
+    private let liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation?
+    var onFirstBufferHostTime: (@Sendable (HostNanoseconds) -> Void)?
+    private let layoutTracker = UnsupportedPCMLayoutTracker(source: "app")
+
+    /// Buffers dropped because their sample layout cannot be copied.
+    var unsupportedFormatCount: Int { layoutTracker.unsupportedFormatCount }
+
+    /// Distinct unsupported formats logged.
+    var loggedUnsupportedFormatCount: Int { layoutTracker.loggedFormatCount }
 
     var audioLevel: Float {
         streamer.audioLevel
@@ -34,7 +41,7 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
     private var hasPrepared = false
 
     init(
-        liveAudioContinuation: AsyncStream<([Float], AudioSource, Double)>.Continuation? = nil,
+        liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation? = nil,
         streamer: AudioFileStreamer = AudioFileStreamer(label: "app")
     ) {
         self.liveAudioContinuation = liveAudioContinuation
@@ -77,9 +84,19 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
         process(sampleBuffer)
     }
 
+#if DEBUG
+    /// Test seam: feed a sample buffer without an `SCStream`, which cannot be constructed in tests.
+    func processSampleBufferForTesting(_ sampleBuffer: CMSampleBuffer) {
+        process(sampleBuffer)
+    }
+#endif
+
     private func process(_ sampleBuffer: CMSampleBuffer) {
+        guard layoutTracker.admit(sampleBuffer) else {
+            return
+        }
         captureFirstBufferHostTimeIfNeeded(from: sampleBuffer)
-        let bufferHostNanos = Self.hostTimeNanos(from: sampleBuffer)
+        let bufferHostNanos = HostNanoseconds(presentationTimeOf: sampleBuffer)?.nanoseconds
 
         guard let pcmBuffer = createPCMBuffer(from: sampleBuffer) else {
             return
@@ -133,16 +150,7 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
         }
 
         streamer.write(buffer: monoBuffer, hostTimeNanos: bufferHostNanos)
-        liveAudioContinuation?.yield((monoSamples, .app, format.sampleRate))
-    }
-
-    /// Host time (nanoseconds) of a sample buffer's first frame, or nil if unavailable.
-    private static func hostTimeNanos(from sampleBuffer: CMSampleBuffer) -> UInt64? {
-        let presentationTimestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        let hostTimeClock = CMClockGetHostTimeClock()
-        let hostTime = CMSyncConvertTime(presentationTimestamp, from: hostTimeClock, to: hostTimeClock)
-        guard CMTIME_IS_VALID(hostTime), CMTIME_IS_NUMERIC(hostTime) else { return nil }
-        return HostClock.nanoseconds(machTime: CMClockConvertHostTimeToSystemUnits(hostTime))
+        liveAudioContinuation?.yield(LiveAudioChunk(samples: monoSamples, source: .app, sampleRate: format.sampleRate, hostTime: bufferHostNanos.map { HostNanoseconds(nanoseconds: $0) }))
     }
 
     private func createPCMBuffer(from sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {
@@ -219,24 +227,14 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
     }
 
     private func captureFirstBufferHostTimeIfNeeded(from sampleBuffer: CMSampleBuffer) {
-        let callback: (@Sendable (UInt64) -> Void)?
-        let hostTimeToEmit: UInt64?
+        let callback: (@Sendable (HostNanoseconds) -> Void)?
+        let hostTimeToEmit: HostNanoseconds?
         var didCaptureFirstHostTime = false
 
         lock.lock()
-        if firstBufferHostTime == nil {
-            let presentationTimestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            let hostTimeClock = CMClockGetHostTimeClock()
-            let hostTime = CMSyncConvertTime(
-                presentationTimestamp,
-                from: hostTimeClock,
-                to: hostTimeClock
-            )
-
-            if CMTIME_IS_VALID(hostTime), CMTIME_IS_NUMERIC(hostTime) {
-                firstBufferHostTime = CMClockConvertHostTimeToSystemUnits(hostTime)
-                didCaptureFirstHostTime = true
-            }
+        if firstBufferHostTime == nil, let hostTime = HostNanoseconds(presentationTimeOf: sampleBuffer) {
+            firstBufferHostTime = hostTime
+            didCaptureFirstHostTime = true
         }
         callback = onFirstBufferHostTime
         hostTimeToEmit = didCaptureFirstHostTime ? firstBufferHostTime : nil

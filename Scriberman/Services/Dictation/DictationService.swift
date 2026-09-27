@@ -57,7 +57,17 @@ final class DictationService {
     // nonisolated(unsafe): written once during prewarm (on main actor), then read by the processing
     // Task which only runs after prewarm completes and never concurrently with another write.
     @ObservationIgnored nonisolated(unsafe) private var asrManager: AsrManager?
-    @ObservationIgnored private let modelPathResolver = ModelPathResolver()
+    @ObservationIgnored private let loadAsr: @Sendable (Workspace) async throws -> AsrManager
+    // Single-flight pre-warm (design D4): callers with the same key join
+    // this task; a failed load clears it so the next call retries.
+    @ObservationIgnored private var prewarmLoad: (key: PrewarmKey, task: Task<Void, Never>)?
+
+    private var preparedWorkspace: Workspace?
+
+    private struct PrewarmKey: Equatable {
+        let workspaceRoot: URL
+        let modelRevision: String
+    }
 
     @ObservationIgnored private let captureSession: any DictationCapturing
     @ObservationIgnored private let insertText: @MainActor (String) -> InsertionOutcome
@@ -77,41 +87,80 @@ final class DictationService {
     init(
         recordingService: any RecordingServiceProtocol,
         captureSession: any DictationCapturing = DictationCaptureSession(),
-        insertText: @escaping @MainActor (String) -> InsertionOutcome = { TextInjector().insert($0) }
+        insertText: @escaping @MainActor (String) -> InsertionOutcome = { TextInjector().insert($0) },
+        loadAsr: @escaping @Sendable (Workspace) async throws -> AsrManager = DictationService.loadWorkspaceAsr
     ) {
         self.recordingService = recordingService
         self.captureSession = captureSession
         self.insertText = insertText
+        self.loadAsr = loadAsr
     }
 
     // MARK: - Pre-warm
 
+    func prepare(for workspace: Workspace) {
+        guard preparedWorkspace != workspace else { return }
+        preparedWorkspace = workspace
+        prewarmLoad?.task.cancel()
+        prewarmLoad = nil
+        asrManager = nil
+        if state == .prewarming { state = .idle }
+    }
+
     func prewarm(workspace: Workspace) async {
-        guard asrManager == nil else { return }
-        state = .prewarming
-
-        do {
-            let asrDir = try modelPathResolver.modelDirectory(for: .asrParakeetUltra, in: workspace)
-            let asr = AsrManager(config: ASRConfig())
-            let asrModels = try await AsrModels.load(from: asrDir, version: ModelPathResolver.asrModelVersion, encoderComputeUnits: .cpuAndGPU)
-            try await asr.loadModels(asrModels)
-            asrManager = asr
-
-            logger.info("DictationService pre-warm complete")
-        } catch {
-            logger.warning("DictationService pre-warm failed (non-fatal): \(error.localizedDescription)")
-            asrManager = nil
+        guard !Task.isCancelled else { return }
+        prepare(for: workspace)
+        let key = PrewarmKey(workspaceRoot: workspace.rootURL, modelRevision: "\(ModelPathResolver.asrModelVersion)")
+        if let prewarmLoad, prewarmLoad.key == key {
+            await prewarmLoad.task.value
+            return
         }
-        state = .idle
+
+        if state == .idle {
+            state = .prewarming
+        }
+        let loadAsr = loadAsr
+        // The task body updates state itself, so every caller awaiting it
+        // resumes with the load already applied.
+        let task = Task { [weak self] in
+            do {
+                let asr = try await loadAsr(workspace)
+                guard !Task.isCancelled else { return }
+                self?.asrManager = asr
+                self?.logger.info("DictationService pre-warm complete")
+            } catch {
+                guard !Task.isCancelled else { return }
+                self?.logger.warning("DictationService pre-warm failed (non-fatal): \(error.localizedDescription)")
+                self?.asrManager = nil
+                if self?.prewarmLoad?.key == key {
+                    self?.prewarmLoad = nil
+                }
+            }
+            if self?.state == .prewarming {
+                self?.state = .idle
+            }
+        }
+        prewarmLoad = (key, task)
+        await task.value
+    }
+
+    nonisolated static func loadWorkspaceAsr(_ workspace: Workspace) async throws -> AsrManager {
+        let asrDir = try ModelPathResolver().modelDirectory(for: .asrParakeetUltra, in: workspace)
+        let asr = AsrManager(config: ASRConfig())
+        let asrModels = try await AsrModels.load(from: asrDir, version: ModelPathResolver.asrModelVersion, encoderComputeUnits: .cpuAndGPU)
+        try await asr.loadModels(asrModels)
+        return asr
     }
 
     // MARK: - Lifecycle
 
     func start(deviceID: AudioDeviceID?) async {
-        guard state == .idle, startTask == nil else { return }
+        guard state == .idle || state == .prewarming, startTask == nil else { return }
 
         let task = Task { [weak self] in
             guard let self else { return }
+            // A press during pre-warm waits for that load (design D4).
+            await self.prewarmLoad?.task.value
             await self.performStart(deviceID: deviceID)
         }
         startTask = task
@@ -165,13 +214,22 @@ final class DictationService {
 
     // MARK: - Processing
 
-    private func startProcessing(stream: AsyncStream<[Float]>) {
+    private func startProcessing(stream: AsyncThrowingStream<[Float], Error>) {
         processingTask = Task { [weak self] in
             var allSamples: [Float] = []
-            for await samples in stream {
-                allSamples.append(contentsOf: samples)
+            do {
+                for try await samples in stream {
+                    allSamples.append(contentsOf: samples)
+                }
+                await self?.finishSession(samples: allSamples)
+            } catch {
+                guard let self else { return }
+                self.logger.error("Dictation conversion failed: \(error.localizedDescription)")
+                await self.captureSession.stop()
+                self.inputLevel = 0
+                self.lastOutcome = .failed(.captureFailed)
+                self.state = .idle
             }
-            await self?.finishSession(samples: allSamples)
         }
     }
 

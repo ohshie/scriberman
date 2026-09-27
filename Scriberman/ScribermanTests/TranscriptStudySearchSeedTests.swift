@@ -68,7 +68,7 @@ struct TranscriptStudySearchSeedTests {
 
     // MARK: - The view's wiring
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testTheSeedIsAppliedFromATaskKeyedOnIt() throws {
         let source = try studyViewSource()
 
@@ -76,7 +76,7 @@ struct TranscriptStudySearchSeedTests {
         #expect(source.contains("applySearchSeed()"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testApplyingASeedSelectsTheMatchAndScrollsToIt() throws {
         let body = try #require(functionBody(named: "private func applySearchSeed()", in: try studyViewSource()))
 
@@ -88,7 +88,7 @@ struct TranscriptStudySearchSeedTests {
 
     /// Opening a session that was not reached by search leaves the view exactly as it was: empty
     /// find bar, no match, nothing hidden.
-    @Test
+    @Test(.tags(.sourceLint))
     func testNoSeedLeavesTheViewUnchanged() throws {
         let body = try #require(functionBody(named: "private func applySearchSeed()", in: try studyViewSource()))
 
@@ -96,7 +96,7 @@ struct TranscriptStudySearchSeedTests {
     }
 
     /// Locating text and listening to it are separate intentions.
-    @Test
+    @Test(.tags(.sourceLint))
     func testApplyingASeedStartsNoPlayback() throws {
         let body = try #require(functionBody(named: "private func applySearchSeed()", in: try studyViewSource()))
 
@@ -104,7 +104,7 @@ struct TranscriptStudySearchSeedTests {
         #expect(!body.contains(".play()"))
     }
 
-    @Test
+    @Test(.tags(.sourceLint))
     func testOpeningAResultStartsNoPlayback() throws {
         let body = try #require(functionBody(named: "private func openSearchResult(", in: try appShellSource()))
 
@@ -113,7 +113,7 @@ struct TranscriptStudySearchSeedTests {
 
     /// A seeded search is dismissed by the same path as one the user opened, so Escape behaves the
     /// same either way.
-    @Test
+    @Test(.tags(.sourceLint))
     func testASeededSearchIsDismissedLikeAnyOther() throws {
         let source = try studyViewSource()
         let dismiss = try #require(functionBody(named: "private func dismissSearch()", in: source))
@@ -126,7 +126,7 @@ struct TranscriptStudySearchSeedTests {
 
     /// Clicking a result whose session is already selected changes no binding, so the row reports
     /// the click itself.
-    @Test
+    @Test(.tags(.sourceLint))
     func testAClickOnAResultIsReportedEvenWithoutASelectionChange() throws {
         let source = try readSourceFile(relativePathFromTests: "../UI/JobsView.swift")
 
@@ -138,7 +138,7 @@ struct TranscriptStudySearchSeedTests {
 
     /// The selection change handler resets the detail view. Without this guard it would undo the
     /// navigation that caused the change.
-    @Test
+    @Test(.tags(.sourceLint))
     func testSelectingAResultIsNotResetByTheSelectionHandler() throws {
         let source = try appShellSource()
 
@@ -168,6 +168,60 @@ struct TranscriptStudySearchSeedTests {
         return try String(
             contentsOf: testsDirectory.appendingPathComponent(relativePathFromTests),
             encoding: .utf8
+        )
+    }
+
+    // MARK: - Session identity
+
+    /// Search result A, then search result B, then a speaker rename: only B may change.
+    @Test
+    func testRenamingASpeakerWritesOnlyTheViewsSession() throws {
+        let sessionA = RecordingSession(duration: 10, micAudioURL: "/tmp/a/mic.wav", title: "A")
+        let sessionB = RecordingSession(duration: 10, micAudioURL: "/tmp/b/mic.wav", title: "B")
+        sessionA.transcript = transcript(text: "session a words", speakerLabel: "Speaker 1")
+        sessionB.transcript = transcript(text: "session b words", speakerLabel: "Speaker 1")
+        let sessionABefore = sessionA.transcriptData
+
+        let shownForB = try #require(sessionB.retranscript ?? sessionB.transcript)
+        let renamed = try #require(TranscriptStudyView.renameSpeaker(id: "S1", to: "Ana", in: shownForB, of: sessionB))
+
+        #expect(renamed.speakers.map(\.label) == ["Ana"])
+        #expect(sessionB.transcript?.speakers.map(\.label) == ["Ana"])
+        #expect(sessionB.transcript?.fullText == "session b words")
+        #expect(sessionA.transcriptData == sessionABefore)
+    }
+
+    @Test
+    func testRenamingWritesTheRetranscriptWhenOneIsDisplayed() throws {
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/c/mic.wav", title: "C")
+        session.transcript = transcript(text: "first pass", speakerLabel: "Speaker 1")
+        session.retranscript = transcript(text: "second pass", speakerLabel: "Speaker 1")
+        let firstPassBefore = session.transcriptData
+
+        let shown = try #require(session.retranscript)
+        _ = TranscriptStudyView.renameSpeaker(id: "S1", to: "Ana", in: shown, of: session)
+
+        #expect(session.retranscript?.speakers.map(\.label) == ["Ana"])
+        #expect(session.transcriptData == firstPassBefore)
+    }
+
+    @Test
+    func testRenamingAnUnknownSpeakerWritesNothing() {
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/d/mic.wav", title: "D")
+        session.transcript = transcript(text: "words", speakerLabel: "Speaker 1")
+        let before = session.transcriptData
+
+        let result = TranscriptStudyView.renameSpeaker(id: "missing", to: "Ana", in: session.transcript!, of: session)
+
+        #expect(result == nil)
+        #expect(session.transcriptData == before)
+    }
+
+    private func transcript(text: String, speakerLabel: String) -> Transcript {
+        Transcript(
+            fullText: text,
+            segments: [TranscriptSegment(speakerId: "S1", text: text, startTime: 0, endTime: 1)],
+            speakers: [TranscriptSpeaker(id: "S1", label: speakerLabel, colorHex: "#112233")]
         )
     }
 }

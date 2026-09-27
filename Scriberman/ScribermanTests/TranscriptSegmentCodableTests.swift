@@ -1,7 +1,49 @@
+import Foundation
 import Testing
 @testable import Scriberman
 
 struct TranscriptSegmentCodableTests {
+    @Test
+    func legacyIDsAreStableAcrossDecodes() throws {
+        let data = Data("""
+        {"speakerId":"S1","text":"migration next week","startTime":2.5,"endTime":4}
+        """.utf8)
+        let first = try JSONDecoder().decode(TranscriptSegment.self, from: data)
+        let second = try JSONDecoder().decode(TranscriptSegment.self, from: data)
+        #expect(first.id == second.id)
+    }
+
+    @Test
+    func storedIDIsPreserved() throws {
+        let data = Data("""
+        {"id":"12345678-1234-4234-8234-123456789ABC","speakerId":"S1",
+         "text":"hello","startTime":0,"endTime":1}
+        """.utf8)
+        let segment = try JSONDecoder().decode(TranscriptSegment.self, from: data)
+        #expect(segment.id == UUID(uuidString: "12345678-1234-4234-8234-123456789ABC"))
+    }
+
+    @Test(arguments: ["startTime", "endTime", "speakerId", "audioSource", "text"])
+    func legacyIDIncludesEachContentField(field: String) throws {
+        var payload: [String: Any] = [
+            "speakerId": "S1", "text": "hello", "startTime": 0, "endTime": 1, "audioSource": "mic"
+        ]
+        let original = try JSONDecoder().decode(
+            TranscriptSegment.self, from: JSONSerialization.data(withJSONObject: payload)
+        )
+        switch field {
+        case "startTime": payload[field] = 0.5
+        case "endTime": payload[field] = 2
+        case "speakerId": payload[field] = "S2"
+        case "audioSource": payload[field] = "app"
+        default: payload[field] = "goodbye"
+        }
+        let changed = try JSONDecoder().decode(
+            TranscriptSegment.self, from: JSONSerialization.data(withJSONObject: payload)
+        )
+        #expect(original.id != changed.id)
+    }
+
     @Test
     func decodeLegacySegmentWithoutAudioSourceDefaultsToMic() throws {
         let json = """
