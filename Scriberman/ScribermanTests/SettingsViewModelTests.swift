@@ -140,6 +140,32 @@ final class SettingsViewModelTests {
         #expect(viewModel.modelStates[.nemotron3Diarization] == .missing)
     }
 
+    @Test
+    func testWarmUpFailureDisplaysReasonAndRetryRecovers() async throws {
+        let workspaceService = MockWorkspaceService()
+        workspaceService.currentWorkspaceResult = Workspace(rootURL: try makeTempRoot())
+        let service = MockModelInstallService()
+        await service.setWarmUpFailures([.vadSilero: "Compile failed"])
+        let viewModel = SettingsViewModel(
+            workspaceService: workspaceService, modelInstallService: service,
+            speakerEmbeddingStore: try makeSpeakerEmbeddingStore()
+        )
+        viewModel.canDownloadModels = true
+        await viewModel.downloadAllTapped()
+        #expect(viewModel.bundlePhase == .error("Compile failed"))
+        #expect(viewModel.modelStates[.vadSilero] == .error)
+        #expect(viewModel.modelStatusMessages[.vadSilero] == "Compile failed")
+        await viewModel.refresh()
+        #expect(viewModel.bundlePhase == .error("Compile failed"))
+        #expect(viewModel.modelStates[.vadSilero] == .error)
+        #expect(viewModel.modelStatusMessages[.vadSilero] == "Compile failed")
+        await service.setWarmUpFailures([:])
+        await viewModel.downloadAllTapped()
+        #expect(viewModel.bundlePhase == .allReady)
+        #expect(viewModel.modelStates[.vadSilero] == .ready)
+        #expect(viewModel.modelStatusMessages[.vadSilero] == nil)
+    }
+
     private func makeTempRoot() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -170,6 +196,8 @@ private actor MockModelInstallService: ModelInstallServicing {
     private var states: [ModelGroup: ModelGroupReadinessState] = [:]
     private var groupsInstalled: [ModelGroup] = []
     private var failGroup: ModelGroup?
+    private var warmUpFailures: [ModelGroup: String] = [:]
+    func setWarmUpFailures(_ failures: [ModelGroup: String]) { warmUpFailures = failures }
     private var warmedUp = false
     private var warmUpHook: (@Sendable () async -> Void)?
 
@@ -235,10 +263,14 @@ private actor MockModelInstallService: ModelInstallServicing {
         return URL(fileURLWithPath: "/tmp/\(group.rawValue)", isDirectory: true)
     }
 
-    func warmUpModels(workspace: Workspace) async {
+    func clearStaging() async throws {}
+
+    func warmUpModels(workspace: Workspace) async -> [ModelGroup: String] {
         await warmUpHook?()
         warmedUp = true
         await Task.yield()
+        for group in warmUpFailures.keys { states[group] = .error }
+        return warmUpFailures
     }
 }
 
