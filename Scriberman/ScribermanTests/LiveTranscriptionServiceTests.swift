@@ -1485,10 +1485,10 @@ struct LiveSpeakerTimelineTests {
             SegmentPart(speakerIndex: 1, start: 3.0, end: 4.0)
         ]
         let timings = [
-            TokenTiming(token: "one", tokenId: 1, startTime: 0.0, endTime: 1.0, confidence: 1.0),
-            TokenTiming(token: "two", tokenId: 2, startTime: 1.0, endTime: 2.0, confidence: 1.0),
-            TokenTiming(token: "three", tokenId: 3, startTime: 3.1, endTime: 3.4, confidence: 1.0),
-            TokenTiming(token: "four", tokenId: 4, startTime: 3.4, endTime: 3.9, confidence: 1.0)
+            TokenTiming(token: " one", tokenId: 1, startTime: 0.0, endTime: 1.0, confidence: 1.0),
+            TokenTiming(token: " two", tokenId: 2, startTime: 1.0, endTime: 2.0, confidence: 1.0),
+            TokenTiming(token: " three", tokenId: 3, startTime: 3.1, endTime: 3.4, confidence: 1.0),
+            TokenTiming(token: " four", tokenId: 4, startTime: 3.4, endTime: 3.9, confidence: 1.0)
         ]
         let texts = LiveSegmentSplitter.apportionText(
             "one two three four",
@@ -1506,6 +1506,125 @@ struct LiveSpeakerTimelineTests {
             LiveSegmentSplitter.apportionText("hello world", parts: parts, bufferStart: 0.0, tokenTimings: nil)
                 == ["hello world"]
         )
+    }
+
+    @Test
+    func apportionTextKeepsMultiTokenWordWhole() {
+        // FluidAudio replaces SentencePiece's word-boundary marker with a leading
+        // space, so " un" opens a word and "bel", "iev", "able" continue it.
+        let parts = [
+            SegmentPart(speakerIndex: 0, start: 0.0, end: 1.5),
+            SegmentPart(speakerIndex: 1, start: 1.5, end: 2.5)
+        ]
+        let timings = [
+            TokenTiming(token: " un", tokenId: 1, startTime: 0.2, endTime: 0.4, confidence: 1.0),
+            TokenTiming(token: "bel", tokenId: 2, startTime: 0.4, endTime: 0.6, confidence: 1.0),
+            TokenTiming(token: "iev", tokenId: 3, startTime: 0.6, endTime: 0.8, confidence: 1.0),
+            TokenTiming(token: "able", tokenId: 4, startTime: 0.8, endTime: 1.0, confidence: 1.0),
+            TokenTiming(token: " yes", tokenId: 5, startTime: 1.8, endTime: 2.0, confidence: 1.0)
+        ]
+        let texts = LiveSegmentSplitter.apportionText(
+            "unbelievable yes",
+            parts: parts,
+            bufferStart: 0.0,
+            tokenTimings: timings
+        )
+        #expect(texts == ["unbelievable", "yes"])
+    }
+
+    @Test
+    func planPartsTilesBufferForRandomOverlappingRuns() {
+        var generator = SeededGenerator(seed: 42)
+        for _ in 0..<500 {
+            let bufferEnd = Float.random(in: 2...20, using: &generator)
+            let runs = (0..<Int.random(in: 2...6, using: &generator)).map { _ in
+                let runStart = Float.random(in: 0..<bufferEnd, using: &generator)
+                return SpeakerRun(
+                    speakerIndex: Int.random(in: 0..<4, using: &generator),
+                    start: runStart,
+                    end: min(bufferEnd, runStart + Float.random(in: 0.2...8, using: &generator))
+                )
+            }
+            let parts = LiveSegmentSplitter.planParts(runs: runs, start: 0.0, end: bufferEnd)
+
+            #expect(!parts.isEmpty)
+            #expect(parts.first?.start == 0.0)
+            #expect(parts.last?.end == bufferEnd)
+            #expect(parts.allSatisfy { $0.end >= $0.start })
+            #expect(zip(parts, parts.dropFirst()).allSatisfy { $0.end == $1.start })
+        }
+    }
+
+    @Test
+    func apportionTextSplitsByDurationWhenTimingsMissing() {
+        let parts = [
+            SegmentPart(speakerIndex: 0, start: 0.0, end: 3.0),
+            SegmentPart(speakerIndex: 1, start: 3.0, end: 4.0)
+        ]
+        let texts = LiveSegmentSplitter.apportionText(
+            "a b c d e f g h",
+            parts: parts,
+            bufferStart: 0.0,
+            tokenTimings: []
+        )
+        #expect(texts == ["a b c d e f", "g h"])
+    }
+
+    @Test
+    func apportionTextStitchesPunctuatedSentenceLikeASRText() {
+        let parts = [
+            SegmentPart(speakerIndex: 0, start: 10.0, end: 13.0),
+            SegmentPart(speakerIndex: 1, start: 13.0, end: 14.0)
+        ]
+        let timings = [
+            TokenTiming(token: " Hel", tokenId: 1, startTime: 0.1, endTime: 0.3, confidence: 1.0),
+            TokenTiming(token: "lo", tokenId: 2, startTime: 0.3, endTime: 0.5, confidence: 1.0),
+            TokenTiming(token: ",", tokenId: 3, startTime: 0.5, endTime: 0.6, confidence: 1.0),
+            TokenTiming(token: " how", tokenId: 4, startTime: 0.8, endTime: 1.0, confidence: 1.0),
+            TokenTiming(token: " are", tokenId: 5, startTime: 1.0, endTime: 1.2, confidence: 1.0),
+            TokenTiming(token: " you", tokenId: 6, startTime: 1.2, endTime: 1.5, confidence: 1.0),
+            TokenTiming(token: "?", tokenId: 7, startTime: 1.5, endTime: 1.6, confidence: 1.0)
+        ]
+        let texts = LiveSegmentSplitter.apportionText(
+            "Hello, how are you?",
+            parts: parts,
+            bufferStart: 10.0,
+            tokenTimings: timings
+        )
+        #expect(texts == ["Hello, how are you?", ""])
+    }
+
+    @Test
+    func planPartsResolvesOverlappingRunsWithoutInvertedParts() {
+        let parts = LiveSegmentSplitter.planParts(
+            runs: [
+                SpeakerRun(speakerIndex: 0, start: 0.0, end: 10.0),
+                SpeakerRun(speakerIndex: 1, start: 1.0, end: 3.0),
+                SpeakerRun(speakerIndex: 2, start: 4.0, end: 6.0)
+            ],
+            start: 0.0,
+            end: 10.0
+        )
+        #expect(parts == [
+            SegmentPart(speakerIndex: 0, start: 0.0, end: 1.0),
+            SegmentPart(speakerIndex: 1, start: 1.0, end: 3.0),
+            SegmentPart(speakerIndex: 0, start: 3.0, end: 4.0),
+            SegmentPart(speakerIndex: 2, start: 4.0, end: 6.0),
+            SegmentPart(speakerIndex: 0, start: 6.0, end: 10.0)
+        ])
+    }
+
+    @Test
+    func speakerRunsMergesSameSpeakerAcrossInterleavedRun() {
+        let runs = LiveSpeakerTimeline.speakerRuns(
+            in: [segment(0, 0.0, 2.0), segment(1, 1.5, 3.0), segment(0, 2.1, 4.0)],
+            start: 0.0,
+            end: 4.0
+        )
+        #expect(runs == [
+            SpeakerRun(speakerIndex: 0, start: 0.0, end: 4.0),
+            SpeakerRun(speakerIndex: 1, start: 1.5, end: 3.0)
+        ])
     }
 }
 
@@ -1993,5 +2112,22 @@ extension LiveRecordingSessionTests {
         monitor.finish()
         monitor.finish()
         #expect(events == [true, false])
+    }
+}
+
+/// Deterministic generator so randomized tests reproduce (SplitMix64).
+struct SeededGenerator: RandomNumberGenerator {
+    private var state: UInt64
+
+    init(seed: UInt64) {
+        state = seed
+    }
+
+    mutating func next() -> UInt64 {
+        state &+= 0x9E3779B97F4A7C15
+        var value = state
+        value = (value ^ (value >> 30)) &* 0xBF58476D1CE4E5B9
+        value = (value ^ (value >> 27)) &* 0x94D049BB133111EB
+        return value ^ (value >> 31)
     }
 }
