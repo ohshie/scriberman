@@ -26,6 +26,14 @@ actor SpeakerEmbeddingStore {
         }
     }
 
+    /// Deletes every stored profile.
+    func deleteAllProfiles() throws {
+        for profile in try fetchAll() {
+            modelContext.delete(profile)
+        }
+        try modelContext.save()
+    }
+
     func findProfileSnapshot(byID id: UUID) throws -> SpeakerProfileSnapshot? {
         try SpeakerProfile.fetch(id: id, in: modelContext).map(SpeakerProfileSnapshot.init(profile:))
     }

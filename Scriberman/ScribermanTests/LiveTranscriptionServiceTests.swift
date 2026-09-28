@@ -1409,6 +1409,31 @@ struct LiveTranscriptionServiceTests {
     }
 
     @Test
+    func deletingAllProfilesMidRecordingKeepsBindingsAndDoesNotRecreateThem() async throws {
+        let store = try makeStore()
+        let aliceID = try await store.enrollNamedSpeaker(name: "Alice", embedding: voice(0))
+        let timeline = try makeTurnTimeline(frameSpeakers: Array(repeating: 0, count: 30), numSpeakers: 2)
+        let service = await makeAttributionService(text: "after deletion", timeline: timeline, store: store)
+        var alice = SessionSpeakerIdentity()
+        alice.accumulate(voice(0))
+        alice.boundProfileID = aliceID
+        alice.boundProfileName = "Alice"
+        var unbound = SessionSpeakerIdentity()
+        unbound.accumulate(voice(1))
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: alice)
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 1, identity: unbound)
+
+        try await store.deleteAllProfiles()
+        let segments = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 40_960), vadStates: tenVADChunks)
+        _ = await service.stop()
+
+        #expect(segments.map(\.speakerId) == ["Alice"])
+        let profiles = try await store.fetchAllSnapshots()
+        #expect(profiles.map(\.name) == ["Speaker 1"])
+        #expect(profiles.first?.embedding == voice(1))
+    }
+
+    @Test
     func fallbackSpeakerStaysBoundToFirstMatch() async throws {
         let store = try makeStore()
         try await store.enrollNamedSpeaker(name: "Alice", embedding: voice(0))
