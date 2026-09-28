@@ -24,6 +24,25 @@ struct TranscriptionPassRunner: @unchecked Sendable {
         let speakerDatabase: [String: [Float]]?
     }
 
+    /// One channel's transcription: segments, a voiceprint per speaker ID, and the profile name
+    /// behind every speaker ID that matched a stored profile.
+    struct PassResult: Sendable {
+        var segments: [TranscriptSegment]
+        var speakerEmbeddings: [String: [Float]]
+        /// Final speaker ID → matched profile name. Unmatched speakers are absent.
+        var matchedSpeakerIDs: [String: String]
+
+        init(
+            segments: [TranscriptSegment] = [],
+            speakerEmbeddings: [String: [Float]] = [:],
+            matchedSpeakerIDs: [String: String] = [:]
+        ) {
+            self.segments = segments
+            self.speakerEmbeddings = speakerEmbeddings
+            self.matchedSpeakerIDs = matchedSpeakerIDs
+        }
+    }
+
     // @unchecked: the closures capture FluidAudio managers (AsrManager is an
     // actor; OfflineDiarizerManager is serialized by the diarize gate) so one
     // engines instance can be shared across the concurrent mic/app passes.
@@ -119,7 +138,7 @@ struct TranscriptionPassRunner: @unchecked Sendable {
         }
     }
 
-    func run(samples: [Float], source: AudioSource, workspace: Workspace) async throws -> ([TranscriptSegment], [String: [Float]]) {
+    func run(samples: [Float], source: AudioSource, workspace: Workspace) async throws -> PassResult {
         let passName = source == .app ? "app" : "mic"
         let speechSegments: [SpeechSegment]
         do {
@@ -129,7 +148,7 @@ struct TranscriptionPassRunner: @unchecked Sendable {
         }
 
         guard !speechSegments.isEmpty else {
-            return ([], [:])
+            return PassResult()
         }
 
         let passEngines: PassEngines
@@ -197,6 +216,12 @@ struct TranscriptionPassRunner: @unchecked Sendable {
         }
 
         let speakerMapping = try await matchSpeakers(speakerDatabase: diarizationResult.speakerDatabase)
+        // The app channel's IDs carry an `app:` prefix so they never collide with the mic's.
+        func finalSpeakerId(for baseId: String) -> String {
+            let speakerId = speakerMapping[baseId] ?? baseId
+            guard source == .app else { return speakerId }
+            return speakerId.hasPrefix("app:") ? speakerId : "app:\(speakerId)"
+        }
 
         let alignedTranscript = alignTranscript(
             fullASRText,
@@ -214,18 +239,8 @@ struct TranscriptionPassRunner: @unchecked Sendable {
                 return nil
             }
 
-            let baseId = segment.speakerId
-            let mappedName = speakerMapping[baseId]
-            let finalSpeakerId = mappedName ?? baseId
-
-            let speakerId: String
-            if source == .app {
-                speakerId = finalSpeakerId.hasPrefix("app:") ? finalSpeakerId : "app:\(finalSpeakerId)"
-            } else {
-                speakerId = finalSpeakerId
-            }
             return TranscriptSegment(
-                speakerId: speakerId,
+                speakerId: finalSpeakerId(for: segment.speakerId),
                 text: cleanedText,
                 startTime: segment.startTime,
                 endTime: segment.endTime,
@@ -236,20 +251,20 @@ struct TranscriptionPassRunner: @unchecked Sendable {
         var finalEmbeddings: [String: [Float]] = [:]
         if let db = diarizationResult.speakerDatabase {
             for (baseId, embedding) in db {
-                let mappedName = speakerMapping[baseId]
-                let finalSpeakerId = mappedName ?? baseId
-
-                let speakerId: String
-                if source == .app {
-                    speakerId = finalSpeakerId.hasPrefix("app:") ? finalSpeakerId : "app:\(finalSpeakerId)"
-                } else {
-                    speakerId = finalSpeakerId
-                }
-                finalEmbeddings[speakerId] = embedding
+                finalEmbeddings[finalSpeakerId(for: baseId)] = embedding
             }
         }
 
-        return (finalSegments, finalEmbeddings)
+        var matchedSpeakerIDs: [String: String] = [:]
+        for (baseId, name) in speakerMapping {
+            matchedSpeakerIDs[finalSpeakerId(for: baseId)] = name
+        }
+
+        return PassResult(
+            segments: finalSegments,
+            speakerEmbeddings: finalEmbeddings,
+            matchedSpeakerIDs: matchedSpeakerIDs
+        )
     }
 
     func matchSpeakers(diarizationResult: DiarizationResult) async throws -> [String: String] {

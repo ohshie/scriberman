@@ -4,7 +4,7 @@ import SwiftData
 actor RetranscriptionService {
     typealias ExtractSamples = @Sendable (URL, Bool) throws -> (mic: [Float], app: [Float]?)
     typealias PrepareModels = @Sendable (Workspace) async throws -> Void
-    typealias TranscribePassFromSamples = @Sendable ([Float], AudioSource, Workspace, LiveTranscriptionPipelineSettings, TranscriptionPassRunner.SharedPassEngines?) async throws -> ([TranscriptSegment], [String: [Float]])
+    typealias TranscribePassFromSamples = @Sendable ([Float], AudioSource, Workspace, LiveTranscriptionPipelineSettings, TranscriptionPassRunner.SharedPassEngines?) async throws -> TranscriptionPassRunner.PassResult
     typealias SaveContext = @Sendable (ModelContext) throws -> Void
 
     private let transcriptionService: TranscriptionService
@@ -87,25 +87,22 @@ actor RetranscriptionService {
 
             let sharedEngines = await transcriptionService.makeSharedPassEngines()
             async let micResult = transcribePassFromSamplesHandler(extracted.mic, .mic, workspace, pipelineSettings, sharedEngines)
-            async let appResult: ([TranscriptSegment], [String: [Float]]) = {
-                guard let appSamples = extracted.app else { return ([], [:]) }
+            async let appResult: TranscriptionPassRunner.PassResult = {
+                guard let appSamples = extracted.app else { return TranscriptionPassRunner.PassResult() }
                 return try await transcribePassFromSamplesHandler(appSamples, .app, workspace, pipelineSettings, sharedEngines)
             }()
 
-            let (micSegments, micEmbeddings) = try await micResult
-            let (appSegments, appEmbeddings) = try await appResult
-            
-            let merged = (micSegments + appSegments).sorted { $0.startTime < $1.startTime }
-            let mergedEmbeddings = micEmbeddings.merging(appEmbeddings) { (current, _) in current }
+            let mic = try await micResult
+            let app = try await appResult
 
-            let speakerIDs = Array(Set(merged.map(\.speakerId))).sorted()
-            let speakers = speakerIDs.enumerated().map { index, speakerID in
-                TranscriptSpeaker(
-                    id: speakerID,
-                    label: speakerID.hasPrefix("app:") || speakerID.hasPrefix("mic:") || speakerID.hasPrefix("unknown") ? "Speaker \(index + 1)" : speakerID,
-                    colorHex: transcriptAligner.speakerColorHex(at: index)
-                )
-            }
+            let merged = (mic.segments + app.segments).sorted { $0.startTime < $1.startTime }
+            let mergedEmbeddings = mic.speakerEmbeddings.merging(app.speakerEmbeddings) { (current, _) in current }
+
+            let speakers = TranscriptionService.offlineSpeakers(
+                for: merged.map(\.speakerId),
+                matched: mic.matchedSpeakerIDs.merging(app.matchedSpeakerIDs) { current, _ in current },
+                colorHex: transcriptAligner.speakerColorHex(at:)
+            )
 
             session.retranscript = Transcript(
                 fullText: Transcript.fullText(joining: merged),

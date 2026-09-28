@@ -131,8 +131,8 @@ actor TranscriptionService: TranscriptionServiceProtocol {
             pipelineSettings: pipelineSettings,
             engines: sharedEngines
         )
-        async let appResult: ([TranscriptSegment], [String: [Float]]) = {
-            guard let appSamples = extractedSamples.app else { return ([], [:]) }
+        async let appResult: TranscriptionPassRunner.PassResult = {
+            guard let appSamples = extractedSamples.app else { return TranscriptionPassRunner.PassResult() }
             return try await transcribePassFromSamples(
                 samples: appSamples,
                 source: .app,
@@ -142,21 +142,18 @@ actor TranscriptionService: TranscriptionServiceProtocol {
             )
         }()
 
-        let (micSegments, micEmbeddings) = try await micResult
-        let (appSegments, appEmbeddings) = try await appResult
-        
-        let mergedSegments = mergeByTimestamp(micSegments + appSegments)
-        let mergedEmbeddings = micEmbeddings.merging(appEmbeddings) { (current, _) in current }
+        let mic = try await micResult
+        let app = try await appResult
+
+        let mergedSegments = mergeByTimestamp(mic.segments + app.segments)
+        let mergedEmbeddings = mic.speakerEmbeddings.merging(app.speakerEmbeddings) { (current, _) in current }
 
         logger.info("Completed transcription for session \(session.id, privacy: .public) with \(mergedSegments.count, privacy: .public) segments")
-        let speakerIds = Array(Set(mergedSegments.map(\.speakerId))).sorted()
-        let speakers = speakerIds.enumerated().map { index, speakerId in
-            TranscriptSpeaker(
-                id: speakerId,
-                label: speakerId.hasPrefix("app:") || speakerId.hasPrefix("mic:") || speakerId.hasPrefix("unknown") ? "Speaker \(index + 1)" : speakerId,
-                colorHex: transcriptAligner.speakerColorHex(at: index)
-            )
-        }
+        let speakers = Self.offlineSpeakers(
+            for: mergedSegments.map(\.speakerId),
+            matched: mic.matchedSpeakerIDs.merging(app.matchedSpeakerIDs) { current, _ in current },
+            colorHex: transcriptAligner.speakerColorHex(at:)
+        )
 
         return Transcript(
             fullText: Transcript.fullText(joining: mergedSegments),
@@ -166,11 +163,27 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         )
     }
 
+    /// The speakers of an offline transcript, sorted by ID. A speaker matched to a stored profile
+    /// is labelled with the profile's name; any other is `Speaker N` by its sorted position.
+    static func offlineSpeakers(
+        for speakerIDs: [String],
+        matched: [String: String],
+        colorHex: (Int) -> String
+    ) -> [TranscriptSpeaker] {
+        Array(Set(speakerIDs)).sorted().enumerated().map { index, speakerID in
+            TranscriptSpeaker(
+                id: speakerID,
+                label: matched[speakerID] ?? "Speaker \(index + 1)",
+                colorHex: colorHex(index)
+            )
+        }
+    }
+
     private func transcribePass(
         url: URL,
         source: AudioSource,
         workspace: Workspace
-    ) async throws -> ([TranscriptSegment], [String: [Float]]) {
+    ) async throws -> TranscriptionPassRunner.PassResult {
         let passName = source == .app ? "app" : "mic"
         logger.info("Starting \(passName, privacy: .public) pass for file \(url.lastPathComponent, privacy: .public)")
         guard fileManager.fileExists(atPath: url.path) else {
@@ -193,7 +206,7 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         workspace: Workspace,
         pipelineSettings: LiveTranscriptionPipelineSettings = .defaults,
         engines: TranscriptionPassRunner.SharedPassEngines? = nil
-    ) async throws -> ([TranscriptSegment], [String: [Float]]) {
+    ) async throws -> TranscriptionPassRunner.PassResult {
         let passRunner = makeTranscriptionPassRunner(pipelineSettings: pipelineSettings, engines: engines)
         return try await passRunner.run(
             samples: samples,
@@ -206,7 +219,7 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         url: URL,
         source: AudioSource,
         workspace: Workspace
-    ) async throws -> ([TranscriptSegment], [String: [Float]]) {
+    ) async throws -> TranscriptionPassRunner.PassResult {
         try await transcribePass(url: url, source: source, workspace: workspace)
     }
 
@@ -214,7 +227,7 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         samples: [Float],
         source: AudioSource,
         workspace: Workspace
-    ) async throws -> ([TranscriptSegment], [String: [Float]]) {
+    ) async throws -> TranscriptionPassRunner.PassResult {
         try await transcribePassFromSamples(samples: samples, source: source, workspace: workspace)
     }
 

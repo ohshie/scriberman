@@ -1,9 +1,78 @@
+import FluidAudio
 import SwiftData
 import Foundation
 import Testing
 @testable import Scriberman
 
 struct TranscriptionServiceTests {
+    // MARK: - Speaker labels
+
+    private func labels(
+        profiles: [(name: String, embedding: [Float])],
+        mic: OfflineLabelFixture.Cluster,
+        app: OfflineLabelFixture.Cluster?
+    ) async throws -> [String: String] {
+        let store = try await OfflineLabelFixture.store(profiles: profiles)
+        let service = OfflineLabelFixture.transcriptionService(store: store, mic: mic, app: app)
+        let (container, sessionID) = try OfflineLabelFixture.sessionContainer(hasApp: app != nil)
+        let transcript = try await service.transcribe(
+            sessionID: sessionID,
+            modelContainer: container,
+            workspace: OfflineLabelFixture.workspace
+        )
+        return Dictionary(uniqueKeysWithValues: transcript.speakers.map { ($0.id, $0.label) })
+    }
+
+    @Test
+    func recognizedAppSpeakerIsLabelledWithProfileName() async throws {
+        let labels = try await labels(
+            profiles: [("Alice", OfflineLabelFixture.voice(0))],
+            mic: .init(id: "S1", embedding: OfflineLabelFixture.voice(5)),
+            app: .init(id: "S1", embedding: OfflineLabelFixture.voice(0))
+        )
+        #expect(labels["app:Alice"] == "Alice")
+    }
+
+    @Test
+    func unmatchedMicSpeakerIsLabelledSpeakerN() async throws {
+        let labels = try await labels(
+            profiles: [],
+            mic: .init(id: "S1", embedding: OfflineLabelFixture.voice(5)),
+            app: nil
+        )
+        #expect(labels == ["S1": "Speaker 1"])
+    }
+
+    @Test
+    func recognizedProfileNamedLikeAClusterKeepsItsName() async throws {
+        let labels = try await labels(
+            profiles: [("S1", OfflineLabelFixture.voice(0))],
+            mic: .init(id: "S7", embedding: OfflineLabelFixture.voice(0)),
+            app: nil
+        )
+        #expect(labels == ["S1": "S1"])
+    }
+
+    @Test
+    func unmatchedAppSpeakerIsLabelledSpeakerN() async throws {
+        let labels = try await labels(
+            profiles: [("Alice", OfflineLabelFixture.voice(0))],
+            mic: .init(id: "S1", embedding: OfflineLabelFixture.voice(0)),
+            app: .init(id: "S1", embedding: OfflineLabelFixture.voice(5))
+        )
+        #expect(labels == ["Alice": "Alice", "app:S1": "Speaker 2"])
+    }
+
+    @Test
+    func sameProfileOnBothChannelsGivesTwoSpeakersWithOneName() async throws {
+        let labels = try await labels(
+            profiles: [("Alice", OfflineLabelFixture.voice(0))],
+            mic: .init(id: "S1", embedding: OfflineLabelFixture.voice(0)),
+            app: .init(id: "S1", embedding: OfflineLabelFixture.voice(0))
+        )
+        #expect(labels == ["Alice": "Alice", "app:Alice": "Alice"])
+    }
+
     @Test
     func mergeByTimestampInterleavedInput() async {
         let service = TranscriptionService()
@@ -61,7 +130,9 @@ struct TranscriptionServiceTests {
         FileManager.default.createFile(atPath: audioURL.path, contents: Data())
         let workspace = Workspace(rootURL: tempRoot)
 
-        let (segments, embeddings) = try await service.transcribePassForTesting(url: audioURL, source: .app, workspace: workspace)
+        let passResult = try await service.transcribePassForTesting(url: audioURL, source: .app, workspace: workspace)
+        let segments = passResult.segments
+        let embeddings = passResult.speakerEmbeddings
         #expect(segments == [])
         #expect(embeddings.isEmpty)
     }
@@ -74,11 +145,13 @@ struct TranscriptionServiceTests {
         )
         let workspace = Workspace(rootURL: FileManager.default.temporaryDirectory)
 
-        let (segments, embeddings) = try await service.transcribePassFromSamplesForTesting(
+        let passResult = try await service.transcribePassFromSamplesForTesting(
             samples: [0, 0, 0, 0],
             source: .mic,
             workspace: workspace
         )
+        let segments = passResult.segments
+        let embeddings = passResult.speakerEmbeddings
 
         #expect(segments == [])
         #expect(embeddings.isEmpty)
@@ -222,5 +295,97 @@ private actor SampleRecorder {
 
     func markPrepared() {
         prepared = true
+    }
+}
+
+/// Offline passes in which the mic and app channels each hear one speaker cluster, run through
+/// the real pass runner and speaker matching, for speaker-label tests.
+enum OfflineLabelFixture {
+    struct Cluster: Sendable {
+        let id: String
+        let embedding: [Float]
+    }
+
+    static let workspace = Workspace(rootURL: FileManager.default.temporaryDirectory)
+    private static let micSample: Float = 0.1
+    private static let appSample: Float = 0.2
+
+    /// A unit vector along `axis`; distinct axes are orthogonal voices.
+    static func voice(_ axis: Int) -> [Float] {
+        (0..<192).map { $0 == axis ? Float(1) : Float(0) }
+    }
+
+    static func store(profiles: [(name: String, embedding: [Float])]) async throws -> SpeakerEmbeddingStore {
+        let container = try ModelContainer(
+            for: SpeakerProfile.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let store = SpeakerEmbeddingStore(modelContainer: container)
+        for profile in profiles {
+            try await store.enrollNamedSpeaker(name: profile.name, embedding: profile.embedding)
+        }
+        return store
+    }
+
+    static func extractSamples(hasApp: Bool) -> @Sendable (URL, Bool) throws -> (mic: [Float], app: [Float]?) {
+        { _, _ in
+            (
+                mic: Array(repeating: micSample, count: 16_000),
+                app: hasApp ? Array(repeating: appSample, count: 16_000) : nil
+            )
+        }
+    }
+
+    static func transcriptionService(store: SpeakerEmbeddingStore, mic: Cluster, app: Cluster?) -> TranscriptionService {
+        TranscriptionService(
+            speakerEmbeddingStore: store,
+            segmentSpeech: { _ in [VadSegment(startTime: 0, endTime: 1)] },
+            extractSamples: extractSamples(hasApp: app != nil),
+            prepareModelsHandler: { _ in },
+            makePassEngines: { _ in
+                TranscriptionPassRunner.PassEngines(
+                    transcribeChunk: { _, _ in
+                        TranscriptionPassRunner.PassASRResult(
+                            text: "hello",
+                            tokenTimings: [TokenTiming(token: " hello", tokenId: 1, startTime: 0, endTime: 0.5, confidence: 1)]
+                        )
+                    },
+                    diarize: { samples in
+                        let cluster = samples.first == appSample ? (app ?? mic) : mic
+                        return TranscriptionPassRunner.PassDiarizationResult(
+                            segments: [TimedSpeakerSegment(
+                                speakerId: cluster.id,
+                                embedding: [],
+                                startTimeSeconds: 0,
+                                endTimeSeconds: 1,
+                                qualityScore: 1
+                            )],
+                            speakerDatabase: [cluster.id: cluster.embedding]
+                        )
+                    }
+                )
+            }
+        )
+    }
+
+    /// An in-memory store holding one recorded session with a mixdown, stereo when `hasApp`.
+    static func sessionContainer(hasApp: Bool) throws -> (ModelContainer, UUID) {
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let session = RecordingSession(
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 1,
+            micAudioURL: "/tmp/mic.wav",
+            appAudioURL: hasApp ? "/tmp/app.wav" : nil,
+            mixdownURL: "/tmp/recording.m4a",
+            title: "Session",
+            status: .recorded
+        )
+        let context = ModelContext(container)
+        context.insert(session)
+        try context.save()
+        return (container, session.id)
     }
 }
