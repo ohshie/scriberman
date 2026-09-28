@@ -144,6 +144,47 @@ struct NewSessionViewModelTests {
     }
 
     @Test
+    func stopRelabelsSegmentsOfSpeakersBoundMidSessionAndSavesVoiceprints() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("live-remap-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let saves = SaveScript(failing: [])
+        let (fixture, transcriber, recording) = try await startScriptedRecording(
+            saves: saves,
+            micAudioURL: directory.appendingPathComponent("mic.wav").path
+        )
+        defer { fixture.cleanup() }
+
+        await transcriber.emit("early turn", speakerId: "speaker_mic_0")
+        await transcriber.emit("early fallback", speakerId: "speaker_S1")
+        await transcriber.emit("later turn", speakerId: "Alice")
+        await transcriber.emit("someone new", speakerId: "speaker_mic_1")
+        await waitForSaves(saves, count: 4)
+        let enrolledID = UUID()
+        await transcriber.setStopResult(LiveSessionResult(
+            segments: [],
+            speakerIDRemap: ["speaker_mic_0": "Alice", "speaker_S1": "Alice"],
+            speakerEmbeddings: ["Alice": [0.1, 0.2], "speaker_mic_1": [0.3, 0.4]],
+            enrolledProfileIDs: ["speaker_mic_1": enrolledID]
+        ))
+
+        _ = await fixture.viewModel.stopRecording(context: fixture.context)
+
+        #expect(recording.transcriptSegments.sorted { $0.startTime < $1.startTime }.map(\.speakerId)
+            == ["Alice", "Alice", "Alice", "speaker_mic_1"])
+        let markdown = try String(contentsOf: directory.appendingPathComponent("transcript.md"), encoding: .utf8)
+        #expect(!markdown.contains("speaker_mic_0"))
+        #expect(!markdown.contains("speaker_S1"))
+        #expect(markdown.contains("Alice: early turn"))
+        #expect(markdown.contains("Alice: early fallback"))
+
+        let transcript = try #require(recording.transcript)
+        #expect(transcript.speakers.map(\.id) == ["Alice", "speaker_mic_1"])
+        #expect(transcript.speakerEmbeddings == ["Alice": [0.1, 0.2], "speaker_mic_1": [0.3, 0.4]])
+        #expect(transcript.speakerProfileIDs == ["speaker_mic_1": enrolledID])
+    }
+
+    @Test
     func aSaveFailureThatOutlastsStopIsReported() async throws {
         let saves = SaveScript(failingFrom: 1)
         let (fixture, transcriber, _) = try await startScriptedRecording(saves: saves)
@@ -159,13 +200,14 @@ struct NewSessionViewModelTests {
     }
 
     private func startScriptedRecording(
-        saves: SaveScript
+        saves: SaveScript,
+        micAudioURL: String = "/tmp/live-save-test/mic.wav"
     ) async throws -> (Fixture, ScriptedLiveTranscriber, RecordingSession) {
         let transcriber = ScriptedLiveTranscriber()
         let fixture = makeFixture(transcriber: transcriber, saveContext: { context in
             try saves.save(context)
         })
-        let recording = RecordingSession(createdAt: .now, duration: 0, micAudioURL: "/tmp/live-save-test/mic.wav", title: "Live", status: .recording)
+        let recording = RecordingSession(createdAt: .now, duration: 0, micAudioURL: micAudioURL, title: "Live", status: .recording)
         fixture.context.insert(recording)
         try fixture.context.save()
         fixture.recordingService.startReturns = recording.id
@@ -1531,13 +1573,13 @@ private actor SuspendedLiveTranscriber: LiveTranscribing {
         processing?.resume()
         processing = nil
     }
-    func stop() async -> [TranscriptSegment] {
+    func stop() async -> LiveSessionResult {
         stopCount += 1
         let segment = TranscriptSegment(speakerId: "speaker", text: "final words \(stopCount)", startTime: 0, endTime: 1, audioSource: .mic, isFinal: true)
         results?.yield(segment)
         results?.finish()
         // No backfill: this test requires the result consumer to persist the segment.
-        return []
+        return LiveSessionResult(segments: [])
     }
 }
 
@@ -1567,6 +1609,7 @@ private actor ScriptedLiveTranscriber: LiveTranscribing {
     private var results: AsyncStream<TranscriptSegment>.Continuation?
     private var startWaiter: CheckedContinuation<Void, Never>?
     private var emitted: Float = 0
+    private var stopResult = LiveSessionResult(segments: [])
 
     func prepare(workspace: Workspace, config: LiveTranscriptionPipelineSettings) async {}
     func start(workspace: Workspace, config: LiveTranscriptionPipelineSettings, resultContinuation: AsyncStream<TranscriptSegment>.Continuation) async throws {
@@ -1579,12 +1622,15 @@ private actor ScriptedLiveTranscriber: LiveTranscribing {
         if results != nil { return }
         await withCheckedContinuation { startWaiter = $0 }
     }
-    func emit(_ text: String) {
-        results?.yield(TranscriptSegment(speakerId: "S1", text: text, startTime: emitted, endTime: emitted + 1, audioSource: .mic, isFinal: true))
+    func emit(_ text: String, speakerId: String = "S1") {
+        results?.yield(TranscriptSegment(speakerId: speakerId, text: text, startTime: emitted, endTime: emitted + 1, audioSource: .mic, isFinal: true))
         emitted += 1
     }
-    func stop() async -> [TranscriptSegment] {
+    func setStopResult(_ result: LiveSessionResult) {
+        stopResult = result
+    }
+    func stop() async -> LiveSessionResult {
         results?.finish()
-        return []
+        return stopResult
     }
 }

@@ -384,3 +384,52 @@ enum LiveSegmentSplitter {
         return result
     }
 }
+
+/// Pairs clustering-diarizer embeddings with turn-diarizer speakers by time
+/// overlap. Overlap is measured against speaker runs, not against planned
+/// parts: a part can absorb another speaker's short turn.
+enum LiveEmbeddingAttribution {
+    /// Share of a clustering segment's duration that must lie inside one
+    /// speaker's runs for its embedding to count as that speaker's voice.
+    static let minimumOverlapFraction: Float = 0.8
+
+    struct Assignment {
+        let segment: TimedSpeakerSegment
+        let overlapFraction: Float
+    }
+
+    /// For each turn-diarizer speaker index, the longest clustering segment
+    /// that lies inside that speaker's runs. A segment that reaches
+    /// `minimumOverlapFraction` for no speaker, or for several (simultaneous
+    /// speech), is discarded. `clusterSegments` are buffer-relative; `runs`
+    /// are session time, as returned by `LiveSpeakerTimeline.speakerRuns`.
+    static func assignments(
+        clusterSegments: [TimedSpeakerSegment],
+        runs: [SpeakerRun],
+        bufferStart: Float
+    ) -> [Int: Assignment] {
+        var result: [Int: Assignment] = [:]
+        for segment in clusterSegments where !segment.embedding.isEmpty {
+            let start = bufferStart + segment.startTimeSeconds
+            let end = bufferStart + segment.endTimeSeconds
+            let duration = end - start
+            guard duration > 0 else { continue }
+
+            var overlapBySpeaker: [Int: Float] = [:]
+            for run in runs {
+                let overlap = min(run.end, end) - max(run.start, start)
+                if overlap > 0 {
+                    overlapBySpeaker[run.speakerIndex, default: 0] += overlap
+                }
+            }
+            let containing = overlapBySpeaker.filter { $0.value / duration >= minimumOverlapFraction }
+            guard containing.count == 1, let (speakerIndex, overlap) = containing.first else { continue }
+
+            if let existing = result[speakerIndex], existing.segment.durationSeconds >= segment.durationSeconds {
+                continue
+            }
+            result[speakerIndex] = Assignment(segment: segment, overlapFraction: overlap / duration)
+        }
+        return result
+    }
+}

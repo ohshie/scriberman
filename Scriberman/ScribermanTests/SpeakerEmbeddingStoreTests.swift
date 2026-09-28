@@ -264,6 +264,18 @@ struct SpeakerEmbeddingStoreTests {
         let match = await store.findBestMatchSnapshot(embedding: query)
         #expect(match?.name == "Alice")
     }
+
+    @Test("Rename a profile keeps its voiceprint")
+    func renameProfileKeepsVoiceprint() async throws {
+        let id = try await store.enrollNamedSpeaker(name: "Speaker 5", embedding: [0.5, 0.5])
+
+        try await store.renameProfile(id: id, name: "Bob")
+
+        let profile = try await store.findProfileSnapshot(byID: id)
+        #expect(profile?.name == "Bob")
+        #expect(profile?.embedding == [0.5, 0.5])
+        #expect(try await store.fetchAllSnapshots().count == 1)
+    }
 }
 
 private extension Sequence {

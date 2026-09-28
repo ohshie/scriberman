@@ -338,7 +338,8 @@ final class AudioTrimService {
             fullText: Transcript.fullText(joining: segments),
             segments: segments,
             speakers: transcript.speakers,
-            speakerEmbeddings: transcript.speakerEmbeddings
+            speakerEmbeddings: transcript.speakerEmbeddings,
+            speakerProfileIDs: transcript.speakerProfileIDs
         )
     }
 

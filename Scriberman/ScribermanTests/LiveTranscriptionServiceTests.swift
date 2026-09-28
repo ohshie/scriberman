@@ -21,9 +21,7 @@ struct LiveTranscriptionServiceTests {
 
         await service.injectSessionSpeaker(
             id: "speaker_SPEAKER_0",
-            embedding: Array(repeating: 0.5, count: 256),
-            wasMatched: false,
-            matchedProfileID: nil
+            embedding: Array(repeating: 0.5, count: 256)
         )
 
         _ = await service.stop()
@@ -40,15 +38,11 @@ struct LiveTranscriptionServiceTests {
 
         await service.injectSessionSpeaker(
             id: "speaker_SPEAKER_0",
-            embedding: Array(repeating: 0.1, count: 256),
-            wasMatched: false,
-            matchedProfileID: nil
+            embedding: Array(repeating: 0.1, count: 256)
         )
         await service.injectSessionSpeaker(
             id: "speaker_SPEAKER_1",
-            embedding: Array(repeating: 0.2, count: 256),
-            wasMatched: false,
-            matchedProfileID: nil
+            embedding: Array(repeating: 0.2, count: 256)
         )
 
         _ = await service.stop()
@@ -68,15 +62,11 @@ struct LiveTranscriptionServiceTests {
 
         await service.injectSessionSpeaker(
             id: "speaker_SPEAKER_0",
-            embedding: Array(repeating: 0.6, count: 256),
-            wasMatched: false,
-            matchedProfileID: nil
+            embedding: Array(repeating: 0.6, count: 256)
         )
         await service.injectSessionSpeaker(
             id: "speaker_SPEAKER_1",
-            embedding: Array(repeating: 0.7, count: 256),
-            wasMatched: false,
-            matchedProfileID: nil
+            embedding: Array(repeating: 0.7, count: 256)
         )
 
         _ = await service.stop()
@@ -101,8 +91,8 @@ struct LiveTranscriptionServiceTests {
         await service.injectSessionSpeaker(
             id: "speaker_SPEAKER_0",
             embedding: aliceEmbedding,
-            wasMatched: true,
-            matchedProfileID: aliceID
+            boundProfileID: aliceID,
+            boundProfileName: "Alice"
         )
 
         _ = await service.stop()
@@ -123,9 +113,7 @@ struct LiveTranscriptionServiceTests {
 
         await service.injectSessionSpeaker(
             id: "speaker_SPEAKER_0",
-            embedding: [],
-            wasMatched: false,
-            matchedProfileID: nil
+            embedding: []
         )
 
         _ = await service.stop()
@@ -140,9 +128,7 @@ struct LiveTranscriptionServiceTests {
 
         await service.injectSessionSpeaker(
             id: "speaker_SPEAKER_0",
-            embedding: Array(repeating: 0.5, count: 256),
-            wasMatched: false,
-            matchedProfileID: nil
+            embedding: Array(repeating: 0.5, count: 256)
         )
 
         _ = await service.stop()
@@ -1053,18 +1039,28 @@ struct LiveTranscriptionServiceTests {
     /// so the buffer is covered but has no speaker activity.
     private func makeAttributionService(
         text: String,
-        timeline: TurnDiarizerChunk?
+        timeline: TurnDiarizerChunk?,
+        store: SpeakerEmbeddingStore? = nil
     ) async -> LiveTranscriptionService {
-        let chunk = timeline ?? TurnDiarizerChunk(probabilities: Array(repeating: 0, count: 1000 * 2), frameCount: 1000)
-        let diarizer = ScriptedTurnDiarizer(numSpeakers: 2, feedResponses: [.success([chunk])])
-        return await makeAttributionService(texts: [text], diarizer: diarizer)
+        await makeAttributionService(texts: [text], timeline: timeline, store: store)
     }
 
     private func makeAttributionService(
         texts: [String],
-        diarizer: ScriptedTurnDiarizer
+        timeline: TurnDiarizerChunk?,
+        store: SpeakerEmbeddingStore? = nil
     ) async -> LiveTranscriptionService {
-        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let chunk = timeline ?? TurnDiarizerChunk(probabilities: Array(repeating: 0, count: 1000 * 2), frameCount: 1000)
+        let diarizer = ScriptedTurnDiarizer(numSpeakers: 2, feedResponses: [.success([chunk])])
+        return await makeAttributionService(texts: texts, diarizer: diarizer, store: store)
+    }
+
+    private func makeAttributionService(
+        texts: [String],
+        diarizer: ScriptedTurnDiarizer,
+        store: SpeakerEmbeddingStore? = nil
+    ) async -> LiveTranscriptionService {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: store)
         let results = AsyncStream<TranscriptSegment>.makeStream()
         await service.setResultContinuationForTesting(results.continuation)
         await service.setStoredConfigForTesting(.defaults)
@@ -1179,7 +1175,7 @@ struct LiveTranscriptionServiceTests {
         await service.process(samples: Array(repeating: Float(0.1), count: 8192), source: .mic, sampleRate: 16_000)
         #expect(await service.pendingAttributionCountForTesting(source: .mic) == 1)
 
-        let segments = await service.stop()
+        let segments = await service.stop().segments
         #expect(segments.count == 1)
         #expect(segments.first?.speakerId == "speaker_mic_1")
     }
@@ -1307,6 +1303,230 @@ struct LiveTranscriptionServiceTests {
 
         #expect(segments.count == 1)
         #expect(segments.first?.speakerId == "Alice")
+    }
+
+    private func clusterSegment(_ speakerId: String, _ start: Float, _ end: Float, embedding: [Float]) -> TimedSpeakerSegment {
+        TimedSpeakerSegment(
+            speakerId: speakerId,
+            embedding: embedding,
+            startTimeSeconds: start,
+            endTimeSeconds: end,
+            qualityScore: 1.0
+        )
+    }
+
+    /// Runs one speech buffer of `vadChunkCount` × 4096 samples starting at
+    /// offset 0 through a service whose turn timeline is `frameSpeakers`
+    /// (0.1s per entry) and whose clustering diarizer returns `clusterSegments`.
+    private func attributeOneBuffer(
+        frameSpeakers: [Int?],
+        clusterSegments: [TimedSpeakerSegment],
+        vadChunkCount: Int
+    ) async throws -> LiveTranscriptionService {
+        let timeline = try makeTurnTimeline(frameSpeakers: frameSpeakers, numSpeakers: 2)
+        let service = await makeAttributionService(text: "one two three four", timeline: timeline)
+        await service.setClusterDiarizationHookForTesting { _ in clusterSegments }
+
+        var vadStates: [(Bool, LiveVADEventKind?)] = [(true, .speechStart)]
+        vadStates.append(contentsOf: Array(repeating: (true, nil), count: vadChunkCount - 2))
+        vadStates.append((false, .speechEnd))
+        _ = await collectSegments(
+            from: service,
+            samples: Array(repeating: Float(0.1), count: vadChunkCount * 4096),
+            vadStates: vadStates
+        )
+        return service
+    }
+
+    @Test
+    func clusterEmbeddingGoesToTheSpeakerWhoseRunsContainIt() async throws {
+        // A 0–2.2s, B 2.2–4.2s, silence to the buffer end at 6.144s, so B's
+        // part (2.2–6.144s) is the longest while A's clustering segment is.
+        let aEmbedding = Array(repeating: Float(0.1), count: 256)
+        let bEmbedding = Array(repeating: Float(0.9), count: 256)
+        let service = try await attributeOneBuffer(
+            frameSpeakers: Array(repeating: 0, count: 22) + Array(repeating: 1, count: 20) + Array(repeating: nil, count: 20),
+            clusterSegments: [
+                clusterSegment("S1", 0.0, 2.2, embedding: aEmbedding),
+                clusterSegment("S2", 2.2, 4.2, embedding: bEmbedding)
+            ],
+            vadChunkCount: 24
+        )
+
+        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 0)?.averagedEmbedding == aEmbedding)
+        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 1)?.averagedEmbedding == bEmbedding)
+    }
+
+    @Test
+    func absorbedShortTurnKeepsItsOwnClusterEmbedding() async throws {
+        // A 0–0.8s, B 0.8–1.7s, A 1.7–2.5s: no run reaches 1s, so the whole
+        // buffer is one part for A, while B's clustering segment is the longest.
+        let aEmbedding = Array(repeating: Float(0.1), count: 256)
+        let bEmbedding = Array(repeating: Float(0.9), count: 256)
+        let service = try await attributeOneBuffer(
+            frameSpeakers: Array(repeating: 0, count: 8) + Array(repeating: 1, count: 9)
+                + Array(repeating: 0, count: 8) + Array(repeating: nil, count: 2),
+            clusterSegments: [
+                clusterSegment("S1", 0.0, 0.8, embedding: aEmbedding),
+                clusterSegment("S2", 0.8, 1.7, embedding: bEmbedding),
+                clusterSegment("S1", 1.7, 2.5, embedding: aEmbedding)
+            ],
+            vadChunkCount: 10
+        )
+
+        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 1)?.averagedEmbedding == bEmbedding)
+        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 0)?.averagedEmbedding != bEmbedding)
+    }
+
+    /// A unit vector along `axis`; distinct axes are orthogonal voices.
+    private func voice(_ axis: Int) -> [Float] {
+        (0..<256).map { $0 == axis ? Float(1) : Float(0) }
+    }
+
+    private let tenVADChunks: [(Bool, LiveVADEventKind?)] =
+        [(true, .speechStart)] + Array(repeating: (true, nil), count: 8) + [(false, .speechEnd)]
+
+    @Test
+    func stopRelabelsTurnSpeakerSegmentsEmittedBeforeBinding() async throws {
+        // Speaker 0 throughout both 2.56s buffers.
+        let timeline = try makeTurnTimeline(frameSpeakers: Array(repeating: 0, count: 60), numSpeakers: 2)
+        let service = await makeAttributionService(texts: ["before binding", "after binding"], timeline: timeline)
+
+        let before = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 40_960), vadStates: tenVADChunks)
+        var identity = SessionSpeakerIdentity()
+        identity.boundProfileID = UUID()
+        identity.boundProfileName = "Alice"
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: identity)
+        let after = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 40_960), vadStates: tenVADChunks)
+
+        #expect(before.map(\.speakerId) == ["speaker_mic_0"])
+        #expect(after.map(\.speakerId) == ["Alice"])
+
+        let result = await service.stop()
+        #expect(result.segments.map(\.speakerId) == ["Alice", "Alice"])
+        #expect(result.segments.map(\.id) == (before + after).map(\.id))
+        #expect(result.speakerIDRemap == ["speaker_mic_0": "Alice"])
+    }
+
+    @Test
+    func fallbackSpeakerStaysBoundToFirstMatch() async throws {
+        let store = try makeStore()
+        try await store.enrollNamedSpeaker(name: "Alice", embedding: voice(0))
+        try await store.enrollNamedSpeaker(name: "Bob", embedding: voice(1))
+        let service = await makeAttributionService(texts: ["first", "second"], timeline: nil, store: store)
+        let clusters = ClusterSequenceProbe([
+            [clusterSegment("S1", 0.0, 0.5, embedding: voice(0))],
+            [clusterSegment("S1", 0.0, 0.5, embedding: voice(1))]
+        ])
+        await service.setClusterDiarizationHookForTesting { _ in clusters.next() }
+
+        let first = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 8192), vadStates: [(true, .speechStart), (false, .speechEnd)])
+        let second = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 8192), vadStates: [(true, .speechStart), (false, .speechEnd)])
+
+        #expect(first.map(\.speakerId) == ["Alice"])
+        #expect(second.map(\.speakerId) == ["Alice"])
+    }
+
+    @Test
+    func stopRelabelsFallbackSegmentsEmittedBeforeBinding() async throws {
+        let store = try makeStore()
+        try await store.enrollNamedSpeaker(name: "Alice", embedding: voice(0))
+        let service = await makeAttributionService(texts: ["first", "second"], timeline: nil, store: store)
+        let clusters = ClusterSequenceProbe([
+            [clusterSegment("S1", 0.0, 0.5, embedding: voice(5))],
+            [clusterSegment("S1", 0.0, 0.5, embedding: voice(0))]
+        ])
+        await service.setClusterDiarizationHookForTesting { _ in clusters.next() }
+
+        let first = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 8192), vadStates: [(true, .speechStart), (false, .speechEnd)])
+        let second = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 8192), vadStates: [(true, .speechStart), (false, .speechEnd)])
+        #expect(first.map(\.speakerId) == ["speaker_S1"])
+        #expect(second.map(\.speakerId) == ["Alice"])
+
+        let result = await service.stop()
+        #expect(result.segments.map(\.speakerId) == ["Alice", "Alice"])
+        #expect(result.speakerIDRemap == ["speaker_S1": "Alice"])
+        #expect(result.speakerEmbeddings["Alice"] == voice(0))
+        #expect(result.speakerEmbeddings["speaker_S1"] == nil)
+        #expect(result.enrolledProfileIDs.isEmpty)
+    }
+
+    @Test
+    func stopReportsVoiceprintsAndEnrolledProfilesPerFinalSpeakerID() async throws {
+        let store = try makeStore()
+        let aliceID = try await store.enrollNamedSpeaker(name: "Alice", embedding: voice(0))
+        let carolID = try await store.enrollNamedSpeaker(name: "Carol", embedding: voice(2))
+        let service = LiveTranscriptionService(speakerEmbeddingStore: store)
+
+        var alice = SessionSpeakerIdentity()
+        alice.accumulate(voice(0))
+        alice.boundProfileID = aliceID
+        alice.boundProfileName = "Alice"
+        var unbound = SessionSpeakerIdentity()
+        unbound.accumulate(voice(1))
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: alice)
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 1, identity: unbound)
+        await service.injectSessionSpeaker(id: "speaker_S1", embedding: voice(2), boundProfileID: carolID, boundProfileName: "Carol")
+        await service.injectSessionSpeaker(id: "speaker_S2", embedding: voice(3))
+
+        let result = await service.stop()
+
+        #expect(result.speakerIDRemap == ["speaker_mic_0": "Alice", "speaker_S1": "Carol"])
+        #expect(result.speakerEmbeddings == [
+            "Alice": voice(0),
+            "speaker_mic_1": voice(1),
+            "Carol": voice(2),
+            "speaker_S2": voice(3)
+        ])
+        #expect(Set(result.enrolledProfileIDs.keys) == ["speaker_mic_1", "speaker_S2"])
+        for profileID in result.enrolledProfileIDs.values {
+            #expect(try await store.findProfileSnapshot(byID: profileID) != nil)
+        }
+    }
+
+    @Test
+    func clusterSegmentStraddlingTwoSpeakersIsDiscarded() async throws {
+        // A 0–1.3s, B 1.3–2.6s; the only clustering segment is half in each.
+        let service = try await attributeOneBuffer(
+            frameSpeakers: Array(repeating: 0, count: 13) + Array(repeating: 1, count: 13),
+            clusterSegments: [clusterSegment("S1", 0.8, 1.8, embedding: Array(repeating: 0.5, count: 256))],
+            vadChunkCount: 10
+        )
+
+        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 0) == nil)
+        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 1) == nil)
+    }
+
+    @Test
+    func clusterSegmentDuringSimultaneousSpeechIsDiscarded() async throws {
+        // Both speakers active 0–2.0s, silence to 2.6s.
+        var probabilities: [Float] = []
+        for frame in 0..<260 {
+            let active: Float = frame < 200 ? 1.0 : 0.0
+            probabilities.append(contentsOf: [active, active])
+        }
+        let timeline = TurnDiarizerChunk(probabilities: probabilities, frameCount: 260)
+        let service = await makeAttributionService(text: "one two three four", timeline: timeline)
+        await service.setClusterDiarizationHookForTesting { _ in
+            [TimedSpeakerSegment(
+                speakerId: "S1",
+                embedding: Array(repeating: 0.5, count: 256),
+                startTimeSeconds: 0.2,
+                endTimeSeconds: 1.8,
+                qualityScore: 1.0
+            )]
+        }
+        var vadStates: [(Bool, LiveVADEventKind?)] = [(true, .speechStart)]
+        vadStates.append(contentsOf: Array(repeating: (true, nil), count: 8))
+        vadStates.append((false, .speechEnd))
+        _ = await collectSegments(
+            from: service,
+            samples: Array(repeating: Float(0.1), count: 40_960),
+            vadStates: vadStates
+        )
+
+        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 0) == nil)
+        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 1) == nil)
     }
 }
 
@@ -1632,10 +1852,14 @@ extension LiveTranscriptionService {
     func injectSessionSpeaker(
         id: String,
         embedding: [Float],
-        wasMatched: Bool,
-        matchedProfileID: UUID?
+        boundProfileID: UUID? = nil,
+        boundProfileName: String? = nil
     ) {
-        sessionSpeakers[id] = (embedding: embedding, wasMatched: wasMatched, matchedProfileID: matchedProfileID)
+        sessionSpeakers[id] = FallbackSpeakerRecord(
+            embedding: embedding,
+            boundProfileID: boundProfileID,
+            boundProfileName: boundProfileName
+        )
     }
 }
 
@@ -1747,6 +1971,22 @@ private final class TextSequenceProbe: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return texts.isEmpty ? "" : texts.removeFirst()
+    }
+}
+
+/// Returns one scripted clustering result per call, then empty results.
+private final class ClusterSequenceProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var results: [[TimedSpeakerSegment]]
+
+    init(_ results: [[TimedSpeakerSegment]]) {
+        self.results = results
+    }
+
+    func next() -> [TimedSpeakerSegment] {
+        lock.lock()
+        defer { lock.unlock() }
+        return results.isEmpty ? [] : results.removeFirst()
     }
 }
 
