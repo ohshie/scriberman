@@ -3,25 +3,27 @@
     <channel>
         <title>Scriberman</title>
         <item>
-            <title>1.0.10</title>
-            <pubDate>Sun, 27 Sep 2026 21:39:38 +0200</pubDate>
-            <sparkle:version>11</sparkle:version>
-            <sparkle:shortVersionString>1.0.10</sparkle:shortVersionString>
+            <title>1.0.11</title>
+            <pubDate>Mon, 28 Sep 2026 09:09:41 +0200</pubDate>
+            <sparkle:version>12</sparkle:version>
+            <sparkle:shortVersionString>1.0.11</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<h2>Scriberman 1.0.10</h2>
+            <description><![CDATA[<h2>Scriberman 1.0.11</h2>
+<h3>What’s new</h3>
+<ul>
+  <li>Get meeting suggestions from selected calendars and prepare a recording session.</li>
+  <li>Delete individual saved speaker profiles or clear them all in Settings.</li>
+</ul>
 <h3>Fixes</h3>
 <ul>
-  <li>Imported 16 kHz and 44.1 kHz audio keeps its correct duration and pitch.</li>
-  <li>Recordings no longer share files accidentally, and interrupted audio and screen-video processing can recover on restart.</li>
-  <li>Trimming and restoring recordings preserve existing files if an operation fails.</li>
-  <li>Switching sessions shows the correct transcript, and search matches refresh when transcript content changes.</li>
-  <li>Automatic speaker enrollment no longer overwrites existing speaker profiles.</li>
-  <li>AI transformations respect the disabled setting and prevent duplicate requests for the same session.</li>
-  <li>Recording and loading animations respect Reduce Motion, and more controls have accessibility labels.</li>
+  <li>Corrected word attribution when speakers change or overlap in live transcription.</li>
+  <li>Kept speaker identities consistent throughout live recordings and saved transcripts.</li>
+  <li>Speaker renames in live transcripts now update speaker memory for future recognition.</li>
+  <li>Offline transcription and retranscription now show matched speaker names and use numbered labels for unrecognized speakers.</li>
 </ul>
 ]]></description>
-            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.0.10/Scriberman-1.0.10-11-arm64.dmg" length="16490487" type="application/octet-stream" sparkle:edSignature="ZKcLMMGHvdMF74LIjugITWOdYrk5eD3wi8VZ3xl6g9T+5ZZ19BBmM68gX9/QEWkZ1hkNE2+MlLtn6dxtGFZRBw=="/>
+            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.0.11/Scriberman-1.0.11-12-arm64.dmg" length="16622418" type="application/octet-stream" sparkle:edSignature="0r92iOoqDGMS87KnO3J++HR3mTYvh4DENvPzd1q/fIJA8/tTXkedVErkF+nuLp+GKka/CzapELo13H9Zsm+eDA=="/>
         </item>
     </channel>
 </rss>
