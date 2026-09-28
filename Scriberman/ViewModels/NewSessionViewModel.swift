@@ -532,7 +532,7 @@ final class NewSessionViewModel {
         startVerificationTask = nil
 
         let sessionID = await recordingService.stopRecording() ?? activeRecordingSessionID
-        let liveFinalSegments = await drainLiveRecordingSession()
+        let liveResult = await drainLiveRecordingSession()
         activeRecordingSessionID = nil
         // Tear the idle prompt down however the session ends (panel, UI button, menu bar,
         // app lifecycle), not just via reset().
@@ -553,8 +553,16 @@ final class NewSessionViewModel {
             return nil
         }
 
-        backfillPersistedSegments(liveFinalSegments, to: session, context: context)
-        saveLiveTranscript(to: session)
+        relabelPersistedSegments(of: session, using: liveResult.speakerIDRemap)
+        backfillPersistedSegments(liveResult.segments, to: session, context: context)
+        if !liveResult.speakerIDRemap.isEmpty {
+            rewriteTranscriptMarkdown(for: session)
+        }
+        saveLiveTranscript(
+            to: session,
+            speakerEmbeddings: liveResult.speakerEmbeddings,
+            speakerProfileIDs: liveResult.enrolledProfileIDs
+        )
         // The flush: every segment a failed save left pending is written here, or reported.
         do {
             try saveContext(context)
@@ -568,7 +576,22 @@ final class NewSessionViewModel {
         return session
     }
 
-    private func saveLiveTranscript(to session: RecordingSession) {
+    /// Moves segments persisted during recording under the speaker's bound profile name, for
+    /// speakers the live service recognized only partway through the session.
+    private func relabelPersistedSegments(of session: RecordingSession, using remap: [String: String]) {
+        guard !remap.isEmpty else { return }
+        for segment in session.transcriptSegments {
+            if let speakerId = remap[segment.speakerId] {
+                segment.speakerId = speakerId
+            }
+        }
+    }
+
+    private func saveLiveTranscript(
+        to session: RecordingSession,
+        speakerEmbeddings: [String: [Float]],
+        speakerProfileIDs: [String: UUID]
+    ) {
         let finalSegments = session.transcriptSegments
             .filter(\.isFinal)
             .sorted {
@@ -612,10 +635,15 @@ final class NewSessionViewModel {
             )
         }
 
+        let presentSpeakerIds = Set(speakerIds)
+        let embeddings = speakerEmbeddings.filter { presentSpeakerIds.contains($0.key) }
+        let profileIDs = speakerProfileIDs.filter { presentSpeakerIds.contains($0.key) }
         let transcript = Transcript(
             fullText: Transcript.fullText(joining: finalSegments),
             segments: finalSegments,
-            speakers: speakers
+            speakers: speakers,
+            speakerEmbeddings: embeddings.isEmpty ? nil : embeddings,
+            speakerProfileIDs: profileIDs.isEmpty ? nil : profileIDs
         )
         session.transcript = transcript
         session.status = .done
@@ -1073,13 +1101,13 @@ final class NewSessionViewModel {
         }
     }
 
-    private func drainLiveRecordingSession() async -> [TranscriptSegment] {
-        guard let session = liveRecordingSession else { return [] }
-        let segments = await session.drainTranscription(using: liveTranscriptionService)
+    private func drainLiveRecordingSession() async -> LiveSessionResult {
+        guard let session = liveRecordingSession else { return LiveSessionResult(segments: []) }
+        let result = await session.drainTranscription(using: liveTranscriptionService)
         if liveRecordingSession?.generation == session.generation {
             liveRecordingSession = nil
         }
-        return segments
+        return result
     }
 
     private func persistLiveTranscriptSegment(_ segment: TranscriptSegment, context: ModelContext) {

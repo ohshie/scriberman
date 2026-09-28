@@ -77,3 +77,23 @@ struct TranscriptSegmentCodableTests {
         #expect(decoded.audioSource == .app)
     }
 }
+
+struct TranscriptCodableTests {
+    @Test
+    func transcriptWithoutProfileLinksDecodesWithNil() throws {
+        let data = Data("""
+        {"fullText":"hello","segments":[],"speakers":[],"speakerEmbeddings":{"S1":[0.5]}}
+        """.utf8)
+        let transcript = try JSONDecoder().decode(Transcript.self, from: data)
+        #expect(transcript.speakerProfileIDs == nil)
+        #expect(transcript.speakerEmbeddings == ["S1": [0.5]])
+    }
+
+    @Test
+    func profileLinksRoundTrip() throws {
+        let profileID = UUID()
+        let transcript = Transcript(fullText: "", segments: [], speakers: [], speakerProfileIDs: ["S1": profileID])
+        let decoded = try JSONDecoder().decode(Transcript.self, from: JSONEncoder().encode(transcript))
+        #expect(decoded.speakerProfileIDs == ["S1": profileID])
+    }
+}
