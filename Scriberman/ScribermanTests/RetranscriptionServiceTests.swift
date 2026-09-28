@@ -48,6 +48,75 @@ struct RetranscriptionServiceTests {
         self.context = ModelContext(container)
     }
 
+    // MARK: - Speaker labels
+
+    private func retranscriptLabels(
+        profiles: [(name: String, embedding: [Float])],
+        mic: OfflineLabelFixture.Cluster,
+        app: OfflineLabelFixture.Cluster?
+    ) async throws -> [String: String] {
+        let store = try await OfflineLabelFixture.store(profiles: profiles)
+        let service = RetranscriptionService(
+            transcriptionService: OfflineLabelFixture.transcriptionService(store: store, mic: mic, app: app),
+            extractSamples: OfflineLabelFixture.extractSamples(hasApp: app != nil),
+            prepareModelsHandler: { _ in }
+        )
+        let (container, sessionID) = try OfflineLabelFixture.sessionContainer(hasApp: app != nil)
+        await service.retranscribe(sessionID: sessionID, modelContainer: container, workspace: OfflineLabelFixture.workspace)
+        let retranscript = try #require(try fetchRecordingSession(id: sessionID, in: container)?.retranscript)
+        return Dictionary(uniqueKeysWithValues: retranscript.speakers.map { ($0.id, $0.label) })
+    }
+
+    @Test("Recognized app speaker keeps the profile name after retranscription")
+    func retranscriptLabelsRecognizedAppSpeaker() async throws {
+        let labels = try await retranscriptLabels(
+            profiles: [("Alice", OfflineLabelFixture.voice(0))],
+            mic: .init(id: "S1", embedding: OfflineLabelFixture.voice(5)),
+            app: .init(id: "S1", embedding: OfflineLabelFixture.voice(0))
+        )
+        #expect(labels["app:Alice"] == "Alice")
+    }
+
+    @Test("Unmatched mic speaker is labelled Speaker N after retranscription")
+    func retranscriptLabelsUnmatchedMicSpeaker() async throws {
+        let labels = try await retranscriptLabels(
+            profiles: [],
+            mic: .init(id: "S1", embedding: OfflineLabelFixture.voice(5)),
+            app: nil
+        )
+        #expect(labels == ["S1": "Speaker 1"])
+    }
+
+    @Test("Recognized profile named like a cluster keeps its name after retranscription")
+    func retranscriptLabelsProfileNamedLikeACluster() async throws {
+        let labels = try await retranscriptLabels(
+            profiles: [("S1", OfflineLabelFixture.voice(0))],
+            mic: .init(id: "S7", embedding: OfflineLabelFixture.voice(0)),
+            app: nil
+        )
+        #expect(labels == ["S1": "S1"])
+    }
+
+    @Test("Unmatched app speaker is labelled Speaker N after retranscription")
+    func retranscriptLabelsUnmatchedAppSpeaker() async throws {
+        let labels = try await retranscriptLabels(
+            profiles: [("Alice", OfflineLabelFixture.voice(0))],
+            mic: .init(id: "S1", embedding: OfflineLabelFixture.voice(0)),
+            app: .init(id: "S1", embedding: OfflineLabelFixture.voice(5))
+        )
+        #expect(labels == ["Alice": "Alice", "app:S1": "Speaker 2"])
+    }
+
+    @Test("Same profile on both channels after retranscription")
+    func retranscriptLabelsSameProfileOnBothChannels() async throws {
+        let labels = try await retranscriptLabels(
+            profiles: [("Alice", OfflineLabelFixture.voice(0))],
+            mic: .init(id: "S1", embedding: OfflineLabelFixture.voice(0)),
+            app: .init(id: "S1", embedding: OfflineLabelFixture.voice(0))
+        )
+        #expect(labels == ["Alice": "Alice", "app:Alice": "Alice"])
+    }
+
     @Test("Stereo retranscription success stores retranscript and sets done status")
     func retranscribeStereoSuccess() async throws {
         let transcriptionService = TranscriptionService()
@@ -60,7 +129,7 @@ struct RetranscriptionServiceTests {
             transcribePassFromSamplesHandler: { _, source, _, _, _ in
                 switch source {
                 case .mic:
-                    return ([
+                    return TranscriptionPassRunner.PassResult(segments: [
                         TranscriptSegment(
                             speakerId: "S1",
                             text: "mic line",
@@ -68,9 +137,9 @@ struct RetranscriptionServiceTests {
                             endTime: 2.2,
                             audioSource: .mic
                         )
-                    ], [:])
+                    ])
                 case .app:
-                    return ([
+                    return TranscriptionPassRunner.PassResult(segments: [
                         TranscriptSegment(
                             speakerId: "app:S1",
                             text: "app line",
@@ -78,7 +147,7 @@ struct RetranscriptionServiceTests {
                             endTime: 1.2,
                             audioSource: .app
                         )
-                    ], [:])
+                    ])
                 }
             }
         )
@@ -130,7 +199,7 @@ struct RetranscriptionServiceTests {
             prepareModelsHandler: { _ in },
             transcribePassFromSamplesHandler: { _, source, _, _, _ in
                 #expect(source == .mic)
-                return ([
+                return TranscriptionPassRunner.PassResult(segments: [
                     TranscriptSegment(
                         speakerId: "S1",
                         text: "mic only",
@@ -138,7 +207,7 @@ struct RetranscriptionServiceTests {
                         endTime: 0.5,
                         audioSource: .mic
                     )
-                ], [:])
+                ])
             }
         )
 
@@ -208,7 +277,7 @@ struct RetranscriptionServiceTests {
             },
             transcribePassFromSamplesHandler: { _, _, _, _, _ in
                 Issue.record("transcribePassFromSamples should not be called when extraction fails")
-                return ([], [:])
+                return TranscriptionPassRunner.PassResult()
             }
         )
 
@@ -251,7 +320,7 @@ struct RetranscriptionServiceTests {
             prepareModelsHandler: { _ in },
             transcribePassFromSamplesHandler: { _, source, _, _, _ in
                 #expect(source == .mic)
-                return ([
+                return TranscriptionPassRunner.PassResult(segments: [
                     TranscriptSegment(
                         speakerId: "S1",
                         text: "imported",
@@ -259,7 +328,7 @@ struct RetranscriptionServiceTests {
                         endTime: 0.5,
                         audioSource: .mic
                     )
-                ], [:])
+                ])
             }
         )
 

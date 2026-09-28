@@ -26,6 +26,14 @@ actor SpeakerEmbeddingStore {
         }
     }
 
+    /// Deletes every stored profile.
+    func deleteAllProfiles() throws {
+        for profile in try fetchAll() {
+            modelContext.delete(profile)
+        }
+        try modelContext.save()
+    }
+
     func findProfileSnapshot(byID id: UUID) throws -> SpeakerProfileSnapshot? {
         try SpeakerProfile.fetch(id: id, in: modelContext).map(SpeakerProfileSnapshot.init(profile:))
     }
@@ -69,10 +77,18 @@ actor SpeakerEmbeddingStore {
         try modelContext.save()
     }
 
-    /// The profile whose name matches `name` case-insensitively, for the manual rename path.
-    func profileID(forName name: String) throws -> UUID? {
+    /// Gives one profile a new name; its voiceprint is unchanged.
+    func renameProfile(id: UUID, name: String) throws {
+        guard let profile = try SpeakerProfile.fetch(id: id, in: modelContext) else { return }
+        profile.name = name
+        try modelContext.save()
+    }
+
+    /// The profile whose name matches `name` case-insensitively, other than `excludedID`, for the
+    /// manual rename path.
+    func profileID(forName name: String, excluding excludedID: UUID? = nil) throws -> UUID? {
         let target = name.lowercased()
-        return try fetchAll().first { $0.name.lowercased() == target }?.id
+        return try fetchAll().first { $0.name.lowercased() == target && $0.id != excludedID }?.id
     }
 
     /// `Speaker <max N + 1>` over the labels of the form `Speaker <number>`, or `Speaker 1`.

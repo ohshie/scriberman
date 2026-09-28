@@ -264,6 +264,81 @@ struct SpeakerEmbeddingStoreTests {
         let match = await store.findBestMatchSnapshot(embedding: query)
         #expect(match?.name == "Alice")
     }
+
+    @Test("Rename a profile keeps its voiceprint")
+    func renameProfileKeepsVoiceprint() async throws {
+        let id = try await store.enrollNamedSpeaker(name: "Speaker 5", embedding: [0.5, 0.5])
+
+        try await store.renameProfile(id: id, name: "Bob")
+
+        let profile = try await store.findProfileSnapshot(byID: id)
+        #expect(profile?.name == "Bob")
+        #expect(profile?.embedding == [0.5, 0.5])
+        #expect(try await store.fetchAllSnapshots().count == 1)
+    }
+
+    @Test("Delete all profiles empties the store and restarts automatic numbering")
+    func deleteAllProfilesEmptiesStore() async throws {
+        try await store.enrollNamedSpeaker(name: "Alice", embedding: [0.1])
+        _ = try await store.enrollNewSpeaker(embedding: [0.2])
+        _ = try await store.enrollNewSpeaker(embedding: [0.3])
+
+        try await store.deleteAllProfiles()
+
+        #expect(try await store.fetchAllSnapshots().isEmpty)
+        let newID = try await store.enrollNewSpeaker(embedding: [0.4])
+        #expect(try await store.findProfileSnapshot(byID: newID)?.name == "Speaker 1")
+    }
+
+    @Test("A deleted profile is no longer matched")
+    func deletedProfileIsNotMatched() async throws {
+        var alice: [Float] = Array(repeating: 0.0, count: 256)
+        alice[0] = 1.0
+        let aliceID = try await store.enrollNamedSpeaker(name: "Alice", embedding: alice)
+        #expect(await store.findBestMatchSnapshot(embedding: alice)?.name == "Alice")
+
+        try await store.deleteProfile(id: aliceID)
+
+        #expect(await store.findBestMatchSnapshot(embedding: alice) == nil)
+    }
+}
+
+@MainActor
+struct SpeakerProfileListTests {
+    private struct DeleteFailure: Error {}
+
+    private func snapshot(_ name: String) -> SpeakerProfileSnapshot {
+        SpeakerProfileSnapshot(profile: SpeakerProfile(name: name, embedding: [0.1]))
+    }
+
+    @Test
+    func failedDeleteReloadsAndShowsFailureUntilADeleteSucceeds() async {
+        let bob = snapshot("Bob")
+        let list = SpeakerProfileList(fetch: { [bob] })
+
+        await list.delete { throw DeleteFailure() }
+        #expect(list.deleteFailed)
+        #expect(list.profiles.map(\.name) == ["Bob"])
+        #expect(list.isLoading == false)
+
+        await list.delete {}
+        #expect(list.deleteFailed == false)
+    }
+
+    @Test
+    func successfulDeleteReloadsFromStorage() async throws {
+        let container = try ModelContainer(for: SpeakerProfile.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let store = SpeakerEmbeddingStore(modelContainer: container)
+        let aliceID = try await store.enrollNamedSpeaker(name: "Alice", embedding: [0.1])
+        try await store.enrollNamedSpeaker(name: "Bob", embedding: [0.2])
+        let list = SpeakerProfileList(store: store)
+        await list.load()
+
+        await list.delete { try await store.deleteProfile(id: aliceID) }
+
+        #expect(list.profiles.map(\.name) == ["Bob"])
+        #expect(list.deleteFailed == false)
+    }
 }
 
 private extension Sequence {

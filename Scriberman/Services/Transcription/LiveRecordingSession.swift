@@ -17,18 +17,18 @@ final class LiveRecordingSession {
     let results = AsyncStream<TranscriptSegment>.makeStream(bufferingPolicy: .unbounded)
     var audioConsumer: Task<Void, Never>?
     var resultConsumer: Task<Void, Never>?
-    private var drainTask: Task<[TranscriptSegment], Never>?
+    private var drainTask: Task<LiveSessionResult, Never>?
 
     /// User stop and capture-start failure can request teardown concurrently.
     /// Both wait for the same drain and flush.
-    func drainTranscription(using service: any LiveTranscribing) async -> [TranscriptSegment] {
+    func drainTranscription(using service: any LiveTranscribing) async -> LiveSessionResult {
         if let drainTask { return await drainTask.value }
         let task = Task {
             await self.drainAudio()
-            let segments = await service.stop()
+            let result = await service.stop()
             self.results.continuation.finish()
             await self.drainResults()
-            return segments
+            return result
         }
         drainTask = task
         return await task.value

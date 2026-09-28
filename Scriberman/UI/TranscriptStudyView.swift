@@ -192,12 +192,48 @@ struct TranscriptStudyView: View {
         }
         self.transcript = updatedTranscript
 
-        // Enroll in profile database if we have an embedding
-        if let embedding = updatedTranscript.speakerEmbeddings?[id], let store = store {
-            Task {
-                try? await Self.enrollRenamedSpeaker(name: newName, embedding: embedding, in: store)
+        guard let store else { return }
+        Task {
+            let unlinked = (try? await Self.updateSpeakerMemory(
+                forRenaming: id,
+                to: newName,
+                in: updatedTranscript,
+                store: store
+            )) ?? false
+            if unlinked, let transcript = Self.removingProfileLink(for: id, in: self.transcript, of: session) {
+                self.transcript = transcript
             }
         }
+    }
+
+    /// Teaches speaker memory that speaker `id` is called `name`, using the voiceprint and profile
+    /// link stored in `transcript`. Returns `true` when the speaker's profile link must be removed.
+    ///
+    /// A link means the live session that made this transcript auto-enrolled the profile, so the
+    /// transcript owns it: it is renamed, or, when another profile already has the name, merged
+    /// into that profile and deleted. Without a live link the voiceprint goes to the profile with
+    /// the new name, as for a speaker matched to someone else's existing profile.
+    static func updateSpeakerMemory(
+        forRenaming id: String,
+        to name: String,
+        in transcript: Transcript,
+        store: SpeakerEmbeddingStore
+    ) async throws -> Bool {
+        let embedding = transcript.speakerEmbeddings?[id]
+        if let linkedID = transcript.speakerProfileIDs?[id],
+           let linked = try await store.findProfileSnapshot(byID: linkedID) {
+            if let existingID = try await store.profileID(forName: name, excluding: linkedID) {
+                try await store.updateEmbedding(profileID: existingID, embedding: embedding ?? linked.embedding)
+                try await store.deleteProfile(id: linkedID)
+                return true
+            }
+            try await store.renameProfile(id: linkedID, name: name)
+            return false
+        }
+        if let embedding {
+            try await enrollRenamedSpeaker(name: name, embedding: embedding, in: store)
+        }
+        return false
     }
 
     /// Gives the renamed speaker's voiceprint to the profile the user named: the existing profile
@@ -228,14 +264,36 @@ struct TranscriptStudyView: View {
             fullText: transcript.fullText,
             segments: transcript.segments,
             speakers: updatedSpeakers,
-            speakerEmbeddings: transcript.speakerEmbeddings
+            speakerEmbeddings: transcript.speakerEmbeddings,
+            speakerProfileIDs: transcript.speakerProfileIDs
         )
-        if session.retranscript != nil {
-            session.retranscript = updatedTranscript
-        } else {
-            session.transcript = updatedTranscript
-        }
+        writeDisplayed(updatedTranscript, to: session)
         return updatedTranscript
+    }
+
+    /// Drops speaker `id`'s profile link from `transcript` and writes the result to `session`'s
+    /// displayed pass. Returns the updated transcript, or `nil` when there is no such link.
+    static func removingProfileLink(
+        for id: String,
+        in transcript: Transcript,
+        of session: any TranscribableSession
+    ) -> Transcript? {
+        guard transcript.speakerProfileIDs?[id] != nil else { return nil }
+        var updatedTranscript = transcript
+        updatedTranscript.speakerProfileIDs?[id] = nil
+        if updatedTranscript.speakerProfileIDs?.isEmpty == true {
+            updatedTranscript.speakerProfileIDs = nil
+        }
+        writeDisplayed(updatedTranscript, to: session)
+        return updatedTranscript
+    }
+
+    private static func writeDisplayed(_ transcript: Transcript, to session: any TranscribableSession) {
+        if session.retranscript != nil {
+            session.retranscript = transcript
+        } else {
+            session.transcript = transcript
+        }
     }
 
     @ToolbarContentBuilder

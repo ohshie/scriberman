@@ -62,6 +62,26 @@ final class AudioTrimServiceTests {
         #expect(result.isEmpty)
     }
 
+    @Test
+    func testTrimmedTranscriptKeepsVoiceprintsAndProfileLinks() {
+        let profileID = UUID()
+        let transcript = Transcript(
+            fullText: "Hello World",
+            segments: [
+                TranscriptSegment(speakerId: "A", text: "Hello", startTime: 0, endTime: 5),
+                TranscriptSegment(speakerId: "A", text: "World", startTime: 65, endTime: 70),
+            ],
+            speakers: [TranscriptSpeaker(id: "A", label: "Speaker 1", colorHex: "#112233")],
+            speakerEmbeddings: ["A": [0.5]],
+            speakerProfileIDs: ["A": profileID]
+        )
+
+        let trimmed = AudioTrimService.trimmedTranscript(transcript, end: 60)
+
+        #expect(trimmed.speakerEmbeddings == ["A": [0.5]])
+        #expect(trimmed.speakerProfileIDs == ["A": profileID])
+    }
+
     // MARK: - Guard: already trimmed
 
     @Test

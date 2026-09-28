@@ -38,6 +38,42 @@ struct SessionSpeakerIdentity {
     }
 }
 
+/// A clustering-diarizer speaker attributed without a turn timeline (embedding
+/// fallback). The first profile match binds it for the rest of the session.
+struct FallbackSpeakerRecord {
+    var embedding: [Float]
+    var boundProfileID: UUID?
+    var boundProfileName: String?
+}
+
+/// What a stopped live session hands back for saving.
+struct LiveSessionResult: Sendable {
+    /// Final segments, already relabelled through `speakerIDRemap`.
+    var segments: [TranscriptSegment]
+    /// Session-local ID → profile name, for every speaker bound during the session.
+    var speakerIDRemap: [String: String] = [:]
+    /// Voiceprint per final speaker ID.
+    var speakerEmbeddings: [String: [Float]] = [:]
+    /// Final speaker ID → profile auto-enrolled for it at stop.
+    var enrolledProfileIDs: [String: UUID] = [:]
+}
+
+extension TranscriptSegment {
+    /// This segment with its speaker ID replaced through `remap`, keeping its identity.
+    func relabelled(using remap: [String: String]) -> TranscriptSegment {
+        guard let speakerId = remap[speakerId] else { return self }
+        return TranscriptSegment(
+            id: id,
+            speakerId: speakerId,
+            text: text,
+            startTime: startTime,
+            endTime: endTime,
+            audioSource: audioSource,
+            isFinal: isFinal
+        )
+    }
+}
+
 enum LiveVADEventKind {
     case speechStart
     case speechEnd
@@ -148,7 +184,8 @@ private struct PendingAttribution {
     let tokenTimings: [TokenTiming]?
     let start: Float
     let end: Float
-    let longestClusterSegment: TimedSpeakerSegment?
+    /// Every clustering-diarizer segment of the chunk, chunk-relative.
+    let clusterSegments: [TimedSpeakerSegment]
 }
 
 /// Settings that shape how models are constructed (`VadConfig`,
@@ -266,7 +303,7 @@ protocol LiveTranscribing: Sendable {
     func prepare(workspace: Workspace, config: LiveTranscriptionPipelineSettings) async
     func start(workspace: Workspace, config: LiveTranscriptionPipelineSettings, resultContinuation: AsyncStream<TranscriptSegment>.Continuation) async throws
     func process(_ chunk: LiveAudioChunk, anchor: HostNanoseconds?) async
-    func stop() async -> [TranscriptSegment]
+    func stop() async -> LiveSessionResult
 }
 
 actor LiveTranscriptionService: LiveTranscribing {
@@ -338,6 +375,7 @@ actor LiveTranscriptionService: LiveTranscribing {
 #if DEBUG
     private var processChunkHookForTesting: (@Sendable ([Float], AudioSource, Float) async -> Void)?
     private var asrTranscribeHookForTesting: (@Sendable ([Float], AudioSource, inout TdtDecoderState) async throws -> ASRResult)?
+    private var clusterDiarizationHookForTesting: (@Sendable ([Float]) throws -> [TimedSpeakerSegment])?
     private var decoderStateFactoryForTesting: (@Sendable (AsrManager) async throws -> TdtDecoderState)?
 #endif
 
@@ -348,8 +386,7 @@ actor LiveTranscriptionService: LiveTranscribing {
     // without a turn timeline (empty/unreliable) record here under the
     // clustering diarizer's session-local ID, preserving pre-turn-diarizer behavior.
     // Key: session-local speaker ID ("speaker_SPEAKER_0" etc.)
-    // Value: (embedding, wasMatched, matchedProfileID)
-    var sessionSpeakers: [String: (embedding: [Float], wasMatched: Bool, matchedProfileID: UUID?)] = [:]
+    var sessionSpeakers: [String: FallbackSpeakerRecord] = [:]
 
     // Primary speaker identity: per-source turn-diarizer speaker index → identity
     // record (accumulated embeddings + sticky profile binding).
@@ -484,7 +521,7 @@ actor LiveTranscriptionService: LiveTranscribing {
         logger.info("LiveTranscriptionService started (turn diarizers: \(self.turnDiarizers.count))")
     }
 
-    func stop() async -> [TranscriptSegment] {
+    func stop() async -> LiveSessionResult {
         logger.info("Stopping live transcription service")
         defer {
             resultContinuation?.finish()
@@ -537,52 +574,68 @@ actor LiveTranscriptionService: LiveTranscribing {
         }
 
         // Speaker enrollment at session end: turn-diarizer identity records are the
-        // primary source; legacy sessionSpeakers covers fallback-attributed
-        // chunks (empty/unreliable timeline stretches).
-        // Each unbound voice becomes a new profile. The store picks the label, one past the
-        // highest `Speaker N`, and never updates an existing profile here.
-        if let store = speakerEmbeddingStore, !sessionSpeakerIdentities.isEmpty || !sessionSpeakers.isEmpty {
-            // Iterate deterministically: sources then turn-diarizer indices.
-            for source in sessionSpeakerIdentities.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
-                let records = sessionSpeakerIdentities[source] ?? [:]
-                for speakerIndex in records.keys.sorted() {
-                    guard let record = records[speakerIndex] else { continue }
+        // primary source; sessionSpeakers covers fallback-attributed chunks
+        // (empty/unreliable timeline stretches). Each unbound voice becomes a new
+        // profile. The store picks the label, one past the highest `Speaker N`,
+        // and never updates an existing profile here. Speakers bound during the
+        // session are remapped to the profile name so earlier segments join them.
+        var result = LiveSessionResult(segments: [])
+        let store = speakerEmbeddingStore
 
-                    if let profileID = record.boundProfileID {
+        // Iterate deterministically: sources then turn-diarizer indices.
+        for source in sessionSpeakerIdentities.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+            let records = sessionSpeakerIdentities[source] ?? [:]
+            for speakerIndex in records.keys.sorted() {
+                guard let record = records[speakerIndex] else { continue }
+                let sessionLocalId = turnSessionLocalID(for: speakerIndex, source: source)
+                let embedding = record.averagedEmbedding
+
+                if let profileID = record.boundProfileID {
+                    recordBoundSpeaker(sessionLocalId, name: record.boundProfileName, embedding: embedding, in: &result)
+                    if let store {
                         try? await store.updateProfile(id: profileID)
                         logger.info("Updated lastSeen for bound speaker \(speakerIndex) (\(source.rawValue))")
-                    } else {
-                        let embedding = record.averagedEmbedding
-                        guard !embedding.isEmpty else { continue }
-                        do {
-                            let profileID = try await store.enrollNewSpeaker(embedding: embedding)
-                            logger.info("Enrolled new speaker \(profileID, privacy: .public) for turn speaker \(speakerIndex) (\(source.rawValue))")
-                        } catch {
-                            logger.error("Failed to enroll turn speaker \(speakerIndex) (\(source.rawValue)): \(error)")
-                        }
                     }
-                }
-            }
-
-            // Sort by session-local ID for deterministic name assignment
-            for sessionLocalId in sessionSpeakers.keys.sorted() {
-                guard let info = sessionSpeakers[sessionLocalId] else { continue }
-
-                if info.wasMatched, let profileID = info.matchedProfileID {
-                    try? await store.updateProfile(id: profileID)
-                    logger.info("Updated lastSeen for matched speaker \(sessionLocalId)")
-                } else if !info.embedding.isEmpty {
+                } else {
+                    guard !embedding.isEmpty else { continue }
+                    result.speakerEmbeddings[sessionLocalId] = embedding
+                    guard let store else { continue }
                     do {
-                        let profileID = try await store.enrollNewSpeaker(embedding: info.embedding)
-                        logger.info("Enrolled new speaker \(profileID, privacy: .public) for session speaker \(sessionLocalId)")
+                        let profileID = try await store.enrollNewSpeaker(embedding: embedding)
+                        result.enrolledProfileIDs[sessionLocalId] = profileID
+                        logger.info("Enrolled new speaker \(profileID, privacy: .public) for turn speaker \(speakerIndex) (\(source.rawValue))")
                     } catch {
-                        logger.error("Failed to enroll session speaker \(sessionLocalId): \(error)")
+                        logger.error("Failed to enroll turn speaker \(speakerIndex) (\(source.rawValue)): \(error)")
                     }
                 }
             }
         }
 
-        let segments = collectedFinalSegments
+        // Sort by session-local ID for deterministic name assignment
+        for sessionLocalId in sessionSpeakers.keys.sorted() {
+            guard let record = sessionSpeakers[sessionLocalId] else { continue }
+
+            if let profileID = record.boundProfileID {
+                recordBoundSpeaker(sessionLocalId, name: record.boundProfileName, embedding: record.embedding, in: &result)
+                if let store {
+                    try? await store.updateProfile(id: profileID)
+                    logger.info("Updated lastSeen for matched speaker \(sessionLocalId)")
+                }
+            } else {
+                guard !record.embedding.isEmpty else { continue }
+                result.speakerEmbeddings[sessionLocalId] = record.embedding
+                guard let store else { continue }
+                do {
+                    let profileID = try await store.enrollNewSpeaker(embedding: record.embedding)
+                    result.enrolledProfileIDs[sessionLocalId] = profileID
+                    logger.info("Enrolled new speaker \(profileID, privacy: .public) for session speaker \(sessionLocalId)")
+                } catch {
+                    logger.error("Failed to enroll session speaker \(sessionLocalId): \(error)")
+                }
+            }
+        }
+
+        result.segments = collectedFinalSegments.map { $0.relabelled(using: result.speakerIDRemap) }
 
         // Cleanup: release the models; the next recording prepares again.
         collectedFinalSegments.removeAll()
@@ -608,7 +661,22 @@ actor LiveTranscriptionService: LiveTranscribing {
         releasingSources.removeAll()
         isInitialized = false
 
-        return segments
+        return result
+    }
+
+    /// Adds a bound speaker's remap entry and voiceprint, keyed by the profile
+    /// name. The first voiceprint recorded under a name is kept.
+    private func recordBoundSpeaker(
+        _ sessionLocalId: String,
+        name: String?,
+        embedding: [Float],
+        in result: inout LiveSessionResult
+    ) {
+        guard let name else { return }
+        result.speakerIDRemap[sessionLocalId] = name
+        if !embedding.isEmpty, result.speakerEmbeddings[name] == nil {
+            result.speakerEmbeddings[name] = embedding
+        }
     }
 
     // MARK: - Audio Processing
@@ -931,14 +999,11 @@ actor LiveTranscriptionService: LiveTranscribing {
             // Clustering diarization is retained solely for embedding
             // extraction (design D1): the turn diarizer provides turn boundaries and
             // within-session consistency; embeddings provide identity.
-            var longestClusterSegment: TimedSpeakerSegment?
-            if let diarizer = diarizer {
-                do {
-                    let diarizationResult = try diarizer.performCompleteDiarization(samples, sampleRate: 16000)
-                    longestClusterSegment = findLongestSpeaker(from: diarizationResult)
-                } catch {
-                    logger.error("Embedding diarization failed: \(error)")
-                }
+            var chunkClusterSegments: [TimedSpeakerSegment] = []
+            do {
+                chunkClusterSegments = try clusterSegments(for: samples)
+            } catch {
+                logger.error("Embedding diarization failed: \(error)")
             }
 
             pendingAttributions[source, default: []].append(PendingAttribution(
@@ -946,7 +1011,7 @@ actor LiveTranscriptionService: LiveTranscribing {
                 tokenTimings: asrResult.tokenTimings,
                 start: currentOffset,
                 end: currentOffset + chunkDuration,
-                longestClusterSegment: longestClusterSegment
+                clusterSegments: chunkClusterSegments
             ))
             await releasePendingAttributions(for: source)
 
@@ -961,33 +1026,37 @@ actor LiveTranscriptionService: LiveTranscribing {
         let bufferStart = pending.start
         let bufferEnd = pending.end
         let cleanedText = pending.text
-        let longestClusterSegment = pending.longestClusterSegment
-        let chunkEmbedding = longestClusterSegment?.embedding ?? []
         let runs = turnSpeakerRuns(for: source, start: bufferStart, end: bufferEnd)
         let parts = LiveSegmentSplitter.planParts(runs: runs, start: bufferStart, end: bufferEnd)
 
         guard !parts.isEmpty else {
             // Timeline has no reliable data for this range: fall back to
             // embedding-based attribution (pre-turn-diarizer behavior).
-            let speakerID = await fallbackSpeakerID(from: longestClusterSegment)
+            let speakerID = await fallbackSpeakerID(from: findLongestSpeaker(in: pending.clusterSegments))
             logger.info("📝 RESULT [\(source.rawValue)] (embedding fallback): \(speakerID): \(cleanedText)")
             emitFinalSegment(speakerId: speakerID, text: cleanedText, start: bufferStart, end: bufferEnd, source: source)
             return
         }
 
-        // Accumulate the chunk's embedding on the dominant part's
-        // identity record; first confident match binds the turn-diarizer index
-        // to a profile for the rest of the session (design D5).
-        if !chunkEmbedding.isEmpty,
-           let dominantPart = parts.max(by: { $0.duration < $1.duration }) {
-            var record = sessionSpeakerIdentities[source]?[dominantPart.speakerIndex] ?? SessionSpeakerIdentity()
-            record.accumulate(chunkEmbedding)
-            if !record.isBound, let match = await findBestSpeakerMatch(for: chunkEmbedding) {
+        // Each turn speaker accumulates the clustering embedding recorded inside
+        // its own runs; the first confident match binds the index to a profile
+        // for the rest of the session (design D5).
+        let assignments = LiveEmbeddingAttribution.assignments(
+            clusterSegments: pending.clusterSegments,
+            runs: runs,
+            bufferStart: bufferStart
+        )
+        for (speakerIndex, assignment) in assignments.sorted(by: { $0.key < $1.key }) {
+            let segment = assignment.segment
+            logger.info("📍 Turn speaker \(speakerIndex) (\(source.rawValue)) takes clustering \(segment.speakerId) \(String(format: "%.2f", bufferStart + segment.startTimeSeconds))–\(String(format: "%.2f", bufferStart + segment.endTimeSeconds))s, \(String(format: "%.0f", assignment.overlapFraction * 100))% inside its runs")
+            var record = sessionSpeakerIdentities[source]?[speakerIndex] ?? SessionSpeakerIdentity()
+            record.accumulate(segment.embedding)
+            if !record.isBound, let match = await findBestSpeakerMatch(for: segment.embedding) {
                 record.boundProfileID = match.id
                 record.boundProfileName = match.name
-                logger.info("📍 Bound turn speaker \(dominantPart.speakerIndex) (\(source.rawValue)) to profile '\(match.name)'")
+                logger.info("📍 Bound turn speaker \(speakerIndex) (\(source.rawValue)) to profile '\(match.name)'")
             }
-            sessionSpeakerIdentities[source, default: [:]][dominantPart.speakerIndex] = record
+            sessionSpeakerIdentities[source, default: [:]][speakerIndex] = record
         }
 
         let texts = LiveSegmentSplitter.apportionText(
@@ -1010,12 +1079,18 @@ actor LiveTranscriptionService: LiveTranscribing {
         if let name = sessionSpeakerIdentities[source]?[speakerIndex]?.boundProfileName {
             return name
         }
-        return "speaker_\(source.rawValue)_\(speakerIndex)"
+        return turnSessionLocalID(for: speakerIndex, source: source)
+    }
+
+    /// Session-local ID of a turn-diarizer speaker index before any binding.
+    private func turnSessionLocalID(for speakerIndex: Int, source: AudioSource) -> String {
+        "speaker_\(source.rawValue)_\(speakerIndex)"
     }
 
     /// Pre-turn-diarizer attribution used when the timeline has no data for a
-    /// buffer: match the chunk's embedding against stored profiles and track
-    /// the result in `sessionSpeakers` for enrollment at stop().
+    /// buffer: match the chunk's embedding against stored profiles while its
+    /// clustering speaker is unbound, and track it in `sessionSpeakers` for
+    /// enrollment at stop(). The first match binds the speaker for the session.
     private func fallbackSpeakerID(from longestSegment: TimedSpeakerSegment?) async -> String {
         guard let longestSegment else {
             logger.info("📍 No speaker detected in audio chunk")
@@ -1023,24 +1098,24 @@ actor LiveTranscriptionService: LiveTranscribing {
         }
 
         let sessionLocalId = "speaker_\(longestSegment.speakerId)"
-        let embedding = longestSegment.embedding
+        if let boundName = sessionSpeakers[sessionLocalId]?.boundProfileName {
+            logger.info("📍 Bound speaker: \(boundName) (\(sessionLocalId))")
+            return boundName
+        }
 
+        let embedding = longestSegment.embedding
         if let match = await findBestSpeakerMatch(for: embedding) {
-            sessionSpeakers[sessionLocalId] = (
+            sessionSpeakers[sessionLocalId] = FallbackSpeakerRecord(
                 embedding: embedding,
-                wasMatched: true,
-                matchedProfileID: match.id
+                boundProfileID: match.id,
+                boundProfileName: match.name
             )
             logger.info("📍 Matched speaker: \(match.name) (profile match)")
             return match.name
         }
 
         if sessionSpeakers[sessionLocalId] == nil && !embedding.isEmpty {
-            sessionSpeakers[sessionLocalId] = (
-                embedding: embedding,
-                wasMatched: false,
-                matchedProfileID: nil
-            )
+            sessionSpeakers[sessionLocalId] = FallbackSpeakerRecord(embedding: embedding)
         }
         logger.info("📍 New/unmatched speaker: \(sessionLocalId)")
         return sessionLocalId
@@ -1087,11 +1162,22 @@ actor LiveTranscriptionService: LiveTranscribing {
         return try TdtDecoderState(decoderLayers: decoderLayers)
     }
 
-    private func findLongestSpeaker(from result: DiarizationResult) -> TimedSpeakerSegment? {
+    /// Clustering-diarizer segments for one chunk, in chunk-relative seconds.
+    private func clusterSegments(for samples: [Float]) throws -> [TimedSpeakerSegment] {
+#if DEBUG
+        if let clusterDiarizationHookForTesting {
+            return try clusterDiarizationHookForTesting(samples)
+        }
+#endif
+        guard let diarizer else { return [] }
+        return try diarizer.performCompleteDiarization(samples, sampleRate: 16000).segments
+    }
+
+    private func findLongestSpeaker(in segments: [TimedSpeakerSegment]) -> TimedSpeakerSegment? {
         var longestSegment: TimedSpeakerSegment?
         var maxDuration: Float = 0
 
-        for segment in result.segments {
+        for segment in segments {
             let duration = segment.endTimeSeconds - segment.startTimeSeconds
             if duration > maxDuration {
                 maxDuration = duration
@@ -1163,6 +1249,10 @@ extension LiveTranscriptionService {
 
     func setAsrTranscribeHookForTesting(_ hook: @escaping @Sendable ([Float], AudioSource, inout TdtDecoderState) async throws -> ASRResult) {
         self.asrTranscribeHookForTesting = hook
+    }
+
+    func setClusterDiarizationHookForTesting(_ hook: @escaping @Sendable ([Float]) throws -> [TimedSpeakerSegment]) {
+        self.clusterDiarizationHookForTesting = hook
     }
 
     func setDecoderStateFactoryForTesting(_ factory: @escaping @Sendable (AsrManager) async throws -> TdtDecoderState) {

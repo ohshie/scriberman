@@ -106,7 +106,8 @@ enum LiveSpeakerTimeline {
 
     /// Speaker runs (finalized + tentative segments alike) overlapping
     /// `[start, end]`, clipped to the range. Adjacent or overlapping
-    /// same-speaker segments are merged; the result is ordered by start time.
+    /// same-speaker segments are merged, even when another speaker's run starts
+    /// between them; the result is ordered by start time.
     static func speakerRuns(in segments: [TurnSegment], start: Float, end: Float) -> [SpeakerRun] {
         guard end > start else { return [] }
 
@@ -116,23 +117,24 @@ enum LiveSpeakerTimeline {
             guard clippedEnd > clippedStart else { return nil }
             return SpeakerRun(speakerIndex: segment.speakerIndex, start: clippedStart, end: clippedEnd)
         }
-        .sorted { ($0.start, $0.end) < ($1.start, $1.end) }
 
         var merged: [SpeakerRun] = []
-        for run in clipped {
-            if let last = merged.last,
-               last.speakerIndex == run.speakerIndex,
-               run.start - last.end <= mergeGapTolerance {
-                merged[merged.count - 1] = SpeakerRun(
-                    speakerIndex: last.speakerIndex,
-                    start: last.start,
-                    end: max(last.end, run.end)
-                )
-            } else {
-                merged.append(run)
+        for speakerRuns in Dictionary(grouping: clipped, by: \.speakerIndex).values {
+            var speakerMerged: [SpeakerRun] = []
+            for run in speakerRuns.sorted(by: { ($0.start, $0.end) < ($1.start, $1.end) }) {
+                if let last = speakerMerged.last, run.start - last.end <= mergeGapTolerance {
+                    speakerMerged[speakerMerged.count - 1] = SpeakerRun(
+                        speakerIndex: last.speakerIndex,
+                        start: last.start,
+                        end: max(last.end, run.end)
+                    )
+                } else {
+                    speakerMerged.append(run)
+                }
             }
+            merged.append(contentsOf: speakerMerged)
         }
-        return merged
+        return merged.sorted { ($0.start, $0.end, $0.speakerIndex) < ($1.start, $1.end, $1.speakerIndex) }
     }
 
     /// The speaker with the longest total speech overlapping `[start, end]`,
@@ -193,46 +195,104 @@ enum LiveSegmentSplitter {
     /// - Runs from a single speaker, or from several speakers where fewer
     ///   than two hold runs ≥ `minimumRunDuration` → one part for the whole
     ///   buffer attributed to the dominant speaker.
-    /// - Otherwise → one part per qualifying run, split at gap midpoints so
-    ///   parts tile the buffer; sub-threshold runs dissolve into whichever
-    ///   neighboring part absorbs their time span.
+    /// - Otherwise → the buffer is cut at every qualifying run's start and end.
+    ///   Each interval belongs to the active run that started most recently, so
+    ///   an interjection inside a longer run takes the interval and hands it
+    ///   back when it ends. Intervals with no active run split at their
+    ///   midpoint between the owners on either side. Parts shorter than
+    ///   `minimumRunDuration` dissolve into their longer neighbor, and parts
+    ///   tile the buffer even when runs overlap.
     static func planParts(runs: [SpeakerRun], start: Float, end: Float) -> [SegmentPart] {
         guard !runs.isEmpty, end > start else { return [] }
 
-        var qualifying = runs.filter { $0.duration >= minimumRunDuration }
-        // Consecutive qualifying runs of the same speaker act as one turn.
-        var collapsed: [SpeakerRun] = []
-        for run in qualifying {
-            if let last = collapsed.last, last.speakerIndex == run.speakerIndex {
-                collapsed[collapsed.count - 1] = SpeakerRun(
-                    speakerIndex: last.speakerIndex,
-                    start: last.start,
-                    end: max(last.end, run.end)
-                )
-            } else {
-                collapsed.append(run)
-            }
-        }
-        qualifying = collapsed
-
-        guard qualifying.count >= 2 else {
+        let qualifying = runs.filter { $0.duration >= minimumRunDuration }
+        guard Set(qualifying.map(\.speakerIndex)).count >= 2 else {
             guard let speaker = LiveSpeakerTimeline.dominantSpeaker(among: runs) else { return [] }
             return [SegmentPart(speakerIndex: speaker, start: start, end: end)]
         }
 
+        let boundaries = Set(
+            [start, end] + qualifying.flatMap { [$0.start, $0.end] }.filter { $0 > start && $0 < end }
+        ).sorted()
+
+        // Owner per elementary interval; nil marks a gap with no active run.
+        var intervals: [(speakerIndex: Int?, start: Float, end: Float)] = []
+        for (lower, upper) in zip(boundaries, boundaries.dropFirst()) where upper > lower {
+            let owner = qualifying
+                .filter { $0.start <= lower && $0.end >= upper }
+                .max { ($0.start, -$0.speakerIndex) < ($1.start, -$1.speakerIndex) }
+            intervals.append((owner?.speakerIndex, lower, upper))
+        }
+
         var parts: [SegmentPart] = []
-        for (index, run) in qualifying.enumerated() {
-            let partStart = index == 0 ? start : (qualifying[index - 1].end + run.start) / 2
-            let partEnd = index == qualifying.count - 1 ? end : (run.end + qualifying[index + 1].start) / 2
-            parts.append(SegmentPart(speakerIndex: run.speakerIndex, start: partStart, end: partEnd))
+        for (index, interval) in intervals.enumerated() {
+            if let speaker = interval.speakerIndex {
+                appendMerging(SegmentPart(speakerIndex: speaker, start: interval.start, end: interval.end), to: &parts)
+                continue
+            }
+            let before = intervals[..<index].last(where: { $0.speakerIndex != nil })?.speakerIndex
+            let after = intervals[(index + 1)...].first(where: { $0.speakerIndex != nil })?.speakerIndex
+            switch (before, after) {
+            case let (before?, after?) where before != after:
+                let midpoint = (interval.start + interval.end) / 2
+                appendMerging(SegmentPart(speakerIndex: before, start: interval.start, end: midpoint), to: &parts)
+                appendMerging(SegmentPart(speakerIndex: after, start: midpoint, end: interval.end), to: &parts)
+            case let (speaker?, _), let (nil, speaker?):
+                appendMerging(SegmentPart(speakerIndex: speaker, start: interval.start, end: interval.end), to: &parts)
+            case (nil, nil):
+                continue
+            }
+        }
+
+        return absorbingShortParts(parts)
+    }
+
+    /// Appends `part`, extending the last part instead when it has the same speaker.
+    private static func appendMerging(_ part: SegmentPart, to parts: inout [SegmentPart]) {
+        guard part.end > part.start else { return }
+        if let last = parts.last, last.speakerIndex == part.speakerIndex {
+            parts[parts.count - 1] = SegmentPart(speakerIndex: last.speakerIndex, start: last.start, end: part.end)
+        } else {
+            parts.append(part)
+        }
+    }
+
+    /// Dissolves parts shorter than `minimumRunDuration` into their longer
+    /// neighbor, shortest first, until every part qualifies or one remains.
+    private static func absorbingShortParts(_ parts: [SegmentPart]) -> [SegmentPart] {
+        var parts = parts
+        while parts.count > 1,
+              let shortIndex = parts.indices
+                  .filter({ parts[$0].duration < minimumRunDuration })
+                  .min(by: { parts[$0].duration < parts[$1].duration }) {
+            let short = parts[shortIndex]
+            let previous = shortIndex > 0 ? parts[shortIndex - 1] : nil
+            let next = shortIndex < parts.count - 1 ? parts[shortIndex + 1] : nil
+            let absorbIntoPrevious = next == nil || (previous.map { $0.duration >= next!.duration } ?? false)
+
+            var rebuilt: [SegmentPart] = []
+            for (index, part) in parts.enumerated() where index != shortIndex {
+                if absorbIntoPrevious, index == shortIndex - 1 {
+                    appendMerging(SegmentPart(speakerIndex: part.speakerIndex, start: part.start, end: short.end), to: &rebuilt)
+                } else if !absorbIntoPrevious, index == shortIndex + 1 {
+                    appendMerging(SegmentPart(speakerIndex: part.speakerIndex, start: short.start, end: part.end), to: &rebuilt)
+                } else {
+                    appendMerging(part, to: &rebuilt)
+                }
+            }
+            parts = rebuilt
         }
         return parts
     }
 
-    /// Apportions `text` across `parts`. Word boundaries come from ASR token
-    /// timings when available (a boundary lands after the fraction of tokens
-    /// whose midpoints precede it); otherwise words split proportionally to
-    /// part duration. Returns one string per part (possibly empty).
+    /// Apportions `text` across `parts`, returning one string per part
+    /// (possibly empty).
+    ///
+    /// With ASR token timings, tokens group into words (a token with a leading
+    /// space opens a word, since FluidAudio turns SentencePiece's word-boundary
+    /// marker into a space) and each whole word goes to the part containing its
+    /// midpoint, or the nearest part. Each part's text is stitched from its
+    /// tokens. Without timings, words split proportionally to part duration.
     static func apportionText(
         _ text: String,
         parts: [SegmentPart],
@@ -243,28 +303,72 @@ enum LiveSegmentSplitter {
             return parts.isEmpty ? [] : [text]
         }
 
+        let timedWords = words(from: tokenTimings ?? [], bufferStart: bufferStart)
+        guard !timedWords.isEmpty else {
+            return apportionByDuration(text, parts: parts, bufferStart: bufferStart)
+        }
+
+        var piecesByPart: [[String]] = Array(repeating: [], count: parts.count)
+        for word in timedWords {
+            piecesByPart[partIndex(containing: word.midpoint, in: parts)].append(contentsOf: word.pieces)
+        }
+        let stitcher = TokenStitcher()
+        return piecesByPart.map { stitcher.stitchTokens($0) }
+    }
+
+    private struct TimedTokenWord {
+        var pieces: [String]
+        let start: Float
+        var end: Float
+
+        var midpoint: Float { (start + end) / 2 }
+    }
+
+    /// Groups buffer-relative token timings into words in session time.
+    private static func words(from timings: [TokenTiming], bufferStart: Float) -> [TimedTokenWord] {
+        var words: [TimedTokenWord] = []
+        for timing in timings {
+            let tokenStart = bufferStart + Float(timing.startTime)
+            let tokenEnd = bufferStart + Float(timing.endTime)
+            let opensWord = timing.token.first.map { $0.isWhitespace || $0 == "▁" } ?? false
+            if opensWord || words.isEmpty {
+                words.append(TimedTokenWord(pieces: [timing.token], start: tokenStart, end: tokenEnd))
+            } else {
+                words[words.count - 1].pieces.append(timing.token)
+                words[words.count - 1].end = max(words[words.count - 1].end, tokenEnd)
+            }
+        }
+        let stitcher = TokenStitcher()
+        return words.filter { !stitcher.stitchTokens($0.pieces).isEmpty }
+    }
+
+    /// The part containing `time`, else the nearest part (earlier on ties).
+    private static func partIndex(containing time: Float, in parts: [SegmentPart]) -> Int {
+        if let index = parts.firstIndex(where: { time >= $0.start && time < $0.end }) {
+            return index
+        }
+        var nearest = (index: 0, distance: Float.greatestFiniteMagnitude)
+        for (index, part) in parts.enumerated() {
+            let distance = max(part.start - time, time - part.end, 0)
+            if distance < nearest.distance {
+                nearest = (index, distance)
+            }
+        }
+        return nearest.index
+    }
+
+    /// Splits `text`'s words across `parts` in proportion to part duration.
+    private static func apportionByDuration(_ text: String, parts: [SegmentPart], bufferStart: Float) -> [String] {
         let words = text.split(separator: " ", omittingEmptySubsequences: true)
         guard !words.isEmpty else {
             return Array(repeating: "", count: parts.count)
         }
 
         let totalDuration = parts[parts.count - 1].end - bufferStart
-        let timings = tokenTimings ?? []
-
-        // Fraction of the text that precedes each interior part boundary.
-        let boundaryFractions: [Float] = parts.dropLast().map { part in
-            let boundary = part.end - bufferStart
-            if !timings.isEmpty {
-                let preceding = timings.filter { Float($0.startTime + $0.endTime) / 2 < boundary }.count
-                return Float(preceding) / Float(timings.count)
-            }
-            guard totalDuration > 0 else { return 0 }
-            return boundary / totalDuration
-        }
-
         var splitIndices: [Int] = []
         var previous = 0
-        for fraction in boundaryFractions {
+        for part in parts.dropLast() {
+            let fraction = totalDuration > 0 ? (part.end - bufferStart) / totalDuration : 0
             let index = Int((fraction * Float(words.count)).rounded())
             let clamped = min(max(index, previous), words.count)
             splitIndices.append(clamped)
@@ -276,6 +380,55 @@ enum LiveSegmentSplitter {
         for upper in splitIndices + [words.count] {
             result.append(words[lower..<upper].joined(separator: " "))
             lower = upper
+        }
+        return result
+    }
+}
+
+/// Pairs clustering-diarizer embeddings with turn-diarizer speakers by time
+/// overlap. Overlap is measured against speaker runs, not against planned
+/// parts: a part can absorb another speaker's short turn.
+enum LiveEmbeddingAttribution {
+    /// Share of a clustering segment's duration that must lie inside one
+    /// speaker's runs for its embedding to count as that speaker's voice.
+    static let minimumOverlapFraction: Float = 0.8
+
+    struct Assignment {
+        let segment: TimedSpeakerSegment
+        let overlapFraction: Float
+    }
+
+    /// For each turn-diarizer speaker index, the longest clustering segment
+    /// that lies inside that speaker's runs. A segment that reaches
+    /// `minimumOverlapFraction` for no speaker, or for several (simultaneous
+    /// speech), is discarded. `clusterSegments` are buffer-relative; `runs`
+    /// are session time, as returned by `LiveSpeakerTimeline.speakerRuns`.
+    static func assignments(
+        clusterSegments: [TimedSpeakerSegment],
+        runs: [SpeakerRun],
+        bufferStart: Float
+    ) -> [Int: Assignment] {
+        var result: [Int: Assignment] = [:]
+        for segment in clusterSegments where !segment.embedding.isEmpty {
+            let start = bufferStart + segment.startTimeSeconds
+            let end = bufferStart + segment.endTimeSeconds
+            let duration = end - start
+            guard duration > 0 else { continue }
+
+            var overlapBySpeaker: [Int: Float] = [:]
+            for run in runs {
+                let overlap = min(run.end, end) - max(run.start, start)
+                if overlap > 0 {
+                    overlapBySpeaker[run.speakerIndex, default: 0] += overlap
+                }
+            }
+            let containing = overlapBySpeaker.filter { $0.value / duration >= minimumOverlapFraction }
+            guard containing.count == 1, let (speakerIndex, overlap) = containing.first else { continue }
+
+            if let existing = result[speakerIndex], existing.segment.durationSeconds >= segment.durationSeconds {
+                continue
+            }
+            result[speakerIndex] = Assignment(segment: segment, overlapFraction: overlap / duration)
         }
         return result
     }

@@ -25,7 +25,9 @@ struct TranscriptionPassRunnerTests {
         )
 
         let workspace = try makeWorkspace()
-        let (segments, embeddings) = try await runner.run(samples: [0, 0, 0], source: .mic, workspace: workspace)
+        let passResult = try await runner.run(samples: [0, 0, 0], source: .mic, workspace: workspace)
+        let segments = passResult.segments
+        let embeddings = passResult.speakerEmbeddings
 
         #expect(segments.isEmpty)
         #expect(embeddings.isEmpty)
@@ -139,7 +141,9 @@ struct TranscriptionPassRunnerTests {
         )
 
         let workspace = try makeWorkspace()
-        let (segments, embeddings) = try await runner.run(samples: Array(repeating: 0.1, count: 16_000), source: .app, workspace: workspace)
+        let passResult = try await runner.run(samples: Array(repeating: 0.1, count: 16_000), source: .app, workspace: workspace)
+        let segments = passResult.segments
+        let embeddings = passResult.speakerEmbeddings
 
         #expect(segments.count == 1)
         #expect(segments[0].speakerId == "app:cluster_1")
@@ -201,7 +205,9 @@ struct TranscriptionPassRunnerTests {
         )
 
         let workspace = try makeWorkspace()
-        let (segments, embeddings) = try await runner.run(samples: Array(repeating: 0.1, count: 16_000), source: .mic, workspace: workspace)
+        let passResult = try await runner.run(samples: Array(repeating: 0.1, count: 16_000), source: .mic, workspace: workspace)
+        let segments = passResult.segments
+        let embeddings = passResult.speakerEmbeddings
 
         #expect(segments.count == 1)
         #expect(segments[0].speakerId == "Alice")
@@ -261,7 +267,8 @@ struct TranscriptionPassRunnerTests {
         )
 
         let workspace = try makeWorkspace()
-        let (segments, _) = try await runner.run(samples: Array(repeating: 0.1, count: 48_000), source: .mic, workspace: workspace)
+        let passResult = try await runner.run(samples: Array(repeating: 0.1, count: 48_000), source: .mic, workspace: workspace)
+        let segments = passResult.segments
 
         #expect(segments.isEmpty)
     }
@@ -293,7 +300,8 @@ struct TranscriptionPassRunnerTests {
         )
 
         let workspace = try makeWorkspace()
-        let (segments, _) = try await runner.run(samples: Array(repeating: 0.1, count: 16_000), source: .mic, workspace: workspace)
+        let passResult = try await runner.run(samples: Array(repeating: 0.1, count: 16_000), source: .mic, workspace: workspace)
+        let segments = passResult.segments
 
         #expect(segments.count == 1)
         #expect(segments[0].text == "hello")
@@ -335,7 +343,8 @@ struct TranscriptionPassRunnerTests {
         )
 
         let workspace = try makeWorkspace()
-        let (segments, _) = try await runner.run(samples: Array(repeating: 0.1, count: 16_000), source: .mic, workspace: workspace)
+        let passResult = try await runner.run(samples: Array(repeating: 0.1, count: 16_000), source: .mic, workspace: workspace)
+        let segments = passResult.segments
 
         // ". um hello there" → sanitized to "um hello there" → rule strips "um".
         // "..." is dropped by the sanitizer; "um" is emptied by the rule.
