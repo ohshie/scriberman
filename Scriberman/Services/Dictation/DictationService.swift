@@ -57,7 +57,11 @@ final class DictationService {
     // nonisolated(unsafe): written once during prewarm (on main actor), then read by the processing
     // Task which only runs after prewarm completes and never concurrently with another write.
     @ObservationIgnored nonisolated(unsafe) private var asrManager: AsrManager?
-    @ObservationIgnored private let loadAsr: @Sendable (Workspace) async throws -> AsrManager
+    /// The model a press started with. A processor change reloads `asrManager`,
+    /// and a press in progress finishes on the model it started with.
+    @ObservationIgnored private var pressAsrManager: AsrManager?
+    @ObservationIgnored private let loadAsr: @Sendable (Workspace, AsrProcessor) async throws -> AsrManager
+    @ObservationIgnored private let processor: @Sendable () -> AsrProcessor
     // Single-flight pre-warm (design D4): callers with the same key join
     // this task; a failed load clears it so the next call retries.
     @ObservationIgnored private var prewarmLoad: (key: PrewarmKey, task: Task<Void, Never>)?
@@ -67,11 +71,23 @@ final class DictationService {
     private struct PrewarmKey: Equatable {
         let workspaceRoot: URL
         let modelRevision: String
+        let processor: AsrProcessor
     }
 
     @ObservationIgnored private let captureSession: any DictationCapturing
     @ObservationIgnored private let insertText: @MainActor (String) -> InsertionOutcome
     @ObservationIgnored private let recordingService: any RecordingServiceProtocol
+    @ObservationIgnored private let mode: @MainActor () -> DictationMode
+    // Progressive typing needs Accessibility; without it insertion would copy each
+    // committed word to the clipboard, so such presses run release-time instead.
+    @ObservationIgnored private let canTypeDuringHold: @MainActor () -> Bool
+
+    /// New audio a progressive pass waits for before it starts: 1 s at 16 kHz.
+    static let progressivePassIntervalSamples = 16_000
+    /// Audio after the last finished pass counts as silent below this peak
+    /// amplitude, and that pass is then used as the final one (design D4).
+    static let silencePeak: Float = 0.03
+    private static let sampleRate = 16_000.0
 
     // Serialization (design D3): stop() awaits the in-flight start before
     // touching the session, so a quick press-release cannot interleave and
@@ -82,18 +98,28 @@ final class DictationService {
 
 #if DEBUG
     @ObservationIgnored var transcribeHookForTesting: (@Sendable ([Float]) async -> String?)?
+    /// Progressive passes: returns the pass's words timed from the start of its audio.
+    @ObservationIgnored var progressivePassHookForTesting: (@Sendable ([Float]) async -> [WordTiming]?)?
+    var pressModelForTesting: AsrManager? { pressAsrManager }
+    var loadedModelForTesting: AsrManager? { asrManager }
 #endif
 
     init(
         recordingService: any RecordingServiceProtocol,
         captureSession: any DictationCapturing = DictationCaptureSession(),
         insertText: @escaping @MainActor (String) -> InsertionOutcome = { TextInjector().insert($0) },
-        loadAsr: @escaping @Sendable (Workspace) async throws -> AsrManager = DictationService.loadWorkspaceAsr
+        loadAsr: @escaping @Sendable (Workspace, AsrProcessor) async throws -> AsrManager = DictationService.loadWorkspaceAsr,
+        processor: @escaping @Sendable () -> AsrProcessor = { AsrProcessor.current() },
+        mode: @escaping @MainActor () -> DictationMode = { .releaseTime },
+        canTypeDuringHold: @escaping @MainActor () -> Bool = { TextInjector().isAccessibilityGranted }
     ) {
         self.recordingService = recordingService
         self.captureSession = captureSession
         self.insertText = insertText
         self.loadAsr = loadAsr
+        self.processor = processor
+        self.mode = mode
+        self.canTypeDuringHold = canTypeDuringHold
     }
 
     // MARK: - Pre-warm
@@ -110,28 +136,34 @@ final class DictationService {
     func prewarm(workspace: Workspace) async {
         guard !Task.isCancelled else { return }
         prepare(for: workspace)
-        let key = PrewarmKey(workspaceRoot: workspace.rootURL, modelRevision: "\(ModelPathResolver.asrModelVersion)")
+        let processor = processor()
+        let key = PrewarmKey(
+            workspaceRoot: workspace.rootURL,
+            modelRevision: "\(ModelPathResolver.asrModelVersion)",
+            processor: processor
+        )
         if let prewarmLoad, prewarmLoad.key == key {
             await prewarmLoad.task.value
             return
         }
 
-        if state == .idle {
+        // A reload for a new processor keeps serving presses with the loaded model.
+        if state == .idle, asrManager == nil {
             state = .prewarming
         }
+        prewarmLoad?.task.cancel()
         let loadAsr = loadAsr
         // The task body updates state itself, so every caller awaiting it
         // resumes with the load already applied.
         let task = Task { [weak self] in
             do {
-                let asr = try await loadAsr(workspace)
+                let asr = try await loadAsr(workspace, processor)
                 guard !Task.isCancelled else { return }
                 self?.asrManager = asr
                 self?.logger.info("DictationService pre-warm complete")
             } catch {
                 guard !Task.isCancelled else { return }
                 self?.logger.warning("DictationService pre-warm failed (non-fatal): \(error.localizedDescription)")
-                self?.asrManager = nil
                 if self?.prewarmLoad?.key == key {
                     self?.prewarmLoad = nil
                 }
@@ -144,11 +176,19 @@ final class DictationService {
         await task.value
     }
 
-    nonisolated static func loadWorkspaceAsr(_ workspace: Workspace) async throws -> AsrManager {
+    nonisolated static func loadWorkspaceAsr(_ workspace: Workspace, processor: AsrProcessor) async throws -> AsrManager {
         let asrDir = try ModelPathResolver().modelDirectory(for: .asrParakeetUltra, in: workspace)
         let asr = AsrManager(config: ASRConfig())
-        let asrModels = try await AsrModels.load(from: asrDir, version: ModelPathResolver.asrModelVersion, encoderComputeUnits: .cpuAndGPU)
+        let asrModels = try await AsrModels.load(
+            from: asrDir,
+            version: ModelPathResolver.asrModelVersion,
+            encoderComputeUnits: processor.encoderComputeUnits
+        )
         try await asr.loadModels(asrModels)
+        // The first inference after a load is several times slower than later ones
+        // (5.3 s vs 0.4 s measured); pay it here instead of on the first press.
+        var warmUpState = try TdtDecoderState()
+        _ = try await asr.transcribe([Float](repeating: 0, count: 16_000), decoderState: &warmUpState)
         return asr
     }
 
@@ -159,8 +199,11 @@ final class DictationService {
 
         let task = Task { [weak self] in
             guard let self else { return }
-            // A press during pre-warm waits for that load (design D4).
-            await self.prewarmLoad?.task.value
+            // A press during pre-warm waits for that load (design D4); a press
+            // during a processor reload uses the model already loaded.
+            if self.asrManager == nil {
+                await self.prewarmLoad?.task.value
+            }
             await self.performStart(deviceID: deviceID)
         }
         startTask = task
@@ -175,6 +218,7 @@ final class DictationService {
         await captureSession.stop()
         await processingTask?.value
         processingTask = nil
+        pressAsrManager = nil
         inputLevel = 0
         if state == .listening {
             state = .idle
@@ -189,6 +233,7 @@ final class DictationService {
 
         // Fresh session: the HUD must not show the previous session's outcome.
         lastOutcome = nil
+        pressAsrManager = asrManager
         inputLevel = 0
 
         if !levelHandlerInstalled {
@@ -201,10 +246,17 @@ final class DictationService {
             }
         }
 
+        // The mode is read once: a press finishes in the mode it started with.
+        let isProgressive = mode() == .progressive && canTypeDuringHold()
+
         do {
             let stream = try await captureSession.start(deviceID: deviceID)
             state = .listening
-            startProcessing(stream: stream)
+            if isProgressive {
+                startProgressiveProcessing(stream: stream)
+            } else {
+                startProcessing(stream: stream)
+            }
         } catch {
             logger.error("Failed to start dictation capture: \(error.localizedDescription)")
             lastOutcome = .failed(.captureFailed)
@@ -245,9 +297,9 @@ final class DictationService {
         }
 
 #if DEBUG
-        let hasModel = asrManager != nil || transcribeHookForTesting != nil
+        let hasModel = pressAsrManager != nil || transcribeHookForTesting != nil
 #else
-        let hasModel = asrManager != nil
+        let hasModel = pressAsrManager != nil
 #endif
         guard hasModel else {
             logger.info("Dictation failed: no ASR model loaded")
@@ -285,12 +337,171 @@ final class DictationService {
             return (text?.isEmpty ?? true) ? nil : text
         }
 #endif
-        guard let asr = asrManager, !samples.isEmpty else { return nil }
+        guard let asr = pressAsrManager, !samples.isEmpty else { return nil }
         do {
             var decoderState = try TdtDecoderState()
             let result = try await asr.transcribe(samples, decoderState: &decoderState)
             let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             return text.isEmpty ? nil : text
+        } catch {
+            logger.error("ASR error: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    // MARK: - Progressive typing
+
+    /// One progressive press. Main-actor state shared by the capture loop and its passes.
+    @MainActor
+    private final class ProgressivePress {
+        var samples: [Float] = []
+        var committer = ProgressiveTranscriptCommitter()
+        var samplesAtLastPass = 0
+        var passTask: Task<Void, Never>?
+        /// The most recent finished pass: its words and the sample range it covered.
+        var lastPass: (words: [WordTiming], startIndex: Int, endIndex: Int)?
+        /// Set at release or on failure; pass results arriving later are discarded.
+        var isClosed = false
+        var insertedAny = false
+        var lastInsertion: InsertionOutcome?
+        /// An insertion during the hold did not reach the app; nothing more is inserted.
+        var insertionStopped = false
+    }
+
+    private func startProgressiveProcessing(stream: AsyncThrowingStream<[Float], Error>) {
+        let press = ProgressivePress()
+        processingTask = Task { [weak self] in
+            do {
+                for try await samples in stream {
+                    press.samples.append(contentsOf: samples)
+                    self?.scheduleProgressivePass(press)
+                }
+                await self?.finishProgressiveSession(press)
+            } catch {
+                press.isClosed = true
+                guard let self else { return }
+                self.logger.error("Dictation conversion failed: \(error.localizedDescription)")
+                await self.captureSession.stop()
+                self.inputLevel = 0
+                self.lastOutcome = .failed(.captureFailed)
+                self.state = .idle
+            }
+        }
+    }
+
+    /// Starts a pass when none is running and a second of new audio has arrived.
+    private func scheduleProgressivePass(_ press: ProgressivePress) {
+        guard !press.isClosed, !press.insertionStopped, press.passTask == nil,
+              press.samples.count - press.samplesAtLastPass >= Self.progressivePassIntervalSamples
+        else { return }
+        let startIndex = min(press.samples.count, Int(press.committer.passStartSeconds * Self.sampleRate))
+        let endIndex = press.samples.count
+        let audio = Array(press.samples[startIndex..<endIndex])
+        press.samplesAtLastPass = endIndex
+        press.passTask = Task { [weak self] in
+            let words = await self?.transcribeWords(audio)
+            press.passTask = nil
+            if let words {
+                press.lastPass = (words, startIndex, endIndex)
+            }
+            guard let self, !press.isClosed, let words else { return }
+            let committed = press.committer.commit(words: words, passStart: Double(startIndex) / Self.sampleRate)
+            if !committed.isEmpty {
+                self.insertProgressive(committed, press: press)
+            }
+            self.scheduleProgressivePass(press)
+        }
+    }
+
+    private func insertProgressive(_ words: [String], press: ProgressivePress) {
+        let text = (press.insertedAny ? " " : "") + words.joined(separator: " ")
+        let outcome = insertText(text)
+        press.lastInsertion = outcome
+        switch outcome {
+        case .insertedDirectly, .typedOut:
+            press.insertedAny = true
+        case .copiedToClipboard, .failed:
+            press.insertionStopped = true
+            logger.info("Dictation progressive insertion stopped: \(String(describing: outcome), privacy: .public)")
+        }
+    }
+
+    private func finishProgressiveSession(_ press: ProgressivePress) async {
+        defer {
+            state = .idle
+        }
+        // No pass starts after release. One still running is awaited: the model runs
+        // one pass at a time, so a final pass would queue behind it anyway (design D4).
+        press.isClosed = true
+        await press.passTask?.value
+
+        if press.insertionStopped {
+            lastOutcome = press.lastInsertion.map(DictationOutcome.init) ?? .failed(.insertionFailed)
+            return
+        }
+
+        guard !press.samples.isEmpty else {
+            logger.info("Dictation session ended before any audio arrived (too-short hold)")
+            lastOutcome = .failed(.tooShort)
+            return
+        }
+
+#if DEBUG
+        let hasModel = pressAsrManager != nil || progressivePassHookForTesting != nil
+#else
+        let hasModel = pressAsrManager != nil
+#endif
+        guard hasModel else {
+            logger.info("Dictation failed: no ASR model loaded")
+            lastOutcome = .failed(.noModel)
+            return
+        }
+
+        state = .transcribing
+        let words: [WordTiming]
+        let startIndex: Int
+        if let lastPass = press.lastPass, Self.isSilent(press.samples[lastPass.endIndex...]) {
+            // Nothing was said after the last pass's audio ended: it is the final pass.
+            words = lastPass.words
+            startIndex = lastPass.startIndex
+            logger.info("Dictation release reuses last pass (\(lastPass.endIndex - lastPass.startIndex, privacy: .public) samples, \(press.samples.count - lastPass.endIndex, privacy: .public) silent after)")
+        } else {
+            startIndex = min(press.samples.count, Int(press.committer.passStartSeconds * Self.sampleRate))
+            let audio = Self.padToMinimum(Array(press.samples[startIndex...]))
+            logger.info("Dictation release runs final pass (\(audio.count, privacy: .public) samples)")
+            words = await transcribeWords(audio) ?? []
+        }
+        let remaining = press.committer.remainingWords(words: words, passStart: Double(startIndex) / Self.sampleRate)
+
+        if !remaining.isEmpty {
+            state = .inserting
+            insertProgressive(remaining, press: press)
+        }
+        guard let lastInsertion = press.lastInsertion else {
+            logger.info("Dictation transcription produced no text")
+            lastOutcome = .failed(.emptyTranscript)
+            return
+        }
+        lastOutcome = DictationOutcome(lastInsertion)
+        logger.info("Dictation outcome: \(String(describing: lastInsertion), privacy: .public)")
+    }
+
+    static func isSilent(_ samples: ArraySlice<Float>) -> Bool {
+        samples.allSatisfy { abs($0) < silencePeak }
+    }
+
+    /// Transcribes one progressive pass into words timed from the start of `samples`.
+    private func transcribeWords(_ samples: [Float]) async -> [WordTiming]? {
+#if DEBUG
+        if let hook = progressivePassHookForTesting {
+            return await hook(samples)
+        }
+#endif
+        guard let asr = pressAsrManager, !samples.isEmpty else { return nil }
+        do {
+            var decoderState = try TdtDecoderState()
+            let result = try await asr.transcribe(Self.padToMinimum(samples), decoderState: &decoderState)
+            return buildWordTimings(from: result.tokenTimings ?? [])
         } catch {
             logger.error("ASR error: \(error.localizedDescription)")
             return nil

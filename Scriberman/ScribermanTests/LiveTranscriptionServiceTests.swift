@@ -166,6 +166,27 @@ struct LiveTranscriptionServiceTests {
     }
 
     @Test
+    func prepareForAnotherProcessorLoadsAgainAndTheSameProcessorReusesModels() async {
+        let loads = FakeModelLoads()
+        let processor = LiveProcessorBox(.gpu)
+        let service = LiveTranscriptionService(
+            speakerEmbeddingStore: nil,
+            modelLoader: loads.loader,
+            processor: { processor.value }
+        )
+        let workspace = makeWorkspace()
+
+        await service.prepare(workspace: workspace)
+        await service.prepare(workspace: workspace)
+        #expect(loads.asrLoadCount == 1)
+
+        processor.value = .neuralEngine
+        await service.prepare(workspace: workspace)
+        #expect(loads.asrLoadCount == 2)
+        #expect(loads.asrProcessors == [.gpu, .neuralEngine])
+    }
+
+    @Test
     func concurrentPrepareAndStartLoadModelsOnce() async throws {
         let gate = LoadGate()
         let loads = FakeModelLoads(gate: gate)
@@ -2105,6 +2126,20 @@ private actor LoadGate {
 
 /// Model loader that counts loads, optionally fails, and records the VAD
 /// threshold of each load and of each processed chunk.
+private final class LiveProcessorBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: AsrProcessor
+
+    init(_ value: AsrProcessor) {
+        stored = value
+    }
+
+    var value: AsrProcessor {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
+    }
+}
+
 private final class FakeModelLoads: @unchecked Sendable {
     private let lock = NSLock()
     private let gate: LoadGate?
@@ -2129,6 +2164,8 @@ private final class FakeModelLoads: @unchecked Sendable {
         set { locked { vadFailures = newValue } }
     }
     var asrLoadCount: Int { locked { asrLoads } }
+    private var loadedProcessors: [AsrProcessor] = []
+    var asrProcessors: [AsrProcessor] { locked { loadedProcessors } }
     var vadThresholds: [Double] { locked { thresholds } }
     var processedThresholds: [Double] { locked { processed } }
     var turnDiarizers: [SampleRecordingDiarizer] { locked { diarizers } }
@@ -2148,9 +2185,10 @@ private final class FakeModelLoads: @unchecked Sendable {
 
     var loader: LiveModelLoader {
         LiveModelLoader(
-            loadAsr: { _ in
+            loadAsr: { _, processor in
                 let shouldFail = self.locked {
                     self.asrLoads += 1
+                    self.loadedProcessors.append(processor)
                     guard self.asrFailures > 0 else { return false }
                     self.asrFailures -= 1
                     return true

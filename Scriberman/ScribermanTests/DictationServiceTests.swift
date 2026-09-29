@@ -222,6 +222,11 @@ private actor MockDictationCapture: DictationCapturing {
         continuation = nil
     }
 
+    /// Delivers audio during the hold, as the microphone does while the hotkey is down.
+    func yield(_ samples: [Float]) {
+        continuation?.yield(samples)
+    }
+
     func setLevelHandler(_ handler: @escaping @Sendable (Float) -> Void) {}
 }
 
@@ -399,6 +404,65 @@ struct DictationPrewarmTests {
     }
 
     @Test
+    func prewarmForAnotherProcessorLoadsAgainAndTheSameProcessorJoins() async {
+        let loads = AsrLoadProbe()
+        loads.release()
+        let processor = ProcessorBox(.gpu)
+        let service = DictationService(
+            recordingService: MockRecordingService(),
+            captureSession: MockDictationCapture(),
+            loadAsr: loads.load,
+            processor: { processor.value }
+        )
+
+        await service.prewarm(workspace: workspace)
+        await service.prewarm(workspace: workspace)
+        #expect(loads.count == 1)
+
+        processor.value = .neuralEngine
+        await service.prewarm(workspace: workspace)
+        #expect(loads.count == 2)
+        #expect(loads.processors == [.gpu, .neuralEngine])
+    }
+
+    @Test
+    func pressDuringProcessorReloadUsesTheLoadedModel() async throws {
+        let loads = AsrLoadProbe()
+        loads.release()
+        let processor = ProcessorBox(.gpu)
+        let capture = MockDictationCapture()
+        let service = DictationService(
+            recordingService: MockRecordingService(),
+            captureSession: capture,
+            loadAsr: loads.load,
+            processor: { processor.value }
+        )
+        await service.prewarm(workspace: workspace)
+        let gpuModel = try #require(service.pressModelForTesting ?? service.loadedModelForTesting)
+
+        loads.hold()
+        processor.value = .neuralEngine
+        let reload = Task { await service.prewarm(workspace: workspace) }
+        #expect(await loads.waitForLoads(2))
+        #expect(service.state == .idle)
+
+        // The press starts without waiting for the reload and keeps the GPU model.
+        await service.start(deviceID: nil)
+        #expect(service.state == .listening)
+        #expect(service.pressModelForTesting === gpuModel)
+        loads.release()
+        await reload.value
+        #expect(service.pressModelForTesting === gpuModel)
+        await service.stop()
+
+        let neuralEngineModel = try #require(service.loadedModelForTesting)
+        #expect(neuralEngineModel !== gpuModel)
+        await service.start(deviceID: nil)
+        #expect(service.pressModelForTesting === neuralEngineModel)
+        await service.stop()
+    }
+
+    @Test
     func failedPrewarmIsRetried() async {
         let loads = AsrLoadProbe(failures: 1)
         loads.release()
@@ -424,6 +488,20 @@ private final class AsrLoadProbe: @unchecked Sendable {
     private var failures: Int
     private var released = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var loadedProcessors: [AsrProcessor] = []
+
+    var processors: [AsrProcessor] {
+        lock.lock()
+        defer { lock.unlock() }
+        return loadedProcessors
+    }
+
+    /// Makes later loads wait again until the next `release()`.
+    func hold() {
+        lock.lock()
+        released = false
+        lock.unlock()
+    }
 
     init(failures: Int = 0) {
         self.failures = failures
@@ -452,9 +530,9 @@ private final class AsrLoadProbe: @unchecked Sendable {
         return count >= expected
     }
 
-    var load: @Sendable (Workspace) async throws -> AsrManager {
-        { _ in
-            let shouldFail = self.begin()
+    var load: @Sendable (Workspace, AsrProcessor) async throws -> AsrManager {
+        { _, processor in
+            let shouldFail = self.begin(processor)
             await withCheckedContinuation { continuation in
                 self.lock.lock()
                 if self.released {
@@ -470,16 +548,303 @@ private final class AsrLoadProbe: @unchecked Sendable {
         }
     }
 
-    private func begin() -> Bool {
+    private func begin(_ processor: AsrProcessor) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         loads += 1
+        loadedProcessors.append(processor)
         guard failures > 0 else { return false }
         failures -= 1
         return true
     }
 }
 
+private final class ProcessorBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: AsrProcessor
+
+    init(_ value: AsrProcessor) {
+        stored = value
+    }
+
+    var value: AsrProcessor {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return stored
+        }
+        set {
+            lock.lock()
+            stored = newValue
+            lock.unlock()
+        }
+    }
+}
+
 private enum AsrLoadProbeError: Error {
     case failed
+}
+
+@MainActor
+struct ProgressiveDictationServiceTests {
+    private let second = [Float](repeating: 0.05, count: 16_000)
+
+    private func makeService(
+        capture: MockDictationCapture,
+        mode: DictationModeBox = DictationModeBox(.progressive),
+        canTypeDuringHold: Bool = true,
+        insertText: @escaping @MainActor (String) -> InsertionOutcome
+    ) -> DictationService {
+        DictationService(
+            recordingService: MockRecordingService(),
+            captureSession: capture,
+            insertText: insertText,
+            mode: { mode.mode },
+            canTypeDuringHold: { canTypeDuringHold }
+        )
+    }
+
+    private func word(_ text: String, _ start: TimeInterval, _ end: TimeInterval) -> WordTiming {
+        WordTiming(word: text, startTime: start, endTime: end)
+    }
+
+    private func waitUntil(_ condition: () -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !condition(), ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return condition()
+    }
+
+    @Test
+    func modeChangeDuringPressDoesNotAffectThatPress() async {
+        let capture = MockDictationCapture()
+        await capture.setSamplesOnStop([second])
+        let mode = DictationModeBox(.progressive)
+        let passes = SampleCountRecorder()
+        let inserted = InsertedTextRecorder()
+        let service = makeService(capture: capture, mode: mode) { text in
+            inserted.record(text)
+            return .typedOut
+        }
+        service.progressivePassHookForTesting = { samples in
+            passes.record(samples.count)
+            return [WordTiming(word: "progressive", startTime: 0.1, endTime: 0.5)]
+        }
+        service.transcribeHookForTesting = { _ in "release-time" }
+
+        await service.start(deviceID: nil)
+        mode.mode = .releaseTime
+        await service.stop()
+
+        #expect(inserted.texts == ["progressive"])
+        #expect(!passes.counts.isEmpty)
+    }
+
+    @Test
+    func passesRunOnEachSecondOfNewAudio() async {
+        let capture = MockDictationCapture()
+        let passes = SampleCountRecorder()
+        let service = makeService(capture: capture) { _ in .typedOut }
+        service.progressivePassHookForTesting = { samples in
+            passes.record(samples.count)
+            return []
+        }
+
+        await service.start(deviceID: nil)
+        await capture.yield(second)
+        #expect(await waitUntil { passes.counts.count == 1 })
+        await capture.yield([Float](repeating: 0.05, count: 8_000))
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(passes.counts == [16_000])
+        await capture.yield([Float](repeating: 0.05, count: 8_000))
+        #expect(await waitUntil { passes.counts.count == 2 })
+        await service.stop()
+
+        // Two passes during the hold on the whole press (nothing committed). The second
+        // covers all captured audio, so release reuses it instead of running another.
+        #expect(passes.counts == [16_000, 32_000])
+    }
+
+    @Test
+    func committedWordsAreTypedDuringTheHoldAndTheTailAtRelease() async {
+        let capture = MockDictationCapture()
+        let inserted = InsertedTextRecorder()
+        let service = makeService(capture: capture) { text in
+            inserted.record(text)
+            return .typedOut
+        }
+        let script = PassScript([
+            [word("Hello", 0.1, 0.4), word("my", 0.5, 0.8)],
+            [word("Hello", 0.1, 0.4), word("my", 0.5, 0.8), word("name", 1.1, 1.5)],
+            [word("Hello", 0.1, 0.4), word("my", 0.5, 0.8), word("name", 1.1, 1.5), word("is", 1.6, 1.9)],
+        ])
+        service.progressivePassHookForTesting = { _ in script.next() }
+
+        await service.start(deviceID: nil)
+        await capture.yield(second)
+        await capture.yield(second)
+        #expect(await waitUntil { inserted.texts.count == 1 })
+        #expect(inserted.texts == ["Hello my"])
+        // Speech after the last pass: release runs a final pass.
+        await capture.yield([Float](repeating: 0.05, count: 8_000))
+        await service.stop()
+
+        #expect(inserted.texts == ["Hello my", " name is"])
+        #expect(script.calls == 3)
+        #expect(service.lastOutcome == .typedOut)
+        #expect(service.state == .idle)
+    }
+
+    @Test
+    func silenceAfterTheLastPassReusesItAtRelease() async {
+        let capture = MockDictationCapture()
+        let inserted = InsertedTextRecorder()
+        let service = makeService(capture: capture) { text in
+            inserted.record(text)
+            return .typedOut
+        }
+        let script = PassScript([
+            [word("Hello", 0.1, 0.4), word("my", 0.5, 0.8)],
+            [word("Hello", 0.1, 0.4), word("my", 0.5, 0.8), word("name", 1.1, 1.5)],
+        ])
+        service.progressivePassHookForTesting = { _ in script.next() }
+
+        await service.start(deviceID: nil)
+        await capture.yield(second)
+        await capture.yield(second)
+        #expect(await waitUntil { inserted.texts.count == 1 })
+        await capture.yield([Float](repeating: 0, count: 8_000))
+        await service.stop()
+
+        #expect(inserted.texts == ["Hello my", " name"])
+        #expect(script.calls == 2)
+        #expect(service.lastOutcome == .typedOut)
+    }
+
+    @Test
+    func shortPressInsertsTheWholeTranscriptOnceAtRelease() async {
+        let capture = MockDictationCapture()
+        await capture.setSamplesOnStop([[Float](repeating: 0.05, count: 8_000)])
+        let inserted = InsertedTextRecorder()
+        let service = makeService(capture: capture) { text in
+            inserted.record(text)
+            return .insertedDirectly
+        }
+        service.progressivePassHookForTesting = { _ in
+            [WordTiming(word: "Quick", startTime: 0.05, endTime: 0.2), WordTiming(word: "note.", startTime: 0.25, endTime: 0.45)]
+        }
+
+        await service.start(deviceID: nil)
+        await service.stop()
+
+        #expect(inserted.texts == ["Quick note."])
+        #expect(service.lastOutcome == .inserted)
+    }
+
+    @Test
+    func withoutAccessibilityThePressRunsReleaseTime() async {
+        let capture = MockDictationCapture()
+        await capture.setSamplesOnStop([second, second])
+        let inserted = InsertedTextRecorder()
+        let passes = SampleCountRecorder()
+        let service = makeService(capture: capture, canTypeDuringHold: false) { text in
+            inserted.record(text)
+            return .copiedToClipboard
+        }
+        service.progressivePassHookForTesting = { samples in
+            passes.record(samples.count)
+            return nil
+        }
+        service.transcribeHookForTesting = { _ in "whole press" }
+
+        await service.start(deviceID: nil)
+        await service.stop()
+
+        #expect(passes.counts.isEmpty)
+        #expect(inserted.texts == ["whole press"])
+        #expect(service.lastOutcome == .copiedToClipboard)
+    }
+
+    @Test
+    func failedInsertionDuringTheHoldStopsThePress() async {
+        let capture = MockDictationCapture()
+        let inserted = InsertedTextRecorder()
+        let service = makeService(capture: capture) { text in
+            inserted.record(text)
+            return .failed
+        }
+        let script = PassScript([
+            [word("Hello", 0.1, 0.4), word("my", 0.5, 0.8)],
+            [word("Hello", 0.1, 0.4), word("my", 0.5, 0.8), word("name", 1.1, 1.5)],
+            [word("Hello", 0.1, 0.4), word("my", 0.5, 0.8), word("name", 1.1, 1.5), word("is", 1.6, 1.9)],
+        ])
+        service.progressivePassHookForTesting = { _ in script.next() }
+
+        await service.start(deviceID: nil)
+        await capture.yield(second)
+        await capture.yield(second)
+        #expect(await waitUntil { inserted.texts.count == 1 })
+        await capture.yield(second)
+        await service.stop()
+
+        #expect(inserted.texts == ["Hello my"])
+        #expect(script.calls == 2)
+        #expect(service.lastOutcome == .failed(.insertionFailed))
+        #expect(service.state == .idle)
+    }
+
+    @Test
+    func conversionFailureEndsThePressWithoutInserting() async {
+        let inserted = InsertedTextRecorder()
+        let service = DictationService(
+            recordingService: MockRecordingService(),
+            captureSession: FailingConversionCapture(),
+            insertText: { text in
+                inserted.record(text)
+                return .typedOut
+            },
+            mode: { .progressive },
+            canTypeDuringHold: { true }
+        )
+        service.progressivePassHookForTesting = { _ in [WordTiming(word: "no", startTime: 0, endTime: 0.1)] }
+
+        await service.start(deviceID: nil)
+        await service.stop()
+
+        #expect(service.lastOutcome == .failed(.captureFailed))
+        #expect(service.state == .idle)
+        #expect(inserted.texts.isEmpty)
+    }
+}
+
+@MainActor
+private final class DictationModeBox {
+    var mode: DictationMode
+    init(_ mode: DictationMode) { self.mode = mode }
+}
+
+/// Returns scripted pass results in order; the last one repeats.
+private final class PassScript: @unchecked Sendable {
+    private let lock = NSLock()
+    private let passes: [[WordTiming]]
+    private var index = 0
+
+    init(_ passes: [[WordTiming]]) {
+        self.passes = passes
+    }
+
+    var calls: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return index
+    }
+
+    func next() -> [WordTiming] {
+        lock.lock()
+        defer { lock.unlock() }
+        let pass = passes[min(index, passes.count - 1)]
+        index += 1
+        return pass
+    }
 }
