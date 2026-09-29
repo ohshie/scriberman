@@ -209,6 +209,7 @@ struct LivePreparationKey: Hashable, Sendable {
     let workspaceRoot: URL
     let modelRevision: String
     let construction: LiveConstructionSettings
+    let processor: AsrProcessor
 }
 
 /// Loaded models from one preparation. The factories build the stateful
@@ -222,16 +223,20 @@ struct LivePreparedModels: Sendable {
 
 /// Model loading steps used by a preparation. Tests inject their own.
 struct LiveModelLoader: Sendable {
-    var loadAsr: @Sendable (Workspace) async throws -> AsrManager
+    var loadAsr: @Sendable (Workspace, AsrProcessor) async throws -> AsrManager
     var loadDiarizer: @Sendable (Workspace, LiveConstructionSettings) async throws -> @Sendable () -> DiarizerManager
     var loadVad: @Sendable (Workspace, LiveConstructionSettings) async throws -> any LiveVADStreamingProcessing
     var loadTurnDiarizers: @Sendable (Workspace) async throws -> @Sendable () -> [AudioSource: any StreamingTurnDiarizing]
 
     static let workspace = LiveModelLoader(
-        loadAsr: { workspace in
+        loadAsr: { workspace, processor in
             let asr = AsrManager(config: ASRConfig())
             let asrDirectory = try ModelPathResolver().modelDirectory(for: .asrParakeetUltra, in: workspace)
-            let asrModels = try await AsrModels.load(from: asrDirectory, version: ModelPathResolver.asrModelVersion, encoderComputeUnits: .cpuAndGPU)
+            let asrModels = try await AsrModels.load(
+                from: asrDirectory,
+                version: ModelPathResolver.asrModelVersion,
+                encoderComputeUnits: processor.encoderComputeUnits
+            )
             try await asr.loadModels(asrModels)
             return asr
         },
@@ -320,6 +325,7 @@ actor LiveTranscriptionService: LiveTranscribing {
     // Single-flight model preparation shared by prepare() and start()
     // (design D3).
     private let modelLoader: LiveModelLoader
+    private let processor: @Sendable () -> AsrProcessor
     private var preparation: (key: LivePreparationKey, task: Task<LivePreparedModels, Error>)?
 
     // Streaming turn diarization: one session-long diarizer per source
@@ -396,9 +402,14 @@ actor LiveTranscriptionService: LiveTranscribing {
     private var captureAnchor: HostNanoseconds?
 
     // task 3.1: SpeakerEmbeddingStore injected via init
-    init(speakerEmbeddingStore: SpeakerEmbeddingStore? = nil, modelLoader: LiveModelLoader = .workspace) {
+    init(
+        speakerEmbeddingStore: SpeakerEmbeddingStore? = nil,
+        modelLoader: LiveModelLoader = .workspace,
+        processor: @escaping @Sendable () -> AsrProcessor = { AsrProcessor.current() }
+    ) {
         self.speakerEmbeddingStore = speakerEmbeddingStore
         self.modelLoader = modelLoader
+        self.processor = processor
     }
 
     // MARK: - Model Preparation (design D3)
@@ -422,7 +433,8 @@ actor LiveTranscriptionService: LiveTranscribing {
         let key = LivePreparationKey(
             workspaceRoot: workspace.rootURL,
             modelRevision: Self.modelRevision,
-            construction: LiveConstructionSettings(config)
+            construction: LiveConstructionSettings(config),
+            processor: processor()
         )
         let task: Task<LivePreparedModels, Error>
         if let preparation, preparation.key == key {
@@ -431,7 +443,13 @@ actor LiveTranscriptionService: LiveTranscribing {
             let loader = modelLoader
             let logger = logger
             task = Task {
-                try await Self.loadModels(workspace: workspace, construction: key.construction, loader: loader, logger: logger)
+                try await Self.loadModels(
+                    workspace: workspace,
+                    construction: key.construction,
+                    processor: key.processor,
+                    loader: loader,
+                    logger: logger
+                )
             }
             // A replaced task still finishes for callers already awaiting it.
             preparation = (key, task)
@@ -450,10 +468,11 @@ actor LiveTranscriptionService: LiveTranscribing {
     private static func loadModels(
         workspace: Workspace,
         construction: LiveConstructionSettings,
+        processor: AsrProcessor,
         loader: LiveModelLoader,
         logger: Logger
     ) async throws -> LivePreparedModels {
-        let asrManager = try await loader.loadAsr(workspace)
+        let asrManager = try await loader.loadAsr(workspace, processor)
         logger.info("AsrManager initialized")
         let makeDiarizer = try await loader.loadDiarizer(workspace, construction)
         logger.info("Diarizer models loaded from workspace")

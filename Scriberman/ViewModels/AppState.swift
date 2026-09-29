@@ -39,6 +39,7 @@ final class AppState {
     let hotkeyRegistrar = HotkeyRegistrar()
     let dictationHotkeySettings = DictationHotkeySettings()
     let dictationModeSettings: DictationModeSettings
+    let asrProcessorSettings = AsrProcessorSettings()
     @ObservationIgnored let dictationHUD = DictationHUDController()
     let calendarSuggestions: CalendarSuggestionController
     /// True from presenting the calendar step until it is answered in this launch.
@@ -322,6 +323,17 @@ final class AppState {
             } else {
                 wireHotkeyRegistrar()
             }
+        }
+    }
+
+    /// Stores the processor and reloads dictation's model on it. Recordings and
+    /// batch jobs pick it up on their next load.
+    func setAsrProcessor(_ processor: AsrProcessor) {
+        guard processor != asrProcessorSettings.processor else { return }
+        asrProcessorSettings.setProcessor(processor)
+        guard requiredOnboardingStep == nil, let workspace else { return }
+        Task { [dictationService] in
+            await dictationService.prewarm(workspace: workspace)
         }
     }
 

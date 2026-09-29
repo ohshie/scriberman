@@ -59,6 +59,14 @@ struct SettingsView: View {
                                 .foregroundStyle(viewModel.currentModelStatusText == "Installed" ? .green : .secondary)
                         }
 
+                        Picker("Processor", selection: Binding(
+                            get: { appState.asrProcessorSettings.processor },
+                            set: { appState.setAsrProcessor($0) }
+                        )) {
+                            Text("GPU").tag(AsrProcessor.gpu)
+                            Text("Neural Engine").tag(AsrProcessor.neuralEngine)
+                        }
+
                         DisclosureGroup(isExpanded: $isModelsExpanded) {
                             ModelsSettingsView(viewModel: viewModel)
                         } label: {

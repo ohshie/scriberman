@@ -404,6 +404,65 @@ struct DictationPrewarmTests {
     }
 
     @Test
+    func prewarmForAnotherProcessorLoadsAgainAndTheSameProcessorJoins() async {
+        let loads = AsrLoadProbe()
+        loads.release()
+        let processor = ProcessorBox(.gpu)
+        let service = DictationService(
+            recordingService: MockRecordingService(),
+            captureSession: MockDictationCapture(),
+            loadAsr: loads.load,
+            processor: { processor.value }
+        )
+
+        await service.prewarm(workspace: workspace)
+        await service.prewarm(workspace: workspace)
+        #expect(loads.count == 1)
+
+        processor.value = .neuralEngine
+        await service.prewarm(workspace: workspace)
+        #expect(loads.count == 2)
+        #expect(loads.processors == [.gpu, .neuralEngine])
+    }
+
+    @Test
+    func pressDuringProcessorReloadUsesTheLoadedModel() async throws {
+        let loads = AsrLoadProbe()
+        loads.release()
+        let processor = ProcessorBox(.gpu)
+        let capture = MockDictationCapture()
+        let service = DictationService(
+            recordingService: MockRecordingService(),
+            captureSession: capture,
+            loadAsr: loads.load,
+            processor: { processor.value }
+        )
+        await service.prewarm(workspace: workspace)
+        let gpuModel = try #require(service.pressModelForTesting ?? service.loadedModelForTesting)
+
+        loads.hold()
+        processor.value = .neuralEngine
+        let reload = Task { await service.prewarm(workspace: workspace) }
+        #expect(await loads.waitForLoads(2))
+        #expect(service.state == .idle)
+
+        // The press starts without waiting for the reload and keeps the GPU model.
+        await service.start(deviceID: nil)
+        #expect(service.state == .listening)
+        #expect(service.pressModelForTesting === gpuModel)
+        loads.release()
+        await reload.value
+        #expect(service.pressModelForTesting === gpuModel)
+        await service.stop()
+
+        let neuralEngineModel = try #require(service.loadedModelForTesting)
+        #expect(neuralEngineModel !== gpuModel)
+        await service.start(deviceID: nil)
+        #expect(service.pressModelForTesting === neuralEngineModel)
+        await service.stop()
+    }
+
+    @Test
     func failedPrewarmIsRetried() async {
         let loads = AsrLoadProbe(failures: 1)
         loads.release()
@@ -429,6 +488,20 @@ private final class AsrLoadProbe: @unchecked Sendable {
     private var failures: Int
     private var released = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var loadedProcessors: [AsrProcessor] = []
+
+    var processors: [AsrProcessor] {
+        lock.lock()
+        defer { lock.unlock() }
+        return loadedProcessors
+    }
+
+    /// Makes later loads wait again until the next `release()`.
+    func hold() {
+        lock.lock()
+        released = false
+        lock.unlock()
+    }
 
     init(failures: Int = 0) {
         self.failures = failures
@@ -457,9 +530,9 @@ private final class AsrLoadProbe: @unchecked Sendable {
         return count >= expected
     }
 
-    var load: @Sendable (Workspace) async throws -> AsrManager {
-        { _ in
-            let shouldFail = self.begin()
+    var load: @Sendable (Workspace, AsrProcessor) async throws -> AsrManager {
+        { _, processor in
+            let shouldFail = self.begin(processor)
             await withCheckedContinuation { continuation in
                 self.lock.lock()
                 if self.released {
@@ -475,13 +548,36 @@ private final class AsrLoadProbe: @unchecked Sendable {
         }
     }
 
-    private func begin() -> Bool {
+    private func begin(_ processor: AsrProcessor) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         loads += 1
+        loadedProcessors.append(processor)
         guard failures > 0 else { return false }
         failures -= 1
         return true
+    }
+}
+
+private final class ProcessorBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: AsrProcessor
+
+    init(_ value: AsrProcessor) {
+        stored = value
+    }
+
+    var value: AsrProcessor {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return stored
+        }
+        set {
+            lock.lock()
+            stored = newValue
+            lock.unlock()
+        }
     }
 }
 
@@ -565,8 +661,9 @@ struct ProgressiveDictationServiceTests {
         #expect(await waitUntil { passes.counts.count == 2 })
         await service.stop()
 
-        // Two passes during the hold on the whole press (nothing committed), then the final pass.
-        #expect(passes.counts == [16_000, 32_000, 32_000])
+        // Two passes during the hold on the whole press (nothing committed). The second
+        // covers all captured audio, so release reuses it instead of running another.
+        #expect(passes.counts == [16_000, 32_000])
     }
 
     @Test
@@ -589,11 +686,40 @@ struct ProgressiveDictationServiceTests {
         await capture.yield(second)
         #expect(await waitUntil { inserted.texts.count == 1 })
         #expect(inserted.texts == ["Hello my"])
+        // Speech after the last pass: release runs a final pass.
+        await capture.yield([Float](repeating: 0.05, count: 8_000))
         await service.stop()
 
         #expect(inserted.texts == ["Hello my", " name is"])
+        #expect(script.calls == 3)
         #expect(service.lastOutcome == .typedOut)
         #expect(service.state == .idle)
+    }
+
+    @Test
+    func silenceAfterTheLastPassReusesItAtRelease() async {
+        let capture = MockDictationCapture()
+        let inserted = InsertedTextRecorder()
+        let service = makeService(capture: capture) { text in
+            inserted.record(text)
+            return .typedOut
+        }
+        let script = PassScript([
+            [word("Hello", 0.1, 0.4), word("my", 0.5, 0.8)],
+            [word("Hello", 0.1, 0.4), word("my", 0.5, 0.8), word("name", 1.1, 1.5)],
+        ])
+        service.progressivePassHookForTesting = { _ in script.next() }
+
+        await service.start(deviceID: nil)
+        await capture.yield(second)
+        await capture.yield(second)
+        #expect(await waitUntil { inserted.texts.count == 1 })
+        await capture.yield([Float](repeating: 0, count: 8_000))
+        await service.stop()
+
+        #expect(inserted.texts == ["Hello my", " name"])
+        #expect(script.calls == 2)
+        #expect(service.lastOutcome == .typedOut)
     }
 
     @Test
