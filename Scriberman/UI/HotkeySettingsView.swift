@@ -38,6 +38,14 @@ struct HotkeySettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
+
+                Picker("Mode", selection: Binding(
+                    get: { appState.dictationModeSettings.mode },
+                    set: { appState.dictationModeSettings.setMode($0) }
+                )) {
+                    Text("After release").tag(DictationMode.releaseTime)
+                    Text("Live").tag(DictationMode.progressive)
+                }
             }
 
             Section("Microphone") {

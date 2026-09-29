@@ -38,6 +38,7 @@ final class AppState {
     let dictationService: DictationService
     let hotkeyRegistrar = HotkeyRegistrar()
     let dictationHotkeySettings = DictationHotkeySettings()
+    let dictationModeSettings: DictationModeSettings
     @ObservationIgnored let dictationHUD = DictationHUDController()
     let calendarSuggestions: CalendarSuggestionController
     /// True from presenting the calendar step until it is answered in this launch.
@@ -141,7 +142,12 @@ final class AppState {
         self.newSessionViewModel.idlePromptPreferencesProvider = { [idlePromptPreferences] in
             idlePromptPreferences.settings
         }
-        self.dictationService = DictationService(recordingService: services.background.recordingService)
+        let dictationModeSettings = DictationModeSettings()
+        self.dictationModeSettings = dictationModeSettings
+        self.dictationService = DictationService(
+            recordingService: services.background.recordingService,
+            mode: { dictationModeSettings.mode }
+        )
         self.newSessionViewModel.menuBarSettings = self.menuBarSettings
         self.newSessionViewModel.settingsViewModel = self.settingsViewModel
         self.jobsViewModel.settingsViewModel = self.settingsViewModel

@@ -132,6 +132,9 @@
 		7954B9202FEA728300870A9B /* DictationCaptureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7954B91F2FEA728300870A9B /* DictationCaptureSession.swift */; };
 		7954B9222FEA728C00870A9B /* TextInjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7954B9212FEA728C00870A9B /* TextInjector.swift */; };
 		7954B9242FEA72AC00870A9B /* DictationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7954B9232FEA72AC00870A9B /* DictationService.swift */; };
+		D1C7A717B2C3D4E5F6A80002 /* ProgressiveDictationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1C7A717B2C3D4E5F6A80001 /* ProgressiveDictationTests.swift */; };
+		D1C7A716B2C3D4E5F6A80002 /* ProgressiveTranscriptCommitter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1C7A716B2C3D4E5F6A80001 /* ProgressiveTranscriptCommitter.swift */; };
+		D1C7A715B2C3D4E5F6A80002 /* DictationModeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1C7A715B2C3D4E5F6A80001 /* DictationModeSettings.swift */; };
 		7954B9262FEA72CD00870A9B /* HotkeySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7954B9252FEA72CD00870A9B /* HotkeySettingsView.swift */; };
 		7975716A2F7983A2006AEFB6 /* TranscriptBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 797571692F7983A2006AEFB6 /* TranscriptBlockView.swift */; };
 		7975716C2F7983A7006AEFB6 /* TranscriptPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7975716B2F7983A7006AEFB6 /* TranscriptPreviewView.swift */; };
@@ -426,6 +429,9 @@
 		7954B91F2FEA728300870A9B /* DictationCaptureSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationCaptureSession.swift; sourceTree = "<group>"; };
 		7954B9212FEA728C00870A9B /* TextInjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextInjector.swift; sourceTree = "<group>"; };
 		7954B9232FEA72AC00870A9B /* DictationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationService.swift; sourceTree = "<group>"; };
+		D1C7A717B2C3D4E5F6A80001 /* ProgressiveDictationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressiveDictationTests.swift; sourceTree = "<group>"; };
+		D1C7A716B2C3D4E5F6A80001 /* ProgressiveTranscriptCommitter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressiveTranscriptCommitter.swift; sourceTree = "<group>"; };
+		D1C7A715B2C3D4E5F6A80001 /* DictationModeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationModeSettings.swift; sourceTree = "<group>"; };
 		7954B9252FEA72CD00870A9B /* HotkeySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeySettingsView.swift; sourceTree = "<group>"; };
 		797571692F7983A2006AEFB6 /* TranscriptBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptBlockView.swift; sourceTree = "<group>"; };
 		7975716B2F7983A7006AEFB6 /* TranscriptPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptPreviewView.swift; sourceTree = "<group>"; };
@@ -697,6 +703,7 @@
 				C42E7AD216AF405CB255E7F1 /* LiveTranscriptionServiceTests.swift */,
 				B3C4D5E6F7A8091B2C3D4E03 /* LiveSegmentSanitizerTests.swift */,
 				D1C7A710B2C3D4E5F6A80001 /* DictationServiceTests.swift */,
+				D1C7A717B2C3D4E5F6A80001 /* ProgressiveDictationTests.swift */,
 				D1C7A712B2C3D4E5F6A80001 /* DictationInsertionTests.swift */,
 				C0DE4A11B2C3D4E5F6A70005 /* TranscriptCleanupEngineTests.swift */,
 				798732682F7D8BC600570A03 /* AudioDeviceUsageStoreTests.swift */,
@@ -850,6 +857,8 @@
 				D1C7A711B2C3D4E5F6A80001 /* UnicodeTypeOutChunker.swift */,
 				D1C7A713B2C3D4E5F6A80001 /* DictationHUDController.swift */,
 				7954B9232FEA72AC00870A9B /* DictationService.swift */,
+				D1C7A716B2C3D4E5F6A80001 /* ProgressiveTranscriptCommitter.swift */,
+				D1C7A715B2C3D4E5F6A80001 /* DictationModeSettings.swift */,
 			);
 			path = Dictation;
 			sourceTree = "<group>";
@@ -1359,6 +1368,8 @@
 				2A2B3C4D5E6F708192A3B4CB /* TranscriptionService.swift in Sources */,
 				79DCE41D2F77CC1E0024DC26 /* PermissionService.swift in Sources */,
 				7954B9242FEA72AC00870A9B /* DictationService.swift in Sources */,
+				D1C7A716B2C3D4E5F6A80002 /* ProgressiveTranscriptCommitter.swift in Sources */,
+				D1C7A715B2C3D4E5F6A80002 /* DictationModeSettings.swift in Sources */,
 				79A11C272F8601220084F195 /* RecordingPermissionService.swift in Sources */,
 				79BE35272F7E71F200DB542F /* PromptManagementViewModel.swift in Sources */,
 				79C201862F7F8C11002A1163 /* ModelsOnboardingStep.swift in Sources */,
@@ -1525,6 +1536,7 @@
 				45F958AA2B0B410EABA60D86 /* LiveTranscriptionServiceTests.swift in Sources */,
 				B3C4D5E6F7A8091B2C3D4E04 /* LiveSegmentSanitizerTests.swift in Sources */,
 				D1C7A710B2C3D4E5F6A80002 /* DictationServiceTests.swift in Sources */,
+				D1C7A717B2C3D4E5F6A80002 /* ProgressiveDictationTests.swift in Sources */,
 				D1C7A712B2C3D4E5F6A80002 /* DictationInsertionTests.swift in Sources */,
 				C0DE4A11B2C3D4E5F6A70006 /* TranscriptCleanupEngineTests.swift in Sources */,
 				79AF5DCA2F92DCD30075AA88 /* RecordingTranscriptPersistenceTests.swift in Sources */,
