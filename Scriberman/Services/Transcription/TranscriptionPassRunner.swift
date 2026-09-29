@@ -295,7 +295,11 @@ struct TranscriptionPassRunner: @unchecked Sendable {
             let offlineDiarizerManager = OfflineDiarizerManager(config: .default)
 
             let asrModelDirectory = try modelPathResolver.modelDirectory(for: .asrParakeetUltra, in: workspace)
-            let asrModels = try await AsrModels.load(from: asrModelDirectory, version: ModelPathResolver.asrModelVersion, encoderComputeUnits: .cpuAndGPU)
+            let asrModels = try await AsrModels.load(
+                from: asrModelDirectory,
+                version: ModelPathResolver.asrModelVersion,
+                encoderComputeUnits: AsrProcessor.current().encoderComputeUnits
+            )
             try await asrManager.loadModels(asrModels)
 
             let diarizerModels = try await OfflineDiarizerModels.load(from: workspace.modelsURL)

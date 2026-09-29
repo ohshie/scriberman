@@ -85,7 +85,11 @@ actor ModelInstallService: ModelInstallServicing {
         return await warmUpModelsInternal(
             warmUpASR: {
                 let asrDirectory = try self.modelPathResolver.modelDirectory(for: .asrParakeetUltra, in: workspace)
-                _ = try await AsrModels.load(from: asrDirectory, version: ModelPathResolver.asrModelVersion, encoderComputeUnits: .cpuAndGPU)
+                _ = try await AsrModels.load(
+                    from: asrDirectory,
+                    version: ModelPathResolver.asrModelVersion,
+                    encoderComputeUnits: AsrProcessor.current().encoderComputeUnits
+                )
             },
             warmUpDiarizer: {
                 let diarizerDirectory = try self.modelPathResolver.modelDirectory(for: .offlineDiarization, in: workspace)

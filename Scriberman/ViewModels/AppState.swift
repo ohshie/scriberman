@@ -38,6 +38,8 @@ final class AppState {
     let dictationService: DictationService
     let hotkeyRegistrar = HotkeyRegistrar()
     let dictationHotkeySettings = DictationHotkeySettings()
+    let dictationModeSettings: DictationModeSettings
+    let asrProcessorSettings = AsrProcessorSettings()
     @ObservationIgnored let dictationHUD = DictationHUDController()
     let calendarSuggestions: CalendarSuggestionController
     /// True from presenting the calendar step until it is answered in this launch.
@@ -141,7 +143,12 @@ final class AppState {
         self.newSessionViewModel.idlePromptPreferencesProvider = { [idlePromptPreferences] in
             idlePromptPreferences.settings
         }
-        self.dictationService = DictationService(recordingService: services.background.recordingService)
+        let dictationModeSettings = DictationModeSettings()
+        self.dictationModeSettings = dictationModeSettings
+        self.dictationService = DictationService(
+            recordingService: services.background.recordingService,
+            mode: { dictationModeSettings.mode }
+        )
         self.newSessionViewModel.menuBarSettings = self.menuBarSettings
         self.newSessionViewModel.settingsViewModel = self.settingsViewModel
         self.jobsViewModel.settingsViewModel = self.settingsViewModel
@@ -316,6 +323,17 @@ final class AppState {
             } else {
                 wireHotkeyRegistrar()
             }
+        }
+    }
+
+    /// Stores the processor and reloads dictation's model on it. Recordings and
+    /// batch jobs pick it up on their next load.
+    func setAsrProcessor(_ processor: AsrProcessor) {
+        guard processor != asrProcessorSettings.processor else { return }
+        asrProcessorSettings.setProcessor(processor)
+        guard requiredOnboardingStep == nil, let workspace else { return }
+        Task { [dictationService] in
+            await dictationService.prewarm(workspace: workspace)
         }
     }
 
