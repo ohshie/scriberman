@@ -10,7 +10,7 @@ struct ScribermanApp: App {
 
     private static let appModelContainer: ModelContainer = {
         do {
-            return try ModelContainer(for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self, SpeakerProfile.self, RecordingTag.self)
+            return try ModelContainer(for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self, SpeakerProfile.self, SpeakerVoiceprint.self, RecordingTag.self)
         } catch {
             fatalError("Failed to initialize app model container: \(error.localizedDescription)")
         }
@@ -94,6 +94,20 @@ struct ScribermanApp: App {
         }
     }
 
+    /// Gives every profile stored before voiceprint lists existed one source-less voiceprint. A
+    /// failure is retried at the next launch; the cached mean keeps matching correct meanwhile.
+    private static func migrateSpeakerProfilesToVoiceprintLists(in context: ModelContext) {
+        let logger = Logger(subsystem: "Scriberman", category: "ScribermanApp")
+        do {
+            let migrated = try SpeakerProfile.migrateToVoiceprintLists(in: context)
+            if migrated > 0 {
+                logger.notice("Migrated \(migrated, privacy: .public) speaker profile(s) to voiceprint lists.")
+            }
+        } catch {
+            logger.error("Migrating speaker profiles to voiceprint lists failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -110,6 +124,7 @@ struct ScribermanApp: App {
                     ScribermanApp.prepareSearchText(in: modelContainer.mainContext)
                     ScribermanApp.removeOrphanedTranscriptSegments(in: modelContainer.mainContext)
                     ScribermanApp.resetSpeakerMemoryIfVoiceprintSpaceChanged(in: modelContainer.mainContext)
+                    ScribermanApp.migrateSpeakerProfilesToVoiceprintLists(in: modelContainer.mainContext)
                     await appState.bootstrapWorkspace()
                 }
                 .onChange(of: appState.dictationService.state) { _, _ in

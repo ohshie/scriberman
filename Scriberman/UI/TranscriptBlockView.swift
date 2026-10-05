@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct TranscriptBlockView: View {
@@ -6,10 +7,22 @@ struct TranscriptBlockView: View {
     let searchRanges: [Range<String.Index>]
     let activeSearchRange: Range<String.Index>?
     let onTap: () -> Void
-    var onSpeakerRename: ((String) -> Void)? = nil
+    var speakerEditing: SpeakerEditing?
 
-    @State private var isEditingSpeaker = false
-    @State private var speakerNameDraft = ""
+    /// What a block of a saved transcript needs to edit its speaker. The caller owns which block is
+    /// renaming, so a click on another block can close the field.
+    struct SpeakerEditing {
+        var isRenaming: Bool
+        /// Stored profiles the rename field suggests.
+        var profiles: [SpeakerProfileSnapshot]
+        /// The transcript's other speakers, with their display colours, for "assign this block to".
+        var otherSpeakers: [TranscriptSpeaker]
+        var onBeginRename: () -> Void
+        var onEndRename: () -> Void
+        var onRename: (String) -> Void
+        /// Gives this block to the speaker with the ID, or to a new speaker for `nil`.
+        var onAssign: (String?) -> Void
+    }
 
     init(
         block: TranscriptBlock,
@@ -17,14 +30,14 @@ struct TranscriptBlockView: View {
         searchRanges: [Range<String.Index>] = [],
         activeSearchRange: Range<String.Index>? = nil,
         onTap: @escaping () -> Void = {},
-        onSpeakerRename: ((String) -> Void)? = nil
+        speakerEditing: SpeakerEditing? = nil
     ) {
         self.block = block
         self.isActive = isActive
         self.searchRanges = searchRanges
         self.activeSearchRange = activeSearchRange
         self.onTap = onTap
-        self.onSpeakerRename = onSpeakerRename
+        self.speakerEditing = speakerEditing
     }
 
     var body: some View {
@@ -42,6 +55,11 @@ struct TranscriptBlockView: View {
         .onTapGesture {
             onTap()
         }
+        .contextMenu {
+            if let speakerEditing {
+                blockMenu(speakerEditing)
+            }
+        }
     }
 
     /// The speaker's dot and name, which double as the rename control.
@@ -51,24 +69,66 @@ struct TranscriptBlockView: View {
             .fill(speakerColor)
             .frame(width: 10, height: 10)
 
-        if isEditingSpeaker {
-            TextField("Speaker Name", text: $speakerNameDraft)
-                .textFieldStyle(.plain)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(speakerColor)
-                .onSubmit {
-                    commitRename()
-                }
+        if let speakerEditing, speakerEditing.isRenaming {
+            SpeakerNameField(
+                name: block.speaker.label,
+                profiles: speakerEditing.profiles,
+                color: speakerColor,
+                onCommit: { name in
+                    speakerEditing.onRename(name)
+                    speakerEditing.onEndRename()
+                },
+                onCancel: speakerEditing.onEndRename
+            )
         } else {
             Text(block.speaker.label)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(speakerColor)
                 .onTapGesture {
-                    if onSpeakerRename != nil {
-                        speakerNameDraft = block.speaker.label
-                        isEditingSpeaker = true
-                    }
+                    speakerEditing?.onBeginRename()
                 }
+
+            if let speakerEditing {
+                Button {
+                    speakerEditing.onBeginRename()
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help("Rename speaker")
+                .accessibilityLabel("Rename speaker")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func blockMenu(_ speakerEditing: SpeakerEditing) -> some View {
+        Button("Copy") {
+            copyTranscriptText(block.text)
+        }
+        Divider()
+        Button("rename speaker") {
+            speakerEditing.onBeginRename()
+        }
+        Menu("assign this block to") {
+            ForEach(speakerEditing.otherSpeakers) { speaker in
+                Button {
+                    speakerEditing.onAssign(speaker.id)
+                } label: {
+                    Label {
+                        Text(speaker.label)
+                    } icon: {
+                        Image(nsImage: SpeakerDotImage.make(hex: speaker.colorHex))
+                    }
+                    .labelStyle(.titleAndIcon)
+                }
+            }
+            Divider()
+            Button("new speaker") {
+                speakerEditing.onAssign(nil)
+            }
         }
     }
 
@@ -122,17 +182,9 @@ struct TranscriptBlockView: View {
 
         return attributedText
     }
-
-    private func commitRename() {
-        let trimmed = speakerNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty && trimmed != block.speaker.label {
-            onSpeakerRename?(trimmed)
-        }
-        isEditingSpeaker = false
-    }
 }
 
-private extension Color {
+extension Color {
     init?(hex: String) {
         var value = hex.trimmingCharacters(in: .whitespacesAndNewlines)
         if value.hasPrefix("#") {
@@ -148,5 +200,19 @@ private extension Color {
         let blue = Double(rgb & 0xFF) / 255.0
 
         self.init(.sRGB, red: red, green: green, blue: blue, opacity: 1.0)
+    }
+}
+
+/// A speaker's colour dot as a non-template image, so a menu draws it in colour.
+enum SpeakerDotImage {
+    static func make(hex: String, diameter: CGFloat = 10) -> NSImage {
+        let color = NSColor(Color(hex: hex) ?? .accentColor)
+        let image = NSImage(size: NSSize(width: diameter, height: diameter), flipped: false) { rect in
+            color.setFill()
+            NSBezierPath(ovalIn: rect).fill()
+            return true
+        }
+        image.isTemplate = false
+        return image
     }
 }

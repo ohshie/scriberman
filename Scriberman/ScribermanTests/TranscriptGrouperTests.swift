@@ -24,6 +24,7 @@ struct TranscriptGrouperTests {
         #expect(blocks[0].startTime == 0.0)
         #expect(blocks[0].endTime == 2.0)
         #expect(blocks[0].text == "Hello world")
+        #expect(blocks[0].segmentIDs == transcript.segments.map(\.id))
     }
 
     @Test
