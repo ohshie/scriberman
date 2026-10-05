@@ -213,12 +213,14 @@ struct TranscriptStudySearchSeedTests {
         var original = transcript(text: "words", speakerLabel: "Speaker 1")
         original.speakerEmbeddings = ["S1": [0.5]]
         original.speakerProfileIDs = ["S1": profileID]
+        original.voiceprintSpace = VoiceprintSpace.current
         session.transcript = original
 
         let renamed = try #require(TranscriptStudyView.renameSpeaker(id: "S1", to: "Ana", in: original, of: session))
 
         #expect(renamed.speakerEmbeddings == ["S1": [0.5]])
         #expect(renamed.speakerProfileIDs == ["S1": profileID])
+        #expect(renamed.voiceprintSpace == VoiceprintSpace.current)
     }
 
     @Test
@@ -243,10 +245,10 @@ struct TranscriptStudySearchSeedTests {
         return SpeakerEmbeddingStore(modelContainer: container)
     }
 
-    private func liveTranscript(voiceprint: [Float], linkedTo profileID: UUID?) -> Transcript {
+    private func liveTranscript(voiceprint: [Float], voiceprintSpace: String? = VoiceprintSpace.current) -> Transcript {
         var transcript = transcript(text: "words", speakerLabel: "Speaker 1")
         transcript.speakerEmbeddings = ["S1": voiceprint]
-        transcript.speakerProfileIDs = profileID.map { ["S1": $0] }
+        transcript.voiceprintSpace = voiceprintSpace
         return transcript
     }
 
@@ -254,92 +256,117 @@ struct TranscriptStudySearchSeedTests {
         Set(try await store.fetchAllSnapshots().map(\.name))
     }
 
+    /// Spec scenario "User names an unknown speaker".
     @Test
-    func testRenamingALinkedSpeakerRenamesItsProfile() async throws {
+    func testRenamingAnUnknownSpeakerCreatesAProfile() async throws {
         let store = try makeStore()
-        let linkedID = try await store.enrollNamedSpeaker(name: "Speaker 5", embedding: [0.5])
 
-        let unlinked = try await TranscriptStudyView.updateSpeakerMemory(
-            forRenaming: "S1", to: "Bob", in: liveTranscript(voiceprint: [0.5], linkedTo: linkedID), store: store
+        try await TranscriptStudyView.updateSpeakerMemory(
+            forRenaming: "S1", to: "Bob", in: liveTranscript(voiceprint: [0.5, 0.5]), store: store
         )
 
-        #expect(unlinked == false)
-        #expect(try await names(in: store) == ["Bob"])
-        #expect(try await store.findProfileSnapshot(byID: linkedID)?.name == "Bob")
-    }
-
-    @Test
-    func testRenamingALinkedSpeakerToAnExistingNameMergesAndUnlinks() async throws {
-        let store = try makeStore()
-        let aliceID = try await store.enrollNamedSpeaker(name: "Alice", embedding: [0.1])
-        let linkedID = try await store.enrollNamedSpeaker(name: "Speaker 5", embedding: [0.5])
-        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/f/mic.wav", title: "F")
-        let original = liveTranscript(voiceprint: [0.5], linkedTo: linkedID)
-        session.transcript = original
-
-        let unlinked = try await TranscriptStudyView.updateSpeakerMemory(
-            forRenaming: "S1", to: "alice", in: original, store: store
-        )
-        let updated = TranscriptStudyView.removingProfileLink(for: "S1", in: original, of: session)
-
-        #expect(unlinked)
-        #expect(try await names(in: store) == ["Alice"])
-        #expect(try await store.findProfileSnapshot(byID: aliceID)?.embedding == [0.5])
-        #expect(try await store.findProfileSnapshot(byID: linkedID) == nil)
-        #expect(updated?.speakerProfileIDs == nil)
-        #expect(session.transcript?.speakerProfileIDs == nil)
-        #expect(session.transcript?.speakerEmbeddings == ["S1": [0.5]])
-    }
-
-    @Test
-    func testRenamingTwiceAfterAMergeLeavesTheExistingProfileNamed() async throws {
-        let store = try makeStore()
-        let aliceID = try await store.enrollNamedSpeaker(name: "Alice", embedding: [0.1])
-        let linkedID = try await store.enrollNamedSpeaker(name: "Speaker 5", embedding: [0.5])
-        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/g/mic.wav", title: "G")
-        let original = liveTranscript(voiceprint: [0.5], linkedTo: linkedID)
-        session.transcript = original
-
-        _ = try await TranscriptStudyView.updateSpeakerMemory(forRenaming: "S1", to: "Alice", in: original, store: store)
-        let afterMerge = try #require(TranscriptStudyView.removingProfileLink(for: "S1", in: original, of: session))
-        let unlinkedAgain = try await TranscriptStudyView.updateSpeakerMemory(
-            forRenaming: "S1", to: "Carol", in: afterMerge, store: store
-        )
-
-        #expect(unlinkedAgain == false)
-        #expect(try await store.findProfileSnapshot(byID: aliceID)?.name == "Alice")
-        #expect(try await names(in: store) == ["Alice", "Carol"])
-        let carolID = try #require(try await store.profileID(forName: "Carol"))
-        #expect(try await store.findProfileSnapshot(byID: carolID)?.embedding == [0.5])
-    }
-
-    @Test
-    func testRenamingASpeakerWhoseLinkedProfileWasDeletedEnrollsByName() async throws {
-        let store = try makeStore()
-        let deletedID = try await store.enrollNamedSpeaker(name: "Speaker 5", embedding: [0.5])
-        try await store.deleteProfile(id: deletedID)
-
-        let unlinked = try await TranscriptStudyView.updateSpeakerMemory(
-            forRenaming: "S1", to: "Bob", in: liveTranscript(voiceprint: [0.5], linkedTo: deletedID), store: store
-        )
-
-        #expect(unlinked == false)
         #expect(try await names(in: store) == ["Bob"])
         let bobID = try #require(try await store.profileID(forName: "Bob"))
-        #expect(try await store.findProfileSnapshot(byID: bobID)?.embedding == [0.5])
+        let bob = try #require(try await store.findProfileSnapshot(byID: bobID))
+        #expect(bob.embedding == [0.5, 0.5])
+        #expect(bob.sampleCount == 1)
     }
 
+    /// Spec scenario "Rename to an existing profile's name".
+    @Test
+    func testRenamingToAnExistingNameFoldsIntoThatProfile() async throws {
+        let store = try makeStore()
+        let aliceID = try await store.enrollNamedSpeaker(name: "Alice", embedding: [1, 0])
+
+        try await TranscriptStudyView.updateSpeakerMemory(
+            forRenaming: "S1", to: "alice", in: liveTranscript(voiceprint: [0, 1]), store: store
+        )
+
+        #expect(try await names(in: store) == ["Alice"])
+        let alice = try #require(try await store.findProfileSnapshot(byID: aliceID))
+        #expect(alice.embedding == [0.5, 0.5])
+        #expect(alice.sampleCount == 2)
+    }
+
+    /// Spec scenario "Rename a speaker that was matched to another profile".
     @Test
     func testRenamingAMatchedSpeakerKeepsTheMatchedProfileName() async throws {
         let store = try makeStore()
         let aliceID = try await store.enrollNamedSpeaker(name: "Alice", embedding: [0.1])
 
-        _ = try await TranscriptStudyView.updateSpeakerMemory(
-            forRenaming: "S1", to: "Carol", in: liveTranscript(voiceprint: [0.1], linkedTo: nil), store: store
+        try await TranscriptStudyView.updateSpeakerMemory(
+            forRenaming: "S1", to: "Carol", in: liveTranscript(voiceprint: [0.1]), store: store
         )
 
         #expect(try await store.findProfileSnapshot(byID: aliceID)?.name == "Alice")
+        #expect(try await store.findProfileSnapshot(byID: aliceID)?.embedding == [0.1])
         #expect(try await names(in: store) == ["Alice", "Carol"])
+    }
+
+    /// Spec scenario "Rename in a transcript from before the voiceprint space".
+    @Test
+    func testRenamingInATranscriptWithoutVoiceprintSpaceWritesNothing() async throws {
+        let store = try makeStore()
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/h/mic.wav", title: "H")
+        let original = liveTranscript(voiceprint: [0.5], voiceprintSpace: nil)
+        session.transcript = original
+
+        let renamed = try #require(TranscriptStudyView.renameSpeaker(id: "S1", to: "Bob", in: original, of: session))
+        try await TranscriptStudyView.updateSpeakerMemory(forRenaming: "S1", to: "Bob", in: renamed, store: store)
+
+        #expect(session.transcript?.speakers.map(\.label) == ["Bob"])
+        #expect(try await store.fetchAllSnapshots().isEmpty)
+    }
+
+    @Test
+    func testRenamingWithoutAVoiceprintWritesNothing() async throws {
+        let store = try makeStore()
+        var transcript = transcript(text: "words", speakerLabel: "Speaker 1")
+        transcript.voiceprintSpace = VoiceprintSpace.current
+
+        try await TranscriptStudyView.updateSpeakerMemory(forRenaming: "S1", to: "Bob", in: transcript, store: store)
+
+        #expect(try await store.fetchAllSnapshots().isEmpty)
+    }
+
+    /// Spec scenario "Rename after trim": the space survives the trim and both renames, and the
+    /// second rename still teaches speaker memory.
+    @Test
+    func testTrimThenRenameTwiceKeepsTeachingSpeakerMemory() async throws {
+        let store = try makeStore()
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/i/mic.wav", title: "I")
+        let original = Transcript(
+            fullText: "one two three",
+            segments: [
+                TranscriptSegment(speakerId: "S1", text: "one", startTime: 0, endTime: 1),
+                TranscriptSegment(speakerId: "S2", text: "two", startTime: 1, endTime: 2),
+                TranscriptSegment(speakerId: "S1", text: "three", startTime: 8, endTime: 9)
+            ],
+            speakers: [
+                TranscriptSpeaker(id: "S1", label: "Speaker 1", colorHex: "#112233"),
+                TranscriptSpeaker(id: "S2", label: "Speaker 2", colorHex: "#445566")
+            ],
+            speakerEmbeddings: ["S1": [1, 0], "S2": [0, 1]],
+            voiceprintSpace: VoiceprintSpace.current
+        )
+
+        let trimmed = AudioTrimService.trimmedTranscript(original, end: 5)
+        #expect(trimmed.voiceprintSpace == VoiceprintSpace.current)
+        #expect(trimmed.segments.map(\.text) == ["one", "two"])
+        session.transcript = trimmed
+
+        let first = try #require(TranscriptStudyView.renameSpeaker(id: "S1", to: "Ana", in: trimmed, of: session))
+        #expect(first.voiceprintSpace == VoiceprintSpace.current)
+        try await TranscriptStudyView.updateSpeakerMemory(forRenaming: "S1", to: "Ana", in: first, store: store)
+
+        let second = try #require(TranscriptStudyView.renameSpeaker(id: "S2", to: "Ben", in: first, of: session))
+        #expect(second.voiceprintSpace == VoiceprintSpace.current)
+        #expect(session.transcript?.voiceprintSpace == VoiceprintSpace.current)
+        try await TranscriptStudyView.updateSpeakerMemory(forRenaming: "S2", to: "Ben", in: second, store: store)
+
+        #expect(try await names(in: store) == ["Ana", "Ben"])
+        let benID = try #require(try await store.profileID(forName: "Ben"))
+        #expect(try await store.findProfileSnapshot(byID: benID)?.embedding == [0, 1])
     }
 
     private func transcript(text: String, speakerLabel: String) -> Transcript {

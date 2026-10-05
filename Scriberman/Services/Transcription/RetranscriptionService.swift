@@ -108,10 +108,14 @@ actor RetranscriptionService {
                 fullText: Transcript.fullText(joining: merged),
                 segments: merged,
                 speakers: speakers,
-                speakerEmbeddings: mergedEmbeddings
+                speakerEmbeddings: mergedEmbeddings,
+                voiceprintSpace: VoiceprintSpace.current
             )
             session.status = .done
             try? saveContext(context)
+            if let recording = session as? RecordingSession {
+                rewriteTranscriptMarkdown(for: recording)
+            }
         } catch {
             session.status = .error(error.localizedDescription)
             try? saveContext(context)

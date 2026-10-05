@@ -159,7 +159,8 @@ actor TranscriptionService: TranscriptionServiceProtocol {
             fullText: Transcript.fullText(joining: mergedSegments),
             segments: mergedSegments,
             speakers: speakers,
-            speakerEmbeddings: mergedEmbeddings
+            speakerEmbeddings: mergedEmbeddings,
+            voiceprintSpace: VoiceprintSpace.current
         )
     }
 

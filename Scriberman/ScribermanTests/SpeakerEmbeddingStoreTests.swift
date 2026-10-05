@@ -40,6 +40,58 @@ struct SpeakerEmbeddingStoreTests {
         #expect(fetched?.name == "Speaker 1400")
     }
 
+    // MARK: - Voiceprint space reset
+
+    private func isolatedDefaults() -> UserDefaults {
+        let suite = "SpeakerEmbeddingStoreTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        return defaults
+    }
+
+    @Test("Start-up reset deletes every profile when no voiceprint space is recorded")
+    func resetDeletesProfilesOnMissingMarker() throws {
+        let context = ModelContext(container)
+        context.insert(SpeakerProfile(name: "Alice", embedding: [1, 0], voiceprintSpace: ""))
+        context.insert(SpeakerProfile(name: "Bob", embedding: [0, 1]))
+        try context.save()
+        let defaults = isolatedDefaults()
+
+        let removed = try SpeakerProfile.resetIfVoiceprintSpaceChanged(in: context, userDefaults: defaults)
+
+        #expect(removed == 2)
+        #expect(try ModelContext(container).fetch(FetchDescriptor<SpeakerProfile>()).isEmpty)
+        #expect(defaults.string(forKey: SpeakerProfile.voiceprintSpaceMarkerKey) == VoiceprintSpace.current)
+    }
+
+    @Test("Start-up reset deletes every profile when another voiceprint space is recorded")
+    func resetDeletesProfilesOnOtherSpace() throws {
+        let context = ModelContext(container)
+        context.insert(SpeakerProfile(name: "Alice", embedding: [1, 0]))
+        try context.save()
+        let defaults = isolatedDefaults()
+        defaults.set("community-1", forKey: SpeakerProfile.voiceprintSpaceMarkerKey)
+
+        let removed = try SpeakerProfile.resetIfVoiceprintSpaceChanged(in: context, userDefaults: defaults)
+
+        #expect(removed == 1)
+        #expect(try ModelContext(container).fetch(FetchDescriptor<SpeakerProfile>()).isEmpty)
+    }
+
+    @Test("Start-up reset keeps profiles when the recorded voiceprint space is current")
+    func resetKeepsProfilesOnCurrentSpace() throws {
+        let context = ModelContext(container)
+        context.insert(SpeakerProfile(name: "Alice", embedding: [1, 0]))
+        try context.save()
+        let defaults = isolatedDefaults()
+        defaults.set(VoiceprintSpace.current, forKey: SpeakerProfile.voiceprintSpaceMarkerKey)
+
+        let removed = try SpeakerProfile.resetIfVoiceprintSpaceChanged(in: context, userDefaults: defaults)
+
+        #expect(removed == 0)
+        #expect(try ModelContext(container).fetch(FetchDescriptor<SpeakerProfile>()).map(\.name) == ["Alice"])
+    }
+
     @Test("Enroll a new speaker")
     func enrollNewSpeaker() async throws {
         let embedding: [Float] = Array(repeating: 0.1, count: 256)
@@ -51,80 +103,109 @@ struct SpeakerEmbeddingStoreTests {
         #expect(all.first?.embedding == embedding)
     }
 
-    // MARK: - Automatic enrollment (numbering)
+    // MARK: - Folding voiceprints (renames)
 
-    @Test("A numbering gap after a deletion gets the next number, not a reused one")
-    func enrollAfterNumberingGap() async throws {
-        let speaker3Embedding: [Float] = Array(repeating: 0.3, count: 256)
-        try await store.enrollNamedSpeaker(name: "Speaker 2", embedding: Array(repeating: 0.2, count: 256))
-        let speaker3 = try await store.enrollNamedSpeaker(name: "Speaker 3", embedding: speaker3Embedding)
+    @Test("Folding into a new name creates a profile with one voiceprint")
+    func foldCreatesProfile() async throws {
+        let alice = try await store.enrollNamedSpeaker(name: "Alice", embedding: Array(repeating: 0.1, count: 4))
 
-        try await store.enrollNewSpeaker(embedding: Array(repeating: 0.9, count: 256))
-
-        let names = try await store.fetchAllSnapshots().map(\.name)
-        #expect(Set(names) == ["Speaker 2", "Speaker 3", "Speaker 4"])
-        #expect(try await store.findProfileSnapshot(byID: speaker3)?.embedding == speaker3Embedding)
-    }
-
-    @Test("A user label that looks automatic is never overwritten")
-    func enrollAfterUserSpeakerSevenLabel() async throws {
-        let userEmbedding: [Float] = Array(repeating: 0.7, count: 256)
-        let seven = try await store.enrollNamedSpeaker(name: "Speaker 7", embedding: userEmbedding)
-
-        try await store.enrollNewSpeaker(embedding: Array(repeating: 0.9, count: 256))
-
-        let names = try await store.fetchAllSnapshots().map(\.name)
-        #expect(Set(names) == ["Speaker 7", "Speaker 8"])
-        #expect(try await store.findProfileSnapshot(byID: seven)?.embedding == userEmbedding)
-    }
-
-    @Test("Automatic labels start at 1 and ignore labels that are not Speaker <number>")
-    func nextAutomaticLabel() {
-        #expect(SpeakerEmbeddingStore.nextAutomaticLabel(after: []) == "Speaker 1")
-        #expect(SpeakerEmbeddingStore.nextAutomaticLabel(after: ["Alice", "Speaker", "Speaker 2b", "speaker 9"]) == "Speaker 1")
-        #expect(SpeakerEmbeddingStore.nextAutomaticLabel(after: ["Speaker 10", "Speaker 2"]) == "Speaker 11")
-    }
-
-    // MARK: - Manual rename enrollment
-
-    @Test("Renaming to an existing name updates that profile's voiceprint")
-    @MainActor
-    func renameToExistingNameUpdatesProfile() async throws {
-        let alice = try await store.enrollNamedSpeaker(name: "Alice", embedding: Array(repeating: 0.1, count: 256))
-        let newEmbedding: [Float] = Array(repeating: 0.2, count: 256)
-
-        try await TranscriptStudyView.enrollRenamedSpeaker(name: "alice", embedding: newEmbedding, in: store)
-
-        let all = try await store.fetchAllSnapshots()
-        #expect(all.count == 1)
-        #expect(all.first?.id == alice)
-        #expect(all.first?.name == "Alice")
-        #expect(all.first?.embedding == newEmbedding)
-    }
-
-    @Test("Renaming to a new name creates a profile")
-    @MainActor
-    func renameToNewNameCreatesProfile() async throws {
-        let alice = try await store.enrollNamedSpeaker(name: "Alice", embedding: Array(repeating: 0.1, count: 256))
-
-        try await TranscriptStudyView.enrollRenamedSpeaker(name: "Bob", embedding: Array(repeating: 0.2, count: 256), in: store)
+        try await store.foldVoiceprint(name: "Bob", embedding: [0, 1, 0, 0])
 
         let all = try await store.fetchAllSnapshots()
         #expect(Set(all.map(\.name)) == ["Alice", "Bob"])
-        #expect(all.first { $0.id == alice }?.embedding == Array(repeating: 0.1, count: 256))
+        let bob = try #require(all.first { $0.name == "Bob" })
+        #expect(bob.embedding == [0, 1, 0, 0])
+        #expect(bob.sampleCount == 1)
+        #expect(bob.voiceprintSpace == VoiceprintSpace.current)
+        #expect(all.first { $0.id == alice }?.embedding == Array(repeating: 0.1, count: 4))
     }
 
-    @Test("The store breaks a tie toward the profile seen least recently, as SpeakerMatcher does")
-    func findBestMatchTieGoesToLeastRecentlySeen() async throws {
+    @Test("Folding into an existing name (case-insensitive) takes the running mean")
+    func foldIntoExistingNameTakesRunningMean() async throws {
+        let alice = try await store.enrollNamedSpeaker(name: "Alice", embedding: [1, 0, 0])
+        try await store.foldVoiceprint(name: "Alice", embedding: [0, 1, 0])
+
+        // Stored mean (1/2, 1/2, 0) with weight 2 and a new voiceprint with weight 1.
+        try await store.foldVoiceprint(name: "alice", embedding: [0, 0, 1])
+
+        let all = try await store.fetchAllSnapshots()
+        #expect(all.count == 1)
+        let profile = try #require(all.first)
+        #expect(profile.id == alice)
+        #expect(profile.name == "Alice")
+        #expect(profile.sampleCount == 3)
+        for (value, expected) in zip(profile.embedding, [Float(1) / 3, Float(1) / 3, Float(1) / 3]) {
+            #expect(abs(value - expected) < 1e-6)
+        }
+    }
+
+    /// Spec scenario "Fold order does not matter": three distinct normalised voiceprints folded in
+    /// every order, with the store reopened between folds, give the same stored mean and count.
+    @Test("Fold order does not matter across saves and reloads")
+    func foldOrderDoesNotMatter() async throws {
+        let voiceprints: [[Float]] = [
+            [1, 0, 0],
+            [0.6, 0.8, 0],
+            [0, 0.28, 0.96]
+        ]
+        let orders = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]
+        var results: [(embedding: [Float], count: Int)] = []
+
+        for order in orders {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let url = directory.appendingPathComponent("store.sqlite")
+            for index in order {
+                // A fresh container per fold: the stored vector is read back from disk each time.
+                let onDisk = SpeakerEmbeddingStore(modelContainer: try ModelContainer(
+                    for: SpeakerProfile.self,
+                    configurations: ModelConfiguration(url: url)
+                ))
+                try await onDisk.foldVoiceprint(name: "Alice", embedding: voiceprints[index])
+            }
+            let reopened = SpeakerEmbeddingStore(modelContainer: try ModelContainer(
+                for: SpeakerProfile.self,
+                configurations: ModelConfiguration(url: url)
+            ))
+            let profile = try #require(try await reopened.fetchAllSnapshots().first)
+            results.append((profile.embedding, profile.sampleCount))
+        }
+
+        let expected: [Float] = [1.6 / 3, 1.08 / 3, 0.96 / 3]
+        for result in results {
+            #expect(result.count == 3)
+            for (value, target) in zip(result.embedding, expected) {
+                #expect(abs(value - target) < 1e-6)
+            }
+        }
+    }
+
+    @Test("Folding into a profile from another voiceprint space replaces its voiceprint")
+    func foldIntoOtherSpaceProfileReplaces() async throws {
+        let context = ModelContext(container)
+        context.insert(SpeakerProfile(name: "Alice", embedding: [1, 0], voiceprintSpace: "", sampleCount: 4))
+        try context.save()
+
+        try await store.foldVoiceprint(name: "Alice", embedding: [0, 1])
+
+        let profile = try #require(try await store.fetchAllSnapshots().first)
+        #expect(profile.embedding == [0, 1])
+        #expect(profile.sampleCount == 1)
+        #expect(profile.voiceprintSpace == VoiceprintSpace.current)
+    }
+
+    @Test("The store matches nothing on a tie, as SpeakerMatcher does")
+    func findBestMatchTieMatchesNothing() async throws {
         var embedding: [Float] = Array(repeating: 0.0, count: 256)
         embedding[0] = 1.0
         let first = try await store.enrollNamedSpeaker(name: "First", embedding: embedding)
-        let second = try await store.enrollNamedSpeaker(name: "Second", embedding: embedding)
+        try await store.enrollNamedSpeaker(name: "Second", embedding: embedding)
         try await store.updateProfile(id: first)
 
         let match = await store.findBestMatchSnapshot(embedding: embedding)
 
-        #expect(match?.id == second)
+        #expect(match == nil)
     }
 
     // MARK: - Concurrency
@@ -146,7 +227,7 @@ struct SpeakerEmbeddingStoreTests {
                 for _ in 0..<50 { _ = await onDisk.findBestMatchSnapshot(embedding: axis) }
             }
             group.addTask {
-                for _ in 0..<20 { try await onDisk.enrollNewSpeaker(embedding: axis) }
+                for index in 1...20 { try await onDisk.enrollNamedSpeaker(name: "Speaker \(index)", embedding: axis) }
             }
             group.addTask {
                 for id in toDelete { try await onDisk.deleteProfile(id: id) }
@@ -277,17 +358,14 @@ struct SpeakerEmbeddingStoreTests {
         #expect(try await store.fetchAllSnapshots().count == 1)
     }
 
-    @Test("Delete all profiles empties the store and restarts automatic numbering")
+    @Test("Delete all profiles empties the store")
     func deleteAllProfilesEmptiesStore() async throws {
         try await store.enrollNamedSpeaker(name: "Alice", embedding: [0.1])
-        _ = try await store.enrollNewSpeaker(embedding: [0.2])
-        _ = try await store.enrollNewSpeaker(embedding: [0.3])
+        try await store.enrollNamedSpeaker(name: "Bob", embedding: [0.2])
 
         try await store.deleteAllProfiles()
 
         #expect(try await store.fetchAllSnapshots().isEmpty)
-        let newID = try await store.enrollNewSpeaker(embedding: [0.4])
-        #expect(try await store.findProfileSnapshot(byID: newID)?.name == "Speaker 1")
     }
 
     @Test("A deleted profile is no longer matched")

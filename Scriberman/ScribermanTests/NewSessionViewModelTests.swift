@@ -144,7 +144,7 @@ struct NewSessionViewModelTests {
     }
 
     @Test
-    func stopRelabelsSegmentsOfSpeakersBoundMidSessionAndSavesVoiceprints() async throws {
+    func stopRelabelsPersistedSegmentsByIDAndSavesVoiceprints() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("live-remap-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -155,17 +155,20 @@ struct NewSessionViewModelTests {
         )
         defer { fixture.cleanup() }
 
-        await transcriber.emit("early turn", speakerId: "speaker_mic_0")
-        await transcriber.emit("early fallback", speakerId: "speaker_S1")
-        await transcriber.emit("later turn", speakerId: "Alice")
-        await transcriber.emit("someone new", speakerId: "speaker_mic_1")
+        let earlyTurn = await transcriber.emit("early turn", speakerId: "speaker_mic_0")
+        let earlyFallback = await transcriber.emit("early fallback", speakerId: "speaker_mic_cluster_S1")
+        let laterTurn = await transcriber.emit("later turn", speakerId: "Alice")
+        let someoneNew = await transcriber.emit("someone new", speakerId: "speaker_mic_1")
         await waitForSaves(saves, count: 4)
-        let enrolledID = UUID()
         await transcriber.setStopResult(LiveSessionResult(
             segments: [],
-            speakerIDRemap: ["speaker_mic_0": "Alice", "speaker_S1": "Alice"],
-            speakerEmbeddings: ["Alice": [0.1, 0.2], "speaker_mic_1": [0.3, 0.4]],
-            enrolledProfileIDs: ["speaker_mic_1": enrolledID]
+            finalSpeakerIDs: [
+                earlyTurn: "Alice",
+                earlyFallback: "Alice",
+                laterTurn: "Alice",
+                someoneNew: "speaker_mic_1"
+            ],
+            speakerEmbeddings: ["Alice": [0.1, 0.2], "speaker_mic_1": [0.3, 0.4]]
         ))
 
         _ = await fixture.viewModel.stopRecording(context: fixture.context)
@@ -174,14 +177,54 @@ struct NewSessionViewModelTests {
             == ["Alice", "Alice", "Alice", "speaker_mic_1"])
         let markdown = try String(contentsOf: directory.appendingPathComponent("transcript.md"), encoding: .utf8)
         #expect(!markdown.contains("speaker_mic_0"))
-        #expect(!markdown.contains("speaker_S1"))
+        #expect(!markdown.contains("speaker_mic_cluster_S1"))
         #expect(markdown.contains("Alice: early turn"))
         #expect(markdown.contains("Alice: early fallback"))
+        #expect(markdown.contains("Speaker 2: someone new"))
+        #expect(!markdown.contains("speaker_mic_1"))
 
         let transcript = try #require(recording.transcript)
         #expect(transcript.speakers.map(\.id) == ["Alice", "speaker_mic_1"])
         #expect(transcript.speakerEmbeddings == ["Alice": [0.1, 0.2], "speaker_mic_1": [0.3, 0.4]])
-        #expect(transcript.speakerProfileIDs == ["speaker_mic_1": enrolledID])
+        #expect(transcript.speakerProfileIDs == nil)
+        #expect(transcript.voiceprintSpace == VoiceprintSpace.current)
+    }
+
+    /// Spec scenario "Match lost on one channel only": both channels were shown as Alice; at stop
+    /// only the app speaker keeps the match. A name-keyed relabel could not separate them.
+    @Test
+    func stopSeparatesSpeakersThatSharedANameDuringRecording() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("live-split-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let saves = SaveScript(failing: [])
+        let (fixture, transcriber, recording) = try await startScriptedRecording(
+            saves: saves,
+            micAudioURL: directory.appendingPathComponent("mic.wav").path
+        )
+        defer { fixture.cleanup() }
+
+        let mic = await transcriber.emit("from the mic", speakerId: "Alice", source: .mic)
+        let app = await transcriber.emit("from the app", speakerId: "Alice", source: .app)
+        await waitForSaves(saves, count: 2)
+        let micFinal = TranscriptSegment(id: mic, speakerId: "speaker_mic_0", text: "from the mic", startTime: 0, endTime: 1, audioSource: .mic, isFinal: true)
+        let appFinal = TranscriptSegment(id: app, speakerId: "Alice", text: "from the app", startTime: 1, endTime: 2, audioSource: .app, isFinal: true)
+        await transcriber.setStopResult(LiveSessionResult(
+            segments: [micFinal, appFinal],
+            finalSpeakerIDs: [mic: "speaker_mic_0", app: "Alice"]
+        ))
+
+        _ = await fixture.viewModel.stopRecording(context: fixture.context)
+
+        let persisted = recording.transcriptSegments.sorted { $0.startTime < $1.startTime }
+        #expect(persisted.map(\.speakerId) == ["speaker_mic_0", "Alice"])
+        let markdown = try String(contentsOf: directory.appendingPathComponent("transcript.md"), encoding: .utf8)
+        #expect(markdown.contains("Speaker 2: from the mic"))
+        #expect(markdown.contains("Alice: from the app"))
+        #expect(!markdown.contains("Alice: from the mic"))
+        #expect(!markdown.contains("speaker_mic_0"))
+        let transcript = try #require(recording.transcript)
+        #expect(transcript.segments.map(\.speakerId) == ["speaker_mic_0", "Alice"])
     }
 
     @Test
@@ -1622,9 +1665,12 @@ private actor ScriptedLiveTranscriber: LiveTranscribing {
         if results != nil { return }
         await withCheckedContinuation { startWaiter = $0 }
     }
-    func emit(_ text: String, speakerId: String = "S1") {
-        results?.yield(TranscriptSegment(speakerId: speakerId, text: text, startTime: emitted, endTime: emitted + 1, audioSource: .mic, isFinal: true))
+    @discardableResult
+    func emit(_ text: String, speakerId: String = "S1", source: AudioSource = .mic) -> UUID {
+        let segment = TranscriptSegment(speakerId: speakerId, text: text, startTime: emitted, endTime: emitted + 1, audioSource: source, isFinal: true)
+        results?.yield(segment)
         emitted += 1
+        return segment.id
     }
     func setStopResult(_ result: LiveSessionResult) {
         stopResult = result

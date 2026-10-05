@@ -553,16 +553,11 @@ final class NewSessionViewModel {
             return nil
         }
 
-        relabelPersistedSegments(of: session, using: liveResult.speakerIDRemap)
+        relabelPersistedSegments(of: session, using: liveResult.finalSpeakerIDs)
         backfillPersistedSegments(liveResult.segments, to: session, context: context)
-        if !liveResult.speakerIDRemap.isEmpty {
-            rewriteTranscriptMarkdown(for: session)
-        }
-        saveLiveTranscript(
-            to: session,
-            speakerEmbeddings: liveResult.speakerEmbeddings,
-            speakerProfileIDs: liveResult.enrolledProfileIDs
-        )
+        saveLiveTranscript(to: session, speakerEmbeddings: liveResult.speakerEmbeddings)
+        // The saved transcript now names its speakers; the file switches from sources to them.
+        rewriteTranscriptMarkdown(for: session)
         // The flush: every segment a failed save left pending is written here, or reported.
         do {
             try saveContext(context)
@@ -576,12 +571,12 @@ final class NewSessionViewModel {
         return session
     }
 
-    /// Moves segments persisted during recording under the speaker's bound profile name, for
-    /// speakers the live service recognized only partway through the session.
-    private func relabelPersistedSegments(of session: RecordingSession, using remap: [String: String]) {
-        guard !remap.isEmpty else { return }
+    /// Gives every segment persisted during recording its speaker's final ID, matched by segment
+    /// ID. A name shown during recording can have belonged to another speaker, so names are never
+    /// used to find segments.
+    private func relabelPersistedSegments(of session: RecordingSession, using finalSpeakerIDs: [UUID: String]) {
         for segment in session.transcriptSegments {
-            if let speakerId = remap[segment.speakerId] {
+            if let speakerId = finalSpeakerIDs[segment.id], speakerId != segment.speakerId {
                 segment.speakerId = speakerId
             }
         }
@@ -589,8 +584,7 @@ final class NewSessionViewModel {
 
     private func saveLiveTranscript(
         to session: RecordingSession,
-        speakerEmbeddings: [String: [Float]],
-        speakerProfileIDs: [String: UUID]
+        speakerEmbeddings: [String: [Float]]
     ) {
         let finalSegments = session.transcriptSegments
             .filter(\.isFinal)
@@ -616,7 +610,8 @@ final class NewSessionViewModel {
             let transcript = Transcript(
                 fullText: "",
                 segments: [],
-                speakers: []
+                speakers: [],
+                voiceprintSpace: VoiceprintSpace.current
             )
             session.transcript = transcript
             session.status = .done
@@ -637,13 +632,12 @@ final class NewSessionViewModel {
 
         let presentSpeakerIds = Set(speakerIds)
         let embeddings = speakerEmbeddings.filter { presentSpeakerIds.contains($0.key) }
-        let profileIDs = speakerProfileIDs.filter { presentSpeakerIds.contains($0.key) }
         let transcript = Transcript(
             fullText: Transcript.fullText(joining: finalSegments),
             segments: finalSegments,
             speakers: speakers,
             speakerEmbeddings: embeddings.isEmpty ? nil : embeddings,
-            speakerProfileIDs: profileIDs.isEmpty ? nil : profileIDs
+            voiceprintSpace: VoiceprintSpace.current
         )
         session.transcript = transcript
         session.status = .done

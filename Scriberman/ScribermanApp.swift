@@ -78,6 +78,22 @@ struct ScribermanApp: App {
         }
     }
 
+    /// Empties speaker memory when its voiceprint space changed, before anything can transcribe.
+    /// Profiles from another space cannot be compared with new voiceprints. A failure leaves the
+    /// marker unset, so the reset is retried at the next launch; matching skips other spaces
+    /// meanwhile.
+    private static func resetSpeakerMemoryIfVoiceprintSpaceChanged(in context: ModelContext) {
+        let logger = Logger(subsystem: "Scriberman", category: "ScribermanApp")
+        do {
+            let removed = try SpeakerProfile.resetIfVoiceprintSpaceChanged(in: context, userDefaults: .standard)
+            if removed > 0 {
+                logger.notice("Voiceprint space changed: removed \(removed, privacy: .public) speaker profile(s).")
+            }
+        } catch {
+            logger.error("Resetting speaker memory failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -93,6 +109,7 @@ struct ScribermanApp: App {
                     ScribermanApp.prepareTags(in: modelContainer.mainContext)
                     ScribermanApp.prepareSearchText(in: modelContainer.mainContext)
                     ScribermanApp.removeOrphanedTranscriptSegments(in: modelContainer.mainContext)
+                    ScribermanApp.resetSpeakerMemoryIfVoiceprintSpaceChanged(in: modelContainer.mainContext)
                     await appState.bootstrapWorkspace()
                 }
                 .onChange(of: appState.dictationService.state) { _, _ in

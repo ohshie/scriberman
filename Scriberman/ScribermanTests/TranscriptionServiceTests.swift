@@ -232,6 +232,7 @@ struct TranscriptionServiceTests {
 
         #expect(transcript.segments.isEmpty)
         #expect(transcript.fullText.isEmpty)
+        #expect(transcript.voiceprintSpace == VoiceprintSpace.current)
         let captured = await recorder.captured
         #expect(captured.count == 2)
         #expect(captured.contains { $0 == [1.0, 2.0] })
@@ -360,8 +361,12 @@ enum OfflineLabelFixture {
                                 endTimeSeconds: 1,
                                 qualityScore: 1
                             )],
-                            speakerDatabase: [cluster.id: cluster.embedding]
+                            speakerDatabase: nil
                         )
+                    },
+                    extractVoiceprints: { samples, _ in
+                        let cluster = samples.first == appSample ? (app ?? mic) : mic
+                        return [cluster.id: SpeakerVoiceprintExtractor.Voiceprint(embedding: cluster.embedding, speechSeconds: 5)]
                     }
                 )
             }

@@ -40,8 +40,8 @@ actor SpeakerEmbeddingStore {
 
     /// The stored profile `matcher` picks for `embedding`, or `nil` when none qualifies.
     ///
-    /// Delegates to `SpeakerMatcher`, so live and offline transcription apply the same boundary
-    /// and tie rule.
+    /// Delegates to `SpeakerMatcher`, so live and offline transcription apply the same threshold
+    /// and margin.
     func findBestMatchSnapshot(
         embedding: [Float],
         matcher: SpeakerMatcher = SpeakerMatcher()
@@ -52,29 +52,37 @@ actor SpeakerEmbeddingStore {
 
     // MARK: - Enrollment
 
-    /// Creates a profile for a voice no existing profile matched, labelled `Speaker N` with N one
-    /// more than the highest number in any existing `Speaker <number>` label.
-    ///
-    /// Always inserts. Automatic enrollment used to update any profile with the generated name,
-    /// so a numbering gap after a deletion overwrote an existing speaker's voiceprint.
-    @discardableResult
-    func enrollNewSpeaker(embedding: [Float]) throws -> UUID {
-        let label = Self.nextAutomaticLabel(after: try fetchAll().map(\.name))
-        return try insertProfile(name: label, embedding: embedding)
-    }
-
     /// Creates a profile with a name the user chose.
     @discardableResult
     func enrollNamedSpeaker(name: String, embedding: [Float]) throws -> UUID {
         try insertProfile(name: name, embedding: embedding)
     }
 
-    /// Replaces one profile's voiceprint and marks it seen now.
-    func updateEmbedding(profileID: UUID, embedding: [Float]) throws {
-        guard let profile = try SpeakerProfile.fetch(id: profileID, in: modelContext) else { return }
-        profile.embedding = embedding
+    /// Teaches the profile named `name` (case-insensitive) one more voiceprint, or creates it.
+    ///
+    /// The stored vector is the unnormalised mean of every voiceprint folded in:
+    /// `mean' = (mean · n + v) / (n + 1)`. Keeping the mean unnormalised makes the result exact and
+    /// independent of the order of folds; matching uses cosine distance, which ignores length.
+    /// - Returns: the profile's ID.
+    @discardableResult
+    func foldVoiceprint(name: String, embedding: [Float]) throws -> UUID {
+        let target = name.lowercased()
+        guard let profile = try fetchAll().first(where: { $0.name.lowercased() == target }) else {
+            return try insertProfile(name: name, embedding: embedding)
+        }
+        let count = Float(max(profile.sampleCount, 1))
+        if profile.voiceprintSpace == VoiceprintSpace.current, profile.embedding.count == embedding.count {
+            profile.embedding = zip(profile.embedding, embedding).map { ($0 * count + $1) / (count + 1) }
+            profile.sampleCount = Int(count) + 1
+        } else {
+            // A voiceprint from another space cannot be averaged with this one.
+            profile.embedding = embedding
+            profile.voiceprintSpace = VoiceprintSpace.current
+            profile.sampleCount = 1
+        }
         profile.lastSeen = .now
         try modelContext.save()
+        return profile.id
     }
 
     /// Gives one profile a new name; its voiceprint is unchanged.
@@ -89,17 +97,6 @@ actor SpeakerEmbeddingStore {
     func profileID(forName name: String, excluding excludedID: UUID? = nil) throws -> UUID? {
         let target = name.lowercased()
         return try fetchAll().first { $0.name.lowercased() == target && $0.id != excludedID }?.id
-    }
-
-    /// `Speaker <max N + 1>` over the labels of the form `Speaker <number>`, or `Speaker 1`.
-    static func nextAutomaticLabel(after labels: [String]) -> String {
-        let highest = labels.compactMap { label -> Int? in
-            guard label.hasPrefix("Speaker ") else { return nil }
-            let number = label.dropFirst("Speaker ".count)
-            guard !number.isEmpty, number.allSatisfy(\.isASCII), number.allSatisfy(\.isNumber) else { return nil }
-            return Int(number)
-        }.max() ?? 0
-        return "Speaker \(highest + 1)"
     }
 
     // MARK: - Private
