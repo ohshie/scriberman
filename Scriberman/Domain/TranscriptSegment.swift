@@ -103,6 +103,8 @@ struct TranscriptBlock: Identifiable {
     let startTime: Float
     let endTime: Float
     let text: String
+    /// The IDs of the segments joined into this block, in order.
+    let segmentIDs: [UUID]
 
     init(
         id: UUID = UUID(),
@@ -110,7 +112,8 @@ struct TranscriptBlock: Identifiable {
         audioSource: AudioSource,
         startTime: Float,
         endTime: Float,
-        text: String
+        text: String,
+        segmentIDs: [UUID] = []
     ) {
         self.id = id
         self.speaker = speaker
@@ -118,5 +121,6 @@ struct TranscriptBlock: Identifiable {
         self.startTime = startTime
         self.endTime = endTime
         self.text = text
+        self.segmentIDs = segmentIDs
     }
 }

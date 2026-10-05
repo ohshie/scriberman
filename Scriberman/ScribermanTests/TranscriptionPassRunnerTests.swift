@@ -162,7 +162,7 @@ struct TranscriptionPassRunnerTests {
         let store = SpeakerEmbeddingStore(modelContainer: modelContainer)
 
         let embedding = normalizedEmbedding(length: 192, activeIndex: 0)
-        try await store.enrollNamedSpeaker(name: "Alice", embedding: embedding)
+        try await store.teach(name: "Alice", voiceprint: embedding)
 
         let runner = TranscriptionPassRunner(
             speakerEmbeddingStore: store,
@@ -278,7 +278,7 @@ struct TranscriptionPassRunnerTests {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let store = SpeakerEmbeddingStore(modelContainer: modelContainer)
-        try await store.enrollNamedSpeaker(name: "Alice", embedding: normalizedEmbedding(length: 8, activeIndex: 0))
+        try await store.teach(name: "Alice", voiceprint: normalizedEmbedding(length: 8, activeIndex: 0))
         let ranges = RangeRecorder()
         let runner = clusterRunner(
             store: store,
@@ -304,7 +304,7 @@ struct TranscriptionPassRunnerTests {
         )
         let store = SpeakerEmbeddingStore(modelContainer: modelContainer)
         let alice = normalizedEmbedding(length: 8, activeIndex: 0)
-        try await store.enrollNamedSpeaker(name: "Alice", embedding: alice)
+        try await store.teach(name: "Alice", voiceprint: alice)
         var nearer = alice
         nearer[1] = 0.2
         var farther = alice

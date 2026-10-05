@@ -11,13 +11,16 @@ enum VoiceprintSpace {
 final class SpeakerProfile {
     @Attribute(.unique) var id: UUID
     var name: String
-    /// The unnormalised mean of the voiceprints folded into this profile.
+    /// The weighted mean of `voiceprints`, kept as a cache so matching never faults the
+    /// voiceprints and an older build that ignores them still matches correctly.
     var embedding: [Float]
     var lastSeen: Date
     /// The voiceprint space `embedding` belongs to. Rows stored before spaces existed read `""`.
     var voiceprintSpace: String = ""
-    /// How many voiceprints `embedding` is the mean of.
+    /// The sum of the voiceprints' weights, kept as a cache with `embedding`.
     var sampleCount: Int = 1
+    @Relationship(deleteRule: .cascade, inverse: \SpeakerVoiceprint.profile)
+    var voiceprints: [SpeakerVoiceprint] = []
 
     init(
         id: UUID = UUID(),
@@ -53,6 +56,24 @@ extension SpeakerProfile {
         }
         try context.save()
         userDefaults.set(VoiceprintSpace.current, forKey: voiceprintSpaceMarkerKey)
+        return profiles.count
+    }
+
+    /// Gives each profile that has no voiceprints one source-less voiceprint: its stored mean,
+    /// weighted by its sample count. The cached mean and count do not change, so matching does
+    /// not either. Idempotent, so it needs no marker.
+    /// - Returns: the number of profiles migrated.
+    @discardableResult
+    static func migrateToVoiceprintLists(in context: ModelContext) throws -> Int {
+        let profiles = try context.fetch(FetchDescriptor<SpeakerProfile>()).filter { $0.voiceprints.isEmpty }
+        for profile in profiles {
+            let voiceprint = SpeakerVoiceprint(embedding: profile.embedding, weight: max(profile.sampleCount, 1))
+            context.insert(voiceprint)
+            profile.voiceprints.append(voiceprint)
+        }
+        if !profiles.isEmpty {
+            try context.save()
+        }
         return profiles.count
     }
 

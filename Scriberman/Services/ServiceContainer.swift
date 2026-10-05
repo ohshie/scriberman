@@ -87,7 +87,7 @@ struct ServiceContainer {
 
     private static func defaultModelContainer() -> ModelContainer {
         do {
-            return try ModelContainer(for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self, SpeakerProfile.self, RecordingTag.self)
+            return try ModelContainer(for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self, SpeakerProfile.self, SpeakerVoiceprint.self, RecordingTag.self)
         } catch {
             fatalError("Failed to initialize SwiftData container: \(error.localizedDescription)")
         }
