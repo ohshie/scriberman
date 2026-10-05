@@ -13,12 +13,10 @@ struct LiveTranscriptionPipelineSettingsTests {
         #expect(d.vadMinSpeechDuration == 0.30)
         #expect(d.asrConfidenceGate == 0.0)
         #expect(d.asrAmplitudeGate == 0.0)
-        #expect(d.speakerSimilarityThreshold == 0.65)
-        #expect(d.minSilenceGap == 0.50)
     }
 
     @Test
-    func settingsViewModelRoundTripAllSixKnobs() {
+    func settingsViewModelRoundTripAllFourKnobs() {
         let suiteName = "LiveTranscriptionPipelineSettingsTests.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
@@ -29,8 +27,6 @@ struct LiveTranscriptionPipelineSettingsTests {
         vm.vadMinSpeechDuration = 0.75
         vm.asrConfidenceGate = 0.40
         vm.asrAmplitudeGate = 0.05
-        vm.speakerThreshold = 0.80
-        vm.minSilenceGap = 1.2
 
         let vm2 = makeViewModel(userDefaults: userDefaults)
 
@@ -38,12 +34,10 @@ struct LiveTranscriptionPipelineSettingsTests {
         #expect(vm2.vadMinSpeechDuration == 0.75)
         #expect(vm2.asrConfidenceGate == 0.40)
         #expect(vm2.asrAmplitudeGate == 0.05)
-        #expect(vm2.speakerThreshold == 0.80)
-        #expect(vm2.minSilenceGap == 1.2)
     }
 
     @Test
-    func pipelineSettingsAssemblesAllSixKnobs() {
+    func pipelineSettingsAssemblesAllFourKnobs() {
         let suiteName = "LiveTranscriptionPipelineSettingsTests.assembly.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
@@ -53,16 +47,12 @@ struct LiveTranscriptionPipelineSettingsTests {
         vm.vadMinSpeechDuration = 0.50
         vm.asrConfidenceGate = 0.30
         vm.asrAmplitudeGate = 0.02
-        vm.speakerThreshold = 0.75
-        vm.minSilenceGap = 0.80
 
         let settings = vm.pipelineSettings
         #expect(settings.vadThreshold == 0.90)
         #expect(settings.vadMinSpeechDuration == 0.50)
         #expect(settings.asrConfidenceGate == 0.30)
         #expect(settings.asrAmplitudeGate == 0.02)
-        #expect(settings.speakerSimilarityThreshold == 0.75)
-        #expect(settings.minSilenceGap == 0.80)
     }
 
     @Test
@@ -78,19 +68,35 @@ struct LiveTranscriptionPipelineSettingsTests {
         #expect(vm.vadMinSpeechDuration == d.vadMinSpeechDuration)
         #expect(vm.asrConfidenceGate == d.asrConfidenceGate)
         #expect(vm.asrAmplitudeGate == d.asrAmplitudeGate)
-        #expect(vm.speakerThreshold == d.speakerSimilarityThreshold)
-        #expect(vm.minSilenceGap == d.minSilenceGap)
+    }
+
+    /// Spec scenario "Stored clustering values are ignored".
+    @Test
+    func storedClusteringValuesAreIgnored() {
+        let suiteName = "LiveTranscriptionPipelineSettingsTests.clustering.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        userDefaults.set(0.75, forKey: "speakerThreshold")
+        userDefaults.set(1.2, forKey: "minSilenceGap")
+
+        let vm = makeViewModel(userDefaults: userDefaults)
+        vm.resetAllPipelineSettingsToDefaults()
+
+        let d = LiveTranscriptionPipelineSettings.defaults
+        #expect(vm.pipelineSettings.vadThreshold == d.vadThreshold)
+        #expect(vm.pipelineSettings.vadMinSpeechDuration == d.vadMinSpeechDuration)
+        // Left in place, unread and unwritten.
+        #expect(userDefaults.double(forKey: "speakerThreshold") == 0.75)
+        #expect(userDefaults.double(forKey: "minSilenceGap") == 1.2)
     }
 
     @Test
-    func resetToDefaultsRestoresAllSixKnobs() {
+    func resetToDefaultsRestoresAllFourKnobs() {
         var settings = LiveTranscriptionPipelineSettings(
             vadThreshold: 0.99,
             vadMinSpeechDuration: 1.5,
             asrConfidenceGate: 0.7,
-            asrAmplitudeGate: 0.05,
-            speakerSimilarityThreshold: 0.3,
-            minSilenceGap: 1.9
+            asrAmplitudeGate: 0.05
         )
         settings.resetToDefaults()
         let d = LiveTranscriptionPipelineSettings.defaults
@@ -98,12 +104,10 @@ struct LiveTranscriptionPipelineSettingsTests {
         #expect(settings.vadMinSpeechDuration == d.vadMinSpeechDuration)
         #expect(settings.asrConfidenceGate == d.asrConfidenceGate)
         #expect(settings.asrAmplitudeGate == d.asrAmplitudeGate)
-        #expect(settings.speakerSimilarityThreshold == d.speakerSimilarityThreshold)
-        #expect(settings.minSilenceGap == d.minSilenceGap)
     }
 
     @Test
-    func resetAllPipelineSettingsToDefaultsResetsAllSevenKnobs() {
+    func resetAllPipelineSettingsToDefaultsResetsAllFiveKnobs() {
         let suiteName = "LiveTranscriptionPipelineSettingsTests.resetAll.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
         let audioUD = UserDefaults(suiteName: suiteName + ".audio")!
@@ -119,8 +123,6 @@ struct LiveTranscriptionPipelineSettingsTests {
         vm.vadMinSpeechDuration = 1.0
         vm.asrConfidenceGate = 0.5
         vm.asrAmplitudeGate = 0.03
-        vm.speakerThreshold = 0.9
-        vm.minSilenceGap = 1.5
         audioSettings.voiceProcessingEnabled = true
 
         vm.resetAllPipelineSettingsToDefaults()
@@ -130,8 +132,6 @@ struct LiveTranscriptionPipelineSettingsTests {
         #expect(vm.vadMinSpeechDuration == d.vadMinSpeechDuration)
         #expect(vm.asrConfidenceGate == d.asrConfidenceGate)
         #expect(vm.asrAmplitudeGate == d.asrAmplitudeGate)
-        #expect(vm.speakerThreshold == d.speakerSimilarityThreshold)
-        #expect(vm.minSilenceGap == d.minSilenceGap)
         #expect(audioSettings.voiceProcessingEnabled == false)
 
         #expect(userDefaults.double(forKey: "vadThreshold") == d.vadThreshold)

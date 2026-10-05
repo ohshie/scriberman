@@ -227,6 +227,41 @@ struct NewSessionViewModelTests {
         #expect(transcript.segments.map(\.speakerId) == ["speaker_mic_0", "Alice"])
     }
 
+    /// Spec scenario "Turn diarizer failed": the source's unknown speaker is saved as `Speaker N`,
+    /// with no voiceprint.
+    @Test
+    func unknownSpeakerIsSavedAsSpeakerN() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("live-unknown-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let saves = SaveScript(failing: [])
+        let (fixture, transcriber, recording) = try await startScriptedRecording(
+            saves: saves,
+            micAudioURL: directory.appendingPathComponent("mic.wav").path
+        )
+        defer { fixture.cleanup() }
+
+        let app = await transcriber.emit("from the app", speakerId: "Alice", source: .app)
+        let mic = await transcriber.emit("from the mic", speakerId: "speaker_mic_unknown", source: .mic)
+        await waitForSaves(saves, count: 2)
+        let appFinal = TranscriptSegment(id: app, speakerId: "Alice", text: "from the app", startTime: 0, endTime: 1, audioSource: .app, isFinal: true)
+        let micFinal = TranscriptSegment(id: mic, speakerId: "speaker_mic_unknown", text: "from the mic", startTime: 1, endTime: 2, audioSource: .mic, isFinal: true)
+        await transcriber.setStopResult(LiveSessionResult(
+            segments: [appFinal, micFinal],
+            finalSpeakerIDs: [app: "Alice"],
+            speakerEmbeddings: ["Alice": [0.1, 0.2]]
+        ))
+
+        _ = await fixture.viewModel.stopRecording(context: fixture.context)
+
+        let markdown = try String(contentsOf: directory.appendingPathComponent("transcript.md"), encoding: .utf8)
+        #expect(markdown.contains("Speaker 2: from the mic"))
+        #expect(!markdown.contains("speaker_mic_unknown"))
+        let transcript = try #require(recording.transcript)
+        #expect(transcript.speakers.map(\.label) == ["Alice", "Speaker 2"])
+        #expect(transcript.speakerEmbeddings?["speaker_mic_unknown"] == nil)
+    }
+
     @Test
     func aSaveFailureThatOutlastsStopIsReported() async throws {
         let saves = SaveScript(failingFrom: 1)
