@@ -37,12 +37,6 @@ final class SettingsViewModel {
     var asrAmplitudeGate: Double {
         didSet { userDefaults.set(asrAmplitudeGate, forKey: "asrAmplitudeGate") }
     }
-    var speakerThreshold: Double {
-        didSet { userDefaults.set(speakerThreshold, forKey: "speakerThreshold") }
-    }
-    var minSilenceGap: Double {
-        didSet { userDefaults.set(minSilenceGap, forKey: "minSilenceGap") }
-    }
     var cleanupRules: [TranscriptCleanupRule] {
         didSet {
             guard let data = try? JSONEncoder().encode(cleanupRules) else { return }
@@ -58,8 +52,6 @@ final class SettingsViewModel {
             vadMinSpeechDuration: vadMinSpeechDuration,
             asrConfidenceGate: asrConfidenceGate,
             asrAmplitudeGate: asrAmplitudeGate,
-            speakerSimilarityThreshold: speakerThreshold,
-            minSilenceGap: minSilenceGap,
             cleanupRules: cleanupRules
         )
     }
@@ -90,12 +82,6 @@ final class SettingsViewModel {
 
         let asrAmplitudeGateStored = userDefaults.object(forKey: "asrAmplitudeGate") as? Double
         self.asrAmplitudeGate = asrAmplitudeGateStored ?? LiveTranscriptionPipelineSettings.defaults.asrAmplitudeGate
-
-        let threshold = userDefaults.double(forKey: "speakerThreshold")
-        self.speakerThreshold = threshold == 0 ? LiveTranscriptionPipelineSettings.defaults.speakerSimilarityThreshold : threshold
-
-        let gap = userDefaults.double(forKey: "minSilenceGap")
-        self.minSilenceGap = gap == 0 ? LiveTranscriptionPipelineSettings.defaults.minSilenceGap : gap
 
         // Absent key or undecodable data falls back to no rules (design D5).
         if let rulesData = userDefaults.data(forKey: Self.cleanupRulesKey),
@@ -241,8 +227,6 @@ final class SettingsViewModel {
         vadMinSpeechDuration = d.vadMinSpeechDuration
         asrConfidenceGate = d.asrConfidenceGate
         asrAmplitudeGate = d.asrAmplitudeGate
-        speakerThreshold = d.speakerSimilarityThreshold
-        minSilenceGap = d.minSilenceGap
         appAudioSettings.resetToDefaults()
     }
 

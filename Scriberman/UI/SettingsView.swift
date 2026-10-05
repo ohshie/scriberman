@@ -284,48 +284,6 @@ struct SettingsView: View {
                         }
                     }
 
-                    Section("Diarization Settings") {
-                        VStack(alignment: .leading) {
-                            HStack {
-                                Text("Speaker Similarity")
-                                Spacer()
-                                Text(String(format: "%.2f", bindableViewModel.speakerThreshold))
-                                    .monospacedDigit()
-                                Button {
-                                    viewModel.speakerThreshold = LiveTranscriptionPipelineSettings.defaults.speakerSimilarityThreshold
-                                } label: {
-                                    Image(systemName: "arrow.counterclockwise")
-                                }
-                                .buttonStyle(.borderless)
-                                .accessibilityLabel("Reset to default")
-                            }
-                            Slider(value: $bindableViewModel.speakerThreshold, in: 0.1...0.9, step: 0.01)
-                            Text("Lower values are stricter, higher values group more aggressively. Default: 0.65.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        VStack(alignment: .leading) {
-                            HStack {
-                                Text("Min Silence Gap")
-                                Spacer()
-                                Text(String(format: "%.2fs", bindableViewModel.minSilenceGap))
-                                    .monospacedDigit()
-                                Button {
-                                    viewModel.minSilenceGap = LiveTranscriptionPipelineSettings.defaults.minSilenceGap
-                                } label: {
-                                    Image(systemName: "arrow.counterclockwise")
-                                }
-                                .buttonStyle(.borderless)
-                                .accessibilityLabel("Reset to default")
-                            }
-                            Slider(value: $bindableViewModel.minSilenceGap, in: 0.1...2.0, step: 0.1)
-                            Text("Minimum duration of silence between speaker turns. Default: 0.50s.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
                     Section("Transcript Cleanup") {
                         ForEach($bindableViewModel.cleanupRules) { $rule in
                             HStack {
