@@ -96,4 +96,30 @@ struct TranscriptCodableTests {
         let decoded = try JSONDecoder().decode(Transcript.self, from: JSONEncoder().encode(transcript))
         #expect(decoded.speakerProfileIDs == ["S1": profileID])
     }
+
+    @Test
+    func oldPayloadDecodesToListsOfOne() throws {
+        let data = Data("""
+        {"fullText":"hello","segments":[],"speakers":[],"speakerEmbeddings":{"S1":[0.5,0.5],"S2":[1,0]}}
+        """.utf8)
+        let transcript = try JSONDecoder().decode(Transcript.self, from: data)
+        #expect(transcript.speakerVoiceprints == ["S1": [[0.5, 0.5]], "S2": [[1, 0]]])
+    }
+
+    @Test
+    func voiceprintListsRoundTrip() throws {
+        var transcript = Transcript(fullText: "", segments: [], speakers: [], voiceprintSpace: VoiceprintSpace.current)
+        transcript.speakerVoiceprints = ["S1": [[1, 0], [0, 1]], "S2": [[0.5, 0.5]]]
+        let decoded = try JSONDecoder().decode(Transcript.self, from: JSONEncoder().encode(transcript))
+        #expect(decoded == transcript)
+    }
+
+    @Test
+    func oldKeyHoldsEachListsMean() throws {
+        var transcript = Transcript(fullText: "", segments: [], speakers: [])
+        transcript.speakerVoiceprints = ["S1": [[1, 0], [0, 1]], "S2": [[0.5, 0.5]]]
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(transcript)) as? [String: Any]
+        let old = try #require(json?["speakerEmbeddings"] as? [String: [Double]])
+        #expect(old == ["S1": [0.5, 0.5], "S2": [0.5, 0.5]])
+    }
 }

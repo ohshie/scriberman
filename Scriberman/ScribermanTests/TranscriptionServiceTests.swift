@@ -323,7 +323,7 @@ enum OfflineLabelFixture {
         )
         let store = SpeakerEmbeddingStore(modelContainer: container)
         for profile in profiles {
-            try await store.enrollNamedSpeaker(name: profile.name, embedding: profile.embedding)
+            try await store.teach(name: profile.name, voiceprint: profile.embedding)
         }
         return store
     }

@@ -80,6 +80,7 @@ final class AudioTrimServiceTests {
         let trimmed = AudioTrimService.trimmedTranscript(transcript, end: 60)
 
         #expect(trimmed.speakerEmbeddings == ["A": [0.5]])
+        #expect(trimmed.speakerVoiceprints == ["A": [[0.5]]])
         #expect(trimmed.speakerProfileIDs == ["A": profileID])
         #expect(trimmed.voiceprintSpace == VoiceprintSpace.current)
         #expect(trimmed.segments.map(\.text) == ["Hello"])

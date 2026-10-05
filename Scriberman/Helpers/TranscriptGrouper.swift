@@ -10,18 +10,7 @@ enum TranscriptGrouper {
         // Every transcript recorded before this was written gave all its speakers one colour, and a
         // conversation drawn in a single colour spends the dot and the coloured label on nothing.
         // Deriving at display time fixes those without rewriting anything on disk.
-        let speakersByID = Dictionary(
-            uniqueKeysWithValues: transcript.speakers.enumerated().map { index, speaker in
-                (
-                    speaker.id,
-                    TranscriptSpeaker(
-                        id: speaker.id,
-                        label: speaker.label,
-                        colorHex: SpeakerPalette.colorHex(at: index)
-                    )
-                )
-            }
-        )
+        let speakersByID = Dictionary(uniqueKeysWithValues: displaySpeakers(of: transcript).map { ($0.id, $0) })
         var blocks: [TranscriptBlock] = []
 
         for segment in transcript.segments {
@@ -45,7 +34,8 @@ enum TranscriptGrouper {
                     audioSource: lastBlock.audioSource,
                     startTime: lastBlock.startTime,
                     endTime: segment.endTime,
-                    text: mergedText
+                    text: mergedText,
+                    segmentIDs: lastBlock.segmentIDs + [segment.id]
                 )
                 blocks[blocks.count - 1] = lastBlock
             } else {
@@ -56,13 +46,22 @@ enum TranscriptGrouper {
                         audioSource: segment.audioSource,
                         startTime: segment.startTime,
                         endTime: segment.endTime,
-                        text: normalizedText
+                        text: normalizedText,
+                        segmentIDs: [segment.id]
                     )
                 )
             }
         }
 
         return blocks
+    }
+
+    /// The transcript's speakers with the colours they are drawn in: each from its position in the
+    /// speaker list.
+    static func displaySpeakers(of transcript: Transcript) -> [TranscriptSpeaker] {
+        transcript.speakers.enumerated().map { index, speaker in
+            TranscriptSpeaker(id: speaker.id, label: speaker.label, colorHex: SpeakerPalette.colorHex(at: index))
+        }
     }
 
     private static func normalizeText(_ text: String) -> String {

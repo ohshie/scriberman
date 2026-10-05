@@ -81,6 +81,9 @@ struct TranscriptRowView<Identity: View, Content: View>: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            // Above the text below it, so a list the identity opens, such as rename suggestions,
+            // is drawn over the passage rather than under it.
+            .zIndex(1)
 
             content
         }
@@ -101,8 +104,13 @@ struct TranscriptRowView<Identity: View, Content: View>: View {
     }
 
     private func copy() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(copyText, forType: .string)
+        copyTranscriptText(copyText)
     }
+}
+
+/// Puts transcript text on the general pasteboard, as a block's copy control does.
+func copyTranscriptText(_ copyText: String) {
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    pasteboard.setString(copyText, forType: .string)
 }

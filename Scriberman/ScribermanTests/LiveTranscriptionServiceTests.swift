@@ -38,7 +38,7 @@ struct LiveTranscriptionServiceTests {
     func stopLeavesExistingProfilesUntouched() async throws {
         let store = try makeStore()
         let speaker3Embedding = Array(repeating: Float(0.3), count: 256)
-        let speaker3 = try await store.enrollNamedSpeaker(name: "Speaker 3", embedding: speaker3Embedding)
+        let speaker3 = try await store.teach(name: "Speaker 3", voiceprint: speaker3Embedding)
         let service = LiveTranscriptionService(speakerEmbeddingStore: store)
 
         var unrelated = Array(repeating: Float(0), count: 256)
@@ -56,7 +56,7 @@ struct LiveTranscriptionServiceTests {
         let store = try makeStore()
         let oldDate = Date(timeIntervalSinceNow: -3600)
         let aliceEmbedding = Array(repeating: Float(0.1), count: 256)
-        try await store.enrollNamedSpeaker(name: "Alice", embedding: aliceEmbedding)
+        try await store.teach(name: "Alice", voiceprint: aliceEmbedding)
         let aliceID = try #require(try await store.fetchAllSnapshots().first { $0.name == "Alice" }?.id)
         let service = LiveTranscriptionService(speakerEmbeddingStore: store)
 
@@ -1452,7 +1452,7 @@ struct LiveTranscriptionServiceTests {
     @Test
     func stopRelabelsTurnSpeakerSegmentsEmittedBeforeTheMatch() async throws {
         let store = try makeStore()
-        try await store.enrollNamedSpeaker(name: "Alice", embedding: voice(0))
+        try await store.teach(name: "Alice", voiceprint: voice(0))
         // Speaker 0 throughout both 2.56s buffers, so 2.56s of qualifying speech in each.
         let timeline = try makeTurnTimeline(frameSpeakers: Array(repeating: 0, count: 60), numSpeakers: 2)
         let service = await makeAttributionService(texts: ["before the match", "after the match"], timeline: timeline, store: store)
@@ -1477,7 +1477,7 @@ struct LiveTranscriptionServiceTests {
     @Test
     func profileReassignedBetweenSpeakersRelabelsBySegment() async throws {
         let store = try makeStore()
-        let bobID = try await store.enrollNamedSpeaker(name: "Bob", embedding: voice(1))
+        let bobID = try await store.teach(name: "Bob", voiceprint: voice(1))
         // Speaker 0 for the first buffer, speaker 1 for the second.
         let timeline = try makeTurnTimeline(frameSpeakers: Array(repeating: 0, count: 26) + Array(repeating: 1, count: 26), numSpeakers: 2)
         let service = await makeAttributionService(texts: ["zero speaks", "one speaks"], timeline: timeline, store: store)
@@ -1503,7 +1503,7 @@ struct LiveTranscriptionServiceTests {
     @Test
     func matchLostBeforeStopFallsBackToTheSessionLocalID() async throws {
         let store = try makeStore()
-        let bobID = try await store.enrollNamedSpeaker(name: "Bob", embedding: voice(1))
+        let bobID = try await store.teach(name: "Bob", voiceprint: voice(1))
         let timeline = try makeTurnTimeline(frameSpeakers: Array(repeating: 1, count: 30), numSpeakers: 2)
         let service = await makeAttributionService(text: "shown as bob", timeline: timeline, store: store)
         await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 1, identity: identity(voice(3), boundTo: (bobID, "Bob")))
@@ -1519,7 +1519,7 @@ struct LiveTranscriptionServiceTests {
     @Test
     func deletingAllProfilesMidRecordingKeepsLabelsUntilStopAndCreatesNothing() async throws {
         let store = try makeStore()
-        let aliceID = try await store.enrollNamedSpeaker(name: "Alice", embedding: voice(0))
+        let aliceID = try await store.teach(name: "Alice", voiceprint: voice(0))
         let timeline = try makeTurnTimeline(frameSpeakers: Array(repeating: 0, count: 30), numSpeakers: 2)
         let service = await makeAttributionService(text: "after deletion", timeline: timeline, store: store)
         await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: identity(voice(0), boundTo: (aliceID, "Alice")))
@@ -1539,7 +1539,7 @@ struct LiveTranscriptionServiceTests {
     @Test
     func speechAccumulatesAcrossShortBuffers() async throws {
         let store = try makeStore()
-        try await store.enrollNamedSpeaker(name: "Alice", embedding: voice(0))
+        try await store.teach(name: "Alice", voiceprint: voice(0))
         // Speaker 0 at 0–1.6s and 2.1–3.7s; buffers 0–2.048s and 2.048–4.096s. 1.6s per buffer
         // keeps each below 3s alone.
         let timeline = try makeTurnTimeline(
@@ -1569,8 +1569,8 @@ struct LiveTranscriptionServiceTests {
     @Test
     func earlyWrongMatchIsCorrectedAndRelabelledAtStop() async throws {
         let store = try makeStore()
-        try await store.enrollNamedSpeaker(name: "Alice", embedding: voice(0))
-        try await store.enrollNamedSpeaker(name: "Bob", embedding: voice(1))
+        try await store.teach(name: "Alice", voiceprint: voice(0))
+        try await store.teach(name: "Bob", voiceprint: voice(1))
         let timeline = try makeTurnTimeline(frameSpeakers: Array(repeating: 0, count: 130), numSpeakers: 2)
         let service = await makeAttributionService(texts: ["one", "two", "three", "four", "five"], timeline: timeline, store: store)
         // Two buffers sound like Bob, then the voice settles on Alice.
@@ -1619,7 +1619,7 @@ struct LiveTranscriptionServiceTests {
     @Test
     func turnDiarizerFailureSendsLaterBuffersToTheUnknownSpeaker() async throws {
         let store = try makeStore()
-        try await store.enrollNamedSpeaker(name: "Alice", embedding: voice(0))
+        try await store.teach(name: "Alice", voiceprint: voice(0))
         let diarizer = ScriptedTurnDiarizer(numSpeakers: 2, feedResponses: [.failure(TestError.turnDiarizerFailed)])
         let service = await makeAttributionService(texts: ["first", "second"], diarizer: diarizer, store: store)
         let embedder = FakeEmbedder([voice(0)])
@@ -1663,7 +1663,7 @@ struct LiveTranscriptionServiceTests {
     @Test
     func stopLogsOneLinePerIdentity() async throws {
         let store = try makeStore()
-        let aliceID = try await store.enrollNamedSpeaker(name: "Alice", embedding: voice(0))
+        let aliceID = try await store.teach(name: "Alice", voiceprint: voice(0))
         let service = LiveTranscriptionService(speakerEmbeddingStore: store)
         let lines = LogLines()
         await service.setNoticeLogSinkForTesting { lines.append($0) }
@@ -1681,8 +1681,8 @@ struct LiveTranscriptionServiceTests {
     @Test
     func stopReportsVoiceprintsPerFinalSpeakerIDAndEnrollsNothing() async throws {
         let store = try makeStore()
-        try await store.enrollNamedSpeaker(name: "Alice", embedding: voice(0))
-        try await store.enrollNamedSpeaker(name: "Carol", embedding: voice(2))
+        try await store.teach(name: "Alice", voiceprint: voice(0))
+        try await store.teach(name: "Carol", voiceprint: voice(2))
         let service = LiveTranscriptionService(speakerEmbeddingStore: store)
 
         await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: identity(voice(0)))

@@ -20,7 +20,7 @@ struct SpeakerMatchingTests {
     @Test("Match speakers with exact embedding")
     func matchSpeakersExactMatch() async throws {
         let aliceEmbedding: [Float] = Array(repeating: 0.1, count: 192)
-        try await store.enrollNamedSpeaker(name: "Alice", embedding: aliceEmbedding)
+        try await store.teach(name: "Alice", voiceprint: aliceEmbedding)
 
         let diarizationResult = DiarizationResult(
             segments: [],
@@ -34,7 +34,7 @@ struct SpeakerMatchingTests {
     @Test("Match speakers with close embedding within threshold")
     func matchSpeakersCloseMatch() async throws {
         let aliceEmbedding: [Float] = Array(repeating: 0.1, count: 192)
-        try await store.enrollNamedSpeaker(name: "Alice", embedding: aliceEmbedding)
+        try await store.teach(name: "Alice", voiceprint: aliceEmbedding)
 
         var closeEmbedding = aliceEmbedding
         closeEmbedding[0] = 0.11
@@ -50,7 +50,7 @@ struct SpeakerMatchingTests {
     @Test("Do not match speakers with embedding above threshold")
     func matchSpeakersNoMatchAboveThreshold() async throws {
         let aliceEmbedding: [Float] = Array(repeating: 0.1, count: 192)
-        try await store.enrollNamedSpeaker(name: "Alice", embedding: aliceEmbedding)
+        try await store.teach(name: "Alice", voiceprint: aliceEmbedding)
 
         var differentEmbedding: [Float] = Array(repeating: 0.0, count: 192)
         differentEmbedding[0] = 1.0
