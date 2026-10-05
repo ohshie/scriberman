@@ -553,12 +553,11 @@ final class NewSessionViewModel {
             return nil
         }
 
-        let relabelled = relabelPersistedSegments(of: session, using: liveResult.finalSpeakerIDs)
+        relabelPersistedSegments(of: session, using: liveResult.finalSpeakerIDs)
         backfillPersistedSegments(liveResult.segments, to: session, context: context)
-        if relabelled {
-            rewriteTranscriptMarkdown(for: session)
-        }
         saveLiveTranscript(to: session, speakerEmbeddings: liveResult.speakerEmbeddings)
+        // The saved transcript now names its speakers; the file switches from sources to them.
+        rewriteTranscriptMarkdown(for: session)
         // The flush: every segment a failed save left pending is written here, or reported.
         do {
             try saveContext(context)
@@ -575,16 +574,12 @@ final class NewSessionViewModel {
     /// Gives every segment persisted during recording its speaker's final ID, matched by segment
     /// ID. A name shown during recording can have belonged to another speaker, so names are never
     /// used to find segments.
-    /// - Returns: whether any segment changed.
-    private func relabelPersistedSegments(of session: RecordingSession, using finalSpeakerIDs: [UUID: String]) -> Bool {
-        var changed = false
+    private func relabelPersistedSegments(of session: RecordingSession, using finalSpeakerIDs: [UUID: String]) {
         for segment in session.transcriptSegments {
             if let speakerId = finalSpeakerIDs[segment.id], speakerId != segment.speakerId {
                 segment.speakerId = speakerId
-                changed = true
             }
         }
-        return changed
     }
 
     private func saveLiveTranscript(

@@ -87,7 +87,8 @@ struct RecordingTranscriptPersistenceTests {
         let transcriptURL = tmpDir.appendingPathComponent("transcript.md")
         let contents = try String(contentsOf: transcriptURL, encoding: .utf8)
         #expect(contents.hasPrefix("# Transcript\n\n"))
-        #expect(contents.contains("[1.50-3.25] S1: Hello"))
+        #expect(contents.contains("[1.50-3.25] Mic: Hello"))
+        #expect(!contents.contains("S1"))
     }
 
     @Test
@@ -117,7 +118,7 @@ struct RecordingTranscriptPersistenceTests {
 
         let contents = try String(contentsOf: transcriptURL, encoding: .utf8)
         #expect(contents.contains("[0.00-1.00] S1: First line"))
-        #expect(contents.contains("[2.00-4.00] S2: Second line"))
+        #expect(contents.contains("[2.00-4.00] Mic: Second line"))
     }
 
     @Test
@@ -273,5 +274,95 @@ struct RecordingTranscriptPersistenceTests {
         let decoded = try JSONDecoder().decode(Transcript.self, from: JSONEncoder().encode(transcript))
         #expect(decoded == transcript)
         #expect(decoded.voiceprintSpace == VoiceprintSpace.current)
+    }
+
+    // MARK: - transcript.md shows the app's labels
+
+    private func markdownSession() throws -> (RecordingSession, URL, URL) {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let session = RecordingSession(
+            createdAt: .now, duration: 10, micAudioURL: directory.appendingPathComponent("mic.wav").path, title: "T"
+        )
+        return (session, directory, directory.appendingPathComponent("transcript.md"))
+    }
+
+    private func labelledTranscript(firstLabel: String) -> Transcript {
+        Transcript(
+            fullText: "one two",
+            segments: [
+                TranscriptSegment(speakerId: "speaker_mic_0", text: "one", startTime: 0, endTime: 1, audioSource: .mic),
+                TranscriptSegment(speakerId: "Alice", text: "two", startTime: 1, endTime: 2, audioSource: .app)
+            ],
+            speakers: [
+                TranscriptSpeaker(id: "Alice", label: "Alice", colorHex: "#111111"),
+                TranscriptSpeaker(id: "speaker_mic_0", label: firstLabel, colorHex: "#222222")
+            ]
+        )
+    }
+
+    /// Spec scenario "Labels after stop".
+    @Test
+    func testMarkdownUsesTheSavedTranscriptsLabels() throws {
+        let (session, directory, markdownURL) = try markdownSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        session.transcript = labelledTranscript(firstLabel: "Speaker 2")
+
+        rewriteTranscriptMarkdown(for: session)
+
+        let contents = try String(contentsOf: markdownURL, encoding: .utf8)
+        #expect(contents == "# Transcript\n\n[0.00-1.00] Speaker 2: one\n[1.00-2.00] Alice: two\n")
+    }
+
+    /// Spec scenario "Rename rewrites the file".
+    @Test @MainActor
+    func testRenameRewritesTheMarkdown() throws {
+        let (session, directory, markdownURL) = try markdownSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transcript = labelledTranscript(firstLabel: "Speaker 2")
+        session.transcript = transcript
+        rewriteTranscriptMarkdown(for: session)
+
+        _ = TranscriptStudyView.renameSpeaker(id: "speaker_mic_0", to: "Bob", in: transcript, of: session)
+
+        let contents = try String(contentsOf: markdownURL, encoding: .utf8)
+        #expect(contents.contains("Bob: one"))
+        #expect(!contents.contains("Speaker 2"))
+    }
+
+    /// Spec scenario "Retranscript replaces the file": the shown pass is the retranscript.
+    @Test
+    func testMarkdownFollowsTheRetranscript() throws {
+        let (session, directory, markdownURL) = try markdownSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        session.transcript = labelledTranscript(firstLabel: "Speaker 2")
+        session.retranscript = Transcript(
+            fullText: "again",
+            segments: [TranscriptSegment(speakerId: "S1", text: "again", startTime: 0, endTime: 1)],
+            speakers: [TranscriptSpeaker(id: "S1", label: "Speaker 1", colorHex: "#333333")]
+        )
+
+        rewriteTranscriptMarkdown(for: session)
+
+        let contents = try String(contentsOf: markdownURL, encoding: .utf8)
+        #expect(contents == "# Transcript\n\n[0.00-1.00] Speaker 1: again\n")
+    }
+
+    @Test
+    func testMarkdownWithoutSavedTranscriptNamesTheSource() throws {
+        let container = try makeContainer()
+        let context = ModelContext(container)
+        let (session, directory, markdownURL) = try markdownSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        context.insert(session)
+        context.insert(RecordingTranscriptSegment(
+            speakerId: "speaker_app_3", text: "from the app", startTime: 0, endTime: 1, audioSource: .app, session: session
+        ))
+        try context.save()
+
+        rewriteTranscriptMarkdown(for: session)
+
+        let contents = try String(contentsOf: markdownURL, encoding: .utf8)
+        #expect(contents == "# Transcript\n\n[0.00-1.00] App: from the app\n")
     }
 }

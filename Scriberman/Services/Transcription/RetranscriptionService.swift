@@ -113,6 +113,9 @@ actor RetranscriptionService {
             )
             session.status = .done
             try? saveContext(context)
+            if let recording = session as? RecordingSession {
+                rewriteTranscriptMarkdown(for: recording)
+            }
         } catch {
             session.status = .error(error.localizedDescription)
             try? saveContext(context)

@@ -244,6 +244,9 @@ struct TranscriptStudyView: View {
         } else {
             session.transcript = transcript
         }
+        if let recording = session as? RecordingSession {
+            rewriteTranscriptMarkdown(for: recording)
+        }
     }
 
     @ToolbarContentBuilder

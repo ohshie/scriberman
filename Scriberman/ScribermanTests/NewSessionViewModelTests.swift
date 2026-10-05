@@ -180,6 +180,8 @@ struct NewSessionViewModelTests {
         #expect(!markdown.contains("speaker_mic_cluster_S1"))
         #expect(markdown.contains("Alice: early turn"))
         #expect(markdown.contains("Alice: early fallback"))
+        #expect(markdown.contains("Speaker 2: someone new"))
+        #expect(!markdown.contains("speaker_mic_1"))
 
         let transcript = try #require(recording.transcript)
         #expect(transcript.speakers.map(\.id) == ["Alice", "speaker_mic_1"])
@@ -217,9 +219,10 @@ struct NewSessionViewModelTests {
         let persisted = recording.transcriptSegments.sorted { $0.startTime < $1.startTime }
         #expect(persisted.map(\.speakerId) == ["speaker_mic_0", "Alice"])
         let markdown = try String(contentsOf: directory.appendingPathComponent("transcript.md"), encoding: .utf8)
-        #expect(markdown.contains("speaker_mic_0: from the mic"))
+        #expect(markdown.contains("Speaker 2: from the mic"))
         #expect(markdown.contains("Alice: from the app"))
         #expect(!markdown.contains("Alice: from the mic"))
+        #expect(!markdown.contains("speaker_mic_0"))
         let transcript = try #require(recording.transcript)
         #expect(transcript.segments.map(\.speakerId) == ["speaker_mic_0", "Alice"])
     }
