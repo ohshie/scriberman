@@ -218,6 +218,7 @@ private struct SpeakerProfileRow: View {
                         SpeakerNameField(
                             name: profile.name,
                             profiles: [],
+                            showsSuggestions: false,
                             onCommit: { name in
                                 onRename(name)
                                 onEndRename()
@@ -239,6 +240,7 @@ private struct SpeakerProfileRow: View {
                     Image(systemName: "pencil")
                 }
                 .buttonStyle(.borderless)
+                .help("Rename speaker")
                 .accessibilityLabel("Rename speaker")
                 Button {
                     onDelete()
@@ -264,6 +266,7 @@ private struct SpeakerProfileRow: View {
                             Image(systemName: "minus.circle")
                         }
                         .buttonStyle(.borderless)
+                        .help("Forget voiceprint")
                         .accessibilityLabel("Forget voiceprint")
                     }
                 }

@@ -113,7 +113,8 @@ struct SessionSpeakerListView: View {
                 Button {
                     renamingSpeakerID = row.id
                 } label: {
-                    Image(systemName: "pencil")
+                    Label("Rename speaker", systemImage: "pencil")
+                        .labelStyle(.iconOnly)
                 }
                 .help("Rename speaker")
                 .accessibilityLabel("Rename speaker")
@@ -133,7 +134,8 @@ struct SessionSpeakerListView: View {
                         }
                     }
                 } label: {
-                    Image(systemName: "arrow.triangle.merge")
+                    Label("Merge speaker", systemImage: "arrow.triangle.merge")
+                        .labelStyle(.iconOnly)
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
@@ -142,14 +144,18 @@ struct SessionSpeakerListView: View {
                 .help("Merge speaker")
                 .accessibilityLabel("Merge speaker")
 
-                Button {
-                    onReset(row.id)
-                } label: {
-                    Image(systemName: "arrow.counterclockwise")
+                // Wrapped, so the tooltip still shows while the button is disabled.
+                ZStack {
+                    Button {
+                        onReset(row.id)
+                    } label: {
+                        Label("Reset name", systemImage: "arrow.counterclockwise")
+                            .labelStyle(.iconOnly)
+                    }
+                    .disabled(!row.canReset)
+                    .accessibilityLabel("Reset name")
                 }
-                .disabled(!row.canReset)
                 .help("Reset name")
-                .accessibilityLabel("Reset name")
             }
             .buttonStyle(.borderless)
             .padding(.leading, 6)

@@ -81,6 +81,9 @@ struct TranscriptRowView<Identity: View, Content: View>: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            // Above the text below it, so a list the identity opens, such as rename suggestions,
+            // is drawn over the passage rather than under it.
+            .zIndex(1)
 
             content
         }

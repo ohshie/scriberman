@@ -6,6 +6,9 @@ import SwiftUI
 /// when there are none; Escape or moving focus away cancels.
 struct SpeakerNameField: View {
     let profiles: [SpeakerProfileSnapshot]
+    /// Whether profiles are suggested below the field. Settings renames a profile itself, so it
+    /// has nothing to suggest.
+    var showsSuggestions = true
     var color: Color = .primary
     let onCommit: (String) -> Void
     let onCancel: () -> Void
@@ -19,11 +22,13 @@ struct SpeakerNameField: View {
     init(
         name: String,
         profiles: [SpeakerProfileSnapshot],
+        showsSuggestions: Bool = true,
         color: Color = .primary,
         onCommit: @escaping (String) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.profiles = profiles
+        self.showsSuggestions = showsSuggestions
         self.color = color
         self.onCommit = onCommit
         self.onCancel = onCancel
@@ -32,7 +37,8 @@ struct SpeakerNameField: View {
     }
 
     private var rows: [SpeakerNameSuggestions.Row] {
-        SpeakerNameSuggestions.rows(for: text, profiles: profiles)
+        guard showsSuggestions else { return [] }
+        return SpeakerNameSuggestions.rows(for: text, profiles: profiles)
     }
 
     var body: some View {
@@ -78,7 +84,8 @@ struct SpeakerNameField: View {
         }
         .padding(5)
         .frame(width: 250, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        // Opaque: the transcript text under the list must not show through it.
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(.separator, lineWidth: 1)
