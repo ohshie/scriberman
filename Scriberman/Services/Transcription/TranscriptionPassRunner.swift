@@ -25,7 +25,8 @@ struct TranscriptionPassRunner: @unchecked Sendable {
     }
 
     /// One channel's transcription: segments, a voiceprint per speaker ID, and the profile name
-    /// behind every speaker ID that matched a stored profile.
+    /// behind every speaker ID that matched a stored profile. Voiceprints are in
+    /// `VoiceprintSpace.current`.
     struct PassResult: Sendable {
         var segments: [TranscriptSegment]
         var speakerEmbeddings: [String: [Float]]
@@ -44,11 +45,24 @@ struct TranscriptionPassRunner: @unchecked Sendable {
     }
 
     // @unchecked: the closures capture FluidAudio managers (AsrManager is an
-    // actor; OfflineDiarizerManager is serialized by the diarize gate) so one
-    // engines instance can be shared across the concurrent mic/app passes.
+    // actor; OfflineDiarizerManager and the voiceprint extractor are serialized
+    // by their gates) so one engines instance can be shared across the
+    // concurrent mic/app passes.
     struct PassEngines: @unchecked Sendable {
         let transcribeChunk: ([Float], AudioSource) async throws -> PassASRResult
         let diarize: ([Float]) async throws -> PassDiarizationResult
+        /// Voiceprints for diarized speakers, from their single-speaker speech in the samples.
+        let extractVoiceprints: ([Float], [SpeakerVoiceprintExtractor.SpeakerRange]) async throws -> [String: SpeakerVoiceprintExtractor.Voiceprint]
+
+        init(
+            transcribeChunk: @escaping ([Float], AudioSource) async throws -> PassASRResult,
+            diarize: @escaping ([Float]) async throws -> PassDiarizationResult,
+            extractVoiceprints: @escaping ([Float], [SpeakerVoiceprintExtractor.SpeakerRange]) async throws -> [String: SpeakerVoiceprintExtractor.Voiceprint] = { _, _ in [:] }
+        ) {
+            self.transcribeChunk = transcribeChunk
+            self.diarize = diarize
+            self.extractVoiceprints = extractVoiceprints
+        }
     }
 
     /// Memoizes the first `MakePassEngines` call so the concurrent mic/app
@@ -215,7 +229,23 @@ struct TranscriptionPassRunner: @unchecked Sendable {
             throw TranscriptionError.failedToTranscribe("\(passName) pass: Offline diarization failed - \(error.localizedDescription)")
         }
 
-        let speakerMapping = try await matchSpeakers(speakerDatabase: diarizationResult.speakerDatabase)
+        // Voiceprints come from the shared voiceprint space, not from the offline clustering
+        // centroids, so they can be compared with profiles named in any other transcript.
+        let speakerRanges = diarizationResult.segments.map {
+            SpeakerVoiceprintExtractor.SpeakerRange(
+                speaker: $0.speakerId,
+                start: Double($0.startTimeSeconds),
+                end: Double($0.endTimeSeconds)
+            )
+        }
+        let voiceprints: [String: [Float]]
+        do {
+            voiceprints = try await passEngines.extractVoiceprints(samples, speakerRanges).mapValues(\.embedding)
+        } catch {
+            throw TranscriptionError.failedToTranscribe("\(passName) pass: voiceprint extraction failed - \(error.localizedDescription)")
+        }
+
+        let speakerMapping = try await matchSpeakers(voiceprints: voiceprints)
         // The app channel's IDs carry an `app:` prefix so they never collide with the mic's.
         func finalSpeakerId(for baseId: String) -> String {
             let speakerId = speakerMapping[baseId] ?? baseId
@@ -249,10 +279,8 @@ struct TranscriptionPassRunner: @unchecked Sendable {
         }
 
         var finalEmbeddings: [String: [Float]] = [:]
-        if let db = diarizationResult.speakerDatabase {
-            for (baseId, embedding) in db {
-                finalEmbeddings[finalSpeakerId(for: baseId)] = embedding
-            }
+        for (baseId, embedding) in voiceprints {
+            finalEmbeddings[finalSpeakerId(for: baseId)] = embedding
         }
 
         var matchedSpeakerIDs: [String: String] = [:]
@@ -267,25 +295,28 @@ struct TranscriptionPassRunner: @unchecked Sendable {
         )
     }
 
+    /// Matches a diarization result's per-speaker vectors as voiceprints. The vectors must be in
+    /// `VoiceprintSpace.current`.
     func matchSpeakers(diarizationResult: DiarizationResult) async throws -> [String: String] {
-        try await matchSpeakers(speakerDatabase: diarizationResult.speakerDatabase)
+        try await matchSpeakers(voiceprints: diarizationResult.speakerDatabase ?? [:])
     }
 
-    private func matchSpeakers(speakerDatabase: [String: [Float]]?) async throws -> [String: String] {
-        var speakerMapping: [String: String] = [:]
-        guard let store = speakerEmbeddingStore, let db = speakerDatabase else {
+    /// Speaker ID → matched profile name, with each profile given to at most one speaker of the
+    /// pass. A matched profile's `lastSeen` is refreshed; nothing else in speaker memory changes.
+    private func matchSpeakers(voiceprints: [String: [Float]]) async throws -> [String: String] {
+        guard let store = speakerEmbeddingStore, !voiceprints.isEmpty else {
             return [:]
         }
 
         let profiles = (try? await store.fetchAllSnapshots()) ?? []
+        let queries = voiceprints.keys.sorted().map { (label: $0, embedding: voiceprints[$0] ?? []) }
+        let matches = speakerMatcher.assign(queries, to: profiles)
 
-        for (clusterId, embedding) in db {
-            if let match = speakerMatcher.findBestMatch(for: embedding, in: profiles) {
-                speakerMapping[clusterId] = match.name
-                try? await store.updateProfile(id: match.id)
-            }
+        var speakerMapping: [String: String] = [:]
+        for (clusterId, profile) in matches {
+            speakerMapping[clusterId] = profile.name
+            try? await store.updateProfile(id: profile.id)
         }
-
         return speakerMapping
     }
 
@@ -304,6 +335,17 @@ struct TranscriptionPassRunner: @unchecked Sendable {
 
             let diarizerModels = try await OfflineDiarizerModels.load(from: workspace.modelsURL)
             offlineDiarizerManager.initialize(models: diarizerModels)
+
+            // The voiceprint model lives in the same installed repo as the offline diarizer.
+            let diarizerRepo = try modelPathResolver.modelDirectory(for: .offlineDiarization, in: workspace)
+            let voiceprintModels = try DiarizerModels.load(
+                localSegmentationModel: diarizerRepo.appendingPathComponent(ModelNames.Diarizer.segmentationFile, isDirectory: true),
+                localEmbeddingModel: diarizerRepo.appendingPathComponent(ModelNames.Diarizer.embeddingFile, isDirectory: true)
+            )
+            let voiceprintExtractor = try SpeakerVoiceprintExtractor(models: voiceprintModels)
+            // EmbeddingExtractor is a plain class with no documented thread safety, so concurrent
+            // passes take turns.
+            let voiceprintGate = SerialAsyncGate()
 
             // OfflineDiarizerManager is a plain class; when one engines
             // instance is shared across concurrent passes, its process calls
@@ -328,6 +370,11 @@ struct TranscriptionPassRunner: @unchecked Sendable {
                         segments: result.segments,
                         speakerDatabase: result.speakerDatabase
                     )
+                },
+                extractVoiceprints: { inputSamples, ranges in
+                    await voiceprintGate.wait()
+                    defer { voiceprintGate.signal() }
+                    return try voiceprintExtractor.voiceprints(samples: inputSamples, ranges: ranges)
                 }
             )
         }

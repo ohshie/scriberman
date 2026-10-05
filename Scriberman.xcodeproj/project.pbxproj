@@ -174,6 +174,8 @@
 		798732842F7DA28400570A03 /* AudioResampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798732832F7DA28400570A03 /* AudioResampler.swift */; };
 		798732862F7DA2F900570A03 /* AudioResamplerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798732852F7DA2F900570A03 /* AudioResamplerTests.swift */; };
 		798732882F7DA3ED00570A03 /* SpeakerMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798732872F7DA3ED00570A03 /* SpeakerMatcher.swift */; };
+		891FA9A6364FE6E96B3500F3 /* SpeakerVoiceprintExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92B024625261C960A1150742 /* SpeakerVoiceprintExtractor.swift */; };
+		98BE68F908AC94ECEE788F9F /* SpeakerVoiceprintExtractorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B0901F9C6326CFDB2CD9B5 /* SpeakerVoiceprintExtractorTests.swift */; };
 		7987328A2F7DA41C00570A03 /* SpeakerMatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798732892F7DA41C00570A03 /* SpeakerMatcherTests.swift */; };
 		7987328C2F7DB47F00570A03 /* ModelInstallServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7987328B2F7DB47F00570A03 /* ModelInstallServiceTests.swift */; };
 		D1C7A719B2C3D4E5F6A80002 /* AsrProcessorSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1C7A719B2C3D4E5F6A80001 /* AsrProcessorSettingsTests.swift */; };
@@ -473,6 +475,8 @@
 		798732832F7DA28400570A03 /* AudioResampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioResampler.swift; sourceTree = "<group>"; };
 		798732852F7DA2F900570A03 /* AudioResamplerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioResamplerTests.swift; sourceTree = "<group>"; };
 		798732872F7DA3ED00570A03 /* SpeakerMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMatcher.swift; sourceTree = "<group>"; };
+		92B024625261C960A1150742 /* SpeakerVoiceprintExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerVoiceprintExtractor.swift; sourceTree = "<group>"; };
+		C0B0901F9C6326CFDB2CD9B5 /* SpeakerVoiceprintExtractorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerVoiceprintExtractorTests.swift; sourceTree = "<group>"; };
 		798732892F7DA41C00570A03 /* SpeakerMatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMatcherTests.swift; sourceTree = "<group>"; };
 		7987328B2F7DB47F00570A03 /* ModelInstallServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelInstallServiceTests.swift; sourceTree = "<group>"; };
 		D1C7A719B2C3D4E5F6A80001 /* AsrProcessorSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsrProcessorSettingsTests.swift; sourceTree = "<group>"; };
@@ -718,6 +722,7 @@
 				798732812F7DA17600570A03 /* AudioDownmixerTests.swift */,
 				798732852F7DA2F900570A03 /* AudioResamplerTests.swift */,
 				798732892F7DA41C00570A03 /* SpeakerMatcherTests.swift */,
+				C0B0901F9C6326CFDB2CD9B5 /* SpeakerVoiceprintExtractorTests.swift */,
 				7987328B2F7DB47F00570A03 /* ModelInstallServiceTests.swift */,
 				D1C7A719B2C3D4E5F6A80001 /* AsrProcessorSettingsTests.swift */,
 				7987328D2F7DBC2800570A03 /* SettingsViewModelTests.swift */,
@@ -952,6 +957,7 @@
 				C0DE4A11B2C3D4E5F6A70003 /* TranscriptCleanupEngine.swift */,
 				798732762F7D985400570A03 /* TranscriptionPassRunner.swift */,
 				798732872F7DA3ED00570A03 /* SpeakerMatcher.swift */,
+				92B024625261C960A1150742 /* SpeakerVoiceprintExtractor.swift */,
 				79AF5DC52F92DC510075AA88 /* TranscriptMarkdownWriter.swift */,
 			);
 			path = Transcription;
@@ -1452,6 +1458,7 @@
 				B3C4D5E6F7A8091B2C3D4E02 /* LiveSegmentSanitizer.swift in Sources */,
 				C0DE4A11B2C3D4E5F6A70004 /* TranscriptCleanupEngine.swift in Sources */,
 				798732882F7DA3ED00570A03 /* SpeakerMatcher.swift in Sources */,
+				891FA9A6364FE6E96B3500F3 /* SpeakerVoiceprintExtractor.swift in Sources */,
 				79BE35312F7E7E8100DB542F /* MetadataCell.swift in Sources */,
 				BBCA028D1A6E4902B7592817 /* EditableTitleHoverModifier.swift in Sources */,
 				440E4794869A4679B73D22DF /* HeroCircleButton.swift in Sources */,
@@ -1567,6 +1574,7 @@
 				79A11C1F2F856CEC0084F195 /* AppAudioSettingsTests.swift in Sources */,
 				C1B2C3D4E5F60718293A4B5C /* NewSessionViewModelTests.swift in Sources */,
 				7987328A2F7DA41C00570A03 /* SpeakerMatcherTests.swift in Sources */,
+				98BE68F908AC94ECEE788F9F /* SpeakerVoiceprintExtractorTests.swift in Sources */,
 				797571802F7A400D006AEFB6 /* SpeakerRecognitionTests.swift in Sources */,
 				79DCE4232F77D03C0024DC26 /* AppStateTests.swift in Sources */,
 				79DCE4272F77D13C0024DC26 /* AppShellSidebarRegressionTests.swift in Sources */,

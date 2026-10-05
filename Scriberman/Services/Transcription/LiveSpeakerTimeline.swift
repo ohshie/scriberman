@@ -399,8 +399,9 @@ enum LiveEmbeddingAttribution {
     }
 
     /// For each turn-diarizer speaker index, the longest clustering segment
-    /// that lies inside that speaker's runs. A segment that reaches
-    /// `minimumOverlapFraction` for no speaker, or for several (simultaneous
+    /// that lies inside that speaker's runs. A segment shorter than
+    /// `SessionSpeakerIdentity.minimumEmbeddingSeconds`, or that reaches
+    /// `minimumOverlapFraction` for no speaker or for several (simultaneous
     /// speech), is discarded. `clusterSegments` are buffer-relative; `runs`
     /// are session time, as returned by `LiveSpeakerTimeline.speakerRuns`.
     static func assignments(
@@ -409,7 +410,8 @@ enum LiveEmbeddingAttribution {
         bufferStart: Float
     ) -> [Int: Assignment] {
         var result: [Int: Assignment] = [:]
-        for segment in clusterSegments where !segment.embedding.isEmpty {
+        for segment in clusterSegments
+        where !segment.embedding.isEmpty && segment.durationSeconds >= SessionSpeakerIdentity.minimumEmbeddingSeconds {
             let start = bufferStart + segment.startTimeSeconds
             let end = bufferStart + segment.endTimeSeconds
             let duration = end - start

@@ -185,6 +185,7 @@ struct RetranscriptionServiceTests {
         let fetched = try fetchRecordingSession(id: sessionID, in: container)
         #expect(fetched?.status == .done)
         #expect(fetched?.retranscript?.segments.map(\.text) == ["app line", "mic line"])
+        #expect(fetched?.retranscript?.voiceprintSpace == VoiceprintSpace.current)
         #expect(fetched?.transcript?.fullText == "original")
     }
 

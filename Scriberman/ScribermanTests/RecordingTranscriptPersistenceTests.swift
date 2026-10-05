@@ -249,4 +249,29 @@ struct RecordingTranscriptPersistenceTests {
         let remaining = try ModelContext(container).fetch(FetchDescriptor<RecordingTranscriptSegment>())
         #expect(remaining.map(\.text) == ["owned"])
     }
+
+    // MARK: - Voiceprint space
+
+    /// A transcript saved before voiceprint spaces existed decodes with no space.
+    @Test
+    func testTranscriptWithoutVoiceprintSpaceDecodesAsNil() throws {
+        let json = #"{"fullText":"Hi","segments":[],"speakers":[],"speakerEmbeddings":{"S1":[1,0]}}"#
+        let transcript = try JSONDecoder().decode(Transcript.self, from: Data(json.utf8))
+        #expect(transcript.voiceprintSpace == nil)
+        #expect(transcript.speakerEmbeddings?["S1"] == [1, 0])
+    }
+
+    @Test
+    func testTranscriptVoiceprintSpaceRoundTrips() throws {
+        let transcript = Transcript(
+            fullText: "Hi",
+            segments: [],
+            speakers: [],
+            speakerEmbeddings: ["S1": [1, 0]],
+            voiceprintSpace: VoiceprintSpace.current
+        )
+        let decoded = try JSONDecoder().decode(Transcript.self, from: JSONEncoder().encode(transcript))
+        #expect(decoded == transcript)
+        #expect(decoded.voiceprintSpace == VoiceprintSpace.current)
+    }
 }

@@ -73,13 +73,17 @@ final class AudioTrimServiceTests {
             ],
             speakers: [TranscriptSpeaker(id: "A", label: "Speaker 1", colorHex: "#112233")],
             speakerEmbeddings: ["A": [0.5]],
-            speakerProfileIDs: ["A": profileID]
+            speakerProfileIDs: ["A": profileID],
+            voiceprintSpace: VoiceprintSpace.current
         )
 
         let trimmed = AudioTrimService.trimmedTranscript(transcript, end: 60)
 
         #expect(trimmed.speakerEmbeddings == ["A": [0.5]])
         #expect(trimmed.speakerProfileIDs == ["A": profileID])
+        #expect(trimmed.voiceprintSpace == VoiceprintSpace.current)
+        #expect(trimmed.segments.map(\.text) == ["Hello"])
+        #expect(trimmed.fullText == "Hello")
     }
 
     // MARK: - Guard: already trimmed

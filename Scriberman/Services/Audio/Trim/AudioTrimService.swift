@@ -332,15 +332,14 @@ final class AudioTrimService {
 
     /// `transcript` cut to `[0, end]`, with the full text rebuilt from the kept segments. A
     /// segment that straddles `end` keeps its whole text: segments carry no word timings.
+    ///
+    /// Copies the transcript and changes only the segments and text, so every other field, such
+    /// as the voiceprint space, survives the trim.
     static func trimmedTranscript(_ transcript: Transcript, end: Float) -> Transcript {
-        let segments = filterSegments(transcript.segments, trimEnd: end)
-        return Transcript(
-            fullText: Transcript.fullText(joining: segments),
-            segments: segments,
-            speakers: transcript.speakers,
-            speakerEmbeddings: transcript.speakerEmbeddings,
-            speakerProfileIDs: transcript.speakerProfileIDs
-        )
+        var trimmed = transcript
+        trimmed.segments = filterSegments(transcript.segments, trimEnd: end)
+        trimmed.fullText = Transcript.fullText(joining: trimmed.segments)
+        return trimmed
     }
 
     static func filterSegments(_ segments: [TranscriptSegment], trimEnd: Float) -> [TranscriptSegment] {

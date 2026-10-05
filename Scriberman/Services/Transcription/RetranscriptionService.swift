@@ -108,7 +108,8 @@ actor RetranscriptionService {
                 fullText: Transcript.fullText(joining: merged),
                 segments: merged,
                 speakers: speakers,
-                speakerEmbeddings: mergedEmbeddings
+                speakerEmbeddings: mergedEmbeddings,
+                voiceprintSpace: VoiceprintSpace.current
             )
             session.status = .done
             try? saveContext(context)

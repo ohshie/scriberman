@@ -118,8 +118,11 @@ struct TranscriptionPassRunnerTests {
                     diarize: { _ in
                         TranscriptionPassRunner.PassDiarizationResult(
                             segments: diarizedSegments,
-                            speakerDatabase: ["cluster_1": [0.2, 0.8]]
+                            speakerDatabase: nil
                         )
+                    },
+                    extractVoiceprints: { _, _ in
+                        ["cluster_1": SpeakerVoiceprintExtractor.Voiceprint(embedding: [0.2, 0.8], speechSeconds: 5)]
                     }
                 )
             },
@@ -182,8 +185,11 @@ struct TranscriptionPassRunnerTests {
                                     qualityScore: 1
                                 )
                             ],
-                            speakerDatabase: ["cluster_1": embedding]
+                            speakerDatabase: nil
                         )
+                    },
+                    extractVoiceprints: { _, _ in
+                        ["cluster_1": SpeakerVoiceprintExtractor.Voiceprint(embedding: embedding, speechSeconds: 5)]
                     }
                 )
             },
@@ -212,6 +218,107 @@ struct TranscriptionPassRunnerTests {
         #expect(segments.count == 1)
         #expect(segments[0].speakerId == "Alice")
         #expect(embeddings["Alice"] != nil)
+    }
+
+    /// A runner whose diarizer returns `clusters` (id, start, end) and whose aligner emits one
+    /// segment per cluster, with voiceprints from `voiceprints`.
+    private func clusterRunner(
+        store: SpeakerEmbeddingStore,
+        clusters: [(id: String, start: Float, end: Float)],
+        voiceprints: [String: [Float]],
+        capturedRanges: RangeRecorder? = nil
+    ) -> TranscriptionPassRunner {
+        TranscriptionPassRunner(
+            speakerEmbeddingStore: store,
+            segmentSpeech: { _ in
+                [TranscriptionPassRunner.SpeechSegment(startTime: 0, endTime: 1)]
+            },
+            makePassEngines: { _ in
+                TranscriptionPassRunner.PassEngines(
+                    transcribeChunk: { _, _ in
+                        TranscriptionPassRunner.PassASRResult(text: "hello", tokenTimings: [])
+                    },
+                    diarize: { _ in
+                        TranscriptionPassRunner.PassDiarizationResult(
+                            segments: clusters.map {
+                                TimedSpeakerSegment(
+                                    speakerId: $0.id, embedding: [], startTimeSeconds: $0.start,
+                                    endTimeSeconds: $0.end, qualityScore: 1
+                                )
+                            },
+                            speakerDatabase: nil
+                        )
+                    },
+                    extractVoiceprints: { _, ranges in
+                        capturedRanges?.record(ranges)
+                        return voiceprints.mapValues {
+                            SpeakerVoiceprintExtractor.Voiceprint(embedding: $0, speechSeconds: 5)
+                        }
+                    }
+                )
+            },
+            alignTranscript: { _, _, _, _ in
+                Transcript(
+                    fullText: "hello",
+                    segments: clusters.map {
+                        TranscriptSegment(speakerId: $0.id, text: "hello", startTime: $0.start, endTime: $0.end, audioSource: .mic)
+                    },
+                    speakers: []
+                )
+            }
+        )
+    }
+
+    /// A cluster with too little single-speaker speech gets no voiceprint from the extractor, so it
+    /// is neither matched nor stored.
+    @Test
+    func clusterWithoutVoiceprintStaysUnmatched() async throws {
+        let modelContainer = try ModelContainer(
+            for: SpeakerProfile.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let store = SpeakerEmbeddingStore(modelContainer: modelContainer)
+        try await store.enrollNamedSpeaker(name: "Alice", embedding: normalizedEmbedding(length: 8, activeIndex: 0))
+        let ranges = RangeRecorder()
+        let runner = clusterRunner(
+            store: store,
+            clusters: [(id: "S1", start: 0, end: 2)],
+            voiceprints: [:],
+            capturedRanges: ranges
+        )
+
+        let result = try await runner.run(samples: Array(repeating: 0.1, count: 32_000), source: .mic, workspace: try makeWorkspace())
+
+        #expect(result.segments.map(\.speakerId) == ["S1"])
+        #expect(result.speakerEmbeddings.isEmpty)
+        #expect(result.matchedSpeakerIDs.isEmpty)
+        #expect(ranges.values == [SpeakerVoiceprintExtractor.SpeakerRange(speaker: "S1", start: 0, end: 2)])
+    }
+
+    /// Two clusters of one pass close to the same profile: only the closer one gets it.
+    @Test
+    func twoClustersCompetingForOneProfile() async throws {
+        let modelContainer = try ModelContainer(
+            for: SpeakerProfile.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let store = SpeakerEmbeddingStore(modelContainer: modelContainer)
+        let alice = normalizedEmbedding(length: 8, activeIndex: 0)
+        try await store.enrollNamedSpeaker(name: "Alice", embedding: alice)
+        var nearer = alice
+        nearer[1] = 0.2
+        var farther = alice
+        farther[2] = 0.5
+        let runner = clusterRunner(
+            store: store,
+            clusters: [(id: "S1", start: 0, end: 5), (id: "S2", start: 5, end: 10)],
+            voiceprints: ["S1": farther, "S2": nearer]
+        )
+
+        let result = try await runner.run(samples: Array(repeating: 0.1, count: 160_000), source: .mic, workspace: try makeWorkspace())
+
+        #expect(result.segments.map(\.speakerId) == ["S1", "Alice"])
+        #expect(result.matchedSpeakerIDs == ["Alice": "Alice"])
     }
 
     @Test
@@ -363,5 +470,18 @@ struct TranscriptionPassRunnerTests {
         var vector = Array(repeating: Float(0), count: length)
         vector[activeIndex] = 1
         return vector
+    }
+}
+
+final class RangeRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var ranges: [SpeakerVoiceprintExtractor.SpeakerRange] = []
+
+    func record(_ ranges: [SpeakerVoiceprintExtractor.SpeakerRange]) {
+        lock.withLock { self.ranges.append(contentsOf: ranges) }
+    }
+
+    var values: [SpeakerVoiceprintExtractor.SpeakerRange] {
+        lock.withLock { ranges }
     }
 }

@@ -187,63 +187,35 @@ struct TranscriptStudyView: View {
     }
 
     private func renameSpeaker(id: String, to newName: String) {
+        let previousLabel = transcript.speakers.first { $0.id == id }?.label
         guard let updatedTranscript = Self.renameSpeaker(id: id, to: newName, in: transcript, of: session) else {
             return
         }
         self.transcript = updatedTranscript
 
-        guard let store else { return }
+        // Renaming to the label it already has teaches nothing new; folding the same voiceprint
+        // again would only weight it twice.
+        guard let store, previousLabel?.lowercased() != newName.lowercased() else { return }
         Task {
-            let unlinked = (try? await Self.updateSpeakerMemory(
-                forRenaming: id,
-                to: newName,
-                in: updatedTranscript,
-                store: store
-            )) ?? false
-            if unlinked, let transcript = Self.removingProfileLink(for: id, in: self.transcript, of: session) {
-                self.transcript = transcript
-            }
+            try? await Self.updateSpeakerMemory(forRenaming: id, to: newName, in: updatedTranscript, store: store)
         }
     }
 
-    /// Teaches speaker memory that speaker `id` is called `name`, using the voiceprint and profile
-    /// link stored in `transcript`. Returns `true` when the speaker's profile link must be removed.
-    ///
-    /// A link means the live session that made this transcript auto-enrolled the profile, so the
-    /// transcript owns it: it is renamed, or, when another profile already has the name, merged
-    /// into that profile and deleted. Without a live link the voiceprint goes to the profile with
-    /// the new name, as for a speaker matched to someone else's existing profile.
+    /// Teaches speaker memory that speaker `id` is called `name`: the speaker's voiceprint stored in
+    /// `transcript` is folded into the profile with that name, which is created when absent. The
+    /// only path that writes speaker memory. Nothing changes when the transcript has no voiceprint
+    /// for the speaker or its voiceprints are from another voiceprint space.
     static func updateSpeakerMemory(
         forRenaming id: String,
         to name: String,
         in transcript: Transcript,
         store: SpeakerEmbeddingStore
-    ) async throws -> Bool {
-        let embedding = transcript.speakerEmbeddings?[id]
-        if let linkedID = transcript.speakerProfileIDs?[id],
-           let linked = try await store.findProfileSnapshot(byID: linkedID) {
-            if let existingID = try await store.profileID(forName: name, excluding: linkedID) {
-                try await store.updateEmbedding(profileID: existingID, embedding: embedding ?? linked.embedding)
-                try await store.deleteProfile(id: linkedID)
-                return true
-            }
-            try await store.renameProfile(id: linkedID, name: name)
-            return false
-        }
-        if let embedding {
-            try await enrollRenamedSpeaker(name: name, embedding: embedding, in: store)
-        }
-        return false
-    }
-
-    /// Gives the renamed speaker's voiceprint to the profile the user named: the existing profile
-    /// with that name (case-insensitive) is updated, otherwise a new one is created.
-    static func enrollRenamedSpeaker(name: String, embedding: [Float], in store: SpeakerEmbeddingStore) async throws {
-        if let profileID = try await store.profileID(forName: name) {
-            try await store.updateEmbedding(profileID: profileID, embedding: embedding)
-        } else {
-            try await store.enrollNamedSpeaker(name: name, embedding: embedding)
-        }
+    ) async throws {
+        guard transcript.voiceprintSpace == VoiceprintSpace.current,
+              let embedding = transcript.speakerEmbeddings?[id],
+              !embedding.isEmpty
+        else { return }
+        try await store.foldVoiceprint(name: name, embedding: embedding)
     }
 
     /// Renames a speaker in `transcript` and writes the result to `session`'s displayed pass.
@@ -256,34 +228,12 @@ struct TranscriptStudyView: View {
         in transcript: Transcript,
         of session: any TranscribableSession
     ) -> Transcript? {
-        var updatedSpeakers = transcript.speakers
-        guard let index = updatedSpeakers.firstIndex(where: { $0.id == id }) else { return nil }
-        let oldSpeaker = updatedSpeakers[index]
-        updatedSpeakers[index] = TranscriptSpeaker(id: oldSpeaker.id, label: newName, colorHex: oldSpeaker.colorHex)
-        let updatedTranscript = Transcript(
-            fullText: transcript.fullText,
-            segments: transcript.segments,
-            speakers: updatedSpeakers,
-            speakerEmbeddings: transcript.speakerEmbeddings,
-            speakerProfileIDs: transcript.speakerProfileIDs
-        )
-        writeDisplayed(updatedTranscript, to: session)
-        return updatedTranscript
-    }
-
-    /// Drops speaker `id`'s profile link from `transcript` and writes the result to `session`'s
-    /// displayed pass. Returns the updated transcript, or `nil` when there is no such link.
-    static func removingProfileLink(
-        for id: String,
-        in transcript: Transcript,
-        of session: any TranscribableSession
-    ) -> Transcript? {
-        guard transcript.speakerProfileIDs?[id] != nil else { return nil }
+        guard let index = transcript.speakers.firstIndex(where: { $0.id == id }) else { return nil }
+        // A copy with only the label changed, so every other field, such as the voiceprint space,
+        // survives the rename.
         var updatedTranscript = transcript
-        updatedTranscript.speakerProfileIDs?[id] = nil
-        if updatedTranscript.speakerProfileIDs?.isEmpty == true {
-            updatedTranscript.speakerProfileIDs = nil
-        }
+        let oldSpeaker = transcript.speakers[index]
+        updatedTranscript.speakers[index] = TranscriptSpeaker(id: oldSpeaker.id, label: newName, colorHex: oldSpeaker.colorHex)
         writeDisplayed(updatedTranscript, to: session)
         return updatedTranscript
     }
