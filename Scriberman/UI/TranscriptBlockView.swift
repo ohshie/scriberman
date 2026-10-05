@@ -122,6 +122,7 @@ struct TranscriptBlockView: View {
                     } icon: {
                         Image(nsImage: SpeakerDotImage.make(hex: speaker.colorHex))
                     }
+                    .labelStyle(.titleAndIcon)
                 }
             }
             Divider()

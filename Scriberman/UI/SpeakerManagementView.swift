@@ -135,30 +135,28 @@ struct SpeakerManagementView: View {
                 Text("No speaker profiles saved yet.")
                     .foregroundStyle(.secondary)
             } else {
-                List {
-                    ForEach(list.profiles) { profile in
-                        SpeakerProfileRow(
-                            profile: profile,
-                            list: list,
-                            isRenaming: renamingProfileID == profile.id,
-                            onBeginRename: { renamingProfileID = profile.id },
-                            onEndRename: {
-                                if renamingProfileID == profile.id {
-                                    renamingProfileID = nil
-                                }
-                            },
-                            onRename: { name in
-                                Task {
-                                    if case .needsMerge(let targetID) = await list.rename(profile.id, to: name) {
-                                        pendingMerge = PendingMerge(id: profile.id, targetID: targetID)
-                                    }
-                                }
-                            },
-                            onDelete: {
-                                Task { await list.delete { try await store.deleteProfile(id: profile.id) } }
+                ForEach(list.profiles) { profile in
+                    SpeakerProfileRow(
+                        profile: profile,
+                        list: list,
+                        isRenaming: renamingProfileID == profile.id,
+                        onBeginRename: { renamingProfileID = profile.id },
+                        onEndRename: {
+                            if renamingProfileID == profile.id {
+                                renamingProfileID = nil
                             }
-                        )
-                    }
+                        },
+                        onRename: { name in
+                            Task {
+                                if case .needsMerge(let targetID) = await list.rename(profile.id, to: name) {
+                                    pendingMerge = PendingMerge(id: profile.id, targetID: targetID)
+                                }
+                            }
+                        },
+                        onDelete: {
+                            Task { await list.delete { try await store.deleteProfile(id: profile.id) } }
+                        }
+                    )
                 }
 
                 Button("Delete All Speaker Profiles", role: .destructive) {
@@ -251,7 +249,19 @@ private struct SpeakerProfileRow: View {
                 .accessibilityLabel("Delete speaker")
             }
 
-            DisclosureGroup("Voiceprints", isExpanded: $isExpanded) {
+            // A button rather than DisclosureGroup: inside the Settings form the group drew no
+            // chevron and never grew its row.
+            Button {
+                isExpanded.toggle()
+            } label: {
+                Label("Voiceprints", systemImage: isExpanded ? "chevron.down" : "chevron.right")
+                    .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(.borderless)
+            .font(.caption)
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+
+            if isExpanded {
                 ForEach(voiceprints) { voiceprint in
                     HStack {
                         voiceprintSourceText(voiceprint)
@@ -269,14 +279,14 @@ private struct SpeakerProfileRow: View {
                         .help("Forget voiceprint")
                         .accessibilityLabel("Forget voiceprint")
                     }
+                    .padding(.leading, 18)
                 }
             }
-            .font(.caption)
-            // Voiceprints load only when expanded, and again when the profile's count changes.
-            .task(id: isExpanded ? profile.sampleCount : nil) {
-                if isExpanded {
-                    await loadVoiceprints()
-                }
+        }
+        // Voiceprints load only when expanded, and again when the profile's count changes.
+        .task(id: isExpanded ? profile.sampleCount : nil) {
+            if isExpanded {
+                await loadVoiceprints()
             }
         }
     }

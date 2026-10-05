@@ -130,12 +130,13 @@ struct SessionSpeakerListView: View {
                                 } icon: {
                                     Image(nsImage: SpeakerDotImage.make(hex: other.speaker.colorHex))
                                 }
+                                .labelStyle(.titleAndIcon)
                             }
                         }
                     }
                 } label: {
-                    Label("Merge speaker", systemImage: "arrow.triangle.merge")
-                        .labelStyle(.iconOnly)
+                    Image(systemName: "arrow.triangle.merge")
+                        .accessibilityLabel("Merge speaker")
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)

@@ -176,6 +176,8 @@ struct TranscriptStudyView: View {
                 .toggleStyle(.switch)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 10)
+                // Full width: sized to the toggle, the bar showed as a patch under the toolbar.
+                .frame(maxWidth: .infinity)
                 .background(.bar)
             }
         }
