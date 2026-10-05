@@ -3,21 +3,25 @@
     <channel>
         <title>Scriberman</title>
         <item>
-            <title>1.0.12</title>
-            <pubDate>Tue, 29 Sep 2026 22:11:57 +0200</pubDate>
-            <sparkle:version>15</sparkle:version>
-            <sparkle:shortVersionString>1.0.12</sparkle:shortVersionString>
+            <title>1.1.0</title>
+            <pubDate>Mon, 05 Oct 2026 23:32:29 +0200</pubDate>
+            <sparkle:version>21</sparkle:version>
+            <sparkle:shortVersionString>1.1.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<h2>Scriberman 1.0.12</h2>
+            <description><![CDATA[<h2>Scriberman 1.1.0</h2>
 <h3>What’s new</h3>
 <ul>
-  <li>Choose Live dictation to type as you speak, or insert text after releasing the hotkey.</li>
-  <li>Choose GPU or Neural Engine for speech recognition.</li>
-  <li>Reduced wait for your first dictation result and for Live dictation to finish after a pause.</li>
+  <li>Rename speakers with saved-name suggestions, merge speakers, or assign a transcript block to another speaker.</li>
+  <li>See each speaker’s talk time and reset names from the new Speakers list.</li>
+  <li>Rename or merge saved speaker profiles and remove individual voiceprints in Settings.</li>
+</ul>
+<h3>Fixes</h3>
+<ul>
+  <li>Saved Markdown transcripts now match the speaker names and transcript shown in the app.</li>
 </ul>
 ]]></description>
-            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.0.12/Scriberman-1.0.12-15-arm64.dmg" length="16641366" type="application/octet-stream" sparkle:edSignature="tbJH0Vecuj7fyZPnpvyhQ3adglz0L4f6YeLiBow04dtLCkPkZ4vmXyefzEuKWi9KoabgvxPgxieRYx4i0VhIDQ=="/>
+            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.1.0/Scriberman-1.1.0-21-arm64.dmg" length="16768079" type="application/octet-stream" sparkle:edSignature="VoDvy7gEh8iQVjptrUseIJCcov9/bNtBqUzyQFC96W/0CxwK2JF2q56EiLm0Ie5zRYOyIOB1dszV154PUl3YDw=="/>
         </item>
     </channel>
 </rss>
