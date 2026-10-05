@@ -79,112 +79,93 @@ struct SpeakerRecognitionTests {
         #expect(finalSpeakerIdForCluster1 == "Alice")
     }
 
-    // MARK: - LS-EEND session speaker identities (task 5.2)
+    // MARK: - Live session speaker identities
 
-    @Test("Identity record accumulates embeddings and averages them")
-    func identityRecordAccumulatesAndAverages() {
+    @Test("Identity record averages embeddings weighted by speech seconds")
+    func identityRecordAccumulatesWeightedAverage() {
         var identity = SessionSpeakerIdentity()
         #expect(identity.averagedEmbedding.isEmpty)
 
-        identity.accumulate(Array(repeating: 0.2, count: 192))
-        identity.accumulate(Array(repeating: 0.4, count: 192))
+        identity.accumulate(Array(repeating: 0.2, count: 192), seconds: 1)
+        identity.accumulate(Array(repeating: 0.4, count: 192), seconds: 3)
 
         let averaged = identity.averagedEmbedding
         #expect(averaged.count == 192)
-        #expect(abs(averaged[0] - 0.3) < 1e-4)
+        #expect(abs(averaged[0] - 0.35) < 1e-5)
+        #expect(identity.speechSeconds == 4)
     }
 
-    @Test("Identity record ignores empty embeddings and stays bound after accumulation")
-    func identityRecordStaysBoundAfterAccumulation() {
+    @Test("Identity record ignores empty embeddings and zero durations")
+    func identityRecordIgnoresEmptyInput() {
         var identity = SessionSpeakerIdentity()
-        identity.accumulate([])
+        identity.accumulate([], seconds: 2)
+        identity.accumulate([0.5], seconds: 0)
         #expect(identity.averagedEmbedding.isEmpty)
-
-        identity.boundProfileID = UUID()
-        identity.boundProfileName = "Alice"
-        identity.accumulate(Array(repeating: 0.5, count: 192))
-
-        #expect(identity.isBound)
-        #expect(identity.boundProfileName == "Alice")
+        #expect(identity.speechSeconds == 0)
     }
 
-    @Test("Stop enrolls unbound identity record with averaged embedding")
-    func stopEnrollsUnboundIdentityRecordWithAveragedEmbedding() async throws {
-        let liveService = LiveTranscriptionService(speakerEmbeddingStore: store)
-
+    @Test("An identity becomes matchable at three seconds of speech")
+    func identityMatchableAtThreeSeconds() {
         var identity = SessionSpeakerIdentity()
-        identity.accumulate(Array(repeating: 0.2, count: 192))
-        identity.accumulate(Array(repeating: 0.4, count: 192))
-        await liveService.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: identity)
-
-        _ = await liveService.stop()
-
-        let profiles = try await store.fetchAllSnapshots()
-        #expect(profiles.count == 1)
-        #expect(profiles.first?.name == "Speaker 1")
-        let embedding = try #require(profiles.first?.embedding)
-        #expect(abs(embedding[0] - 0.3) < 1e-4)
+        identity.accumulate([1, 0], seconds: 2.9)
+        #expect(!identity.hasMatchableVoiceprint)
+        identity.accumulate([1, 0], seconds: 0.1)
+        #expect(identity.hasMatchableVoiceprint)
     }
 
-    @Test("Stop refreshes lastSeen for bound identity record without duplicating profiles")
-    func stopRefreshesLastSeenForBoundIdentityRecord() async throws {
-        let oldDate = Date(timeIntervalSinceNow: -3600)
+    /// Spec scenario "Session with unknown voices".
+    @Test("Stop creates no profile for unknown voices")
+    func stopCreatesNoProfileForUnknownVoices() async throws {
+        let liveService = LiveTranscriptionService(speakerEmbeddingStore: store)
+        var mic = SessionSpeakerIdentity()
+        mic.accumulate(Array(repeating: 0.2, count: 192), seconds: 4)
+        var app = SessionSpeakerIdentity()
+        app.accumulate(Array(repeating: -0.2, count: 192), seconds: 4)
+        await liveService.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: mic)
+        await liveService.injectSpeakerIdentityForTesting(source: .app, speakerIndex: 0, identity: app)
+
+        let result = await liveService.stop()
+
+        #expect(try await store.fetchAllSnapshots().isEmpty)
+        #expect(Set(result.speakerEmbeddings.keys) == ["speaker_mic_0", "speaker_app_0"])
+    }
+
+    @Test("Stop refreshes lastSeen for a matched identity without creating profiles")
+    func stopRefreshesLastSeenForMatchedIdentity() async throws {
         var aliceEmbedding: [Float] = Array(repeating: 0.0, count: 192)
         aliceEmbedding[0] = 1.0
-        try await store.enrollNamedSpeaker(name: "Alice", embedding: aliceEmbedding)
-        let enrolledProfiles = try await store.fetchAllSnapshots()
-        let aliceID = try #require(enrolledProfiles.first?.id)
+        let context = ModelContext(container)
+        let oldDate = Date(timeIntervalSinceNow: -3600)
+        context.insert(SpeakerProfile(name: "Alice", embedding: aliceEmbedding, lastSeen: oldDate))
+        try context.save()
+        let aliceID = try #require(try await store.fetchAllSnapshots().first?.id)
 
         let liveService = LiveTranscriptionService(speakerEmbeddingStore: store)
-
         var identity = SessionSpeakerIdentity()
-        identity.accumulate(aliceEmbedding)
-        identity.boundProfileID = aliceID
-        identity.boundProfileName = "Alice"
+        identity.accumulate(aliceEmbedding, seconds: 5)
         await liveService.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: identity)
 
-        _ = await liveService.stop()
+        let result = await liveService.stop()
 
         let profiles = try await store.fetchAllSnapshots()
-        #expect(profiles.count == 1)
-        #expect(profiles.first?.name == "Alice")
-        let updatedProfile = try await store.findProfileSnapshot(byID: aliceID)
-        let updated = try #require(updatedProfile)
+        #expect(profiles.map(\.name) == ["Alice"])
+        let updated = try #require(try await store.findProfileSnapshot(byID: aliceID))
         #expect(updated.lastSeen > oldDate)
+        #expect(updated.embedding == aliceEmbedding)
+        #expect(result.speakerEmbeddings == ["Alice": aliceEmbedding])
     }
 
-    @Test("Stop skips identity records without embeddings")
-    func stopSkipsEmbeddingLessIdentityRecords() async throws {
+    @Test("Stop skips identities without enough speech")
+    func stopSkipsIdentitiesWithoutEnoughSpeech() async throws {
         let liveService = LiveTranscriptionService(speakerEmbeddingStore: store)
+        var short = SessionSpeakerIdentity()
+        short.accumulate(Array(repeating: 0.2, count: 192), seconds: 2)
+        await liveService.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: SessionSpeakerIdentity())
+        await liveService.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 1, identity: short)
 
-        await liveService.injectSpeakerIdentityForTesting(
-            source: .mic,
-            speakerIndex: 0,
-            identity: SessionSpeakerIdentity()
-        )
+        let result = await liveService.stop()
 
-        _ = await liveService.stop()
-
-        let profiles = try await store.fetchAllSnapshots()
-        #expect(profiles.isEmpty)
-    }
-
-    @Test("Stop enrolls one profile per identity record across sources")
-    func stopEnrollsIdentityRecordsAcrossSources() async throws {
-        let liveService = LiveTranscriptionService(speakerEmbeddingStore: store)
-
-        var micIdentity = SessionSpeakerIdentity()
-        micIdentity.accumulate(Array(repeating: 0.1, count: 192))
-        await liveService.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: micIdentity)
-
-        var appIdentity = SessionSpeakerIdentity()
-        appIdentity.accumulate(Array(repeating: 0.9, count: 192))
-        await liveService.injectSpeakerIdentityForTesting(source: .app, speakerIndex: 0, identity: appIdentity)
-
-        _ = await liveService.stop()
-
-        let profiles = try await store.fetchAllSnapshots()
-        #expect(profiles.count == 2)
-        #expect(Set(profiles.map(\.name)) == ["Speaker 1", "Speaker 2"])
+        #expect(result.speakerEmbeddings.isEmpty)
+        #expect(try await store.fetchAllSnapshots().isEmpty)
     }
 }

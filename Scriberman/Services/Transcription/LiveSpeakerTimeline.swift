@@ -155,6 +155,28 @@ enum LiveSpeakerTimeline {
         }?.key
     }
 
+    /// Each segment overlapping `[start, end]`, clipped to it, in seconds from
+    /// `start`, as voiceprint extractor ranges keyed by speaker index. Segments
+    /// are not merged: a gap between a speaker's runs is not speech
+    /// (live-mask-embeddings design D1).
+    static func voiceprintRanges(
+        in segments: [TurnSegment],
+        start: Float,
+        end: Float
+    ) -> [SpeakerVoiceprintExtractor.SpeakerRange] {
+        guard end > start else { return [] }
+        return segments.compactMap { segment in
+            let clippedStart = max(segment.start, start)
+            let clippedEnd = min(segment.end, end)
+            guard clippedEnd > clippedStart else { return nil }
+            return SpeakerVoiceprintExtractor.SpeakerRange(
+                speaker: String(segment.speakerIndex),
+                start: Double(clippedStart - start),
+                end: Double(clippedEnd - start)
+            )
+        }
+    }
+
     /// Dominant speaker among already-clipped runs (longest total duration,
     /// ties toward the lower index).
     static func dominantSpeaker(among runs: [SpeakerRun]) -> Int? {
@@ -190,8 +212,8 @@ enum LiveSegmentSplitter {
 
     /// Plans attribution for a buffer spanning `[start, end]` session seconds.
     ///
-    /// - Empty `runs` → empty result; the caller falls back to
-    ///   embedding-based attribution.
+    /// - Empty `runs` → empty result; the caller attributes the buffer to the
+    ///   source's unknown speaker.
     /// - Runs from a single speaker, or from several speakers where fewer
     ///   than two hold runs ≥ `minimumRunDuration` → one part for the whole
     ///   buffer attributed to the dominant speaker.
@@ -380,55 +402,6 @@ enum LiveSegmentSplitter {
         for upper in splitIndices + [words.count] {
             result.append(words[lower..<upper].joined(separator: " "))
             lower = upper
-        }
-        return result
-    }
-}
-
-/// Pairs clustering-diarizer embeddings with turn-diarizer speakers by time
-/// overlap. Overlap is measured against speaker runs, not against planned
-/// parts: a part can absorb another speaker's short turn.
-enum LiveEmbeddingAttribution {
-    /// Share of a clustering segment's duration that must lie inside one
-    /// speaker's runs for its embedding to count as that speaker's voice.
-    static let minimumOverlapFraction: Float = 0.8
-
-    struct Assignment {
-        let segment: TimedSpeakerSegment
-        let overlapFraction: Float
-    }
-
-    /// For each turn-diarizer speaker index, the longest clustering segment
-    /// that lies inside that speaker's runs. A segment that reaches
-    /// `minimumOverlapFraction` for no speaker, or for several (simultaneous
-    /// speech), is discarded. `clusterSegments` are buffer-relative; `runs`
-    /// are session time, as returned by `LiveSpeakerTimeline.speakerRuns`.
-    static func assignments(
-        clusterSegments: [TimedSpeakerSegment],
-        runs: [SpeakerRun],
-        bufferStart: Float
-    ) -> [Int: Assignment] {
-        var result: [Int: Assignment] = [:]
-        for segment in clusterSegments where !segment.embedding.isEmpty {
-            let start = bufferStart + segment.startTimeSeconds
-            let end = bufferStart + segment.endTimeSeconds
-            let duration = end - start
-            guard duration > 0 else { continue }
-
-            var overlapBySpeaker: [Int: Float] = [:]
-            for run in runs {
-                let overlap = min(run.end, end) - max(run.start, start)
-                if overlap > 0 {
-                    overlapBySpeaker[run.speakerIndex, default: 0] += overlap
-                }
-            }
-            let containing = overlapBySpeaker.filter { $0.value / duration >= minimumOverlapFraction }
-            guard containing.count == 1, let (speakerIndex, overlap) = containing.first else { continue }
-
-            if let existing = result[speakerIndex], existing.segment.durationSeconds >= segment.durationSeconds {
-                continue
-            }
-            result[speakerIndex] = Assignment(segment: segment, overlapFraction: overlap / duration)
         }
         return result
     }

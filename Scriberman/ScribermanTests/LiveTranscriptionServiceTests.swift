@@ -14,65 +14,40 @@ struct LiveTranscriptionServiceTests {
         return SpeakerEmbeddingStore(modelContainer: container)
     }
 
-    @Test
-    func stopEnrollsNewSpeaker() async throws {
-        let store = try makeStore()
-        let service = LiveTranscriptionService(speakerEmbeddingStore: store)
-
-        await service.injectSessionSpeaker(
-            id: "speaker_SPEAKER_0",
-            embedding: Array(repeating: 0.5, count: 256)
-        )
-
-        _ = await service.stop()
-
-        let profiles = try await store.fetchAllSnapshots()
-        #expect(profiles.count == 1)
-        #expect(profiles.first?.name == "Speaker 1")
+    /// A turn-speaker identity with `seconds` of speech.
+    private func turnIdentity(_ embedding: [Float], seconds: Float = 3) -> SessionSpeakerIdentity {
+        var identity = SessionSpeakerIdentity()
+        identity.accumulate(embedding, seconds: seconds)
+        return identity
     }
 
     @Test
-    func stopEnrollsMultipleNewSpeakers() async throws {
+    func stopEnrollsNoUnmatchedSpeaker() async throws {
         let store = try makeStore()
         let service = LiveTranscriptionService(speakerEmbeddingStore: store)
 
-        await service.injectSessionSpeaker(
-            id: "speaker_SPEAKER_0",
-            embedding: Array(repeating: 0.1, count: 256)
-        )
-        await service.injectSessionSpeaker(
-            id: "speaker_SPEAKER_1",
-            embedding: Array(repeating: 0.2, count: 256)
-        )
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: turnIdentity(Array(repeating: 0.1, count: 256)))
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 1, identity: turnIdentity(Array(repeating: -0.1, count: 256)))
 
         _ = await service.stop()
 
-        let profiles = try await store.fetchAllSnapshots()
-        #expect(profiles.count == 2)
-        #expect(Set(profiles.map(\.name)) == ["Speaker 1", "Speaker 2"])
+        #expect(try await store.fetchAllSnapshots().isEmpty)
     }
 
     @Test
-    func stopEnrollsTwoNewSpeakersPastTheHighestNumberWithoutTouchingExisting() async throws {
+    func stopLeavesExistingProfilesUntouched() async throws {
         let store = try makeStore()
         let speaker3Embedding = Array(repeating: Float(0.3), count: 256)
-        try await store.enrollNamedSpeaker(name: "Speaker 2", embedding: Array(repeating: 0.2, count: 256))
         let speaker3 = try await store.enrollNamedSpeaker(name: "Speaker 3", embedding: speaker3Embedding)
         let service = LiveTranscriptionService(speakerEmbeddingStore: store)
 
-        await service.injectSessionSpeaker(
-            id: "speaker_SPEAKER_0",
-            embedding: Array(repeating: 0.6, count: 256)
-        )
-        await service.injectSessionSpeaker(
-            id: "speaker_SPEAKER_1",
-            embedding: Array(repeating: 0.7, count: 256)
-        )
+        var unrelated = Array(repeating: Float(0), count: 256)
+        unrelated[0] = 1
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: turnIdentity(unrelated))
 
         _ = await service.stop()
 
-        let profiles = try await store.fetchAllSnapshots()
-        #expect(Set(profiles.map(\.name)) == ["Speaker 2", "Speaker 3", "Speaker 4", "Speaker 5"])
+        #expect(try await store.fetchAllSnapshots().map(\.name) == ["Speaker 3"])
         #expect(try await store.findProfileSnapshot(byID: speaker3)?.embedding == speaker3Embedding)
     }
 
@@ -81,57 +56,28 @@ struct LiveTranscriptionServiceTests {
         let store = try makeStore()
         let oldDate = Date(timeIntervalSinceNow: -3600)
         let aliceEmbedding = Array(repeating: Float(0.1), count: 256)
-
         try await store.enrollNamedSpeaker(name: "Alice", embedding: aliceEmbedding)
-        let alice = try await store.fetchAllSnapshots().first { $0.name == "Alice" }
-        let aliceID = try #require(alice?.id)
-
+        let aliceID = try #require(try await store.fetchAllSnapshots().first { $0.name == "Alice" }?.id)
         let service = LiveTranscriptionService(speakerEmbeddingStore: store)
 
-        await service.injectSessionSpeaker(
-            id: "speaker_SPEAKER_0",
-            embedding: aliceEmbedding,
-            boundProfileID: aliceID,
-            boundProfileName: "Alice"
-        )
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: turnIdentity(aliceEmbedding))
 
         _ = await service.stop()
 
         let profiles = try await store.fetchAllSnapshots()
-        #expect(profiles.count == 1)
-        #expect(profiles.first?.name == "Alice")
-
-        let updatedProfile = try await store.findProfileSnapshot(byID: aliceID)
-        let updated = try #require(updatedProfile)
+        #expect(profiles.map(\.name) == ["Alice"])
+        let updated = try #require(try await store.findProfileSnapshot(byID: aliceID))
         #expect(updated.lastSeen > oldDate)
-    }
-
-    @Test
-    func stopSkipsEnrollmentForEmptyEmbedding() async throws {
-        let store = try makeStore()
-        let service = LiveTranscriptionService(speakerEmbeddingStore: store)
-
-        await service.injectSessionSpeaker(
-            id: "speaker_SPEAKER_0",
-            embedding: []
-        )
-
-        _ = await service.stop()
-
-        let profiles = try await store.fetchAllSnapshots()
-        #expect(profiles.isEmpty)
     }
 
     @Test
     func stopWithoutStoreDoesNotCrash() async {
         let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
 
-        await service.injectSessionSpeaker(
-            id: "speaker_SPEAKER_0",
-            embedding: Array(repeating: 0.5, count: 256)
-        )
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: turnIdentity(Array(repeating: 0.5, count: 256)))
 
-        _ = await service.stop()
+        let result = await service.stop()
+        #expect(result.speakerEmbeddings.keys.sorted() == ["speaker_mic_0"])
     }
 
     @Test
@@ -163,6 +109,24 @@ struct LiveTranscriptionServiceTests {
         await service.prepare(workspace: makeWorkspace())
 
         #expect(await service.isInitialized == false)
+    }
+
+    @Test
+    func missingVoiceprintModelKeepsServiceUninitializedAndStartThrows() async {
+        let loads = FakeModelLoads()
+        loads.voiceprintFailuresRemaining = 2
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil, modelLoader: loads.loader)
+        let workspace = makeWorkspace()
+
+        await service.prepare(workspace: workspace)
+        #expect(await service.isInitialized == false)
+
+        let (_, continuation) = AsyncStream<TranscriptSegment>.makeStream()
+        await #expect(throws: LiveTranscriptionError.initializationFailed) {
+            try await service.start(workspace: workspace, resultContinuation: continuation)
+        }
+        #expect(await service.isInitialized == false)
+        #expect(loads.voiceprintLoadCount == 2)
     }
 
     @Test
@@ -265,7 +229,7 @@ struct LiveTranscriptionServiceTests {
         #expect(await flushProbe.lastOffset() == 0)
         #expect(await flushProbe.lastSamplesCount() == 5_000)
         #expect(loads.turnDiarizers.map(\.samples.count) == [10_000, 5_000])
-        #expect(loads.diarizerManagerCount == 2)
+        #expect(loads.voiceprintLoadCount == 2)
     }
 
     @Test
@@ -1102,7 +1066,8 @@ struct LiveTranscriptionServiceTests {
     private func collectSegments(
         from service: LiveTranscriptionService,
         samples: [Float],
-        vadStates: [(Bool, LiveVADEventKind?)]
+        vadStates: [(Bool, LiveVADEventKind?)],
+        source: Scriberman.AudioSource = .mic
     ) async -> [TranscriptSegment] {
         let results = AsyncStream<TranscriptSegment>.makeStream()
         await service.setResultContinuationForTesting(results.continuation)
@@ -1119,7 +1084,7 @@ struct LiveTranscriptionServiceTests {
             }
         }
 
-        await service.process(samples: samples, source: .mic, sampleRate: 16_000)
+        await service.process(samples: samples, source: source, sampleRate: 16_000)
         results.continuation.finish()
         await collectTask.value
         return receivedSegments
@@ -1201,8 +1166,9 @@ struct LiveTranscriptionServiceTests {
         #expect(segments.first?.speakerId == "speaker_mic_1")
     }
 
+    /// Spec scenario "Held buffer released on diarizer failure".
     @Test
-    func heldBufferFallsBackToEmbeddingsWhenTurnDiarizerFails() async {
+    func heldBufferGoesToTheUnknownSpeakerWhenTurnDiarizerFails() async {
         let diarizer = ScriptedTurnDiarizer(
             numSpeakers: 2,
             feedResponses: [.success([]), .failure(TestError.turnDiarizerFailed)]
@@ -1221,21 +1187,22 @@ struct LiveTranscriptionServiceTests {
         await service.process(samples: Array(repeating: Float(0), count: 4096), source: .mic, sampleRate: 16_000)
         let segments = await box.values(atLeast: 1)
         #expect(segments.count == 1)
-        #expect(segments.first?.speakerId == "unknown")
+        #expect(segments.first?.speakerId == "speaker_mic_unknown")
     }
 
+    /// Spec scenario "Timeline has no speaker activity for the range".
     @Test
-    func emptyTimelineFallsBackToSingleEmbeddingAttributedSegment() async {
+    func emptyTimelineGoesToTheUnknownSpeaker() async {
         let service = await makeAttributionService(text: "hello world", timeline: nil)
 
         let segments = await collectSegments(
             from: service,
             samples: Array(repeating: Float(0.1), count: 8192),
-            vadStates: [(true, .speechStart), (false, .speechEnd)]
+            vadStates: oneSpeechChunkPair
         )
 
         #expect(segments.count == 1)
-        #expect(segments.first?.speakerId == "unknown")
+        #expect(segments.first?.speakerId == "speaker_mic_unknown")
         #expect(segments.first?.text == "hello world")
         #expect(segments.first?.startTime == 0)
     }
@@ -1326,77 +1293,139 @@ struct LiveTranscriptionServiceTests {
         #expect(segments.first?.speakerId == "Alice")
     }
 
-    private func clusterSegment(_ speakerId: String, _ start: Float, _ end: Float, embedding: [Float]) -> TimedSpeakerSegment {
-        TimedSpeakerSegment(
-            speakerId: speakerId,
-            embedding: embedding,
-            startTimeSeconds: start,
-            endTimeSeconds: end,
-            qualityScore: 1.0
-        )
+    private func vadChunks(_ count: Int) -> [(Bool, LiveVADEventKind?)] {
+        [(true, .speechStart)] + Array(repeating: (true, nil), count: count - 2) + [(false, .speechEnd)]
     }
 
-    /// Runs one speech buffer of `vadChunkCount` × 4096 samples starting at
-    /// offset 0 through a service whose turn timeline is `frameSpeakers`
-    /// (0.1s per entry) and whose clustering diarizer returns `clusterSegments`.
+    /// Runs one speech buffer of `vadChunkCount` × 4096 samples starting at offset 0 through a
+    /// service whose turn timeline is `timeline` and whose voiceprint model is `embedder`.
     private func attributeOneBuffer(
-        frameSpeakers: [Int?],
-        clusterSegments: [TimedSpeakerSegment],
-        vadChunkCount: Int
-    ) async throws -> LiveTranscriptionService {
-        let timeline = try makeTurnTimeline(frameSpeakers: frameSpeakers, numSpeakers: 2)
+        timeline: TurnDiarizerChunk,
+        vadChunkCount: Int,
+        embedder: FakeEmbedder
+    ) async -> (service: LiveTranscriptionService, segments: [TranscriptSegment]) {
         let service = await makeAttributionService(text: "one two three four", timeline: timeline)
-        await service.setClusterDiarizationHookForTesting { _ in clusterSegments }
-
-        var vadStates: [(Bool, LiveVADEventKind?)] = [(true, .speechStart)]
-        vadStates.append(contentsOf: Array(repeating: (true, nil), count: vadChunkCount - 2))
-        vadStates.append((false, .speechEnd))
-        _ = await collectSegments(
+        await service.setVoiceprintEmbedderForTesting { try embedder.embed($0, $1) }
+        let segments = await collectSegments(
             from: service,
             samples: Array(repeating: Float(0.1), count: vadChunkCount * 4096),
-            vadStates: vadStates
+            vadStates: vadChunks(vadChunkCount)
         )
-        return service
+        return (service, segments)
     }
 
-    @Test
-    func clusterEmbeddingGoesToTheSpeakerWhoseRunsContainIt() async throws {
-        // A 0–2.2s, B 2.2–4.2s, silence to the buffer end at 6.144s, so B's
-        // part (2.2–6.144s) is the longest while A's clustering segment is.
-        let aEmbedding = Array(repeating: Float(0.1), count: 256)
-        let bEmbedding = Array(repeating: Float(0.9), count: 256)
-        let service = try await attributeOneBuffer(
-            frameSpeakers: Array(repeating: 0, count: 22) + Array(repeating: 1, count: 20) + Array(repeating: nil, count: 20),
-            clusterSegments: [
-                clusterSegment("S1", 0.0, 2.2, embedding: aEmbedding),
-                clusterSegment("S2", 2.2, 4.2, embedding: bEmbedding)
-            ],
-            vadChunkCount: 24
-        )
-
-        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 0)?.averagedEmbedding == aEmbedding)
-        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 1)?.averagedEmbedding == bEmbedding)
+    /// As above, with the timeline given as speakers at 0.1s resolution.
+    private func attributeOneBuffer(
+        frameSpeakers: [Int?],
+        vadChunkCount: Int,
+        embedder: FakeEmbedder
+    ) async throws -> (service: LiveTranscriptionService, segments: [TranscriptSegment]) {
+        let timeline = try makeTurnTimeline(frameSpeakers: frameSpeakers, numSpeakers: 2)
+        return await attributeOneBuffer(timeline: timeline, vadChunkCount: vadChunkCount, embedder: embedder)
     }
 
+    /// Frames of a 100-frame mask that are set.
+    private func activeFrames(_ mask: [Float]) -> [Int] {
+        mask.indices.filter { mask[$0] != 0 }
+    }
+
+    /// Spec scenario "Short run gives no voiceprint".
     @Test
-    func absorbedShortTurnKeepsItsOwnClusterEmbedding() async throws {
-        // A 0–0.8s, B 0.8–1.7s, A 1.7–2.5s: no run reaches 1s, so the whole
-        // buffer is one part for A, while B's clustering segment is the longest.
-        let aEmbedding = Array(repeating: Float(0.1), count: 256)
-        let bEmbedding = Array(repeating: Float(0.9), count: 256)
-        let service = try await attributeOneBuffer(
-            frameSpeakers: Array(repeating: 0, count: 8) + Array(repeating: 1, count: 9)
+    func shortRunGivesNoVoiceprint() async throws {
+        // Speaker 0 for 2.0s, speaker 1 for 0.6s; the buffer ends at 2.816s.
+        let embedder = FakeEmbedder([voice(0)])
+        let (service, _) = try await attributeOneBuffer(
+            frameSpeakers: Array(repeating: 0, count: 20) + Array(repeating: 1, count: 6) + Array(repeating: nil, count: 3),
+            vadChunkCount: 11,
+            embedder: embedder
+        )
+
+        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 1) == nil)
+        let zero = try #require(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 0))
+        #expect(abs(zero.speechSeconds - 2.0) < 0.01)
+    }
+
+    /// Spec scenario "Short runs separated by a small gap": the gap merge used for splitting does
+    /// not reach the voiceprints.
+    @Test
+    func shortRunsSeparatedByASmallGapGiveNoVoiceprint() async throws {
+        // Speaker 0 at 0–0.6s and 0.7–1.3s; the buffer ends at 1.536s.
+        let embedder = FakeEmbedder([voice(0)])
+        let (service, segments) = try await attributeOneBuffer(
+            frameSpeakers: Array(repeating: 0, count: 6) + [nil] + Array(repeating: 0, count: 6) + Array(repeating: nil, count: 3),
+            vadChunkCount: 6,
+            embedder: embedder
+        )
+
+        #expect(segments.map(\.speakerId) == ["speaker_mic_0"])
+        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 0) == nil)
+        #expect(embedder.calls.isEmpty)
+    }
+
+    /// Spec scenario "Overlapped speech is excluded".
+    @Test
+    func overlappedSpeechIsExcludedFromVoiceprints() async throws {
+        // A 0–4s, B 3–6s at 10ms frames; the buffer ends at 6.144s.
+        var probabilities: [Float] = []
+        for frame in 0..<620 {
+            probabilities.append(frame < 400 ? 1 : 0)
+            probabilities.append(frame >= 300 && frame < 600 ? 1 : 0)
+        }
+        let embedder = FakeEmbedder([voice(0)])
+        let (service, _) = await attributeOneBuffer(
+            timeline: TurnDiarizerChunk(probabilities: probabilities, frameCount: 620),
+            vadChunkCount: 24,
+            embedder: embedder
+        )
+
+        let masks = try #require(embedder.calls.first)
+        #expect(embedder.calls.count == 1)
+        #expect(masks.map(activeFrames) == [Array(0..<30), Array(40..<60)])
+        let a = try #require(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 0))
+        let b = try #require(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 1))
+        #expect(abs(a.speechSeconds - 3.0) < 0.01)
+        #expect(abs(b.speechSeconds - 2.0) < 0.01)
+    }
+
+    /// Spec scenario "Absorbed short turn keeps its own voiceprint".
+    @Test
+    func absorbedShortTurnKeepsItsOwnVoiceprint() async throws {
+        // A 0–0.8s, B 0.8–2.0s, A 2.0–2.8s: only B's run reaches 1s, so the whole buffer is one
+        // part for A.
+        let embedder = FakeEmbedder([voice(1)])
+        let (service, segments) = try await attributeOneBuffer(
+            frameSpeakers: Array(repeating: 0, count: 8) + Array(repeating: 1, count: 12)
                 + Array(repeating: 0, count: 8) + Array(repeating: nil, count: 2),
-            clusterSegments: [
-                clusterSegment("S1", 0.0, 0.8, embedding: aEmbedding),
-                clusterSegment("S2", 0.8, 1.7, embedding: bEmbedding),
-                clusterSegment("S1", 1.7, 2.5, embedding: aEmbedding)
-            ],
-            vadChunkCount: 10
+            vadChunkCount: 11,
+            embedder: embedder
         )
 
-        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 1)?.averagedEmbedding == bEmbedding)
-        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 0)?.averagedEmbedding != bEmbedding)
+        #expect(segments.map(\.speakerId) == ["speaker_mic_0"])
+        let b = try #require(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 1))
+        #expect(abs(b.speechSeconds - 1.2) < 0.01)
+        #expect(b.averagedEmbedding == voice(1))
+        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 0) == nil)
+    }
+
+    @Test
+    func voiceprintRangesAreBufferRelativeAndUnmerged() {
+        let ranges = LiveSpeakerTimeline.voiceprintRanges(
+            in: [
+                TurnSegment(speakerIndex: 0, start: 9.0, end: 11.0),
+                TurnSegment(speakerIndex: 1, start: 11.5, end: 12.5),
+                TurnSegment(speakerIndex: 0, start: 12.6, end: 20.0),
+                TurnSegment(speakerIndex: 1, start: 20.0, end: 21.0)
+            ],
+            start: 10.0,
+            end: 13.0
+        )
+
+        #expect(ranges.map(\.speaker) == ["0", "1", "0"])
+        let expected: [(Double, Double)] = [(0.0, 1.0), (1.5, 2.5), (2.6, 3.0)]
+        for (range, bounds) in zip(ranges, expected) {
+            #expect(abs(range.start - bounds.0) < 0.001)
+            #expect(abs(range.end - bounds.1) < 0.001)
+        }
     }
 
     /// A unit vector along `axis`; distinct axes are orthogonal voices.
@@ -1404,20 +1433,33 @@ struct LiveTranscriptionServiceTests {
         (0..<256).map { $0 == axis ? Float(1) : Float(0) }
     }
 
+    private let oneSpeechChunkPair: [(Bool, LiveVADEventKind?)] = [(true, .speechStart), (false, .speechEnd)]
+
     private let tenVADChunks: [(Bool, LiveVADEventKind?)] =
         [(true, .speechStart)] + Array(repeating: (true, nil), count: 8) + [(false, .speechEnd)]
 
+    /// An identity with `seconds` of speech whose voiceprint is `embedding`.
+    private func identity(_ embedding: [Float], seconds: Float = 3, boundTo profile: (UUID, String)? = nil) -> SessionSpeakerIdentity {
+        var identity = SessionSpeakerIdentity()
+        identity.accumulate(embedding, seconds: seconds)
+        identity.boundProfileID = profile?.0
+        identity.boundProfileName = profile?.1
+        return identity
+    }
+
+    /// Spec scenarios "Known speaker recognized mid-session", "Short speech is not matched" and
+    /// "Earlier segments relabelled at stop".
     @Test
-    func stopRelabelsTurnSpeakerSegmentsEmittedBeforeBinding() async throws {
-        // Speaker 0 throughout both 2.56s buffers.
+    func stopRelabelsTurnSpeakerSegmentsEmittedBeforeTheMatch() async throws {
+        let store = try makeStore()
+        try await store.enrollNamedSpeaker(name: "Alice", embedding: voice(0))
+        // Speaker 0 throughout both 2.56s buffers, so 2.56s of qualifying speech in each.
         let timeline = try makeTurnTimeline(frameSpeakers: Array(repeating: 0, count: 60), numSpeakers: 2)
-        let service = await makeAttributionService(texts: ["before binding", "after binding"], timeline: timeline)
+        let service = await makeAttributionService(texts: ["before the match", "after the match"], timeline: timeline, store: store)
+        let embedder = FakeEmbedder([voice(0)])
+        await service.setVoiceprintEmbedderForTesting { try embedder.embed($0, $1) }
 
         let before = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 40_960), vadStates: tenVADChunks)
-        var identity = SessionSpeakerIdentity()
-        identity.boundProfileID = UUID()
-        identity.boundProfileName = "Alice"
-        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: identity)
         let after = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 40_960), vadStates: tenVADChunks)
 
         #expect(before.map(\.speakerId) == ["speaker_mic_0"])
@@ -1426,153 +1468,236 @@ struct LiveTranscriptionServiceTests {
         let result = await service.stop()
         #expect(result.segments.map(\.speakerId) == ["Alice", "Alice"])
         #expect(result.segments.map(\.id) == (before + after).map(\.id))
-        #expect(result.speakerIDRemap == ["speaker_mic_0": "Alice"])
+        #expect(result.finalSpeakerIDs == [before[0].id: "Alice", after[0].id: "Alice"])
+        #expect(try await store.fetchAllSnapshots().count == 1)
+    }
+
+    /// Spec scenario "Profile reassigned between speakers": index 0 is shown as Bob, loses the
+    /// match, and index 1 ends with it. Relabelling by segment keeps them apart.
+    @Test
+    func profileReassignedBetweenSpeakersRelabelsBySegment() async throws {
+        let store = try makeStore()
+        let bobID = try await store.enrollNamedSpeaker(name: "Bob", embedding: voice(1))
+        // Speaker 0 for the first buffer, speaker 1 for the second.
+        let timeline = try makeTurnTimeline(frameSpeakers: Array(repeating: 0, count: 26) + Array(repeating: 1, count: 26), numSpeakers: 2)
+        let service = await makeAttributionService(texts: ["zero speaks", "one speaks"], timeline: timeline, store: store)
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: identity(voice(1), boundTo: (bobID, "Bob")))
+
+        let first = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 40_960), vadStates: tenVADChunks)
+        // Index 0's voiceprint has since moved away from Bob; index 1 sounds like Bob.
+        var moved = identity(voice(1), boundTo: (bobID, "Bob"))
+        moved.accumulate(voice(2), seconds: 30)
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: moved)
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 1, identity: identity(voice(1)))
+        let second = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 40_960), vadStates: tenVADChunks)
+
+        #expect(first.map(\.speakerId) == ["Bob"])
+        #expect(second.map(\.speakerId) == ["speaker_mic_1"])
+
+        let result = await service.stop()
+        #expect(result.segments.map(\.speakerId) == ["speaker_mic_0", "Bob"])
+        #expect(result.finalSpeakerIDs == [first[0].id: "speaker_mic_0", second[0].id: "Bob"])
+    }
+
+    /// Spec scenario "Match lost before stop".
+    @Test
+    func matchLostBeforeStopFallsBackToTheSessionLocalID() async throws {
+        let store = try makeStore()
+        let bobID = try await store.enrollNamedSpeaker(name: "Bob", embedding: voice(1))
+        let timeline = try makeTurnTimeline(frameSpeakers: Array(repeating: 1, count: 30), numSpeakers: 2)
+        let service = await makeAttributionService(text: "shown as bob", timeline: timeline, store: store)
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 1, identity: identity(voice(3), boundTo: (bobID, "Bob")))
+
+        let segments = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 40_960), vadStates: tenVADChunks)
+        let result = await service.stop()
+
+        #expect(segments.map(\.speakerId) == ["Bob"])
+        #expect(result.segments.map(\.speakerId) == ["speaker_mic_1"])
+        #expect(result.speakerEmbeddings == ["speaker_mic_1": voice(3)])
     }
 
     @Test
-    func deletingAllProfilesMidRecordingKeepsBindingsAndDoesNotRecreateThem() async throws {
+    func deletingAllProfilesMidRecordingKeepsLabelsUntilStopAndCreatesNothing() async throws {
         let store = try makeStore()
         let aliceID = try await store.enrollNamedSpeaker(name: "Alice", embedding: voice(0))
         let timeline = try makeTurnTimeline(frameSpeakers: Array(repeating: 0, count: 30), numSpeakers: 2)
         let service = await makeAttributionService(text: "after deletion", timeline: timeline, store: store)
-        var alice = SessionSpeakerIdentity()
-        alice.accumulate(voice(0))
-        alice.boundProfileID = aliceID
-        alice.boundProfileName = "Alice"
-        var unbound = SessionSpeakerIdentity()
-        unbound.accumulate(voice(1))
-        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: alice)
-        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 1, identity: unbound)
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: identity(voice(0), boundTo: (aliceID, "Alice")))
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 1, identity: identity(voice(1)))
 
         try await store.deleteAllProfiles()
         let segments = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 40_960), vadStates: tenVADChunks)
-        _ = await service.stop()
+        let result = await service.stop()
 
         #expect(segments.map(\.speakerId) == ["Alice"])
-        let profiles = try await store.fetchAllSnapshots()
-        #expect(profiles.map(\.name) == ["Speaker 1"])
-        #expect(profiles.first?.embedding == voice(1))
+        #expect(result.segments.map(\.speakerId) == ["speaker_mic_0"])
+        #expect(try await store.fetchAllSnapshots().isEmpty)
     }
 
+    /// Spec scenario "Speech accumulates across short buffers", with the second buffer starting
+    /// at a nonzero session offset.
     @Test
-    func fallbackSpeakerStaysBoundToFirstMatch() async throws {
+    func speechAccumulatesAcrossShortBuffers() async throws {
+        let store = try makeStore()
+        try await store.enrollNamedSpeaker(name: "Alice", embedding: voice(0))
+        // Speaker 0 at 0–1.6s and 2.1–3.7s; buffers 0–2.048s and 2.048–4.096s. 1.6s per buffer
+        // keeps each below 3s alone.
+        let timeline = try makeTurnTimeline(
+            frameSpeakers: Array(repeating: 0, count: 16) + Array(repeating: nil, count: 5)
+                + Array(repeating: 0, count: 16) + Array(repeating: nil, count: 4),
+            numSpeakers: 2
+        )
+        let service = await makeAttributionService(texts: ["first", "second"], timeline: timeline, store: store)
+        let embedder = FakeEmbedder([voice(0)])
+        await service.setVoiceprintEmbedderForTesting { try embedder.embed($0, $1) }
+
+        let first = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 8 * 4096), vadStates: vadChunks(8))
+        let afterFirst = try #require(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 0))
+        #expect(abs(afterFirst.speechSeconds - 1.6) < 0.01)
+        let second = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 8 * 4096), vadStates: vadChunks(8))
+
+        #expect(first.map(\.speakerId) == ["speaker_mic_0"])
+        #expect(second.map(\.speakerId) == ["Alice"])
+        let afterSecond = try #require(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 0))
+        #expect(abs(afterSecond.speechSeconds - 3.2) < 0.01)
+        // The second buffer starts at 2.048s: speech at 2.1–3.7s is 0.052–1.652s into it.
+        let secondMasks = try #require(embedder.calls.last)
+        #expect(secondMasks.map(activeFrames) == [Array(1...16)])
+    }
+
+    /// Spec scenario "Early wrong match is corrected".
+    @Test
+    func earlyWrongMatchIsCorrectedAndRelabelledAtStop() async throws {
         let store = try makeStore()
         try await store.enrollNamedSpeaker(name: "Alice", embedding: voice(0))
         try await store.enrollNamedSpeaker(name: "Bob", embedding: voice(1))
-        let service = await makeAttributionService(texts: ["first", "second"], timeline: nil, store: store)
-        let clusters = ClusterSequenceProbe([
-            [clusterSegment("S1", 0.0, 0.5, embedding: voice(0))],
-            [clusterSegment("S1", 0.0, 0.5, embedding: voice(1))]
-        ])
-        await service.setClusterDiarizationHookForTesting { _ in clusters.next() }
+        let timeline = try makeTurnTimeline(frameSpeakers: Array(repeating: 0, count: 130), numSpeakers: 2)
+        let service = await makeAttributionService(texts: ["one", "two", "three", "four", "five"], timeline: timeline, store: store)
+        // Two buffers sound like Bob, then the voice settles on Alice.
+        let embedder = FakeEmbedder([voice(1), voice(1), voice(0)])
+        await service.setVoiceprintEmbedderForTesting { try embedder.embed($0, $1) }
 
-        let first = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 8192), vadStates: [(true, .speechStart), (false, .speechEnd)])
-        let second = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 8192), vadStates: [(true, .speechStart), (false, .speechEnd)])
+        var emitted: [TranscriptSegment] = []
+        for _ in 0..<5 {
+            emitted += await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 40_960), vadStates: tenVADChunks)
+        }
+        let result = await service.stop()
 
-        #expect(first.map(\.speakerId) == ["Alice"])
-        #expect(second.map(\.speakerId) == ["Alice"])
+        #expect(emitted.map(\.speakerId) == ["speaker_mic_0", "Bob", "Bob", "speaker_mic_0", "Alice"])
+        #expect(result.segments.map(\.speakerId) == Array(repeating: "Alice", count: 5))
+        #expect(result.finalSpeakerIDs == Dictionary(uniqueKeysWithValues: emitted.map { ($0.id, "Alice") }))
     }
 
+    /// Spec scenario "Voiceprint extraction fails": the model throws.
     @Test
-    func stopRelabelsFallbackSegmentsEmittedBeforeBinding() async throws {
+    func throwingVoiceprintModelStillEmitsEveryBuffer() async throws {
+        try await expectBuffersEmittedWithoutVoiceprints(embedder: FakeEmbedder([voice(0)], error: TestError.embeddingFailed))
+    }
+
+    /// Spec scenario "Voiceprint extraction fails": the model returns no usable vector.
+    @Test
+    func unusableVoiceprintStillEmitsEveryBuffer() async throws {
+        try await expectBuffersEmittedWithoutVoiceprints(embedder: FakeEmbedder([Array(repeating: 0, count: 256)]))
+    }
+
+    private func expectBuffersEmittedWithoutVoiceprints(embedder: FakeEmbedder) async throws {
+        let timeline = try makeTurnTimeline(frameSpeakers: Array(repeating: 0, count: 60), numSpeakers: 2)
+        let service = await makeAttributionService(texts: ["first", "second"], timeline: timeline)
+        await service.setVoiceprintEmbedderForTesting { try embedder.embed($0, $1) }
+
+        let first = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 40_960), vadStates: tenVADChunks)
+        let second = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 40_960), vadStates: tenVADChunks)
+
+        #expect(first.map(\.text) == ["first"])
+        #expect(second.map(\.text) == ["second"])
+        #expect((first + second).map(\.speakerId) == ["speaker_mic_0", "speaker_mic_0"])
+        #expect(embedder.calls.count == 2)
+        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 0) == nil)
+    }
+
+    /// Spec scenario "Turn diarizer failed".
+    @Test
+    func turnDiarizerFailureSendsLaterBuffersToTheUnknownSpeaker() async throws {
         let store = try makeStore()
         try await store.enrollNamedSpeaker(name: "Alice", embedding: voice(0))
-        let service = await makeAttributionService(texts: ["first", "second"], timeline: nil, store: store)
-        let clusters = ClusterSequenceProbe([
-            [clusterSegment("S1", 0.0, 0.5, embedding: voice(5))],
-            [clusterSegment("S1", 0.0, 0.5, embedding: voice(0))]
-        ])
-        await service.setClusterDiarizationHookForTesting { _ in clusters.next() }
+        let diarizer = ScriptedTurnDiarizer(numSpeakers: 2, feedResponses: [.failure(TestError.turnDiarizerFailed)])
+        let service = await makeAttributionService(texts: ["first", "second"], diarizer: diarizer, store: store)
+        let embedder = FakeEmbedder([voice(0)])
+        await service.setVoiceprintEmbedderForTesting { try embedder.embed($0, $1) }
 
-        let first = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 8192), vadStates: [(true, .speechStart), (false, .speechEnd)])
-        let second = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 8192), vadStates: [(true, .speechStart), (false, .speechEnd)])
-        #expect(first.map(\.speakerId) == ["speaker_S1"])
-        #expect(second.map(\.speakerId) == ["Alice"])
-
+        let first = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 40_960), vadStates: tenVADChunks)
+        let second = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 40_960), vadStates: tenVADChunks)
         let result = await service.stop()
-        #expect(result.segments.map(\.speakerId) == ["Alice", "Alice"])
-        #expect(result.speakerIDRemap == ["speaker_S1": "Alice"])
-        #expect(result.speakerEmbeddings["Alice"] == voice(0))
-        #expect(result.speakerEmbeddings["speaker_S1"] == nil)
-        #expect(result.enrolledProfileIDs.isEmpty)
+
+        #expect((first + second).map(\.speakerId) == ["speaker_mic_unknown", "speaker_mic_unknown"])
+        #expect(result.segments.map(\.speakerId) == ["speaker_mic_unknown", "speaker_mic_unknown"])
+        #expect(result.finalSpeakerIDs.isEmpty)
+        #expect(result.speakerEmbeddings.isEmpty)
+        #expect(embedder.calls.isEmpty)
+    }
+
+    /// Spec scenario "Sources keep separate unknown speakers".
+    @Test
+    func sourcesKeepSeparateUnknownSpeakers() async throws {
+        let service = await makeAttributionService(texts: ["mic words", "app words"], timeline: nil)
+
+        let mic = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 8192), vadStates: oneSpeechChunkPair)
+        let app = await collectSegments(from: service, samples: Array(repeating: Float(0.1), count: 8192), vadStates: oneSpeechChunkPair, source: .app)
+
+        #expect(mic.map(\.speakerId) == ["speaker_mic_unknown"])
+        #expect(app.map(\.speakerId) == ["speaker_app_unknown"])
     }
 
     @Test
-    func stopReportsVoiceprintsAndEnrolledProfilesPerFinalSpeakerID() async throws {
+    func speakerIDsNeverCollide() {
+        let ids = [
+            LiveSpeakerReference.turn(.mic, 0).sessionLocalID,
+            LiveSpeakerReference.turn(.app, 0).sessionLocalID,
+            LiveSpeakerReference.turn(.mic, 1).sessionLocalID,
+            LiveSpeakerReference.unknownSpeakerID(for: .mic),
+            LiveSpeakerReference.unknownSpeakerID(for: .app)
+        ]
+        #expect(Set(ids).count == ids.count)
+    }
+
+    @Test
+    func stopLogsOneLinePerIdentity() async throws {
         let store = try makeStore()
         let aliceID = try await store.enrollNamedSpeaker(name: "Alice", embedding: voice(0))
-        let carolID = try await store.enrollNamedSpeaker(name: "Carol", embedding: voice(2))
+        let service = LiveTranscriptionService(speakerEmbeddingStore: store)
+        let lines = LogLines()
+        await service.setNoticeLogSinkForTesting { lines.append($0) }
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: identity(voice(0), seconds: 4))
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 1, identity: identity(voice(1), seconds: 2))
+
+        _ = await service.stop()
+
+        #expect(lines.values == [
+            "🗣 Speaker speaker_mic_0: 4.0s qualifying speech, voiceprint saved: yes, profile: \(aliceID.uuidString)",
+            "🗣 Speaker speaker_mic_1: 2.0s qualifying speech, voiceprint saved: no, profile: none"
+        ])
+    }
+
+    @Test
+    func stopReportsVoiceprintsPerFinalSpeakerIDAndEnrollsNothing() async throws {
+        let store = try makeStore()
+        try await store.enrollNamedSpeaker(name: "Alice", embedding: voice(0))
+        try await store.enrollNamedSpeaker(name: "Carol", embedding: voice(2))
         let service = LiveTranscriptionService(speakerEmbeddingStore: store)
 
-        var alice = SessionSpeakerIdentity()
-        alice.accumulate(voice(0))
-        alice.boundProfileID = aliceID
-        alice.boundProfileName = "Alice"
-        var unbound = SessionSpeakerIdentity()
-        unbound.accumulate(voice(1))
-        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: alice)
-        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 1, identity: unbound)
-        await service.injectSessionSpeaker(id: "speaker_S1", embedding: voice(2), boundProfileID: carolID, boundProfileName: "Carol")
-        await service.injectSessionSpeaker(id: "speaker_S2", embedding: voice(3))
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 0, identity: identity(voice(0)))
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 1, identity: identity(voice(1)))
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 2, identity: identity(voice(2)))
+        await service.injectSpeakerIdentityForTesting(source: .mic, speakerIndex: 3, identity: identity(voice(3), seconds: 1))
 
         let result = await service.stop()
 
-        #expect(result.speakerIDRemap == ["speaker_mic_0": "Alice", "speaker_S1": "Carol"])
         #expect(result.speakerEmbeddings == [
             "Alice": voice(0),
             "speaker_mic_1": voice(1),
-            "Carol": voice(2),
-            "speaker_S2": voice(3)
+            "Carol": voice(2)
         ])
-        #expect(Set(result.enrolledProfileIDs.keys) == ["speaker_mic_1", "speaker_S2"])
-        for profileID in result.enrolledProfileIDs.values {
-            #expect(try await store.findProfileSnapshot(byID: profileID) != nil)
-        }
-    }
-
-    @Test
-    func clusterSegmentStraddlingTwoSpeakersIsDiscarded() async throws {
-        // A 0–1.3s, B 1.3–2.6s; the only clustering segment is half in each.
-        let service = try await attributeOneBuffer(
-            frameSpeakers: Array(repeating: 0, count: 13) + Array(repeating: 1, count: 13),
-            clusterSegments: [clusterSegment("S1", 0.8, 1.8, embedding: Array(repeating: 0.5, count: 256))],
-            vadChunkCount: 10
-        )
-
-        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 0) == nil)
-        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 1) == nil)
-    }
-
-    @Test
-    func clusterSegmentDuringSimultaneousSpeechIsDiscarded() async throws {
-        // Both speakers active 0–2.0s, silence to 2.6s.
-        var probabilities: [Float] = []
-        for frame in 0..<260 {
-            let active: Float = frame < 200 ? 1.0 : 0.0
-            probabilities.append(contentsOf: [active, active])
-        }
-        let timeline = TurnDiarizerChunk(probabilities: probabilities, frameCount: 260)
-        let service = await makeAttributionService(text: "one two three four", timeline: timeline)
-        await service.setClusterDiarizationHookForTesting { _ in
-            [TimedSpeakerSegment(
-                speakerId: "S1",
-                embedding: Array(repeating: 0.5, count: 256),
-                startTimeSeconds: 0.2,
-                endTimeSeconds: 1.8,
-                qualityScore: 1.0
-            )]
-        }
-        var vadStates: [(Bool, LiveVADEventKind?)] = [(true, .speechStart)]
-        vadStates.append(contentsOf: Array(repeating: (true, nil), count: 8))
-        vadStates.append((false, .speechEnd))
-        _ = await collectSegments(
-            from: service,
-            samples: Array(repeating: Float(0.1), count: 40_960),
-            vadStates: vadStates
-        )
-
-        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 0) == nil)
-        #expect(await service.speakerIdentityForTesting(source: .mic, speakerIndex: 1) == nil)
+        #expect(Set(try await store.fetchAllSnapshots().map(\.name)) == ["Alice", "Carol"])
     }
 }
 
@@ -1894,26 +2019,12 @@ struct LiveSpeakerTimelineTests {
     }
 }
 
-extension LiveTranscriptionService {
-    func injectSessionSpeaker(
-        id: String,
-        embedding: [Float],
-        boundProfileID: UUID? = nil,
-        boundProfileName: String? = nil
-    ) {
-        sessionSpeakers[id] = FallbackSpeakerRecord(
-            embedding: embedding,
-            boundProfileID: boundProfileID,
-            boundProfileName: boundProfileName
-        )
-    }
-}
-
 private enum TestError: Error {
     case modelLoadFailed
     case vadInitializationFailed
     case decoderStateCreationFailed
     case turnDiarizerFailed
+    case embeddingFailed
 }
 
 /// Turn diarizer that commits scripted chunks: one `feedResponses` entry per
@@ -2020,19 +2131,39 @@ private final class TextSequenceProbe: @unchecked Sendable {
     }
 }
 
-/// Returns one scripted clustering result per call, then empty results.
-private final class ClusterSequenceProbe: @unchecked Sendable {
+/// Voiceprint model that returns one scripted vector per call for every mask (the last vector
+/// repeats), or throws `error`. Records each call's masks.
+private final class FakeEmbedder: @unchecked Sendable {
     private let lock = NSLock()
-    private var results: [[TimedSpeakerSegment]]
+    private var vectors: [[Float]]
+    private let error: TestError?
+    private var recorded: [[[Float]]] = []
 
-    init(_ results: [[TimedSpeakerSegment]]) {
-        self.results = results
+    init(_ vectors: [[Float]], error: TestError? = nil) {
+        self.vectors = vectors
+        self.error = error
     }
 
-    func next() -> [TimedSpeakerSegment] {
-        lock.lock()
-        defer { lock.unlock() }
-        return results.isEmpty ? [] : results.removeFirst()
+    var calls: [[[Float]]] { lock.withLock { recorded } }
+
+    func embed(_ window: ArraySlice<Float>, _ masks: [[Float]]) throws -> [[Float]] {
+        let vector: [Float] = lock.withLock {
+            recorded.append(masks)
+            return vectors.count > 1 ? vectors.removeFirst() : vectors[0]
+        }
+        if let error { throw error }
+        return masks.map { _ in vector }
+    }
+}
+
+private final class LogLines: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+
+    var values: [String] { lock.withLock { lines } }
+
+    func append(_ line: String) {
+        lock.withLock { lines.append(line) }
     }
 }
 
@@ -2147,7 +2278,8 @@ private final class FakeModelLoads: @unchecked Sendable {
     private var thresholds: [Double] = []
     private var processed: [Double] = []
     private var diarizers: [SampleRecordingDiarizer] = []
-    private var diarizerManagers = 0
+    private var voiceprintLoads = 0
+    private var voiceprintFailures = 0
     private var asrFailures = 0
     private var vadFailures = 0
 
@@ -2163,13 +2295,17 @@ private final class FakeModelLoads: @unchecked Sendable {
         get { locked { vadFailures } }
         set { locked { vadFailures = newValue } }
     }
+    var voiceprintFailuresRemaining: Int {
+        get { locked { voiceprintFailures } }
+        set { locked { voiceprintFailures = newValue } }
+    }
     var asrLoadCount: Int { locked { asrLoads } }
     private var loadedProcessors: [AsrProcessor] = []
     var asrProcessors: [AsrProcessor] { locked { loadedProcessors } }
     var vadThresholds: [Double] { locked { thresholds } }
     var processedThresholds: [Double] { locked { processed } }
     var turnDiarizers: [SampleRecordingDiarizer] { locked { diarizers } }
-    var diarizerManagerCount: Int { locked { diarizerManagers } }
+    var voiceprintLoadCount: Int { locked { voiceprintLoads } }
 
     func waitForAsrLoads(_ count: Int) async -> Bool {
         let deadline = ContinuousClock.now + .seconds(5)
@@ -2197,15 +2333,17 @@ private final class FakeModelLoads: @unchecked Sendable {
                 if shouldFail { throw TestError.modelLoadFailed }
                 return AsrManager(config: ASRConfig())
             },
-            loadDiarizer: { _, construction in
-                return {
-                    self.locked { self.diarizerManagers += 1 }
-                    return DiarizerManager(config: DiarizerConfig(
-                        clusteringThreshold: Float(construction.speakerSimilarityThreshold),
-                        minSpeechDuration: Float(construction.vadMinSpeechDuration),
-                        minSilenceGap: Float(construction.minSilenceGap)
-                    ))
+            loadVoiceprintExtractor: { _ in
+                let shouldFail = self.locked {
+                    self.voiceprintLoads += 1
+                    guard self.voiceprintFailures > 0 else { return false }
+                    self.voiceprintFailures -= 1
+                    return true
                 }
+                if shouldFail { throw LiveTranscriptionError.initializationFailed }
+                return LiveVoiceprintExtractor(SpeakerVoiceprintExtractor(maskFrameCount: 100) { _, masks in
+                    masks.map { _ in [1] }
+                })
             },
             loadVad: { _, construction in
                 let shouldFail = self.locked {

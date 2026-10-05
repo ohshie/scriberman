@@ -8,60 +8,90 @@ enum LiveTranscriptionError: Error {
     case initializationFailed
 }
 
-/// Session identity of one turn-diarizer speaker index within one audio source:
-/// clustering-diarizer embeddings accumulate here, and the first confident
-/// profile match binds the index for the rest of the session (design D5).
+/// The session identity a live segment belongs to. The source is part of the reference, so the
+/// same index on two sources never shares one.
+enum LiveSpeakerReference: Hashable, Sendable {
+    /// A turn-diarizer speaker index of one source.
+    case turn(AudioSource, Int)
+
+    var source: AudioSource {
+        switch self {
+        case let .turn(source, _):
+            return source
+        }
+    }
+
+    /// The speaker ID used while the identity matches no profile.
+    var sessionLocalID: String {
+        switch self {
+        case let .turn(source, index):
+            return "speaker_\(source.rawValue)_\(index)"
+        }
+    }
+
+    /// Speaker ID of a source's buffers attributed without turn data. It has no identity record,
+    /// no voiceprint and is never matched (live-mask-embeddings design D3).
+    static func unknownSpeakerID(for source: AudioSource) -> String {
+        "speaker_\(source.rawValue)_unknown"
+    }
+}
+
+/// One live speaker identity: voiceprints from its turn-diarizer speech accumulate here, weighted
+/// by the seconds of speech each came from, and the identity's current profile match. The match
+/// is re-evaluated as the voiceprint grows (design D4).
 struct SessionSpeakerIdentity {
+    /// A buffer gives a speaker a voiceprint only with at least this much qualifying speech.
+    static let minimumEmbeddingSeconds: Float = 1.0
+    /// An identity is matched only once it has this much qualifying speech.
+    static let minimumMatchingSeconds: Float = 3.0
+
     private(set) var embeddingSum: [Float] = []
-    private(set) var embeddingCount: Int = 0
+    private(set) var speechSeconds: Float = 0
     var boundProfileID: UUID?
     var boundProfileName: String?
 
     var isBound: Bool { boundProfileID != nil }
 
+    /// The duration-weighted mean of the accumulated embeddings.
     var averagedEmbedding: [Float] {
-        guard embeddingCount > 0 else { return [] }
-        return embeddingSum.map { $0 / Float(embeddingCount) }
+        guard speechSeconds > 0 else { return [] }
+        return embeddingSum.map { $0 / speechSeconds }
     }
 
-    mutating func accumulate(_ embedding: [Float]) {
-        guard !embedding.isEmpty else { return }
+    /// Whether the identity has enough speech to be matched or saved with a voiceprint.
+    var hasMatchableVoiceprint: Bool {
+        speechSeconds >= Self.minimumMatchingSeconds && !embeddingSum.isEmpty
+    }
+
+    mutating func accumulate(_ embedding: [Float], seconds: Float) {
+        guard !embedding.isEmpty, seconds > 0 else { return }
         if embeddingSum.count == embedding.count {
             for index in embedding.indices {
-                embeddingSum[index] += embedding[index]
+                embeddingSum[index] += embedding[index] * seconds
             }
-            embeddingCount += 1
+            speechSeconds += seconds
         } else {
-            embeddingSum = embedding
-            embeddingCount = 1
+            embeddingSum = embedding.map { $0 * seconds }
+            speechSeconds = seconds
         }
     }
 }
 
-/// A clustering-diarizer speaker attributed without a turn timeline (embedding
-/// fallback). The first profile match binds it for the rest of the session.
-struct FallbackSpeakerRecord {
-    var embedding: [Float]
-    var boundProfileID: UUID?
-    var boundProfileName: String?
-}
-
 /// What a stopped live session hands back for saving.
 struct LiveSessionResult: Sendable {
-    /// Final segments, already relabelled through `speakerIDRemap`.
+    /// Final segments, already carrying their final speaker IDs.
     var segments: [TranscriptSegment]
-    /// Session-local ID → profile name, for every speaker bound during the session.
-    var speakerIDRemap: [String: String] = [:]
-    /// Voiceprint per final speaker ID.
+    /// Segment ID → final speaker ID, for every segment emitted for a speaker identity. Segments
+    /// persisted during recording are relabelled by ID from this, never by name (design D4).
+    var finalSpeakerIDs: [UUID: String] = [:]
+    /// Voiceprint per final speaker ID, in `VoiceprintSpace.current`.
     var speakerEmbeddings: [String: [Float]] = [:]
-    /// Final speaker ID → profile auto-enrolled for it at stop.
-    var enrolledProfileIDs: [String: UUID] = [:]
 }
 
 extension TranscriptSegment {
-    /// This segment with its speaker ID replaced through `remap`, keeping its identity.
-    func relabelled(using remap: [String: String]) -> TranscriptSegment {
-        guard let speakerId = remap[speakerId] else { return self }
+    /// This segment with its speaker ID replaced by `finalSpeakerIDs[id]`, keeping its identity.
+    func relabelled(using finalSpeakerIDs: [UUID: String]) -> TranscriptSegment {
+        guard let speakerId = finalSpeakerIDs[id], speakerId != self.speakerId else { return self }
         return TranscriptSegment(
             id: id,
             speakerId: speakerId,
@@ -184,24 +214,20 @@ private struct PendingAttribution {
     let tokenTimings: [TokenTiming]?
     let start: Float
     let end: Float
-    /// Every clustering-diarizer segment of the chunk, chunk-relative.
-    let clusterSegments: [TimedSpeakerSegment]
+    /// The buffer's 16 kHz samples, kept for voiceprints until it is attributed
+    /// (live-mask-embeddings design D1).
+    let samples: [Float]
 }
 
 /// Settings that shape how models are constructed (`VadConfig`,
-/// `VadSegmentationConfig`, `DiarizerConfig`). A change starts a new
-/// preparation (design D3).
+/// `VadSegmentationConfig`). A change starts a new preparation (design D3).
 struct LiveConstructionSettings: Hashable, Sendable {
     let vadThreshold: Double
     let vadMinSpeechDuration: Double
-    let speakerSimilarityThreshold: Double
-    let minSilenceGap: Double
 
     init(_ settings: LiveTranscriptionPipelineSettings) {
         vadThreshold = settings.vadThreshold
         vadMinSpeechDuration = settings.vadMinSpeechDuration
-        speakerSimilarityThreshold = settings.speakerSimilarityThreshold
-        minSilenceGap = settings.minSilenceGap
     }
 }
 
@@ -217,14 +243,14 @@ struct LivePreparationKey: Hashable, Sendable {
 struct LivePreparedModels: Sendable {
     let asrManager: AsrManager
     let vadProcessor: any LiveVADStreamingProcessing
-    let makeDiarizer: @Sendable () -> DiarizerManager
+    let voiceprintExtractor: LiveVoiceprintExtractor
     let makeTurnDiarizers: @Sendable () -> [AudioSource: any StreamingTurnDiarizing]
 }
 
 /// Model loading steps used by a preparation. Tests inject their own.
 struct LiveModelLoader: Sendable {
     var loadAsr: @Sendable (Workspace, AsrProcessor) async throws -> AsrManager
-    var loadDiarizer: @Sendable (Workspace, LiveConstructionSettings) async throws -> @Sendable () -> DiarizerManager
+    var loadVoiceprintExtractor: @Sendable (Workspace) async throws -> LiveVoiceprintExtractor
     var loadVad: @Sendable (Workspace, LiveConstructionSettings) async throws -> any LiveVADStreamingProcessing
     var loadTurnDiarizers: @Sendable (Workspace) async throws -> @Sendable () -> [AudioSource: any StreamingTurnDiarizing]
 
@@ -240,10 +266,11 @@ struct LiveModelLoader: Sendable {
             try await asr.loadModels(asrModels)
             return asr
         },
-        loadDiarizer: { workspace, construction in
+        loadVoiceprintExtractor: { workspace in
+            // The voiceprint model lives in the installed speaker-diarization repo.
             let diarizerRepo = try ModelPathResolver().modelDirectory(for: .offlineDiarization, in: workspace)
-            let segmentationURL = diarizerRepo.appendingPathComponent("pyannote_segmentation.mlmodelc", isDirectory: true)
-            let embeddingURL = diarizerRepo.appendingPathComponent("wespeaker_v2.mlmodelc", isDirectory: true)
+            let segmentationURL = diarizerRepo.appendingPathComponent(ModelNames.Diarizer.segmentationFile, isDirectory: true)
+            let embeddingURL = diarizerRepo.appendingPathComponent(ModelNames.Diarizer.embeddingFile, isDirectory: true)
             let fileManager = FileManager.default
             guard fileManager.fileExists(atPath: segmentationURL.path),
                   fileManager.fileExists(atPath: embeddingURL.path)
@@ -254,18 +281,7 @@ struct LiveModelLoader: Sendable {
                 localSegmentationModel: segmentationURL,
                 localEmbeddingModel: embeddingURL
             )
-            let diarizerConfig = DiarizerConfig(
-                clusteringThreshold: Float(construction.speakerSimilarityThreshold),
-                minSpeechDuration: Float(construction.vadMinSpeechDuration),
-                minSilenceGap: Float(construction.minSilenceGap)
-            )
-            // DiarizerManager accumulates speakers across calls, so each
-            // recording gets a new one.
-            return {
-                let manager = DiarizerManager(config: diarizerConfig)
-                manager.initialize(models: models)
-                return manager
-            }
+            return LiveVoiceprintExtractor(try SpeakerVoiceprintExtractor(models: models))
         },
         loadVad: { workspace, construction in
             let vadDirectory = try ModelPathResolver().modelDirectory(for: .vadSilero, in: workspace)
@@ -291,6 +307,22 @@ struct LiveModelLoader: Sendable {
             }
         }
     )
+}
+
+// @unchecked: EmbeddingExtractor is a plain class with no documented thread
+// safety. LiveTranscriptionService's actor is its only caller and calls it
+// synchronously.
+final class LiveVoiceprintExtractor: @unchecked Sendable {
+    let extractor: SpeakerVoiceprintExtractor
+
+    init(_ extractor: SpeakerVoiceprintExtractor) {
+        self.extractor = extractor
+    }
+}
+
+/// The voiceprint model returned no usable vector for a speaker of a buffer.
+enum LiveVoiceprintError: Error {
+    case unusableEmbedding
 }
 
 // @unchecked: Nemotron3Models holds reused scratch buffers. Only diarizers
@@ -319,7 +351,7 @@ actor LiveTranscriptionService: LiveTranscribing {
     // Core managers for the current recording, taken from the preparation
     // by start().
     private var asrManager: AsrManager?
-    private var diarizer: DiarizerManager?
+    private var voiceprintExtractor: LiveVoiceprintExtractor?
     private var vadStreamProcessor: (any LiveVADStreamingProcessing)?
 
     // Single-flight model preparation shared by prepare() and start()
@@ -336,7 +368,7 @@ actor LiveTranscriptionService: LiveTranscribing {
     private var turnTimelines: [AudioSource: TurnTimeline] = [:]
     // Session offset (seconds) from which a source's turn timeline is
     // desynchronized after a feed failure; queries at or past this point
-    // return no runs so attribution falls back to embeddings.
+    // return no runs so buffers go to the source's unknown speaker.
     private var turnUnreliableFromOffsets: [AudioSource: Float] = [:]
     // Transcribed buffers held until their source's timeline covers them,
     // oldest first (design D5).
@@ -381,22 +413,18 @@ actor LiveTranscriptionService: LiveTranscribing {
 #if DEBUG
     private var processChunkHookForTesting: (@Sendable ([Float], AudioSource, Float) async -> Void)?
     private var asrTranscribeHookForTesting: (@Sendable ([Float], AudioSource, inout TdtDecoderState) async throws -> ASRResult)?
-    private var clusterDiarizationHookForTesting: (@Sendable ([Float]) throws -> [TimedSpeakerSegment])?
+    private var voiceprintEmbedHookForTesting: (maskFrameCount: Int, embed: @Sendable (ArraySlice<Float>, [[Float]]) throws -> [[Float]])?
+    private var noticeLogSinkForTesting: (@Sendable (String) -> Void)?
     private var decoderStateFactoryForTesting: (@Sendable (AsrManager) async throws -> TdtDecoderState)?
 #endif
 
     // Authoritative record of all final segments accumulated this session
     private var collectedFinalSegments: [TranscriptSegment] = []
 
-    // Speaker tracking across session — fallback path only. Chunks attributed
-    // without a turn timeline (empty/unreliable) record here under the
-    // clustering diarizer's session-local ID, preserving pre-turn-diarizer behavior.
-    // Key: session-local speaker ID ("speaker_SPEAKER_0" etc.)
-    var sessionSpeakers: [String: FallbackSpeakerRecord] = [:]
-
-    // Primary speaker identity: per-source turn-diarizer speaker index → identity
-    // record (accumulated embeddings + sticky profile binding).
-    private(set) var sessionSpeakerIdentities: [AudioSource: [Int: SessionSpeakerIdentity]] = [:]
+    // Speaker identities of the session: one per turn-diarizer index and source.
+    private(set) var speakerIdentities: [LiveSpeakerReference: SessionSpeakerIdentity] = [:]
+    // The identity behind every emitted segment, so stop() relabels by segment, not by name.
+    private var segmentReferences: [UUID: LiveSpeakerReference] = [:]
 
     private var resultContinuation: AsyncStream<TranscriptSegment>.Continuation?
     private var captureAnchor: HostNanoseconds?
@@ -474,8 +502,8 @@ actor LiveTranscriptionService: LiveTranscribing {
     ) async throws -> LivePreparedModels {
         let asrManager = try await loader.loadAsr(workspace, processor)
         logger.info("AsrManager initialized")
-        let makeDiarizer = try await loader.loadDiarizer(workspace, construction)
-        logger.info("Diarizer models loaded from workspace")
+        let voiceprintExtractor = try await loader.loadVoiceprintExtractor(workspace)
+        logger.info("Voiceprint model loaded from workspace")
         let vadProcessor = try await loader.loadVad(workspace, construction)
         logger.info("VAD model loaded from workspace (threshold \(construction.vadThreshold))")
         let makeTurnDiarizers = try await loader.loadTurnDiarizers(workspace)
@@ -483,7 +511,7 @@ actor LiveTranscriptionService: LiveTranscribing {
         return LivePreparedModels(
             asrManager: asrManager,
             vadProcessor: vadProcessor,
-            makeDiarizer: makeDiarizer,
+            voiceprintExtractor: voiceprintExtractor,
             makeTurnDiarizers: makeTurnDiarizers
         )
     }
@@ -511,8 +539,8 @@ actor LiveTranscriptionService: LiveTranscribing {
         lastFinalSegmentEndOffsets.removeAll()
         decoderStates.removeAll()
         collectedFinalSegments.removeAll()
-        sessionSpeakers.removeAll()
-        sessionSpeakerIdentities.removeAll()
+        speakerIdentities.removeAll()
+        segmentReferences.removeAll()
         turnUnreliableFromOffsets.removeAll()
         pendingAttributions.removeAll()
 
@@ -533,7 +561,7 @@ actor LiveTranscriptionService: LiveTranscribing {
         // (design D3), so each recording starts from clean state.
         asrManager = models.asrManager
         vadStreamProcessor = models.vadProcessor
-        diarizer = models.makeDiarizer()
+        voiceprintExtractor = models.voiceprintExtractor
         installTurnDiarizers(models.makeTurnDiarizers())
         isInitialized = true
 
@@ -587,79 +615,49 @@ actor LiveTranscriptionService: LiveTranscribing {
         }
 
         // Anything still held (a stream that failed to finish) is attributed
-        // with whatever the timeline has, falling back to embeddings.
+        // with whatever the timeline has, else to the source's unknown speaker.
         for source in Array(pendingAttributions.keys) {
             await releasePendingAttributions(for: source, force: true)
         }
 
-        // Speaker enrollment at session end: turn-diarizer identity records are the
-        // primary source; sessionSpeakers covers fallback-attributed chunks
-        // (empty/unreliable timeline stretches). Each unbound voice becomes a new
-        // profile. The store picks the label, one past the highest `Speaker N`,
-        // and never updates an existing profile here. Speakers bound during the
-        // session are remapped to the profile name so earlier segments join them.
+        // Final speaker identities. Nothing is enrolled: speaker memory changes only through
+        // user renames. The final match of every identity decides the speaker ID of all its
+        // segments, including those shown under another name during recording.
         var result = LiveSessionResult(segments: [])
-        let store = speakerEmbeddingStore
+        for source in Set(speakerIdentities.keys.map(\.source)).sorted(by: { $0.rawValue < $1.rawValue }) {
+            await reevaluateMatches(for: source)
+        }
 
-        // Iterate deterministically: sources then turn-diarizer indices.
-        for source in sessionSpeakerIdentities.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
-            let records = sessionSpeakerIdentities[source] ?? [:]
-            for speakerIndex in records.keys.sorted() {
-                guard let record = records[speakerIndex] else { continue }
-                let sessionLocalId = turnSessionLocalID(for: speakerIndex, source: source)
-                let embedding = record.averagedEmbedding
-
-                if let profileID = record.boundProfileID {
-                    recordBoundSpeaker(sessionLocalId, name: record.boundProfileName, embedding: embedding, in: &result)
-                    if let store {
-                        try? await store.updateProfile(id: profileID)
-                        logger.info("Updated lastSeen for bound speaker \(speakerIndex) (\(source.rawValue))")
-                    }
-                } else {
-                    guard !embedding.isEmpty else { continue }
-                    result.speakerEmbeddings[sessionLocalId] = embedding
-                    guard let store else { continue }
-                    do {
-                        let profileID = try await store.enrollNewSpeaker(embedding: embedding)
-                        result.enrolledProfileIDs[sessionLocalId] = profileID
-                        logger.info("Enrolled new speaker \(profileID, privacy: .public) for turn speaker \(speakerIndex) (\(source.rawValue))")
-                    } catch {
-                        logger.error("Failed to enroll turn speaker \(speakerIndex) (\(source.rawValue)): \(error)")
-                    }
-                }
+        var finalLabels: [LiveSpeakerReference: String] = [:]
+        for reference in speakerIdentities.keys.sorted(by: { $0.sessionLocalID < $1.sessionLocalID }) {
+            guard let identity = speakerIdentities[reference] else { continue }
+            let label = identity.boundProfileName ?? reference.sessionLocalID
+            finalLabels[reference] = label
+            if let profileID = identity.boundProfileID, let store = speakerEmbeddingStore {
+                try? await store.updateProfile(id: profileID)
+            }
+            // The first voiceprint recorded under a label is kept.
+            var voiceprintSaved = false
+            if identity.hasMatchableVoiceprint, result.speakerEmbeddings[label] == nil {
+                result.speakerEmbeddings[label] = identity.averagedEmbedding
+                voiceprintSaved = true
+            }
+            // The store is inside the app's sandbox; this line is how a recording's voiceprints
+            // are checked from outside the app (live-mask-embeddings design D5).
+            notice("🗣 Speaker \(reference.sessionLocalID): \(String(format: "%.1f", identity.speechSeconds))s qualifying speech, voiceprint saved: \(voiceprintSaved ? "yes" : "no"), profile: \(identity.boundProfileID?.uuidString ?? "none")")
+        }
+        for (segmentID, reference) in segmentReferences {
+            if let label = finalLabels[reference] {
+                result.finalSpeakerIDs[segmentID] = label
             }
         }
 
-        // Sort by session-local ID for deterministic name assignment
-        for sessionLocalId in sessionSpeakers.keys.sorted() {
-            guard let record = sessionSpeakers[sessionLocalId] else { continue }
-
-            if let profileID = record.boundProfileID {
-                recordBoundSpeaker(sessionLocalId, name: record.boundProfileName, embedding: record.embedding, in: &result)
-                if let store {
-                    try? await store.updateProfile(id: profileID)
-                    logger.info("Updated lastSeen for matched speaker \(sessionLocalId)")
-                }
-            } else {
-                guard !record.embedding.isEmpty else { continue }
-                result.speakerEmbeddings[sessionLocalId] = record.embedding
-                guard let store else { continue }
-                do {
-                    let profileID = try await store.enrollNewSpeaker(embedding: record.embedding)
-                    result.enrolledProfileIDs[sessionLocalId] = profileID
-                    logger.info("Enrolled new speaker \(profileID, privacy: .public) for session speaker \(sessionLocalId)")
-                } catch {
-                    logger.error("Failed to enroll session speaker \(sessionLocalId): \(error)")
-                }
-            }
-        }
-
-        result.segments = collectedFinalSegments.map { $0.relabelled(using: result.speakerIDRemap) }
+        result.segments = collectedFinalSegments.map { $0.relabelled(using: result.finalSpeakerIDs) }
 
         // Cleanup: release the models; the next recording prepares again.
         collectedFinalSegments.removeAll()
-        sessionSpeakers.removeAll()
-        sessionSpeakerIdentities.removeAll()
+        speakerIdentities.removeAll()
+        segmentReferences.removeAll()
         audioConverters.removeAll()
         vadStreamStates.removeAll()
         speechAccumulationBuffers.removeAll()
@@ -671,7 +669,7 @@ actor LiveTranscriptionService: LiveTranscribing {
         lastFinalSegmentEndOffsets.removeAll()
         decoderStates.removeAll()
         asrManager = nil
-        diarizer = nil
+        voiceprintExtractor = nil
         vadStreamProcessor = nil
         preparation = nil
         installTurnDiarizers([:])
@@ -681,21 +679,6 @@ actor LiveTranscriptionService: LiveTranscribing {
         isInitialized = false
 
         return result
-    }
-
-    /// Adds a bound speaker's remap entry and voiceprint, keyed by the profile
-    /// name. The first voiceprint recorded under a name is kept.
-    private func recordBoundSpeaker(
-        _ sessionLocalId: String,
-        name: String?,
-        embedding: [Float],
-        in result: inout LiveSessionResult
-    ) {
-        guard let name else { return }
-        result.speakerIDRemap[sessionLocalId] = name
-        if !embedding.isEmpty, result.speakerEmbeddings[name] == nil {
-            result.speakerEmbeddings[name] = embedding
-        }
     }
 
     // MARK: - Audio Processing
@@ -879,13 +862,13 @@ actor LiveTranscriptionService: LiveTranscribing {
         let failureOffset = turnTimelines[source]?.coveredUntil
             ?? Float((totalSamplesProcessed[source] ?? 0) - fedSampleCount) / Self.SAMPLE_RATE
         turnUnreliableFromOffsets[source] = failureOffset
-        logger.error("Turn diarizer failed for \(source.rawValue) at \(String(format: "%.1f", failureOffset))s; attribution falls back to embeddings from here: \(error)")
+        logger.error("Turn diarizer failed for \(source.rawValue) at \(String(format: "%.1f", failureOffset))s; buffers from here go to the source's unknown speaker: \(error)")
     }
 
     /// Speaker runs from the source's committed turn timeline overlapping
     /// `[start, end]` session seconds. Empty when the diarizer is unavailable or
-    /// its timeline is unreliable for the range — callers fall back to
-    /// embedding-based attribution.
+    /// its timeline is unreliable for the range — callers attribute to the
+    /// source's unknown speaker.
     func turnSpeakerRuns(for source: AudioSource, start: Float, end: Float) -> [SpeakerRun] {
         guard let timeline = turnTimelines[source] else { return [] }
         if let unreliableFrom = turnUnreliableFromOffsets[source], end > unreliableFrom {
@@ -1015,22 +998,12 @@ actor LiveTranscriptionService: LiveTranscribing {
                 return
             }
 
-            // Clustering diarization is retained solely for embedding
-            // extraction (design D1): the turn diarizer provides turn boundaries and
-            // within-session consistency; embeddings provide identity.
-            var chunkClusterSegments: [TimedSpeakerSegment] = []
-            do {
-                chunkClusterSegments = try clusterSegments(for: samples)
-            } catch {
-                logger.error("Embedding diarization failed: \(error)")
-            }
-
             pendingAttributions[source, default: []].append(PendingAttribution(
                 text: cleanedText,
                 tokenTimings: asrResult.tokenTimings,
                 start: currentOffset,
                 end: currentOffset + chunkDuration,
-                clusterSegments: chunkClusterSegments
+                samples: samples
             ))
             await releasePendingAttributions(for: source)
 
@@ -1040,7 +1013,7 @@ actor LiveTranscriptionService: LiveTranscribing {
     }
 
     /// Splits a covered buffer at turn boundaries and emits its segments, or
-    /// falls back to embedding attribution when the timeline has nothing.
+    /// emits it under the source's unknown speaker when the timeline has nothing.
     private func attribute(_ pending: PendingAttribution, source: AudioSource) async {
         let bufferStart = pending.start
         let bufferEnd = pending.end
@@ -1049,34 +1022,15 @@ actor LiveTranscriptionService: LiveTranscribing {
         let parts = LiveSegmentSplitter.planParts(runs: runs, start: bufferStart, end: bufferEnd)
 
         guard !parts.isEmpty else {
-            // Timeline has no reliable data for this range: fall back to
-            // embedding-based attribution (pre-turn-diarizer behavior).
-            let speakerID = await fallbackSpeakerID(from: findLongestSpeaker(in: pending.clusterSegments))
-            logger.info("📝 RESULT [\(source.rawValue)] (embedding fallback): \(speakerID): \(cleanedText)")
-            emitFinalSegment(speakerId: speakerID, text: cleanedText, start: bufferStart, end: bufferEnd, source: source)
+            // No turn data for this range: one speaker per source, with no voiceprint and no
+            // match (live-mask-embeddings design D3).
+            let speakerID = LiveSpeakerReference.unknownSpeakerID(for: source)
+            logger.info("📝 RESULT [\(source.rawValue)] (no turn data): \(speakerID): \(cleanedText)")
+            emitFinalSegment(speakerId: speakerID, reference: nil, text: cleanedText, start: bufferStart, end: bufferEnd, source: source)
             return
         }
 
-        // Each turn speaker accumulates the clustering embedding recorded inside
-        // its own runs; the first confident match binds the index to a profile
-        // for the rest of the session (design D5).
-        let assignments = LiveEmbeddingAttribution.assignments(
-            clusterSegments: pending.clusterSegments,
-            runs: runs,
-            bufferStart: bufferStart
-        )
-        for (speakerIndex, assignment) in assignments.sorted(by: { $0.key < $1.key }) {
-            let segment = assignment.segment
-            logger.info("📍 Turn speaker \(speakerIndex) (\(source.rawValue)) takes clustering \(segment.speakerId) \(String(format: "%.2f", bufferStart + segment.startTimeSeconds))–\(String(format: "%.2f", bufferStart + segment.endTimeSeconds))s, \(String(format: "%.0f", assignment.overlapFraction * 100))% inside its runs")
-            var record = sessionSpeakerIdentities[source]?[speakerIndex] ?? SessionSpeakerIdentity()
-            record.accumulate(segment.embedding)
-            if !record.isBound, let match = await findBestSpeakerMatch(for: segment.embedding) {
-                record.boundProfileID = match.id
-                record.boundProfileName = match.name
-                logger.info("📍 Bound turn speaker \(speakerIndex) (\(source.rawValue)) to profile '\(match.name)'")
-            }
-            sessionSpeakerIdentities[source, default: [:]][speakerIndex] = record
-        }
+        await accumulateVoiceprints(from: pending, source: source)
 
         let texts = LiveSegmentSplitter.apportionText(
             cleanedText,
@@ -1086,63 +1040,124 @@ actor LiveTranscriptionService: LiveTranscribing {
         )
 
         for (part, text) in zip(parts, texts) where !text.isEmpty {
-            let speakerID = turnSpeakerLabel(for: part.speakerIndex, source: source)
+            let reference = LiveSpeakerReference.turn(source, part.speakerIndex)
+            let speakerID = speakerLabel(for: reference)
             logger.info("📝 RESULT [\(source.rawValue)]: \(speakerID): \(text)")
-            emitFinalSegment(speakerId: speakerID, text: text, start: part.start, end: part.end, source: source)
+            emitFinalSegment(speakerId: speakerID, reference: reference, text: text, start: part.start, end: part.end, source: source)
         }
     }
 
-    /// Label for a turn-diarizer speaker index: the bound profile's name, or a
-    /// session-local ID that stays stable for the whole session.
-    private func turnSpeakerLabel(for speakerIndex: Int, source: AudioSource) -> String {
-        if let name = sessionSpeakerIdentities[source]?[speakerIndex]?.boundProfileName {
-            return name
-        }
-        return turnSessionLocalID(for: speakerIndex, source: source)
-    }
+    /// Each turn speaker of the buffer accumulates a voiceprint from its own single-speaker
+    /// speech in the buffer, whether or not it has a part of its own; the source's matches are
+    /// then re-evaluated (live-mask-embeddings design D1). A failed extraction adds nothing and
+    /// never blocks emission (design D4).
+    private func accumulateVoiceprints(from pending: PendingAttribution, source: AudioSource) async {
+        guard let extractor = activeVoiceprintExtractor(), let timeline = turnTimelines[source] else { return }
+        // Unmerged runs: the gap merge used for splitting would count gaps as speech.
+        let ranges = LiveSpeakerTimeline.voiceprintRanges(in: timeline.segments, start: pending.start, end: pending.end)
+        guard !ranges.isEmpty else { return }
 
-    /// Session-local ID of a turn-diarizer speaker index before any binding.
-    private func turnSessionLocalID(for speakerIndex: Int, source: AudioSource) -> String {
-        "speaker_\(source.rawValue)_\(speakerIndex)"
-    }
-
-    /// Pre-turn-diarizer attribution used when the timeline has no data for a
-    /// buffer: match the chunk's embedding against stored profiles while its
-    /// clustering speaker is unbound, and track it in `sessionSpeakers` for
-    /// enrollment at stop(). The first match binds the speaker for the session.
-    private func fallbackSpeakerID(from longestSegment: TimedSpeakerSegment?) async -> String {
-        guard let longestSegment else {
-            logger.info("📍 No speaker detected in audio chunk")
-            return "unknown"
-        }
-
-        let sessionLocalId = "speaker_\(longestSegment.speakerId)"
-        if let boundName = sessionSpeakers[sessionLocalId]?.boundProfileName {
-            logger.info("📍 Bound speaker: \(boundName) (\(sessionLocalId))")
-            return boundName
-        }
-
-        let embedding = longestSegment.embedding
-        if let match = await findBestSpeakerMatch(for: embedding) {
-            sessionSpeakers[sessionLocalId] = FallbackSpeakerRecord(
-                embedding: embedding,
-                boundProfileID: match.id,
-                boundProfileName: match.name
+        let voiceprints: [String: SpeakerVoiceprintExtractor.Voiceprint]
+        do {
+            voiceprints = try extractor.voiceprints(
+                samples: pending.samples,
+                ranges: ranges,
+                minimumSpeechSeconds: Double(SessionSpeakerIdentity.minimumEmbeddingSeconds)
             )
-            logger.info("📍 Matched speaker: \(match.name) (profile match)")
-            return match.name
+        } catch {
+            logger.error("Voiceprint extraction failed for \(source.rawValue) buffer \(String(format: "%.2f", pending.start))–\(String(format: "%.2f", pending.end))s; it adds no voiceprint: \(error)")
+            return
         }
 
-        if sessionSpeakers[sessionLocalId] == nil && !embedding.isEmpty {
-            sessionSpeakers[sessionLocalId] = FallbackSpeakerRecord(embedding: embedding)
+        var gained = false
+        for (speaker, voiceprint) in voiceprints.sorted(by: { $0.key < $1.key }) {
+            guard let speakerIndex = Int(speaker) else { continue }
+            logger.info("📍 Turn speaker \(speakerIndex) (\(source.rawValue)) voiceprint from \(String(format: "%.2f", voiceprint.speechSeconds))s in \(String(format: "%.2f", pending.start))–\(String(format: "%.2f", pending.end))s")
+            speakerIdentities[.turn(source, speakerIndex), default: SessionSpeakerIdentity()]
+                .accumulate(voiceprint.embedding, seconds: Float(voiceprint.speechSeconds))
+            gained = true
         }
-        logger.info("📍 New/unmatched speaker: \(sessionLocalId)")
-        return sessionLocalId
+        if gained {
+            await reevaluateMatches(for: source)
+        }
     }
 
-    private func emitFinalSegment(speakerId: String, text: String, start: Float, end: Float, source: AudioSource) {
+    /// The live voiceprint extractor, failing a whole buffer when the model returns no usable
+    /// vector for any speaker (empty, all zeros or non-finite).
+    private func activeVoiceprintExtractor() -> SpeakerVoiceprintExtractor? {
+        var base = voiceprintExtractor?.extractor
+#if DEBUG
+        if let voiceprintEmbedHookForTesting {
+            base = SpeakerVoiceprintExtractor(
+                maskFrameCount: voiceprintEmbedHookForTesting.maskFrameCount,
+                embed: voiceprintEmbedHookForTesting.embed
+            )
+        }
+#endif
+        guard let base else { return nil }
+        return SpeakerVoiceprintExtractor(maskFrameCount: base.maskFrameCount) { window, masks in
+            let embeddings = try base.embed(window, masks)
+            let usable = embeddings.count == masks.count && embeddings.allSatisfy { embedding in
+                !embedding.isEmpty && embedding.contains { $0 != 0 } && embedding.allSatisfy(\.isFinite)
+            }
+            guard usable else { throw LiveVoiceprintError.unusableEmbedding }
+            return embeddings
+        }
+    }
+
+    /// Current label of a speaker identity: its matched profile's name, or its session-local ID.
+    private func speakerLabel(for reference: LiveSpeakerReference) -> String {
+        speakerIdentities[reference]?.boundProfileName ?? reference.sessionLocalID
+    }
+
+    /// Logs a notice line, and hands it to the test sink in DEBUG builds.
+    private func notice(_ line: String) {
+        logger.notice("\(line, privacy: .public)")
+#if DEBUG
+        noticeLogSinkForTesting?(line)
+#endif
+    }
+
+    /// Matches every identity of `source` with enough speech against stored profiles, giving each
+    /// profile to at most one of them. Identities below the minimum speech, or matching no
+    /// profile, are left unmatched. A match may change between evaluations (design D4).
+    private func reevaluateMatches(for source: AudioSource) async {
+        let references = speakerIdentities.keys
+            .filter { $0.source == source }
+            .sorted { $0.sessionLocalID < $1.sessionLocalID }
+        let queries = references.compactMap { reference -> (label: String, embedding: [Float])? in
+            guard let identity = speakerIdentities[reference], identity.hasMatchableVoiceprint else { return nil }
+            return (reference.sessionLocalID, identity.averagedEmbedding)
+        }
+
+        var matches: [String: SpeakerProfileSnapshot] = [:]
+        if !queries.isEmpty, let store = speakerEmbeddingStore {
+            let profiles = (try? await store.fetchAllSnapshots()) ?? []
+            matches = speakerMatcher.assign(queries, to: profiles)
+        }
+
+        for reference in references {
+            guard var identity = speakerIdentities[reference] else { continue }
+            let match = matches[reference.sessionLocalID]
+            if identity.boundProfileID != match?.id {
+                logger.notice("📍 Speaker \(reference.sessionLocalID, privacy: .public) match changed to \(match?.id.uuidString ?? "none", privacy: .public)")
+            }
+            identity.boundProfileID = match?.id
+            identity.boundProfileName = match?.name
+            speakerIdentities[reference] = identity
+        }
+    }
+
+    private func emitFinalSegment(
+        speakerId: String,
+        reference: LiveSpeakerReference?,
+        text: String,
+        start: Float,
+        end: Float,
+        source: AudioSource
+    ) {
         // Sanitize at the choke point so every emit path (turn-split parts,
-        // single-part, embedding fallback, stop() flush) is covered (design D1).
+        // single-part, unknown speaker, stop() flush) is covered (design D1).
         guard let sanitizedText = LiveSegmentSanitizer.sanitize(text) else {
             logger.info("🧹 Dropped punctuation-only segment [\(source.rawValue)]: \"\(text)\"")
             return
@@ -1162,6 +1177,9 @@ actor LiveTranscriptionService: LiveTranscribing {
             isFinal: true
         )
         collectedFinalSegments.append(segment)
+        if let reference {
+            segmentReferences[segment.id] = reference
+        }
         lastFinalSegmentEndOffsets[source] = segment.endTime
         resultContinuation?.yield(segment)
     }
@@ -1179,40 +1197,6 @@ actor LiveTranscriptionService: LiveTranscribing {
 
         let decoderLayers = await asrManager.decoderLayerCount
         return try TdtDecoderState(decoderLayers: decoderLayers)
-    }
-
-    /// Clustering-diarizer segments for one chunk, in chunk-relative seconds.
-    private func clusterSegments(for samples: [Float]) throws -> [TimedSpeakerSegment] {
-#if DEBUG
-        if let clusterDiarizationHookForTesting {
-            return try clusterDiarizationHookForTesting(samples)
-        }
-#endif
-        guard let diarizer else { return [] }
-        return try diarizer.performCompleteDiarization(samples, sampleRate: 16000).segments
-    }
-
-    private func findLongestSpeaker(in segments: [TimedSpeakerSegment]) -> TimedSpeakerSegment? {
-        var longestSegment: TimedSpeakerSegment?
-        var maxDuration: Float = 0
-
-        for segment in segments {
-            let duration = segment.endTimeSeconds - segment.startTimeSeconds
-            if duration > maxDuration {
-                maxDuration = duration
-                longestSegment = segment
-            }
-        }
-
-        return longestSegment
-    }
-
-    private func findBestSpeakerMatch(for embedding: [Float]) async -> SpeakerProfileSnapshot? {
-        guard !embedding.isEmpty, let store = speakerEmbeddingStore else {
-            return nil
-        }
-
-        return await store.findBestMatchSnapshot(embedding: embedding, matcher: speakerMatcher)
     }
 }
 
@@ -1235,11 +1219,19 @@ extension LiveTranscriptionService {
     }
 
     func injectSpeakerIdentityForTesting(source: AudioSource, speakerIndex: Int, identity: SessionSpeakerIdentity) {
-        sessionSpeakerIdentities[source, default: [:]][speakerIndex] = identity
+        speakerIdentities[.turn(source, speakerIndex)] = identity
     }
 
     func speakerIdentityForTesting(source: AudioSource, speakerIndex: Int) -> SessionSpeakerIdentity? {
-        sessionSpeakerIdentities[source]?[speakerIndex]
+        speakerIdentities[.turn(source, speakerIndex)]
+    }
+
+    func speakerIdentityForTesting(_ reference: LiveSpeakerReference) -> SessionSpeakerIdentity? {
+        speakerIdentities[reference]
+    }
+
+    func injectSpeakerIdentityForTesting(_ reference: LiveSpeakerReference, identity: SessionSpeakerIdentity) {
+        speakerIdentities[reference] = identity
     }
 
     func markTurnDiarizerUnreliableForTesting(source: AudioSource, fromOffset: Float) {
@@ -1270,8 +1262,17 @@ extension LiveTranscriptionService {
         self.asrTranscribeHookForTesting = hook
     }
 
-    func setClusterDiarizationHookForTesting(_ hook: @escaping @Sendable ([Float]) throws -> [TimedSpeakerSegment]) {
-        self.clusterDiarizationHookForTesting = hook
+    /// Replaces the live voiceprint model's embed function. `maskFrameCount` frames span each
+    /// 10 s window.
+    func setVoiceprintEmbedderForTesting(
+        maskFrameCount: Int = 100,
+        _ embed: @escaping @Sendable (ArraySlice<Float>, [[Float]]) throws -> [[Float]]
+    ) {
+        self.voiceprintEmbedHookForTesting = (maskFrameCount, embed)
+    }
+
+    func setNoticeLogSinkForTesting(_ sink: @escaping @Sendable (String) -> Void) {
+        self.noticeLogSinkForTesting = sink
     }
 
     func setDecoderStateFactoryForTesting(_ factory: @escaping @Sendable (AsrManager) async throws -> TdtDecoderState) {
