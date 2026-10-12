@@ -289,6 +289,9 @@ struct AppShellView: View {
                     onReprocess: {
                         appState.jobsViewModel.reprocess(session: session, context: modelContext)
                     },
+                    onCopy: {
+                        copyTranscript(for: session)
+                    },
                     onDelete: {
                         let item = selectedSession
                         selectedSession = nil
@@ -334,6 +337,9 @@ struct AppShellView: View {
                     aiProviderService: aiProviderService,
                     onReprocess: {
                         appState.jobsViewModel.reprocess(session: session, context: modelContext)
+                    },
+                    onCopy: {
+                        copyTranscript(for: session)
                     },
                     onDelete: {
                         let item = selectedSession
