@@ -5,6 +5,7 @@ import SwiftUI
 struct TranscriptDetailView: View {
     let session: any TranscribableSession
     let onReprocess: (() -> Void)?
+    let onCopy: () -> Void
     let onDelete: () -> Void
     /// Restores a trimmed recording to its pre-trim state; `nil` for sessions that cannot be trimmed.
     let onRestoreOriginal: (() async throws -> Void)?
@@ -25,6 +26,7 @@ struct TranscriptDetailView: View {
         session: any TranscribableSession,
         aiProviderService: AIProviderService,
         onReprocess: (() -> Void)?,
+        onCopy: @escaping () -> Void,
         onDelete: @escaping () -> Void,
         onRestoreOriginal: (() async throws -> Void)? = nil,
         onOpenStudy: (() -> Void)?,
@@ -32,6 +34,7 @@ struct TranscriptDetailView: View {
     ) {
         self.session = session
         self.onReprocess = onReprocess
+        self.onCopy = onCopy
         self.onDelete = onDelete
         self.onRestoreOriginal = onRestoreOriginal
         self.onOpenStudy = onOpenStudy
@@ -73,7 +76,7 @@ struct TranscriptDetailView: View {
                 }
 
                 Button {
-                    copyTranscript()
+                    onCopy()
                 } label: {
                     Label("Copy", systemImage: "doc.on.doc")
                 }
@@ -237,12 +240,6 @@ struct TranscriptDetailView: View {
         formatter.locale = .current
         formatter.dateFormat = "MMM d, yyyy 'at' HH:mm"
         return formatter.string(from: session.createdAt)
-    }
-
-    private func copyTranscript() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(viewModel.finalTranscriptText, forType: .string)
     }
 
     private func restoreOriginal() {
