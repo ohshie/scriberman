@@ -49,11 +49,23 @@ struct MarkdownRenderer {
     }
 
     func defaultFileName(for title: String) -> String {
+        "\(Self.sanitizedFileNameComponent(title, fallback: "Transcript")).md"
+    }
+
+    /// The name a transformation's export suggests: `<session title> - <prompt name>.md`.
+    func defaultTransformationFileName(sessionTitle: String, promptName: String) -> String {
+        let session = Self.sanitizedFileNameComponent(sessionTitle, fallback: "Session")
+        let prompt = Self.sanitizedFileNameComponent(promptName, fallback: "Transformation")
+        return "\(session) - \(prompt).md"
+    }
+
+    /// `text` with each character a filename cannot safely hold replaced by `-` and surrounding
+    /// whitespace trimmed, or `fallback` when nothing is left. Every suggested export name uses it.
+    static func sanitizedFileNameComponent(_ text: String, fallback: String) -> String {
         let invalidCharacterSet = CharacterSet(charactersIn: "/:\\?%*|\"<>")
-        let sanitizedTitle = title.components(separatedBy: invalidCharacterSet).joined(separator: "-")
-        let trimmed = sanitizedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseName = trimmed.isEmpty ? "Transcript" : trimmed
-        return "\(baseName).md"
+        let sanitized = text.components(separatedBy: invalidCharacterSet).joined(separator: "-")
+        let trimmed = sanitized.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed
     }
 
     private func dateText(_ date: Date) -> String {

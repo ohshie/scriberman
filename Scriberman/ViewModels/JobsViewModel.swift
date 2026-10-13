@@ -349,16 +349,16 @@ final class JobsViewModel {
 
     /// The pass a session displays, for the items the list is built from.
     ///
-    /// The same `retranscript ?? transcript` the study view opens with — the snippet has to come
+    /// The same `displayedTranscript` the study view opens with — the snippet has to come
     /// from the text the user will see there, or the match would not be found again.
     static func displayedTranscript(for item: SessionListItem) -> Transcript? {
         switch item {
         case .pending:
             return nil
         case .recording(let session):
-            return session.retranscript ?? session.transcript
+            return session.displayedTranscript
         case .imported(let session):
-            return session.retranscript ?? session.transcript
+            return session.displayedTranscript
         }
     }
 
@@ -692,7 +692,7 @@ final class JobsViewModel {
     /// Returns `nil` when there is no transcript to render, which the caller reports in its own
     /// terms — a thrown error for an export, nothing at all for a copy.
     func renderedTranscript(for session: any TranscribableSession) -> String? {
-        guard let transcript = displayedTranscript(for: session) else { return nil }
+        guard let transcript = session.displayedTranscript else { return nil }
         return markdownRenderer.renderMarkdown(session: session, transcript: transcript)
     }
 
@@ -722,23 +722,8 @@ final class JobsViewModel {
         return await deleteRecord(session, folder: folder, context: context)
     }
 
-    private func displayedTranscript(for session: any TranscribableSession) -> Transcript? {
-        session.retranscript ?? session.transcript
-    }
-
     private static func defaultSavePanelPresenter(suggestedName: String) -> URL? {
-        let panel = NSSavePanel()
-        panel.title = "Export Transcript"
-        panel.prompt = "Export"
-        panel.canCreateDirectories = true
-        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
-        panel.nameFieldStringValue = suggestedName
-
-        guard panel.runModal() == .OK else {
-            return nil
-        }
-
-        return panel.url
+        presentMarkdownSavePanel(title: "Export Transcript", suggestedName: suggestedName)
     }
 
     private static func isAudioURL(_ url: URL) -> Bool {

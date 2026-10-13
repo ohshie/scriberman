@@ -70,6 +70,29 @@ struct MarkdownRendererTests {
         #expect(renderer.defaultFileName(for: "") == "Transcript.md")
     }
 
+    /// Spec scenario "Reserved characters are replaced".
+    @Test
+    func transformationFileNameReplacesReservedCharacters() {
+        #expect(renderer.defaultTransformationFileName(sessionTitle: "Q3: plan/review", promptName: "Summary?")
+            == "Q3- plan-review - Summary-.md")
+    }
+
+    /// Spec scenario "Empty parts fall back".
+    @Test
+    func transformationFileNameFallsBackForEmptyParts() {
+        #expect(renderer.defaultTransformationFileName(sessionTitle: "  ", promptName: "")
+            == "Session - Transformation.md")
+    }
+
+    /// Spec scenario "Same rule as transcript export".
+    @Test
+    func transformationAndTranscriptFileNamesShareTheRule() {
+        let transcript = renderer.defaultFileName(for: "Q3: plan/review")
+        let transformation = renderer.defaultTransformationFileName(sessionTitle: "Q3: plan/review", promptName: "Summary")
+        #expect(transcript.hasPrefix("Q3- plan-review"))
+        #expect(transformation.hasPrefix("Q3- plan-review"))
+    }
+
     @Test
     func markdownUIImportCompiles() {
         _ = Markdown("**MarkdownUI**")

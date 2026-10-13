@@ -121,7 +121,7 @@ struct TranscriptRowTests {
     func testTheBlockControlStillCopiesThePassageAlone() throws {
         let row = try rowSource()
 
-        #expect(row.contains("pasteboard.setString(copyText, forType: .string)"))
+        #expect(row.contains("copyToPasteboard(copyText)"))
         #expect(!row.contains("renderMarkdown"))
     }
 
@@ -139,7 +139,7 @@ struct TranscriptRowTests {
     func testTheCopyControlCopiesTheTextAlone() throws {
         let row = try rowSource()
 
-        #expect(row.contains("pasteboard.setString(copyText, forType: .string)"))
+        #expect(row.contains("copyToPasteboard(copyText)"))
         // Not the speaker, not the time — the metadata a quotation would have to have deleted.
         #expect(!row.contains("setString(\"\\(timeText)"))
         #expect(row.contains(".help(\"Copy\")"))

@@ -106,7 +106,7 @@ struct TranscriptBlockView: View {
     @ViewBuilder
     private func blockMenu(_ speakerEditing: SpeakerEditing) -> some View {
         Button("Copy") {
-            copyTranscriptText(block.text)
+            copyToPasteboard(block.text)
         }
         Divider()
         Button("rename speaker") {

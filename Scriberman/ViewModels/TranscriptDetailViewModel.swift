@@ -32,7 +32,7 @@ final class TranscriptDetailViewModel {
     }
 
     var displayedTranscript: Transcript? {
-        session.retranscript ?? session.transcript
+        session.displayedTranscript
     }
 
     var finalTranscriptText: String {
