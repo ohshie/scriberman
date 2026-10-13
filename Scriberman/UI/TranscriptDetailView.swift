@@ -259,5 +259,9 @@ struct TranscriptDetailView: View {
     private func commitTitle() {
         session.title = editingTitle
         try? modelContext.save()
+        // The file carries the title.
+        if let recording = session as? RecordingSession {
+            rewriteTranscriptMarkdown(for: recording)
+        }
     }
 }
