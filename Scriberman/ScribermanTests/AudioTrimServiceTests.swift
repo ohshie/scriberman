@@ -454,12 +454,12 @@ final class AudioTrimServiceTests {
         try await fixture.service().trim(session: fixture.session, end: 60, context: fixture.context)
         let trimmedMarkdown = try fixture.contents(of: fixture.markdownURL)
         #expect(!trimmedMarkdown.contains(Fixture.removedPhrase))
-        #expect(trimmedMarkdown.contains("[55.00-60.00] S1: straddling words"))
+        #expect(trimmedMarkdown.contains("**Speaker** [00:55 – 01:00]\nstraddling words\n"))
 
         try await fixture.service().restore(session: fixture.session, context: fixture.context)
         let restoredMarkdown = try fixture.contents(of: fixture.markdownURL)
         #expect(restoredMarkdown.contains(Fixture.removedPhrase))
-        #expect(restoredMarkdown.contains("[55.00-63.00] S1: straddling words"))
+        #expect(restoredMarkdown.contains("**Speaker** [00:55 – 01:03]\nstraddling words\n"))
     }
 
     @Test

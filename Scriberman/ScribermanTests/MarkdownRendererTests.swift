@@ -46,6 +46,20 @@ struct MarkdownRendererTests {
         #expect(firstIndex!.lowerBound < secondIndex!.lowerBound)
     }
 
+    /// A header with blocks appended one by one equals rendering the same rows together.
+    @Test
+    func appendedBlocksEqualTheRowRender() {
+        let session = makeSession()
+        let rows = [
+            MarkdownRenderer.Row(label: "Mic", text: "one", startTime: 0, endTime: 1),
+            MarkdownRenderer.Row(label: "App", text: "two", startTime: 1, endTime: 2)
+        ]
+
+        let appended = rows.reduce(renderer.header(for: session)) { $0 + renderer.block(for: $1) }
+
+        #expect(appended == renderer.renderMarkdown(session: session, rows: rows))
+    }
+
     @Test
     func defaultFileNameSanitizesSlash() {
         #expect(renderer.defaultFileName(for: "Recording 03/27") == "Recording 03-27.md")

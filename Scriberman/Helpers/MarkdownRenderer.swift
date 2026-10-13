@@ -1,26 +1,51 @@
 import Foundation
 
 struct MarkdownRenderer {
+    /// One passage as the Markdown lists it: under a speaker's label, or under its source while a
+    /// recording has no saved transcript.
+    struct Row: Equatable {
+        var label: String
+        var text: String
+        var startTime: Float
+        var endTime: Float
+    }
+
     func renderMarkdown(session: any TranscribableSession, transcript: Transcript) -> String {
-        var lines: [String] = []
-        lines.append("# \(session.title)")
-        lines.append("")
-        lines.append("Date: \(dateText(session.createdAt))")
-        lines.append("Duration: \(durationText(session.duration))")
-        lines.append("")
+        renderMarkdown(session: session, rows: Self.rows(for: transcript))
+    }
 
-        let speakersById = Dictionary(uniqueKeysWithValues: transcript.speakers.map { ($0.id, $0) })
-        let orderedSegments = transcript.segments.sorted { $0.startTime < $1.startTime }
+    /// The header followed by one block per row, in the order given.
+    ///
+    /// Copy, export and `transcript.md` all come through here, so the format is defined once.
+    func renderMarkdown(session: any TranscribableSession, rows: [Row]) -> String {
+        header(for: session) + rows.map(block(for:)).joined()
+    }
 
-        for segment in orderedSegments {
-            let speakerLabel = speakersById[segment.speakerId]?.label ?? "Speaker"
-            let rangeText = "\(TimeFormatter.format(seconds: segment.startTime)) – \(TimeFormatter.format(seconds: segment.endTime))"
-            lines.append("**\(speakerLabel)** [\(rangeText)]")
-            lines.append(segment.text)
-            lines.append("")
-        }
+    /// The title, date and duration that open the document. Blocks are appended after it.
+    func header(for session: any TranscribableSession) -> String {
+        "# \(session.title)\n\nDate: \(dateText(session.createdAt))\nDuration: \(durationText(session.duration))\n"
+    }
 
-        return lines.joined(separator: "\n")
+    /// One row's block, starting with the blank line that separates it from what precedes it, so
+    /// appending blocks to a header yields the same text as rendering them together.
+    func block(for row: Row) -> String {
+        let rangeText = "\(TimeFormatter.format(seconds: row.startTime)) – \(TimeFormatter.format(seconds: row.endTime))"
+        return "\n**\(row.label)** [\(rangeText)]\n\(row.text)\n"
+    }
+
+    /// A transcript's segments by start time, each under its speaker's label.
+    static func rows(for transcript: Transcript) -> [Row] {
+        let speakersById = Dictionary(transcript.speakers.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return transcript.segments
+            .sorted { $0.startTime < $1.startTime }
+            .map { segment in
+                Row(
+                    label: speakersById[segment.speakerId]?.label ?? "Speaker",
+                    text: segment.text,
+                    startTime: segment.startTime,
+                    endTime: segment.endTime
+                )
+            }
     }
 
     func defaultFileName(for title: String) -> String {
