@@ -386,11 +386,14 @@ actor LiveTranscriptionService: LiveTranscribing {
     // True while a started recording has its managers installed.
     private(set) var isInitialized = false
 
-    // Audio processing constants (task 2.1: 5.0 → 10.0)
+    // Audio processing constants
     private static let SAMPLE_RATE: Float = 16000
     private static let VAD_CHUNK_SIZE = 4096
     private static let PRE_ROLL_CHUNK_COUNT = 2
-    private static let MAX_SPEECH_SAMPLES = 480_000
+    // Force-flush cap for speech without a VAD speechEnd: one ASR model
+    // window (15 s). Longer buffers would be split by FluidAudio's
+    // ChunkProcessor anyway.
+    private static let MAX_SPEECH_SAMPLES = ASRConstants.maxModelSamples
 
     // Pipeline configuration (set at start() time, used throughout session)
     private var storedConfig: LiveTranscriptionPipelineSettings = .defaults

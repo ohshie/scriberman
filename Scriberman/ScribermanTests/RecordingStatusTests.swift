@@ -854,7 +854,7 @@ struct RecordingSessionTests {
         #expect(source.contains("SkeletonView()"))
         #expect(source.contains("Add prompts in Settings"))
         #expect(source.contains("shouldWarnAboutTranscriptLength"))
-        #expect(source.contains("NSPasteboard.general"))
+        #expect(source.contains("copyToPasteboard(latestTransformation.resultText)"))
         #expect(source.contains("latestTransformation.resultText"))
         #expect(!source.contains("Picker(\"Prompt\""))
         #expect(!source.contains("MetadataCell("))
@@ -862,6 +862,17 @@ struct RecordingSessionTests {
 
     
     
+    /// Spec scenario "Session rename rewrites the file": committing a title rewrites `transcript.md`.
+    @Test(.tags(.sourceLint))
+    func testCommittingTheTitleRewritesTranscriptMarkdown() throws {
+        let source = try transcriptDetailSource()
+        let start = try #require(source.range(of: "private func commitTitle()"))
+        let function = String(source[start.upperBound...].prefix(400))
+
+        #expect(function.contains("session.title = editingTitle"))
+        #expect(function.contains("rewriteTranscriptMarkdown(for: recording)"))
+    }
+
     @Test(.tags(.sourceLint))
     func testAITransformationPreviewCardIncludesCopyButtonContract() throws {
         let source = try sourceForFile(named: "AITransformationPreviewCard.swift")

@@ -266,7 +266,7 @@ struct AppShellView: View {
                     modelContext: modelContext
                 )
                 .id(session.id)
-            } else if detailMode == .study, let transcript = displayedTranscript(for: session) {
+            } else if detailMode == .study, let transcript = session.displayedTranscript {
                 TranscriptStudyView(
                     session: session,
                     audioPlayerViewModel: audioPlayerViewModel,
@@ -288,6 +288,9 @@ struct AppShellView: View {
                     aiProviderService: aiProviderService,
                     onReprocess: {
                         appState.jobsViewModel.reprocess(session: session, context: modelContext)
+                    },
+                    onCopy: {
+                        copyTranscript(for: session)
                     },
                     onDelete: {
                         let item = selectedSession
@@ -312,7 +315,7 @@ struct AppShellView: View {
             }
 
         case .imported(let session):
-            if detailMode == .study, let transcript = displayedTranscript(for: session) {
+            if detailMode == .study, let transcript = session.displayedTranscript {
                 TranscriptStudyView(
                     session: session,
                     audioPlayerViewModel: audioPlayerViewModel,
@@ -334,6 +337,9 @@ struct AppShellView: View {
                     aiProviderService: aiProviderService,
                     onReprocess: {
                         appState.jobsViewModel.reprocess(session: session, context: modelContext)
+                    },
+                    onCopy: {
+                        copyTranscript(for: session)
                     },
                     onDelete: {
                         let item = selectedSession
@@ -585,10 +591,6 @@ struct AppShellView: View {
         detailMode = .study
     }
 
-    private func displayedTranscript(for session: any TranscribableSession) -> Transcript? {
-        session.retranscript ?? session.transcript
-    }
-
     /// Copies the transcript as the export writes it — the same rendering, speakers and times
     /// included.
     ///
@@ -604,9 +606,7 @@ struct AppShellView: View {
             return
         }
 
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(markdown, forType: .string)
+        copyToPasteboard(markdown)
     }
 
     private func exportTranscript(for session: any TranscribableSession) {
@@ -639,9 +639,7 @@ struct AppShellView: View {
             return
         }
 
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(transformation.resultText, forType: .string)
+        copyToPasteboard(transformation.resultText)
     }
 
     private func exportTransformation(for session: any TranscribableSession) {
@@ -649,14 +647,11 @@ struct AppShellView: View {
             return
         }
 
-        let panel = NSSavePanel()
-        panel.title = "Export Transformation"
-        panel.prompt = "Export"
-        panel.canCreateDirectories = true
-        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
-        panel.nameFieldStringValue = defaultTransformationFileName(sessionTitle: session.title, promptName: transformation.promptName)
-
-        guard panel.runModal() == .OK, let destinationURL = panel.url else {
+        let suggestedName = MarkdownRenderer().defaultTransformationFileName(
+            sessionTitle: session.title,
+            promptName: transformation.promptName
+        )
+        guard let destinationURL = presentMarkdownSavePanel(title: "Export Transformation", suggestedName: suggestedName) else {
             return
         }
 
@@ -665,14 +660,6 @@ struct AppShellView: View {
         } catch {
             studyActionErrorMessage = error.localizedDescription
         }
-    }
-
-    private func defaultTransformationFileName(sessionTitle: String, promptName: String) -> String {
-        let sanitizedSession = sessionTitle.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespacesAndNewlines)
-        let sanitizedPrompt = promptName.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseSession = sanitizedSession.isEmpty ? "Session" : sanitizedSession
-        let basePrompt = sanitizedPrompt.isEmpty ? "Transformation" : sanitizedPrompt
-        return "\(baseSession) - \(basePrompt).md"
     }
 }
 

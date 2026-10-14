@@ -167,11 +167,31 @@ struct AppShellSidebarRegressionTests {
         )
     }
 
+    @Test("Detail toolbar Copy uses the shared transcript copy helper", .tags(.sourceLint))
+    func detailToolbarCopyUsesSharedTranscriptCopyHelper() throws {
+        let appShell = try appShellSource()
+        let wiring = "onCopy: {\n                        copyTranscript(for: session)\n                    },\n                    onDelete: {"
+        #expect(
+            appShell.components(separatedBy: wiring).count - 1 == 2,
+            "Both TranscriptDetailView call sites (recording and imported) should wire Copy to copyTranscript(for: session)."
+        )
+
+        let detailView = try transcriptDetailViewSource()
+        #expect(
+            detailView.contains("Button {\n                    onCopy()\n                } label: {\n                    Label(\"Copy\", systemImage: \"doc.on.doc\")"),
+            "The detail toolbar Copy button should call the parent's copy action."
+        )
+        #expect(
+            !detailView.contains("setString(viewModel.finalTranscriptText"),
+            "TranscriptDetailView should not copy the unattributed transcript text."
+        )
+    }
+
     @Test("Study mode renders TranscriptStudyView in place", .tags(.sourceLint))
     func studyModeRendersTranscriptStudyViewInPlace() throws {
         let source = try appShellSource()
         #expect(
-            source.contains("else if detailMode == .study, let transcript = displayedTranscript(for: session) {\n                TranscriptStudyView(\n                    session: session,\n                    audioPlayerViewModel: audioPlayerViewModel,\n                    autoScrollEnabled: $transcriptAutoScrollEnabled,\n                    transcript: transcript,\n                    store: appState.backgroundServices.speakerEmbeddingStore,\n                    searchSeed: studySearchSeed\n                )"),
+            source.contains("else if detailMode == .study, let transcript = session.displayedTranscript {\n                TranscriptStudyView(\n                    session: session,\n                    audioPlayerViewModel: audioPlayerViewModel,\n                    autoScrollEnabled: $transcriptAutoScrollEnabled,\n                    transcript: transcript,\n                    store: appState.backgroundServices.speakerEmbeddingStore,\n                    searchSeed: studySearchSeed\n                )"),
             "App shell should render TranscriptStudyView in the detail column when study mode is active."
         )
     }
@@ -196,6 +216,10 @@ struct AppShellSidebarRegressionTests {
 
     private func appShellSource() throws -> String {
         try readSourceFile(relativePathFromTests: "../UI/AppShellView.swift")
+    }
+
+    private func transcriptDetailViewSource() throws -> String {
+        try readSourceFile(relativePathFromTests: "../UI/TranscriptDetailView.swift")
     }
 
     private func jobsViewSource() throws -> String {

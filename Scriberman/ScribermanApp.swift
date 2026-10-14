@@ -64,6 +64,18 @@ struct ScribermanApp: App {
         }
     }
 
+    /// Rewrites `transcript.md` files left in an older format. After `bootstrapWorkspace`, because
+    /// session folders are writable only once the workspace's access is restored. A failure is
+    /// retried at the next launch.
+    private static func regenerateTranscriptMarkdown(in context: ModelContext) {
+        let logger = Logger(subsystem: "Scriberman", category: "ScribermanApp")
+        do {
+            try TranscriptMarkdownRegeneration.regenerateIfNeeded(in: context, userDefaults: .standard)
+        } catch {
+            logger.error("Regenerating transcript.md failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     /// Removes live transcript segments left without a recording by versions that did not cascade
     /// the delete. Idempotent; a failure costs only the cleanup, retried at the next launch.
     static func removeOrphanedTranscriptSegments(in context: ModelContext) {
@@ -126,6 +138,9 @@ struct ScribermanApp: App {
                     ScribermanApp.resetSpeakerMemoryIfVoiceprintSpaceChanged(in: modelContainer.mainContext)
                     ScribermanApp.migrateSpeakerProfilesToVoiceprintLists(in: modelContainer.mainContext)
                     await appState.bootstrapWorkspace()
+                    if appState.workspace != nil {
+                        ScribermanApp.regenerateTranscriptMarkdown(in: modelContainer.mainContext)
+                    }
                 }
                 .onChange(of: appState.dictationService.state) { _, _ in
                     appDelegate.refreshStatusItemIcon()

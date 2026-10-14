@@ -31,20 +31,7 @@ final class DictationHUDController {
         )
         let hosting = NSHostingView(rootView: view)
 
-        let panel = HUDPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 72),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        panel.isFloatingPanel = true
-        panel.level = .floating
-        panel.backgroundColor = .clear
-        panel.isOpaque = false
-        panel.hasShadow = false
-        panel.hidesOnDeactivate = false
-        panel.becomesKeyOnlyIfNeeded = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        let panel = FloatingPanel(size: NSSize(width: 420, height: 72), hasShadow: false)
         panel.contentView = hosting
         return panel
     }
@@ -70,11 +57,4 @@ final class DictationHUDController {
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         NSApp.activate(ignoringOtherApps: true)
     }
-}
-
-/// Borderless windows refuse key status by default; the panel must accept it
-/// so HUD buttons are clickable — combined with `.nonactivatingPanel`, this
-/// never activates the app or steals the target field's focus.
-private final class HUDPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
 }

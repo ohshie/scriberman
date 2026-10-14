@@ -608,8 +608,10 @@ struct ProgressiveDictationServiceTests {
         WordTiming(word: text, startTime: start, endTime: end)
     }
 
+    /// Polls until `condition` holds. The deadline only guards against a hang: in a full parallel
+    /// run the main actor these passes need can be held for well over 5 s by other tests.
     private func waitUntil(_ condition: () -> Bool) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(5)
+        let deadline = ContinuousClock.now + .seconds(60)
         while !condition(), ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(5))
         }
@@ -674,10 +676,12 @@ struct ProgressiveDictationServiceTests {
             inserted.record(text)
             return .typedOut
         }
+        // "my" ends 1.5 s before the end of the 2 s the second pass hears: just enough right
+        // context to commit during the hold.
         let script = PassScript([
-            [word("Hello", 0.1, 0.4), word("my", 0.5, 0.8)],
-            [word("Hello", 0.1, 0.4), word("my", 0.5, 0.8), word("name", 1.1, 1.5)],
-            [word("Hello", 0.1, 0.4), word("my", 0.5, 0.8), word("name", 1.1, 1.5), word("is", 1.6, 1.9)],
+            [word("Hello", 0.05, 0.2), word("my", 0.3, 0.5)],
+            [word("Hello", 0.05, 0.2), word("my", 0.3, 0.5), word("name", 1.1, 1.5)],
+            [word("Hello", 0.05, 0.2), word("my", 0.3, 0.5), word("name", 1.1, 1.5), word("is", 1.6, 1.9)],
         ])
         service.progressivePassHookForTesting = { _ in script.next() }
 
@@ -705,8 +709,8 @@ struct ProgressiveDictationServiceTests {
             return .typedOut
         }
         let script = PassScript([
-            [word("Hello", 0.1, 0.4), word("my", 0.5, 0.8)],
-            [word("Hello", 0.1, 0.4), word("my", 0.5, 0.8), word("name", 1.1, 1.5)],
+            [word("Hello", 0.05, 0.2), word("my", 0.3, 0.5)],
+            [word("Hello", 0.05, 0.2), word("my", 0.3, 0.5), word("name", 1.1, 1.5)],
         ])
         service.progressivePassHookForTesting = { _ in script.next() }
 
@@ -775,9 +779,9 @@ struct ProgressiveDictationServiceTests {
             return .failed
         }
         let script = PassScript([
-            [word("Hello", 0.1, 0.4), word("my", 0.5, 0.8)],
-            [word("Hello", 0.1, 0.4), word("my", 0.5, 0.8), word("name", 1.1, 1.5)],
-            [word("Hello", 0.1, 0.4), word("my", 0.5, 0.8), word("name", 1.1, 1.5), word("is", 1.6, 1.9)],
+            [word("Hello", 0.05, 0.2), word("my", 0.3, 0.5)],
+            [word("Hello", 0.05, 0.2), word("my", 0.3, 0.5), word("name", 1.1, 1.5)],
+            [word("Hello", 0.05, 0.2), word("my", 0.3, 0.5), word("name", 1.1, 1.5), word("is", 1.6, 1.9)],
         ])
         service.progressivePassHookForTesting = { _ in script.next() }
 

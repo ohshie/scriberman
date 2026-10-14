@@ -178,9 +178,9 @@ struct NewSessionViewModelTests {
         let markdown = try String(contentsOf: directory.appendingPathComponent("transcript.md"), encoding: .utf8)
         #expect(!markdown.contains("speaker_mic_0"))
         #expect(!markdown.contains("speaker_mic_cluster_S1"))
-        #expect(markdown.contains("Alice: early turn"))
-        #expect(markdown.contains("Alice: early fallback"))
-        #expect(markdown.contains("Speaker 2: someone new"))
+        #expect(markdown.lists("early turn", under: "Alice"))
+        #expect(markdown.lists("early fallback", under: "Alice"))
+        #expect(markdown.lists("someone new", under: "Speaker 2"))
         #expect(!markdown.contains("speaker_mic_1"))
 
         let transcript = try #require(recording.transcript)
@@ -219,9 +219,9 @@ struct NewSessionViewModelTests {
         let persisted = recording.transcriptSegments.sorted { $0.startTime < $1.startTime }
         #expect(persisted.map(\.speakerId) == ["speaker_mic_0", "Alice"])
         let markdown = try String(contentsOf: directory.appendingPathComponent("transcript.md"), encoding: .utf8)
-        #expect(markdown.contains("Speaker 2: from the mic"))
-        #expect(markdown.contains("Alice: from the app"))
-        #expect(!markdown.contains("Alice: from the mic"))
+        #expect(markdown.lists("from the mic", under: "Speaker 2"))
+        #expect(markdown.lists("from the app", under: "Alice"))
+        #expect(!markdown.lists("from the mic", under: "Alice"))
         #expect(!markdown.contains("speaker_mic_0"))
         let transcript = try #require(recording.transcript)
         #expect(transcript.segments.map(\.speakerId) == ["speaker_mic_0", "Alice"])
@@ -255,7 +255,7 @@ struct NewSessionViewModelTests {
         _ = await fixture.viewModel.stopRecording(context: fixture.context)
 
         let markdown = try String(contentsOf: directory.appendingPathComponent("transcript.md"), encoding: .utf8)
-        #expect(markdown.contains("Speaker 2: from the mic"))
+        #expect(markdown.lists("from the mic", under: "Speaker 2"))
         #expect(!markdown.contains("speaker_mic_unknown"))
         let transcript = try #require(recording.transcript)
         #expect(transcript.speakers.map(\.label) == ["Alice", "Speaker 2"])
@@ -1713,5 +1713,15 @@ private actor ScriptedLiveTranscriber: LiveTranscribing {
     func stop() async -> LiveSessionResult {
         results?.finish()
         return stopResult
+    }
+}
+
+private extension String {
+    /// True when this Markdown has a block under `label` whose text is `text`.
+    func lists(_ text: String, under label: String) -> Bool {
+        let lines = components(separatedBy: "\n")
+        return zip(lines, lines.dropFirst()).contains { heading, body in
+            heading.hasPrefix("**\(label)** [") && body == text
+        }
     }
 }

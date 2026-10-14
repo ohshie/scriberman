@@ -104,13 +104,6 @@ struct TranscriptRowView<Identity: View, Content: View>: View {
     }
 
     private func copy() {
-        copyTranscriptText(copyText)
+        copyToPasteboard(copyText)
     }
-}
-
-/// Puts transcript text on the general pasteboard, as a block's copy control does.
-func copyTranscriptText(_ copyText: String) {
-    let pasteboard = NSPasteboard.general
-    pasteboard.clearContents()
-    pasteboard.setString(copyText, forType: .string)
 }

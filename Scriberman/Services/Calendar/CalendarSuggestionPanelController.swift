@@ -33,21 +33,7 @@ final class CalendarSuggestionPanelController {
     }
 
     private func makePanel() -> NSPanel {
-        let panel = CalendarSuggestionPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 320, height: 120),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        panel.isFloatingPanel = true
-        panel.level = .floating
-        panel.backgroundColor = .clear
-        panel.isOpaque = false
-        panel.hasShadow = true
-        panel.hidesOnDeactivate = false
-        panel.becomesKeyOnlyIfNeeded = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        return panel
+        FloatingPanel(size: NSSize(width: 320, height: 120))
     }
 
     private func position(_ panel: NSPanel) {
@@ -59,9 +45,4 @@ final class CalendarSuggestionPanelController {
             y: visible.maxY - size.height - 24
         ))
     }
-}
-
-/// Borderless panels refuse key status by default, which would make the buttons unclickable.
-private final class CalendarSuggestionPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
 }

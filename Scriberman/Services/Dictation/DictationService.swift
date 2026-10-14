@@ -95,6 +95,8 @@ final class DictationService {
     @ObservationIgnored private var startTask: Task<Void, Never>?
     @ObservationIgnored private var processingTask: Task<Void, Never>?
     @ObservationIgnored private var levelHandlerInstalled = false
+    /// Numbers progressive presses for the per-pass log.
+    @ObservationIgnored private var progressivePressCount = 0
 
 #if DEBUG
     @ObservationIgnored var transcribeHookForTesting: (@Sendable ([Float]) async -> String?)?
@@ -354,6 +356,10 @@ final class DictationService {
     /// One progressive press. Main-actor state shared by the capture loop and its passes.
     @MainActor
     private final class ProgressivePress {
+        /// Identifies the press in the per-pass log.
+        let id: Int
+        /// Hold-time passes finished so far.
+        var passCount = 0
         var samples: [Float] = []
         var committer = ProgressiveTranscriptCommitter()
         var samplesAtLastPass = 0
@@ -366,10 +372,15 @@ final class DictationService {
         var lastInsertion: InsertionOutcome?
         /// An insertion during the hold did not reach the app; nothing more is inserted.
         var insertionStopped = false
+
+        init(id: Int) {
+            self.id = id
+        }
     }
 
     private func startProgressiveProcessing(stream: AsyncThrowingStream<[Float], Error>) {
-        let press = ProgressivePress()
+        progressivePressCount += 1
+        let press = ProgressivePress(id: progressivePressCount)
         processingTask = Task { [weak self] in
             do {
                 for try await samples in stream {
@@ -405,12 +416,35 @@ final class DictationService {
                 press.lastPass = (words, startIndex, endIndex)
             }
             guard let self, !press.isClosed, let words else { return }
-            let committed = press.committer.commit(words: words, passStart: Double(startIndex) / Self.sampleRate)
-            if !committed.isEmpty {
-                self.insertProgressive(committed, press: press)
+            let passStart = Double(startIndex) / Self.sampleRate
+            let passEnd = Double(endIndex) / Self.sampleRate
+            let result = press.committer.commit(words: words, passStart: passStart, passEnd: passEnd)
+            press.passCount += 1
+            self.logProgressivePass(result, press: press, passStart: passStart, passEnd: passEnd)
+            if !result.words.isEmpty {
+                self.insertProgressive(result.words, press: press)
             }
             self.scheduleProgressivePass(press)
         }
+    }
+
+    /// One line per hold-time pass, for measuring the right context the model needs before it
+    /// stops rewriting a word. Timings and counts only: what the user said is never logged.
+    private func logProgressivePass(
+        _ result: ProgressiveTranscriptCommitter.PassResult,
+        press: ProgressivePress,
+        passStart: TimeInterval,
+        passEnd: TimeInterval
+    ) {
+        let straddles = result.straddles.map { straddle in
+            let rightContext = straddle.committedWordRightContext.map { String(format: "%.2f", $0) } ?? "-"
+            return String(format: "%.2f-%.2f", straddle.startTime, straddle.endTime) + " rc=" + rightContext
+        }.joined(separator: ", ")
+        let line = String(
+            format: "Dictation pass press=%d pass=%d audio=%.2f-%.2f cut=%.2f->%.2f committed=%d",
+            press.id, press.passCount, passStart, passEnd, result.cutPointBefore, result.cutPointAfter, result.words.count
+        ) + " straddles=[" + straddles + "]"
+        logger.info("\(line, privacy: .public)")
     }
 
     private func insertProgressive(_ words: [String], press: ProgressivePress) {

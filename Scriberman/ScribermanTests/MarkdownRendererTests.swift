@@ -46,6 +46,20 @@ struct MarkdownRendererTests {
         #expect(firstIndex!.lowerBound < secondIndex!.lowerBound)
     }
 
+    /// A header with blocks appended one by one equals rendering the same rows together.
+    @Test
+    func appendedBlocksEqualTheRowRender() {
+        let session = makeSession()
+        let rows = [
+            MarkdownRenderer.Row(label: "Mic", text: "one", startTime: 0, endTime: 1),
+            MarkdownRenderer.Row(label: "App", text: "two", startTime: 1, endTime: 2)
+        ]
+
+        let appended = rows.reduce(renderer.header(for: session)) { $0 + renderer.block(for: $1) }
+
+        #expect(appended == renderer.renderMarkdown(session: session, rows: rows))
+    }
+
     @Test
     func defaultFileNameSanitizesSlash() {
         #expect(renderer.defaultFileName(for: "Recording 03/27") == "Recording 03-27.md")
@@ -54,6 +68,29 @@ struct MarkdownRendererTests {
     @Test
     func defaultFileNameFallbackForEmptyTitle() {
         #expect(renderer.defaultFileName(for: "") == "Transcript.md")
+    }
+
+    /// Spec scenario "Reserved characters are replaced".
+    @Test
+    func transformationFileNameReplacesReservedCharacters() {
+        #expect(renderer.defaultTransformationFileName(sessionTitle: "Q3: plan/review", promptName: "Summary?")
+            == "Q3- plan-review - Summary-.md")
+    }
+
+    /// Spec scenario "Empty parts fall back".
+    @Test
+    func transformationFileNameFallsBackForEmptyParts() {
+        #expect(renderer.defaultTransformationFileName(sessionTitle: "  ", promptName: "")
+            == "Session - Transformation.md")
+    }
+
+    /// Spec scenario "Same rule as transcript export".
+    @Test
+    func transformationAndTranscriptFileNamesShareTheRule() {
+        let transcript = renderer.defaultFileName(for: "Q3: plan/review")
+        let transformation = renderer.defaultTransformationFileName(sessionTitle: "Q3: plan/review", promptName: "Summary")
+        #expect(transcript.hasPrefix("Q3- plan-review"))
+        #expect(transformation.hasPrefix("Q3- plan-review"))
     }
 
     @Test

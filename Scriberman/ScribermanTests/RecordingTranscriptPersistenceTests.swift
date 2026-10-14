@@ -86,8 +86,9 @@ struct RecordingTranscriptPersistenceTests {
 
         let transcriptURL = tmpDir.appendingPathComponent("transcript.md")
         let contents = try String(contentsOf: transcriptURL, encoding: .utf8)
-        #expect(contents.hasPrefix("# Transcript\n\n"))
-        #expect(contents.contains("[1.50-3.25] Mic: Hello"))
+        let renderer = MarkdownRenderer()
+        #expect(contents.hasPrefix(renderer.header(for: session)))
+        #expect(contents.hasSuffix("\n**Mic** [00:01 – 00:03]\nHello\n"))
         #expect(!contents.contains("S1"))
     }
 
@@ -97,13 +98,16 @@ struct RecordingTranscriptPersistenceTests {
         try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let transcriptURL = tmpDir.appendingPathComponent("transcript.md")
-        try "# Transcript\n\n[0.00-1.00] S1: First line\n".write(to: transcriptURL, atomically: true, encoding: .utf8)
-
         let micPath = tmpDir.appendingPathComponent("mic.wav").path
         let session = RecordingSession(
             createdAt: .now, duration: 0, micAudioURL: micPath, title: "T", status: .recording
         )
+        let transcriptURL = tmpDir.appendingPathComponent("transcript.md")
+        let existing = MarkdownRenderer().renderMarkdown(
+            session: session,
+            rows: [MarkdownRenderer.Row(label: "Mic", text: "First line", startTime: 0, endTime: 1)]
+        )
+        try existing.write(to: transcriptURL, atomically: true, encoding: .utf8)
         let segment = RecordingTranscriptSegment(
             speakerId: "S2",
             text: "Second line",
@@ -117,15 +121,39 @@ struct RecordingTranscriptPersistenceTests {
         appendTranscriptSegmentToMarkdown(segment, for: session)
 
         let contents = try String(contentsOf: transcriptURL, encoding: .utf8)
-        #expect(contents.contains("[0.00-1.00] S1: First line"))
-        #expect(contents.contains("[2.00-4.00] Mic: Second line"))
+        #expect(contents == existing + "\n**Mic** [00:02 – 00:04]\nSecond line\n")
     }
 
+    /// Appending segment by segment and rewriting from the same segments produce the same file.
     @Test
-    func testFormatTranscriptTimestampClampsToZero() {
-        #expect(formatTranscriptTimestamp(-1.5) == "0.00")
-        #expect(formatTranscriptTimestamp(0) == "0.00")
-        #expect(formatTranscriptTimestamp(12.345) == "12.35")
+    func testAppendedFileEqualsRewrite() throws {
+        let container = try makeContainer()
+        let context = ModelContext(container)
+        let (session, directory, markdownURL) = try markdownSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        context.insert(session)
+        let segments = [
+            RecordingTranscriptSegment(
+                createdAt: Date(timeIntervalSince1970: 0),
+                speakerId: "speaker_mic_0", text: "from the mic", startTime: 0, endTime: 1, audioSource: .mic,
+                session: session
+            ),
+            RecordingTranscriptSegment(
+                createdAt: Date(timeIntervalSince1970: 1),
+                speakerId: "speaker_app_0", text: "from the app", startTime: 1, endTime: 2, audioSource: .app,
+                session: session
+            )
+        ]
+        for segment in segments {
+            context.insert(segment)
+            appendTranscriptSegmentToMarkdown(segment, for: session)
+        }
+        try context.save()
+        let appended = try String(contentsOf: markdownURL, encoding: .utf8)
+
+        rewriteTranscriptMarkdown(for: session)
+
+        #expect(try String(contentsOf: markdownURL, encoding: .utf8) == appended)
     }
 
     // MARK: - Lookup by ID
@@ -311,7 +339,8 @@ struct RecordingTranscriptPersistenceTests {
         rewriteTranscriptMarkdown(for: session)
 
         let contents = try String(contentsOf: markdownURL, encoding: .utf8)
-        #expect(contents == "# Transcript\n\n[0.00-1.00] Speaker 2: one\n[1.00-2.00] Alice: two\n")
+        let header = MarkdownRenderer().header(for: session)
+        #expect(contents == header + "\n**Speaker 2** [00:00 – 00:01]\none\n\n**Alice** [00:01 – 00:02]\ntwo\n")
     }
 
     /// Spec scenario "Rename rewrites the file".
@@ -326,7 +355,7 @@ struct RecordingTranscriptPersistenceTests {
         _ = TranscriptStudyView.renameSpeaker(id: "speaker_mic_0", to: "Bob", in: transcript, of: session)
 
         let contents = try String(contentsOf: markdownURL, encoding: .utf8)
-        #expect(contents.contains("Bob: one"))
+        #expect(contents.contains("**Bob** [00:00 – 00:01]\none\n"))
         #expect(!contents.contains("Speaker 2"))
     }
 
@@ -345,7 +374,7 @@ struct RecordingTranscriptPersistenceTests {
         rewriteTranscriptMarkdown(for: session)
 
         let contents = try String(contentsOf: markdownURL, encoding: .utf8)
-        #expect(contents == "# Transcript\n\n[0.00-1.00] Speaker 1: again\n")
+        #expect(contents == MarkdownRenderer().header(for: session) + "\n**Speaker 1** [00:00 – 00:01]\nagain\n")
     }
 
     @Test
@@ -363,6 +392,102 @@ struct RecordingTranscriptPersistenceTests {
         rewriteTranscriptMarkdown(for: session)
 
         let contents = try String(contentsOf: markdownURL, encoding: .utf8)
-        #expect(contents == "# Transcript\n\n[0.00-1.00] App: from the app\n")
+        #expect(contents == MarkdownRenderer().header(for: session) + "\n**App** [00:00 – 00:01]\nfrom the app\n")
+    }
+
+    /// Spec scenario "File matches export".
+    @Test
+    func testMarkdownEqualsExport() throws {
+        let (session, directory, markdownURL) = try markdownSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        session.transcript = labelledTranscript(firstLabel: "Speaker 2")
+
+        rewriteTranscriptMarkdown(for: session)
+
+        let exported = MarkdownRenderer().renderMarkdown(session: session, transcript: try #require(session.transcript))
+        #expect(try String(contentsOf: markdownURL, encoding: .utf8) == exported)
+    }
+
+    /// Spec scenario "Session rename rewrites the file".
+    @Test
+    func testSessionRenameRewritesTheTitle() throws {
+        let (session, directory, markdownURL) = try markdownSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        session.title = "Standup"
+        session.transcript = labelledTranscript(firstLabel: "Speaker 2")
+        rewriteTranscriptMarkdown(for: session)
+
+        session.title = "Weekly sync"
+        rewriteTranscriptMarkdown(for: session)
+
+        let contents = try String(contentsOf: markdownURL, encoding: .utf8)
+        #expect(contents.hasPrefix("# Weekly sync\n"))
+    }
+
+    // MARK: - One-time regeneration
+
+    private func isolatedDefaults() throws -> UserDefaults {
+        let suite = "transcript-md-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        return defaults
+    }
+
+    /// Spec scenario "Existing files are regenerated once".
+    @Test
+    func testRegenerationRewritesAnOldFileOnce() throws {
+        let context = ModelContext(try makeContainer())
+        let (session, directory, markdownURL) = try markdownSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        session.transcript = labelledTranscript(firstLabel: "Speaker 2")
+        context.insert(session)
+        try context.save()
+        try "# Transcript\n\n[0.00-1.00] Speaker 2: one\n".write(to: markdownURL, atomically: true, encoding: .utf8)
+        let defaults = try isolatedDefaults()
+
+        try TranscriptMarkdownRegeneration.regenerateIfNeeded(in: context, userDefaults: defaults)
+
+        let exported = MarkdownRenderer().renderMarkdown(session: session, transcript: try #require(session.transcript))
+        #expect(try String(contentsOf: markdownURL, encoding: .utf8) == exported)
+        #expect(defaults.integer(forKey: TranscriptMarkdownRegeneration.formatVersionKey)
+            == TranscriptMarkdownRegeneration.currentFormatVersion)
+
+        try "untouched".write(to: markdownURL, atomically: true, encoding: .utf8)
+        try TranscriptMarkdownRegeneration.regenerateIfNeeded(in: context, userDefaults: defaults)
+        #expect(try String(contentsOf: markdownURL, encoding: .utf8) == "untouched")
+    }
+
+    @Test
+    func testRegenerationSkipsARecordingInProgress() throws {
+        let context = ModelContext(try makeContainer())
+        let (session, directory, markdownURL) = try markdownSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        session.status = .recording
+        session.transcript = labelledTranscript(firstLabel: "Speaker 2")
+        context.insert(session)
+        try context.save()
+        try "live".write(to: markdownURL, atomically: true, encoding: .utf8)
+
+        try TranscriptMarkdownRegeneration.regenerateIfNeeded(in: context, userDefaults: try isolatedDefaults())
+
+        #expect(try String(contentsOf: markdownURL, encoding: .utf8) == "live")
+    }
+
+    @Test
+    func testRegenerationRetriesAfterAFailedWrite() throws {
+        let context = ModelContext(try makeContainer())
+        let missingFolder = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("mic.wav")
+        let session = RecordingSession(createdAt: .now, duration: 10, micAudioURL: missingFolder.path, title: "T")
+        session.transcript = labelledTranscript(firstLabel: "Speaker 2")
+        context.insert(session)
+        try context.save()
+        let defaults = try isolatedDefaults()
+
+        #expect(throws: (any Error).self) {
+            try TranscriptMarkdownRegeneration.regenerateIfNeeded(in: context, userDefaults: defaults)
+        }
+        #expect(defaults.object(forKey: TranscriptMarkdownRegeneration.formatVersionKey) == nil)
     }
 }
