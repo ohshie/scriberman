@@ -222,9 +222,7 @@ struct TranscriptDetailView: View {
                         onOpenTransformation?(latestTransformation.id)
                     },
                     onCopy: {
-                        let pasteboard = NSPasteboard.general
-                        pasteboard.clearContents()
-                        pasteboard.setString(latestTransformation.resultText, forType: .string)
+                        copyToPasteboard(latestTransformation.resultText)
                     }
                 )
             }

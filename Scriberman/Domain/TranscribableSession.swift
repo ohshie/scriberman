@@ -53,13 +53,17 @@ protocol TranscribableSession: AnyObject {
 }
 
 extension TranscribableSession {
-    /// Recomputes the stored searchable text from the transcript pass the app displays.
-    ///
-    /// `retranscript ?? transcript`, the same choice `displayedTranscript` makes everywhere else,
-    /// so a session is findable by the text it shows when opened rather than by a superseded pass.
+    /// The transcript pass the app displays: the retranscript when there is one, otherwise the
+    /// transcript. Defined once so every view, export and file shows the same pass.
+    var displayedTranscript: Transcript? {
+        retranscript ?? transcript
+    }
+
+    /// Recomputes the stored searchable text from the transcript pass the app displays, so a
+    /// session is findable by the text it shows when opened rather than by a superseded pass.
     /// Called by the transcript setters; no call site has to remember it.
     func refreshSearchableText() {
-        searchableText = (retranscript ?? transcript)?.fullText
+        searchableText = displayedTranscript?.fullText
     }
 
     /// Restores both transcript passes from previously stored blobs, keeping the searchable text

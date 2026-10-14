@@ -32,7 +32,7 @@ func appendTranscriptSegmentToMarkdown(
 
 /// Rewrites `transcript.md` to show what the app shows, in the format export writes.
 ///
-/// With a saved transcript, the file lists the shown pass (`retranscript ?? transcript`) under each
+/// With a saved transcript, the file lists the shown pass (`displayedTranscript`) under each
 /// speaker's label, so renames, recognized names and `Speaker N` read the same as in the app, and
 /// the content equals the export. Without one (a recording still in progress or interrupted), it
 /// lists the persisted live segments under their source, as the live view does. Segments that start
@@ -46,7 +46,7 @@ func rewriteTranscriptMarkdown(for session: RecordingSession, end: Float? = nil)
 /// `rewriteTranscriptMarkdown`, reporting a failed write instead of ignoring it.
 func writeTranscriptMarkdown(for session: RecordingSession, end: Float? = nil) throws {
     let rows: [MarkdownRenderer.Row]
-    if let transcript = session.retranscript ?? session.transcript {
+    if let transcript = session.displayedTranscript {
         rows = MarkdownRenderer.rows(for: transcript)
     } else {
         rows = session.transcriptSegments

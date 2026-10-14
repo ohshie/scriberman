@@ -608,8 +608,10 @@ struct ProgressiveDictationServiceTests {
         WordTiming(word: text, startTime: start, endTime: end)
     }
 
+    /// Polls until `condition` holds. The deadline only guards against a hang: in a full parallel
+    /// run the main actor these passes need can be held for well over 5 s by other tests.
     private func waitUntil(_ condition: () -> Bool) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(5)
+        let deadline = ContinuousClock.now + .seconds(60)
         while !condition(), ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(5))
         }

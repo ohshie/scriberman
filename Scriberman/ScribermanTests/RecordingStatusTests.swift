@@ -854,7 +854,7 @@ struct RecordingSessionTests {
         #expect(source.contains("SkeletonView()"))
         #expect(source.contains("Add prompts in Settings"))
         #expect(source.contains("shouldWarnAboutTranscriptLength"))
-        #expect(source.contains("NSPasteboard.general"))
+        #expect(source.contains("copyToPasteboard(latestTransformation.resultText)"))
         #expect(source.contains("latestTransformation.resultText"))
         #expect(!source.contains("Picker(\"Prompt\""))
         #expect(!source.contains("MetadataCell("))
