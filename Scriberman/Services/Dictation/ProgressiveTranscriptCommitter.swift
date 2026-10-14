@@ -16,7 +16,8 @@ struct ProgressiveTranscriptCommitter {
 
     /// Audio a word needs after it in the committing pass. The model rewrites spans once it
     /// hears what follows ("two to three" becomes "2-3"); a word typed before that would be
-    /// typed again in its rewritten form. Provisional until measured from real presses.
+    /// typed again in its rewritten form. Checked on 2026-10-14 with number ranges, dates and
+    /// amounts in English, Russian and Ukrainian: no span was typed twice at 1.5 s.
     static let rightContextSeconds: TimeInterval = 1.5
 
     /// What one pass did, for the per-pass log. Timings only, in seconds from the start of
