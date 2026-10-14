@@ -3,25 +3,25 @@
     <channel>
         <title>Scriberman</title>
         <item>
-            <title>1.1.0</title>
-            <pubDate>Mon, 05 Oct 2026 23:32:29 +0200</pubDate>
-            <sparkle:version>21</sparkle:version>
-            <sparkle:shortVersionString>1.1.0</sparkle:shortVersionString>
+            <title>1.1.1</title>
+            <pubDate>Wed, 14 Oct 2026 19:13:32 +0200</pubDate>
+            <sparkle:version>26</sparkle:version>
+            <sparkle:shortVersionString>1.1.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<h2>Scriberman 1.1.0</h2>
+            <description><![CDATA[<h2>Scriberman 1.1.1</h2>
 <h3>What’s new</h3>
 <ul>
-  <li>Rename speakers with saved-name suggestions, merge speakers, or assign a transcript block to another speaker.</li>
-  <li>See each speaker’s talk time and reset names from the new Speakers list.</li>
-  <li>Rename or merge saved speaker profiles and remove individual voiceprints in Settings.</li>
+  <li>Copied, exported, and saved transcripts now share consistent formatting with titles, speaker labels, and timestamps.</li>
 </ul>
 <h3>Fixes</h3>
 <ul>
-  <li>Saved Markdown transcripts now match the speaker names and transcript shown in the app.</li>
+  <li>Live transcripts appear sooner during uninterrupted speech.</li>
+  <li>Reduced repeated text during dictation when numbers, dates, or amounts are revised as you speak.</li>
+  <li>Renaming a recording now updates the title in its saved transcript file.</li>
 </ul>
 ]]></description>
-            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.1.0/Scriberman-1.1.0-21-arm64.dmg" length="16768079" type="application/octet-stream" sparkle:edSignature="VoDvy7gEh8iQVjptrUseIJCcov9/bNtBqUzyQFC96W/0CxwK2JF2q56EiLm0Ie5zRYOyIOB1dszV154PUl3YDw=="/>
+            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.1.1/Scriberman-1.1.1-26-arm64.dmg" length="16770204" type="application/octet-stream" sparkle:edSignature="yIdnFUz5p838F7zUhFCEwhQBKIvcmJby0T1/Kmqyna8PgiYtKos4XIXvGumhNiY/3+H26wi2j1mKqrq9Mfs7Dg=="/>
         </item>
     </channel>
 </rss>
