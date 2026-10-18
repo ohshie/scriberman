@@ -6,3 +6,4 @@ openspec/
 dist/
 /scripts/
 /Scriberman/ScribermanTests/ReleaseValidationTests.swift
+.scratch/
