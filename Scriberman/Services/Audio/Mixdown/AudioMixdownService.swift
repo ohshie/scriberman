@@ -76,19 +76,19 @@ actor AudioMixdownService {
                 micStartHostTime: micStartHostTime,
                 appStartHostTime: appStartHostTime
             )
-            logger.info("Computed stereo offsetSamples=\(offsetSamples, privacy: .public)")
+            logger.info("Computed legacy offsetSamples=\(offsetSamples, privacy: .public)")
 
             do {
-                try writeStereoAAC(
+                try writeMonoSummedAAC(
                     micSamples: micSamples,
                     appSamples: appSamples,
                     appOffsetSamples: offsetSamples,
                     to: outputURL
                 )
-                logger.info("Stereo write completed to \(outputURL.path, privacy: .public)")
+                logger.info("Mono-summed write completed to \(outputURL.path, privacy: .public)")
             } catch {
-                logger.error("Stereo write failed: \(error.localizedDescription, privacy: .public)")
-                throw RecordingError.failedToStart("Mixdown stereo write failed: \(error.localizedDescription)")
+                logger.error("Mono-summed write failed: \(error.localizedDescription, privacy: .public)")
+                throw RecordingError.failedToStart("Mixdown mono-summed write failed: \(error.localizedDescription)")
             }
         } else {
             do {
@@ -201,10 +201,10 @@ actor AudioMixdownService {
             sampleRate: outputSampleRate
         )
         logger.notice(
-            "Timeline stereo. micSilence=\(micTimeline.insertedSilenceFrames, privacy: .public) micGaps=\(micTimeline.gapCount, privacy: .public) appSilence=\(appTimeline.insertedSilenceFrames, privacy: .public) appGaps=\(appTimeline.gapCount, privacy: .public) micOverlap=\(micTimeline.overlapFrames, privacy: .public) appOverlap=\(appTimeline.overlapFrames, privacy: .public)"
+            "Timeline mic + app. micSilence=\(micTimeline.insertedSilenceFrames, privacy: .public) micGaps=\(micTimeline.gapCount, privacy: .public) appSilence=\(appTimeline.insertedSilenceFrames, privacy: .public) appGaps=\(appTimeline.gapCount, privacy: .public) micOverlap=\(micTimeline.overlapFrames, privacy: .public) appOverlap=\(appTimeline.overlapFrames, privacy: .public)"
         )
         // Both timelines are anchored to the same reference (frame 0), so no residual offset.
-        try writeStereoAAC(
+        try writeMonoSummedAAC(
             micSamples: micTimeline.frames,
             appSamples: appTimeline.frames,
             appOffsetSamples: 0,
@@ -255,56 +255,80 @@ actor AudioMixdownService {
         }
     }
 
-    private func writeStereoAAC(
+    /// Writes mic and app as one channel on their aligned positions. A positive offset starts the
+    /// app source later, a negative one starts the mic later; the output is as long as the longer
+    /// aligned source.
+    private func writeMonoSummedAAC(
         micSamples: [Float],
         appSamples: [Float],
         appOffsetSamples: Int,
         to outputURL: URL
     ) throws {
-        try removeOutputIfNeeded(outputURL)
-
-        let outputFile = try makeOutputFile(url: outputURL, channelCount: 2)
-        guard let stereoFormat = AVAudioFormat(standardFormatWithSampleRate: outputSampleRate, channels: 2) else {
-            throw RecordingError.failedToStart("Failed to create stereo mixdown format.")
-        }
-
         let micStartFrame = max(0, -appOffsetSamples)
         let appStartFrame = max(0, appOffsetSamples)
         let totalFrames = max(micStartFrame + micSamples.count, appStartFrame + appSamples.count)
 
-        var outputStartFrame = 0
-        while outputStartFrame < totalFrames {
-            let framesRemaining = totalFrames - outputStartFrame
-            let frameCount = min(framesRemaining, Int(processingChunkSize))
-
-            guard let buffer = AVAudioPCMBuffer(
-                pcmFormat: stereoFormat,
-                frameCapacity: AVAudioFrameCount(frameCount)
-            ), let channelData = buffer.floatChannelData else {
-                throw RecordingError.failedToStart("Failed to allocate stereo output buffer.")
-            }
-
-            buffer.frameLength = AVAudioFrameCount(frameCount)
-            channelData[0].initialize(repeating: 0, count: frameCount)
-            channelData[1].initialize(repeating: 0, count: frameCount)
-
-            for frameOffset in 0..<frameCount {
-                let frameIndex = outputStartFrame + frameOffset
-
-                let micIndex = frameIndex - micStartFrame
-                if micIndex >= 0, micIndex < micSamples.count {
-                    channelData[0][frameOffset] = micSamples[micIndex]
-                }
-
-                let appIndex = frameIndex - appStartFrame
-                if appIndex >= 0, appIndex < appSamples.count {
-                    channelData[1][frameOffset] = appSamples[appIndex]
-                }
-            }
-
-            try outputFile.write(from: buffer)
-            outputStartFrame += frameCount
+        var summed = [Float](repeating: 0, count: totalFrames)
+        for (index, sample) in micSamples.enumerated() {
+            summed[micStartFrame + index] = sample
         }
+        for (index, sample) in appSamples.enumerated() {
+            summed[appStartFrame + index] += sample
+        }
+
+        let reducedFrames = Self.applyLookAheadLimiter(to: &summed, sampleRate: outputSampleRate)
+        try writeMonoAAC(samples: summed, to: outputURL)
+        logger.notice(
+            "Mixdown written mono-summed. frames=\(totalFrames, privacy: .public) micStartFrame=\(micStartFrame, privacy: .public) appStartFrame=\(appStartFrame, privacy: .public) limiterReducedFrames=\(reducedFrames, privacy: .public)"
+        )
+    }
+
+    /// −1 dBFS as a linear amplitude.
+    private static let limiterCeiling = Float(pow(10.0, -1.0 / 20.0))
+
+    /// Look-ahead gain limiter. A frame above the ceiling needs gain `ceiling / |sample|`; the gain
+    /// ramps linearly from 1 down to that value over the ~5 ms before the frame and recovers
+    /// linearly to 1 over ~50 ms after it. A frame with no over-ceiling frame in its look-ahead
+    /// window and no release in progress keeps gain 1, so it is unchanged. Returns the number of
+    /// frames whose gain was below 1.
+    private static func applyLookAheadLimiter(to samples: inout [Float], sampleRate: Double) -> Int {
+        let ceiling = limiterCeiling
+        let lookAheadFrames = max(1, Int((sampleRate * 0.005).rounded()))
+        let releaseStep = Float(1.0 / (sampleRate * 0.050))
+
+        // Attack gain for the frames from the one being output to the newest one read, keyed by
+        // frame index modulo the window size.
+        let windowSize = lookAheadFrames + 1
+        var attackGains = [Float](repeating: 1, count: windowSize)
+        var gain: Float = 1
+        var reducedFrames = 0
+
+        for newest in 0..<(samples.count + lookAheadFrames) {
+            if newest < samples.count {
+                let magnitude = abs(samples[newest])
+                if magnitude > ceiling {
+                    let required = ceiling / magnitude
+                    for distance in 0...lookAheadFrames where newest - distance >= 0 {
+                        let ramped = required + (1 - required) * Float(distance) / Float(lookAheadFrames)
+                        let slot = (newest - distance) % windowSize
+                        attackGains[slot] = min(attackGains[slot], ramped)
+                    }
+                }
+            }
+
+            let frame = newest - lookAheadFrames
+            guard frame >= 0 else { continue }
+            let slot = frame % windowSize
+            gain = min(attackGains[slot], gain + releaseStep, 1)
+            attackGains[slot] = 1
+
+            guard gain < 1 else { continue }
+            reducedFrames += 1
+            let limited = samples[frame] * gain
+            // Guards against the product rounding a hair above the ceiling.
+            samples[frame] = max(-ceiling, min(ceiling, limited))
+        }
+        return reducedFrames
     }
 
     private func removeOutputIfNeeded(_ outputURL: URL) throws {
