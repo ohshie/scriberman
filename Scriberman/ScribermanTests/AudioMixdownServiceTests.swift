@@ -92,6 +92,45 @@ final class AudioMixdownServiceTests {
         #expect(decoded.channelCount == 2)
     }
 
+    /// The mode passed in wins over the stored flag. The sidecars say both sources started
+    /// together; the host times say the app started half a second late. Only the timeline path
+    /// trusts the sidecars, so the app channel's opening tells the two modes apart.
+    @Test(arguments: [true, false])
+    func testRequestedTimelineModeWinsOverTheStoredFlag(timeline: Bool) async throws {
+        let suiteName = "AudioMixdownServiceTests-\(UUID().uuidString)"
+        let store = try #require(UserDefaults(suiteName: suiteName))
+        defer { store.removePersistentDomain(forName: suiteName) }
+        store.set(!timeline, forKey: AudioSyncConfig.FlagDefinitions.shipped.timelineMixdown.key)
+        let service = AudioMixdownService(outputFormat: .linearPCMCaf, audioSyncConfig: AudioSyncConfig(store: store))
+        let micURL = tempDirectoryURL.appendingPathComponent("mic-mode.wav")
+        let appURL = tempDirectoryURL.appendingPathComponent("app-mode.wav")
+        let outputURL = tempDirectoryURL.appendingPathComponent("mode.caf")
+
+        try writeMonoWAV(samples: Array(repeating: Float(0.25), count: 48_000), to: micURL)
+        try writeMonoWAV(samples: Array(repeating: Float(-0.55), count: 48_000), to: appURL)
+        try ensureReadableAudioFile(at: micURL)
+        try ensureReadableAudioFile(at: appURL)
+        try writeSidecar(for: micURL, segmentCount: 50)
+        try writeSidecar(for: appURL, segmentCount: 50)
+
+        try await service.mix(
+            micURL: micURL,
+            appURL: appURL,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: HostNanoseconds(nanoseconds: 1_500_000_000),
+            into: outputURL,
+            timelineMixdown: timeline
+        )
+
+        let decoded = try decodePCM(from: outputURL)
+        let appOpening = mean(decoded.channelSamples[1].prefix(12_000))
+        if timeline {
+            #expect(appOpening < -0.20)
+        } else {
+            #expect(abs(appOpening) < 0.05)
+        }
+    }
+
     @Test
     func testMixWithTwoSourcesAndZeroOffsetProducesStereoOutput() async throws {
         let service = AudioMixdownService(outputFormat: .linearPCMCaf)
@@ -355,7 +394,8 @@ final class AudioMixdownServiceTests {
             appURL: nil,
             mixdownURL: mixdownURL,
             micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
-            appStartHostTime: nil
+            appStartHostTime: nil,
+            timelineMixdown: true
         )
 
         let persisted = try #require(try RecordingSession.fetch(id: session.id, in: ModelContext(container)))
@@ -390,7 +430,8 @@ final class AudioMixdownServiceTests {
             appURL: nil,
             mixdownURL: mixdownURL,
             micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
-            appStartHostTime: nil
+            appStartHostTime: nil,
+            timelineMixdown: true
         )
 
         #expect(!committed)

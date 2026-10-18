@@ -21,27 +21,33 @@ actor AudioMixdownService {
     private let outputFormat: AudioMixdownOutputFormat
     private let removeItemAtURL: RemoveItemAtURL
     private let sampleReader: AudioSampleReader
+    private let audioSyncConfig: AudioSyncConfig
     private let logger = Logger(subsystem: "Scriberman", category: "AudioMixdownService")
 
     init(
         outputFormat: AudioMixdownOutputFormat = .aacM4A,
         sampleReader: AudioSampleReader = AudioSampleReader(),
+        audioSyncConfig: AudioSyncConfig = AudioSyncConfig(),
         removeItemAtURL: @escaping RemoveItemAtURL = { url in
             try FileManager.default.removeItem(at: url)
         }
     ) {
         self.outputFormat = outputFormat
         self.sampleReader = sampleReader
+        self.audioSyncConfig = audioSyncConfig
         self.removeItemAtURL = removeItemAtURL
     }
 
+    /// `timelineMixdown` is the recording's own flag value; `nil` reads the stored flag, for
+    /// imports and for recordings saved without a flag snapshot.
     func mix(
         micURL: URL,
         appURL: URL?,
         micStartHostTime: HostNanoseconds,
         appStartHostTime: HostNanoseconds?,
         into outputURL: URL,
-        deleteSourceFiles: Bool = true
+        deleteSourceFiles: Bool = true,
+        timelineMixdown: Bool? = nil
     ) async throws {
         logger.info(
             "Mix request received. mic=\(micURL.path, privacy: .public) app=\(appURL?.path ?? "nil", privacy: .public) out=\(outputURL.path, privacy: .public) format=\(String(describing: self.outputFormat), privacy: .public)"
@@ -56,7 +62,7 @@ actor AudioMixdownService {
         let micSamples = try await sampleReader.read(from: micURL, label: "mic")
         logger.info("Mic samples loaded. count=\(micSamples.count, privacy: .public)")
 
-        if AudioSyncConfig.isTimelineMixdownEnabled {
+        if timelineMixdown ?? audioSyncConfig.isTimelineMixdownEnabled {
             if try await attemptTimelineMix(micURL: micURL, appURL: appURL, micSamples: micSamples, into: outputURL) {
                 logger.notice("Used timeline (PTS-anchored) mixdown path.")
                 logger.info("Mix completed. outputExists=\(self.fileManager.fileExists(atPath: outputURL.path), privacy: .public)")

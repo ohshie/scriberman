@@ -41,7 +41,8 @@ protocol RecordingServiceProtocol: Sendable {
         appProcessID: pid_t?,
         title: String?,
         liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation?,
-        liveAudioClock: LiveCaptureClock?
+        liveAudioClock: LiveCaptureClock?,
+        audioSyncFlags: AudioSyncFlags
     ) async throws(RecordingError) -> UUID
     func stopRecording() async -> UUID?
     func consumePendingError() async -> RecordingError?

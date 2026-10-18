@@ -6,7 +6,8 @@ actor RecordingRecoveryService {
     static let maxMixdownAttempts = 3
     /// Screen mux retries stop after the same number of attempts as mixdown recovery.
     static let maxScreenMuxAttempts = maxMixdownAttempts
-    typealias MixdownHandler = @Sendable (URL, URL?, URL) async throws -> Void
+    /// Mic, app, output, and the recording's timeline mixdown flag (`nil` without a snapshot).
+    typealias MixdownHandler = @Sendable (URL, URL?, URL, Bool?) async throws -> Void
     typealias MuxHandler = @Sendable (ScreenVideoMuxRequest) async -> Void
     typealias RetireSources = @Sendable (_ micURL: URL, _ appURL: URL?) throws -> Void
 
@@ -41,14 +42,15 @@ actor RecordingRecoveryService {
             self.performMixdown = performMixdown
         } else {
             let mixdownService = AudioMixdownService()
-            self.performMixdown = { micURL, appURL, outputURL in
+            self.performMixdown = { micURL, appURL, outputURL, timelineMixdown in
                 try await mixdownService.mix(
                     micURL: micURL,
                     appURL: appURL,
                     micStartHostTime: HostNanoseconds(nanoseconds: 0),
                     appStartHostTime: nil,
                     into: outputURL,
-                    deleteSourceFiles: false
+                    deleteSourceFiles: false,
+                    timelineMixdown: timelineMixdown
                 )
             }
         }
@@ -171,7 +173,12 @@ actor RecordingRecoveryService {
         logger.info("Retrying screen mux for session \(session.id, privacy: .public), attempt \(attempt, privacy: .public)")
 
         let micURL = URL(fileURLWithPath: session.micAudioURL)
-        let anchor = session.audioAnchorHostTimeNanos.map { HostNanoseconds(nanoseconds: UInt64(clamping: $0)) }
+        // A legacy mixdown is not anchored to the shared timeline, so it gets no anchor. Without a
+        // snapshot the saved anchor is used, as before snapshots existed.
+        let timelineMixdown = session.audioSyncFlags?.isTimelineMixdownEnabled ?? true
+        let anchor = timelineMixdown
+            ? session.audioAnchorHostTimeNanos.map { HostNanoseconds(nanoseconds: UInt64(clamping: $0)) }
+            : nil
         await performMux(ScreenVideoMuxRequest(
             sessionID: session.id,
             screenTmpURL: screenTmpURL,
@@ -264,7 +271,7 @@ actor RecordingRecoveryService {
         }
 
         do {
-            try await performMixdown(micURL, appURL, outputURL)
+            try await performMixdown(micURL, appURL, outputURL, session.audioSyncFlags?.isTimelineMixdownEnabled)
             session.mixdownURL = outputURL.path
             session.status = .recorded
             try? context.save()

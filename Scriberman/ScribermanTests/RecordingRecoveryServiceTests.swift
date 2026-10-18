@@ -9,6 +9,17 @@ private actor CallTracker {
     func markCalled() { called = true }
 }
 
+/// Every timeline mode a recovery mixdown was asked for; `nil` entries mean no snapshot.
+private actor CapturedTimelineModes {
+    private(set) var modes: [Bool?] = []
+    func append(_ mode: Bool?) { modes.append(mode) }
+}
+
+private actor CapturedMuxRequests {
+    private(set) var requests: [ScreenVideoMuxRequest] = []
+    func append(_ request: ScreenVideoMuxRequest) { requests.append(request) }
+}
+
 private actor CapturedValue {
     private(set) var value: Int?
     func set(_ newValue: Int) { value = newValue }
@@ -60,7 +71,7 @@ final class RecordingRecoveryServiceTests {
             workspaceService: workspaceService,
             modelContainer: container,
             launchedAt: Date(timeIntervalSinceNow: -300),
-            performMixdown: { _, _, _ in await tracker.markCalled() }
+            performMixdown: { _, _, _, _ in await tracker.markCalled() }
         )
 
         await service.sweepIncompleteSessions()
@@ -97,7 +108,7 @@ final class RecordingRecoveryServiceTests {
         let service = RecordingRecoveryService(
             workspaceService: workspaceService,
             modelContainer: container,
-            performMixdown: { _, _, _ in }
+            performMixdown: { _, _, _, _ in }
         )
 
         await service.sweepIncompleteSessions()
@@ -129,7 +140,7 @@ final class RecordingRecoveryServiceTests {
         let service = RecordingRecoveryService(
             workspaceService: workspaceService,
             modelContainer: container,
-            performMixdown: { _, _, _ in await tracker.markCalled() }
+            performMixdown: { _, _, _, _ in await tracker.markCalled() }
         )
 
         await service.sweepIncompleteSessions()
@@ -162,7 +173,7 @@ final class RecordingRecoveryServiceTests {
         let service = RecordingRecoveryService(
             workspaceService: workspaceService,
             modelContainer: container,
-            performMixdown: { _, _, _ in await tracker.markCalled() }
+            performMixdown: { _, _, _, _ in await tracker.markCalled() }
         )
 
         await service.sweepIncompleteSessions()
@@ -192,7 +203,7 @@ final class RecordingRecoveryServiceTests {
         let service = RecordingRecoveryService(
             workspaceService: workspaceService,
             modelContainer: container,
-            performMixdown: { _, _, _ in }
+            performMixdown: { _, _, _, _ in }
         )
 
         await service.sweepIncompleteSessions()
@@ -226,7 +237,7 @@ final class RecordingRecoveryServiceTests {
         let service = RecordingRecoveryService(
             workspaceService: workspaceService,
             modelContainer: container,
-            performMixdown: { _, _, _ in }
+            performMixdown: { _, _, _, _ in }
         )
 
         await service.sweepIncompleteSessions()
@@ -258,7 +269,7 @@ final class RecordingRecoveryServiceTests {
         let service = RecordingRecoveryService(
             workspaceService: workspaceService,
             modelContainer: container,
-            performMixdown: { _, _, _ in throw MixdownError() }
+            performMixdown: { _, _, _, _ in throw MixdownError() }
         )
 
         await service.sweepIncompleteSessions()
@@ -296,7 +307,7 @@ final class RecordingRecoveryServiceTests {
         let service = RecordingRecoveryService(
             workspaceService: workspaceService,
             modelContainer: container,
-            performMixdown: { _, _, _ in throw MixdownError() }
+            performMixdown: { _, _, _, _ in throw MixdownError() }
         )
 
         await service.sweepIncompleteSessions()
@@ -340,7 +351,7 @@ final class RecordingRecoveryServiceTests {
         let service = RecordingRecoveryService(
             workspaceService: workspaceService,
             modelContainer: container,
-            performMixdown: { _, _, _ in await tracker.markCalled() }
+            performMixdown: { _, _, _, _ in await tracker.markCalled() }
         )
 
         await service.sweepIncompleteSessions()
@@ -400,7 +411,7 @@ final class RecordingRecoveryServiceTests {
         let service = RecordingRecoveryService(
             workspaceService: workspaceService,
             modelContainer: container,
-            performMixdown: { micURL, _, _ in
+            performMixdown: { micURL, _, _, _ in
                 // Read the header the mixdown would see: repair must have
                 // already rewritten the data-chunk size at offset 40.
                 let bytes = try Data(contentsOf: micURL)
@@ -441,7 +452,7 @@ final class RecordingRecoveryServiceTests {
 
     private func makeRecoveryService(
         container: ModelContainer,
-        performMixdown: @escaping RecordingRecoveryService.MixdownHandler = { _, _, _ in },
+        performMixdown: @escaping RecordingRecoveryService.MixdownHandler = { _, _, _, _ in },
         performMux: RecordingRecoveryService.MuxHandler? = nil,
         isFinalizing: @escaping @Sendable (UUID) -> Bool = { _ in false }
     ) -> RecordingRecoveryService {
@@ -474,7 +485,7 @@ final class RecordingRecoveryServiceTests {
         try context.save()
 
         let tracker = CallTracker()
-        let service = makeRecoveryService(container: container, performMixdown: { _, _, _ in await tracker.markCalled() })
+        let service = makeRecoveryService(container: container, performMixdown: { _, _, _, _ in await tracker.markCalled() })
         await service.sweepIncompleteSessions()
 
         let recovered = try fetch(session.id, in: container)
@@ -498,7 +509,7 @@ final class RecordingRecoveryServiceTests {
         try context.save()
 
         let tracker = CallTracker()
-        let service = makeRecoveryService(container: container, performMixdown: { _, _, _ in await tracker.markCalled() })
+        let service = makeRecoveryService(container: container, performMixdown: { _, _, _, _ in await tracker.markCalled() })
         await service.sweepIncompleteSessions()
 
         #expect(await tracker.called)
@@ -540,6 +551,104 @@ final class RecordingRecoveryServiceTests {
         #expect(!FileManager.default.fileExists(atPath: screenTmpURL.path))
         let plan = try #require(exporter.lastPlan)
         #expect(plan.audioInstructions.map(\.url) == [mixdownURL])
+    }
+
+    // MARK: - Per-recording audio-sync flags
+
+    private func makeSessionAwaitingMixdown(in folder: URL, audioSyncFlags: AudioSyncFlags?) -> RecordingSession {
+        let micURL = folder.appendingPathComponent("mic.wav")
+        FileManager.default.createFile(atPath: micURL.path, contents: Data("wav".utf8))
+        let session = makeSession(micAudioURL: micURL.path, status: .recorded)
+        session.audioSyncFlags = audioSyncFlags
+        return session
+    }
+
+    private func makeSessionAwaitingScreenMux(in folder: URL, audioSyncFlags: AudioSyncFlags?) throws -> RecordingSession {
+        let mixdownURL = folder.appendingPathComponent("recording.m4a")
+        try writeValidMixdown(at: mixdownURL)
+        FileManager.default.createFile(atPath: RecordingFileLayout.screenTmpVideoURL(in: folder).path, contents: Data("video".utf8))
+        let session = makeSession(micAudioURL: folder.appendingPathComponent("mic.wav").path, mixdownURL: mixdownURL.path)
+        session.screenMuxState = ScreenMuxState.pending.rawValue
+        session.videoStartHostTimeNanos = 2_000_000_000
+        session.audioAnchorHostTimeNanos = 1_000_000_000
+        session.audioSyncFlags = audioSyncFlags
+        return session
+    }
+
+    @Test(arguments: [true, false])
+    func testRecoveryMixdownUsesTheTimelineModeTheRecordingStartedWith(timeline: Bool) async throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let container = try makeContainer()
+        let context = ModelContext(container)
+        context.insert(makeSessionAwaitingMixdown(in: folder, audioSyncFlags: AudioSyncFlags(
+            isTimelineMixdownEnabled: timeline,
+            isUnifiedCaptureEnabled: true,
+            isCaptureHealthRecoveryEnabled: true
+        )))
+        try context.save()
+
+        let captured = CapturedTimelineModes()
+        let service = makeRecoveryService(container: container, performMixdown: { _, _, _, mode in await captured.append(mode) })
+        await service.sweepIncompleteSessions()
+
+        #expect(await captured.modes == [timeline])
+    }
+
+    @Test
+    func testRecoveryMixdownWithoutSnapshotLeavesTheModeToTheMixdownService() async throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let container = try makeContainer()
+        let context = ModelContext(container)
+        context.insert(makeSessionAwaitingMixdown(in: folder, audioSyncFlags: nil))
+        try context.save()
+
+        let captured = CapturedTimelineModes()
+        let service = makeRecoveryService(container: container, performMixdown: { _, _, _, mode in await captured.append(mode) })
+        await service.sweepIncompleteSessions()
+
+        #expect(await captured.modes == [nil])
+    }
+
+    @Test(arguments: [true, false])
+    func testScreenMuxRetryUsesTheTimelineModeTheRecordingStartedWith(timeline: Bool) async throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let container = try makeContainer()
+        let context = ModelContext(container)
+        context.insert(try makeSessionAwaitingScreenMux(in: folder, audioSyncFlags: AudioSyncFlags(
+            isTimelineMixdownEnabled: timeline,
+            isUnifiedCaptureEnabled: true,
+            isCaptureHealthRecoveryEnabled: true
+        )))
+        try context.save()
+
+        let captured = CapturedMuxRequests()
+        let service = makeRecoveryService(container: container, performMux: { await captured.append($0) })
+        await service.sweepIncompleteSessions()
+
+        let request = try #require(await captured.requests.first)
+        #expect(request.timelineAudioURL == folder.appendingPathComponent("recording.m4a"))
+        #expect(request.audioAnchorHostTime == (timeline ? HostNanoseconds(nanoseconds: 1_000_000_000) : nil))
+    }
+
+    @Test
+    func testScreenMuxRetryWithoutSnapshotUsesTheSavedAnchor() async throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let container = try makeContainer()
+        let context = ModelContext(container)
+        context.insert(try makeSessionAwaitingScreenMux(in: folder, audioSyncFlags: nil))
+        try context.save()
+
+        let captured = CapturedMuxRequests()
+        let service = makeRecoveryService(container: container, performMux: { await captured.append($0) })
+        await service.sweepIncompleteSessions()
+
+        let request = try #require(await captured.requests.first)
+        #expect(request.timelineAudioURL == folder.appendingPathComponent("recording.m4a"))
+        #expect(request.audioAnchorHostTime == HostNanoseconds(nanoseconds: 1_000_000_000))
     }
 
     @Test
@@ -608,7 +717,7 @@ final class RecordingRecoveryServiceTests {
         let tracker = CallTracker()
         let service = makeRecoveryService(
             container: container,
-            performMixdown: { _, _, _ in await tracker.markCalled() },
+            performMixdown: { _, _, _, _ in await tracker.markCalled() },
             isFinalizing: { $0 == sessionID }
         )
         await service.sweepIncompleteSessions()

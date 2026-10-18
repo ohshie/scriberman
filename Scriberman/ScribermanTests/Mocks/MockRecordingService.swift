@@ -10,7 +10,7 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
     var startThrowSequence: [RecordingError] = []
     var startReturns: UUID = UUID()
     var stopReturns: UUID?
-    var startCalls: [(workspace: Workspace, micDeviceID: AudioDeviceID?, captureDisplayID: CGDirectDisplayID?, capturedAppName: String?, appProcessID: pid_t?, title: String?)] = []
+    var startCalls: [(workspace: Workspace, micDeviceID: AudioDeviceID?, captureDisplayID: CGDirectDisplayID?, capturedAppName: String?, appProcessID: pid_t?, title: String?, audioSyncFlags: AudioSyncFlags)] = []
     var retargetMicCalls: [String?] = []
     var pendingError: RecordingError?
 
@@ -90,7 +90,8 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
         appProcessID: pid_t?,
         title: String?,
         liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation?,
-        liveAudioClock: LiveCaptureClock?
+        liveAudioClock: LiveCaptureClock?,
+        audioSyncFlags: AudioSyncFlags
     ) async throws(RecordingError) -> UUID {
         startCalls.append((
             workspace: workspace,
@@ -98,7 +99,8 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
             captureDisplayID: captureDisplayID,
             capturedAppName: capturedAppName,
             appProcessID: appProcessID,
-            title: title
+            title: title,
+            audioSyncFlags: audioSyncFlags
         ))
         if !startThrowSequence.isEmpty {
             throw startThrowSequence.removeFirst()
