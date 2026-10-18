@@ -37,7 +37,7 @@ final class AudioMixdownServiceTests {
     /// A recording whose sidecar agrees with its file mixes on the presentation-timestamp path.
     /// After the capture-time invariant, agreement is the normal case rather than the lucky one.
     @Test
-    func testAgreeingSidecarProducesStereoOutput() async throws {
+    func testAgreeingSidecarProducesOneChannelOutput() async throws {
         let service = AudioMixdownService(outputFormat: .linearPCMCaf)
         let micURL = tempDirectoryURL.appendingPathComponent("mic-agree.wav")
         let appURL = tempDirectoryURL.appendingPathComponent("app-agree.wav")
@@ -59,7 +59,54 @@ final class AudioMixdownServiceTests {
         )
 
         let decoded = try decodePCM(from: outputURL)
-        #expect(decoded.channelCount == 2)
+        #expect(decoded.channelCount == 1)
+    }
+
+    /// Writes a `.timing` sidecar with the given segment start times, each `framesPerSegment` long.
+    private func writeSidecar(for audioURL: URL, segmentStarts: [UInt64], framesPerSegment: Int = 960) throws {
+        let segments = segmentStarts.map { AudioCaptureSegment(startHostTimeNanos: $0, frameCount: framesPerSegment) }
+        let sidecar = CaptureTimingSidecar(sampleRate: 48_000, segments: segments)
+        let data = try JSONEncoder().encode(sidecar)
+        try data.write(to: AudioFileStreamer.timingSidecarURL(for: audioURL), options: .atomic)
+    }
+
+    /// Timeline path. The mic has 50 contiguous 20 ms segments from 1.0 s. The app starts at 1.5 s
+    /// (frame 24,000) with 10 segments, misses 100 ms (4,800 frames), then has 10 more ending at
+    /// frame 48,000. The gap is mic alone, as the right channel was silent there in the stereo
+    /// mixdown.
+    @Test
+    func testTimelineMixKeepsLaterAppStartAndGapSilencePositions() async throws {
+        let service = AudioMixdownService(outputFormat: .linearPCMCaf)
+        let micURL = tempDirectoryURL.appendingPathComponent("mic-gap.wav")
+        let appURL = tempDirectoryURL.appendingPathComponent("app-gap.wav")
+        let outputURL = tempDirectoryURL.appendingPathComponent("gap.caf")
+
+        try writeFloatWAV(samples: Array(repeating: Float(0.125), count: 48_000), to: micURL)
+        try writeFloatWAV(samples: Array(repeating: Float(0.5), count: 19_200), to: appURL)
+        try writeSidecar(
+            for: micURL,
+            segmentStarts: (0..<50).map { 1_000_000_000 + UInt64($0) * 20_000_000 }
+        )
+        let beforeGap = (0..<10).map { 1_500_000_000 + UInt64($0) * 20_000_000 }
+        let afterGap = (0..<10).map { 1_800_000_000 + UInt64($0) * 20_000_000 }
+        try writeSidecar(for: appURL, segmentStarts: beforeGap + afterGap)
+
+        try await service.mix(
+            micURL: micURL,
+            appURL: appURL,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: HostNanoseconds(nanoseconds: 1_500_000_000),
+            into: outputURL
+        )
+
+        let decoded = try decodePCM(from: outputURL)
+        #expect(decoded.channelCount == 1)
+        #expect(decoded.frameCount == 48_000)
+        let samples = decoded.channelSamples[0]
+        #expect(samples[0..<24_000].allSatisfy { $0 == 0.125 })
+        #expect(samples[24_000..<33_600].allSatisfy { $0 == 0.625 })
+        #expect(samples[33_600..<38_400].allSatisfy { $0 == 0.125 })
+        #expect(samples[38_400..<48_000].allSatisfy { $0 == 0.625 })
     }
 
     /// A sidecar that genuinely disagrees with its file must still be refused, and the recording
@@ -89,12 +136,13 @@ final class AudioMixdownServiceTests {
         )
 
         let decoded = try decodePCM(from: outputURL)
-        #expect(decoded.channelCount == 2)
+        #expect(decoded.channelCount == 1)
     }
 
     /// The mode passed in wins over the stored flag. The sidecars say both sources started
     /// together; the host times say the app started half a second late. Only the timeline path
-    /// trusts the sidecars, so the app channel's opening tells the two modes apart.
+    /// trusts the sidecars, so the opening of the mono-summed output tells the two modes apart:
+    /// mic plus app (0.25 − 0.55) on the timeline path, mic alone (0.25) on the legacy path.
     @Test(arguments: [true, false])
     func testRequestedTimelineModeWinsOverTheStoredFlag(timeline: Bool) async throws {
         let suiteName = "AudioMixdownServiceTests-\(UUID().uuidString)"
@@ -123,25 +171,27 @@ final class AudioMixdownServiceTests {
         )
 
         let decoded = try decodePCM(from: outputURL)
-        let appOpening = mean(decoded.channelSamples[1].prefix(12_000))
+        #expect(decoded.channelCount == 1)
+        let opening = mean(decoded.channelSamples[0].prefix(12_000))
         if timeline {
-            #expect(appOpening < -0.20)
+            #expect(abs(opening - -0.30) < 0.01)
         } else {
-            #expect(abs(appOpening) < 0.05)
+            #expect(abs(opening - 0.25) < 0.01)
         }
     }
 
+    /// Below the ceiling the limiter leaves every frame alone, so each output sample is the mic
+    /// sample plus the app sample. Float WAV inputs and the PCM output carry these values exactly.
     @Test
-    func testMixWithTwoSourcesAndZeroOffsetProducesStereoOutput() async throws {
+    func testMixWithTwoSourcesSumsMicAndAppIntoOneChannel() async throws {
         let service = AudioMixdownService(outputFormat: .linearPCMCaf)
         let micURL = tempDirectoryURL.appendingPathComponent("mic.wav")
         let appURL = tempDirectoryURL.appendingPathComponent("app.wav")
         let outputURL = tempDirectoryURL.appendingPathComponent("recording.caf")
 
-        try writeMonoWAV(samples: Array(repeating: Float(0.25), count: 48_000), to: micURL)
-        try writeMonoWAV(samples: Array(repeating: Float(-0.55), count: 48_000), to: appURL)
-        try ensureReadableAudioFile(at: micURL)
-        try ensureReadableAudioFile(at: appURL)
+        let mic = (0..<48_000).map { $0.isMultiple(of: 2) ? Float(0.25) : Float(-0.125) }
+        try writeFloatWAV(samples: mic, to: micURL)
+        try writeFloatWAV(samples: Array(repeating: Float(-0.5), count: 48_000), to: appURL)
 
         try await service.mix(
             micURL: micURL,
@@ -152,15 +202,46 @@ final class AudioMixdownServiceTests {
         )
 
         let decoded = try decodePCM(from: outputURL)
-        #expect(decoded.channelCount == 2)
+        #expect(decoded.channelCount == 1)
         #expect(decoded.sampleRate == 48_000)
         #expect(decoded.frameCount == 48_000)
+        let samples = decoded.channelSamples[0]
+        #expect(samples.enumerated().allSatisfy { index, sample in
+            sample == (index.isMultiple(of: 2) ? Float(-0.25) : Float(-0.625))
+        })
+    }
 
-        let leftAverage = mean(decoded.channelSamples[0].prefix(20_000))
-        let rightAverage = mean(decoded.channelSamples[1].prefix(20_000))
-        #expect(leftAverage > 0.10)
-        #expect(rightAverage < -0.20)
-        #expect(abs(leftAverage - rightAverage) > 0.25)
+    /// A 10 ms burst where mic and app together reach 1.0 (0 dBFS). −1 dBFS is 0.8912509 linear.
+    /// Frames well before the burst (outside the ~5 ms look-ahead) and well after it (past the
+    /// ~50 ms release) keep the plain sum of 0.5.
+    @Test
+    func testCoincidentPeaksAreLimitedToMinusOneDBFS() async throws {
+        let service = AudioMixdownService(outputFormat: .linearPCMCaf)
+        let micURL = tempDirectoryURL.appendingPathComponent("mic.wav")
+        let appURL = tempDirectoryURL.appendingPathComponent("app.wav")
+        let outputURL = tempDirectoryURL.appendingPathComponent("recording.caf")
+
+        var app = Array(repeating: Float(0.25), count: 48_000)
+        for index in 24_000..<24_480 {
+            app[index] = 0.75
+        }
+        try writeFloatWAV(samples: Array(repeating: Float(0.25), count: 48_000), to: micURL)
+        try writeFloatWAV(samples: app, to: appURL)
+
+        try await service.mix(
+            micURL: micURL,
+            appURL: appURL,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            into: outputURL
+        )
+
+        let samples = try decodePCM(from: outputURL).channelSamples[0]
+        #expect(samples.count == 48_000)
+        #expect(samples.allSatisfy { abs($0) <= 0.8912510 })
+        #expect(samples[24_000..<24_480].allSatisfy { $0 >= 0.85 })
+        #expect(samples[0..<23_000].allSatisfy { $0 == 0.5 })
+        #expect(samples[30_000..<48_000].allSatisfy { $0 == 0.5 })
     }
 
     @Test
@@ -220,17 +301,18 @@ final class AudioMixdownServiceTests {
         #expect(average < 0.40)
     }
 
+    /// Legacy offset path. The app starts 0.5 s (24,000 frames) after the mic and runs 12,000
+    /// frames past the mic's end, so the output is 48,000 frames: mic alone, then both, then app
+    /// alone.
     @Test
-    func testMixWithHalfSecondAppOffsetPadsRightChannelSilence() async throws {
+    func testLaterStartingLongerAppSourceKeepsPositionsAndTotalLength() async throws {
         let service = AudioMixdownService(outputFormat: .linearPCMCaf)
         let micURL = tempDirectoryURL.appendingPathComponent("mic.wav")
         let appURL = tempDirectoryURL.appendingPathComponent("app.wav")
         let outputURL = tempDirectoryURL.appendingPathComponent("recording.caf")
 
-        try writeMonoWAV(samples: Array(repeating: Float(0.1), count: 60_000), to: micURL)
-        try writeMonoWAV(samples: Array(repeating: Float(0.8), count: 24_000), to: appURL)
-        try ensureReadableAudioFile(at: micURL)
-        try ensureReadableAudioFile(at: appURL)
+        try writeFloatWAV(samples: Array(repeating: Float(0.125), count: 36_000), to: micURL)
+        try writeFloatWAV(samples: Array(repeating: Float(0.5), count: 24_000), to: appURL)
 
         try await service.mix(
             micURL: micURL,
@@ -241,15 +323,12 @@ final class AudioMixdownServiceTests {
         )
 
         let decoded = try decodePCM(from: outputURL)
-        #expect(decoded.channelCount == 2)
-        #expect(decoded.sampleRate == 48_000)
-        #expect(decoded.frameCount == 60_000)
-
-        let right = decoded.channelSamples[1]
-        #expect(right.count > 26_000)
-        let preOffsetAverage = meanAbsolute(right.prefix(23_000))
-        #expect(preOffsetAverage < 0.05)
-        #expect(abs(right[24_000]) > 0.3)
+        #expect(decoded.channelCount == 1)
+        #expect(decoded.frameCount == 48_000)
+        let samples = decoded.channelSamples[0]
+        #expect(samples[0..<24_000].allSatisfy { $0 == 0.125 })
+        #expect(samples[24_000..<36_000].allSatisfy { $0 == 0.625 })
+        #expect(samples[36_000..<48_000].allSatisfy { $0 == 0.5 })
     }
 
     @Test
@@ -488,6 +567,35 @@ final class AudioMixdownServiceTests {
             try file.write(from: buffer)
             index += frameCount
         }
+    }
+
+    /// Float32 WAV, so test values reach the mixdown without 16-bit quantization.
+    private func writeFloatWAV(samples: [Float], to url: URL) throws {
+        guard let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48_000,
+            channels: 1,
+            interleaved: false
+        ), let buffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: AVAudioFrameCount(samples.count)
+        ), let channelData = buffer.floatChannelData else {
+            throw RecordingError.failedToStart("Failed to build float WAV buffer for tests.")
+        }
+
+        let file = try AVAudioFile(
+            forWriting: url,
+            settings: format.settings,
+            commonFormat: format.commonFormat,
+            interleaved: format.isInterleaved
+        )
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { pointer in
+            if let baseAddress = pointer.baseAddress {
+                channelData[0].update(from: baseAddress, count: samples.count)
+            }
+        }
+        try file.write(from: buffer)
     }
 
     private func writeStereoWAV(left: [Float], right: [Float], to url: URL) throws {

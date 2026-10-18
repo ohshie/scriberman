@@ -8,6 +8,8 @@ struct TranscriptBlockView: View {
     let activeSearchRange: Range<String.Index>?
     let onTap: () -> Void
     var speakerEditing: SpeakerEditing?
+    /// `false` for a transcript whose segments' source does not say which capture stream a voice came from.
+    var showsAudioSource: Bool
 
     /// What a block of a saved transcript needs to edit its speaker. The caller owns which block is
     /// renaming, so a click on another block can close the field.
@@ -30,7 +32,8 @@ struct TranscriptBlockView: View {
         searchRanges: [Range<String.Index>] = [],
         activeSearchRange: Range<String.Index>? = nil,
         onTap: @escaping () -> Void = {},
-        speakerEditing: SpeakerEditing? = nil
+        speakerEditing: SpeakerEditing? = nil,
+        showsAudioSource: Bool = true
     ) {
         self.block = block
         self.isActive = isActive
@@ -38,12 +41,13 @@ struct TranscriptBlockView: View {
         self.activeSearchRange = activeSearchRange
         self.onTap = onTap
         self.speakerEditing = speakerEditing
+        self.showsAudioSource = showsAudioSource
     }
 
     var body: some View {
         TranscriptRowView(
             timeText: startTimeText,
-            audioSource: block.audioSource,
+            audioSource: showsAudioSource ? block.audioSource : nil,
             copyText: block.text,
             isActive: isActive,
             activeColor: speakerColor
