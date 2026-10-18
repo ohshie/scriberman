@@ -251,6 +251,7 @@ actor RecordingService: RecordingServiceProtocol {
     private let voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)?
     private let applyDefaultTag: DefaultTagApplier
     private let now: DateProvider
+    private let audioSyncConfig: AudioSyncConfig
 
     private var audioEngine: AVAudioEngine?
     private let micStreamer = AudioFileStreamer(label: "mic")
@@ -349,7 +350,8 @@ actor RecordingService: RecordingServiceProtocol {
         screenCaptureSessionFactory: @escaping ScreenCaptureSessionFactory = { ScreenCaptureSession() },
         voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)? = nil,
         defaultTagApplier: @escaping DefaultTagApplier = { try TagService().applyDefaultTag(to: $0, in: $1) },
-        now: @escaping DateProvider = { Date() }
+        now: @escaping DateProvider = { Date() },
+        audioSyncConfig: AudioSyncConfig = AudioSyncConfig()
     ) {
         self.workspaceService = workspaceService
         self.modelContainer = modelContainer
@@ -364,6 +366,7 @@ actor RecordingService: RecordingServiceProtocol {
         self.voiceProcessingPropertySetter = voiceProcessingPropertySetter
         self.applyDefaultTag = defaultTagApplier
         self.now = now
+        self.audioSyncConfig = audioSyncConfig
         self.hardwareListenerQueue = DispatchQueue(label: "Scriberman.RecordingService.HardwareListeners")
         let mixdownCoordinator = mixdownCoordinator ?? RecordingMixdownCoordinator(
             workspaceService: workspaceService,
@@ -651,7 +654,7 @@ actor RecordingService: RecordingServiceProtocol {
         appProcessID: pid_t?
     ) async throws {
         var unifiedStarted = false
-        if AudioSyncConfig.isUnifiedCaptureEnabled, let appProcessID {
+        if audioSyncConfig.isUnifiedCaptureEnabled, let appProcessID {
             do {
                 let unified = UnifiedCaptureSession(
                     micFileURL: micFileURL,
@@ -1200,7 +1203,7 @@ actor RecordingService: RecordingServiceProtocol {
             // mux the raw mic/app tracks, which the finalizer keeps until the mux has finished.
             var screenMux: ScreenVideoMuxRequest?
             if shouldRunScreenMux, let videoStartHostTime {
-                let timelineEnabled = AudioSyncConfig.isTimelineMixdownEnabled
+                let timelineEnabled = audioSyncConfig.isTimelineMixdownEnabled
                 screenMux = ScreenVideoMuxRequest(
                     sessionID: sessionID,
                     screenTmpURL: screenTmpVideoURL,

@@ -234,8 +234,10 @@ final class NewSessionViewModel {
         userInputIdleProvider: any UserInputIdleProviding = SystemUserInputIdleProvider(),
         userDefaults _: UserDefaults = .standard,
         liveTranscriptionService: (any LiveTranscribing)? = nil,
-        saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() }
+        saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() },
+        audioSyncConfig: AudioSyncConfig = AudioSyncConfig()
     ) {
+        self.isCaptureHealthRecoveryEnabled = audioSyncConfig.isCaptureHealthRecoveryEnabled
         self.saveContext = saveContext
         self.userInputIdleProvider = userInputIdleProvider
         self.liveTranscriptionService = liveTranscriptionService ?? LiveTranscriptionService(speakerEmbeddingStore: speakerEmbeddingStore)
@@ -846,7 +848,7 @@ final class NewSessionViewModel {
     /// Whether a detected capture death is acted on, or only observed and logged.
     ///
     /// Overridable so tests can exercise both sides without touching user defaults.
-    var isCaptureHealthRecoveryEnabled: Bool = AudioSyncConfig.isCaptureHealthRecoveryEnabled
+    var isCaptureHealthRecoveryEnabled: Bool
 
     /// Set while a restart is in flight, so the 50 ms monitor loop cannot start a second one on top
     /// of it. Mirrors `RecordingService.isRecoveringMicCapture`.

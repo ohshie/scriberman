@@ -21,17 +21,20 @@ actor AudioMixdownService {
     private let outputFormat: AudioMixdownOutputFormat
     private let removeItemAtURL: RemoveItemAtURL
     private let sampleReader: AudioSampleReader
+    private let audioSyncConfig: AudioSyncConfig
     private let logger = Logger(subsystem: "Scriberman", category: "AudioMixdownService")
 
     init(
         outputFormat: AudioMixdownOutputFormat = .aacM4A,
         sampleReader: AudioSampleReader = AudioSampleReader(),
+        audioSyncConfig: AudioSyncConfig = AudioSyncConfig(),
         removeItemAtURL: @escaping RemoveItemAtURL = { url in
             try FileManager.default.removeItem(at: url)
         }
     ) {
         self.outputFormat = outputFormat
         self.sampleReader = sampleReader
+        self.audioSyncConfig = audioSyncConfig
         self.removeItemAtURL = removeItemAtURL
     }
 
@@ -56,7 +59,7 @@ actor AudioMixdownService {
         let micSamples = try await sampleReader.read(from: micURL, label: "mic")
         logger.info("Mic samples loaded. count=\(micSamples.count, privacy: .public)")
 
-        if AudioSyncConfig.isTimelineMixdownEnabled {
+        if audioSyncConfig.isTimelineMixdownEnabled {
             if try await attemptTimelineMix(micURL: micURL, appURL: appURL, micSamples: micSamples, into: outputURL) {
                 logger.notice("Used timeline (PTS-anchored) mixdown path.")
                 logger.info("Mix completed. outputExists=\(self.fileManager.fileExists(atPath: outputURL.path), privacy: .public)")
