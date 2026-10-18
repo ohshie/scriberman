@@ -13,6 +13,7 @@ import Observation
 final class DeveloperSettings {
     private enum Key {
         static let isUnlocked = "developerSettings.isUnlocked"
+        static let betaBuildsEnabled = "developerSettings.betaBuildsEnabled"
     }
 
     /// Clicks on the version label in Settings that unlock the tab.
@@ -28,6 +29,12 @@ final class DeveloperSettings {
         didSet { store.set(isUnlocked, forKey: Key.isUnlocked) }
     }
 
+    /// Whether update checks offer beta releases. `UpdateService` reads it at launch and applies
+    /// changes to the updater.
+    private(set) var betaBuildsEnabled: Bool {
+        didSet { store.set(betaBuildsEnabled, forKey: Key.betaBuildsEnabled) }
+    }
+
     /// Stored rather than read through to `store` on each access, because `@Observable` tracks
     /// stored properties only.
     private var flagValues: [String: Bool]
@@ -38,6 +45,7 @@ final class DeveloperSettings {
         self.store = store
         self.flagDefinitions = flagDefinitions
         isUnlocked = store.bool(forKey: Key.isUnlocked)
+        betaBuildsEnabled = store.bool(forKey: Key.betaBuildsEnabled)
         flagValues = Dictionary(uniqueKeysWithValues: flagDefinitions.all.map {
             ($0.key, store.object(forKey: $0.key) as? Bool ?? $0.defaultValue)
         })
@@ -56,10 +64,14 @@ final class DeveloperSettings {
         versionClickCount = 0
     }
 
-    /// Removes the tab. Flag values are left as they are.
+    /// Removes the tab. Flag values and the beta builds opt-in are left as they are.
     func hide() {
         versionClickCount = 0
         isUnlocked = false
+    }
+
+    func setBetaBuilds(_ enabled: Bool) {
+        betaBuildsEnabled = enabled
     }
 
     func isOn(_ flag: AudioSyncConfig.Flag) -> Bool {

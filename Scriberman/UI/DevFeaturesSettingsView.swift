@@ -3,6 +3,7 @@ import SwiftUI
 /// The hidden Dev Features tab in Settings, shown only while `DeveloperSettings` is unlocked.
 struct DevFeaturesSettingsView: View {
     var settings: DeveloperSettings
+    var updateService: UpdateService
 
     /// A flag's label and caption. A new flag is listed by adding its definition and one entry here.
     private struct FlagCopy {
@@ -31,6 +32,25 @@ struct DevFeaturesSettingsView: View {
 
     var body: some View {
         Form {
+            Section {
+                VStack(alignment: .leading) {
+                    Toggle("Beta builds", isOn: Binding(
+                        get: { settings.betaBuildsEnabled },
+                        set: { updateService.setBetaBuilds($0, in: settings) }
+                    ))
+                    Text("Offers beta releases on update checks. Turning this off keeps the installed build until a newer stable release.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if !updateService.isConfigured {
+                    Text("Update checks are available in production releases.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Updates")
+            }
+
             Section {
                 ForEach(Self.audioSyncFlags, id: \.flag) { copy in
                     let flag = settings.flagDefinitions[keyPath: copy.flag]

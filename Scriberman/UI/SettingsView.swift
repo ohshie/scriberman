@@ -360,7 +360,7 @@ struct SettingsView: View {
                     .tag(SettingsTab.hotkeys)
 
                 if appState.developerSettings.isUnlocked {
-                    DevFeaturesSettingsView(settings: appState.developerSettings)
+                    DevFeaturesSettingsView(settings: appState.developerSettings, updateService: updateService)
                         .tabItem {
                             Label("Dev Features", systemImage: "hammer")
                         }

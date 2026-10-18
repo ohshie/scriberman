@@ -98,6 +98,30 @@ struct DeveloperSettingsTests {
         }
     }
 
+    @Test("Beta builds are off on a fresh install and persist across relaunch")
+    func betaBuildsPersist() {
+        let defaults = makeDefaults()
+        #expect(!DeveloperSettings(store: defaults).betaBuildsEnabled)
+
+        DeveloperSettings(store: defaults).setBetaBuilds(true)
+        #expect(DeveloperSettings(store: defaults).betaBuildsEnabled)
+
+        DeveloperSettings(store: defaults).setBetaBuilds(false)
+        #expect(!DeveloperSettings(store: defaults).betaBuildsEnabled)
+    }
+
+    @Test("Hide keeps the beta builds opt-in")
+    func hideKeepsBetaBuilds() {
+        let defaults = makeDefaults()
+        let settings = DeveloperSettings(store: defaults)
+        click(settings, times: 7)
+        settings.setBetaBuilds(true)
+        settings.hide()
+
+        #expect(settings.betaBuildsEnabled)
+        #expect(DeveloperSettings(store: defaults).betaBuildsEnabled)
+    }
+
     @Test("A flag set away from its default persists across relaunch")
     func flagAwayFromDefaultPersists() {
         let defaults = makeDefaults()

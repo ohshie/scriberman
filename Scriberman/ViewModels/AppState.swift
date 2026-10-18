@@ -25,7 +25,7 @@ final class AppState {
     let appAudioSettings: AppAudioSettings
     let idlePromptPreferences = IdlePromptPreferences()
     let appIconPreferences = AppIconPreferences()
-    let developerSettings = DeveloperSettings()
+    let developerSettings: DeveloperSettings
     private let restoreWorkspaceHandler: () async throws -> Workspace
     private let setWorkspaceHandler: (URL) async throws -> Workspace
 
@@ -110,7 +110,9 @@ final class AppState {
         self.mainServices = services.main
         self.backgroundServices = services.background
         self.permissionService = services.main.permissionService
-        self.updateService = updateService ?? .live()
+        let developerSettings = DeveloperSettings()
+        self.developerSettings = developerSettings
+        self.updateService = updateService ?? .live(developerSettings: developerSettings)
         self.restoreWorkspaceHandler = restoreWorkspaceHandler ?? {
             try await services.background.workspaceService.restoreWorkspaceIfPossible()
         }
