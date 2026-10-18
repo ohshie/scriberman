@@ -27,6 +27,9 @@ struct AudioSyncConfig: @unchecked Sendable {
             unifiedCapture: Flag(key: "AudioSync.unifiedCaptureEnabled", defaultValue: true),
             captureHealthRecovery: Flag(key: "AudioSync.captureHealthRecoveryEnabled", defaultValue: true)
         )
+
+        /// Every flag, in the order the Dev Features tab lists them.
+        var all: [Flag] { [timelineMixdown, unifiedCapture, captureHealthRecovery] }
     }
 
     private let store: UserDefaults

@@ -25,6 +25,7 @@ final class AppState {
     let appAudioSettings: AppAudioSettings
     let idlePromptPreferences = IdlePromptPreferences()
     let appIconPreferences = AppIconPreferences()
+    let developerSettings = DeveloperSettings()
     private let restoreWorkspaceHandler: () async throws -> Workspace
     private let setWorkspaceHandler: (URL) async throws -> Workspace
 
