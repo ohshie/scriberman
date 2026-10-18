@@ -11,6 +11,8 @@ struct RecordingFinalizationJob: Sendable {
     let mixdownURL: URL
     let micStartHostTime: HostNanoseconds
     let appStartHostTime: HostNanoseconds?
+    /// The recording's timeline mixdown flag. The screen mux request was built from the same value.
+    let timelineMixdown: Bool
     /// Set when the recording has video to mux.
     let screenMux: ScreenVideoMuxRequest?
 }
@@ -88,7 +90,8 @@ actor RecordingFinalizer: RecordingFinalizing {
             appURL: job.appURL,
             mixdownURL: job.mixdownURL,
             micStartHostTime: job.micStartHostTime,
-            appStartHostTime: job.appStartHostTime
+            appStartHostTime: job.appStartHostTime,
+            timelineMixdown: job.timelineMixdown
         )
 
         // Runs after the mixdown on both paths, so the legacy mux still finds the raw inputs.

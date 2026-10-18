@@ -11,6 +11,7 @@ enum SettingsTab {
     case tags
     case hotkeys
     case advanced
+    case devFeatures
 }
 
 struct SettingsView: View {
@@ -94,6 +95,10 @@ struct SettingsView: View {
                     Section("Updates") {
                         LabeledContent("Current version") {
                             Text(updateService.currentVersionText)
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            appState.developerSettings.registerVersionClick()
                         }
 
                         Toggle(
@@ -353,8 +358,25 @@ struct SettingsView: View {
                         Label("Hotkeys", systemImage: "keyboard")
                     }
                     .tag(SettingsTab.hotkeys)
+
+                if appState.developerSettings.isUnlocked {
+                    DevFeaturesSettingsView(settings: appState.developerSettings, updateService: updateService)
+                        .tabItem {
+                            Label("Dev Features", systemImage: "hammer")
+                        }
+                        .tag(SettingsTab.devFeatures)
+                }
             }
             .navigationTitle("Settings")
+        }
+        // Hiding the tab while it is selected would leave the selection pointing at nothing.
+        .onChange(of: appState.developerSettings.isUnlocked) { _, isUnlocked in
+            if !isUnlocked && selectedTab == .devFeatures {
+                selectedTab = .general
+            }
+        }
+        .onDisappear {
+            appState.developerSettings.settingsDidClose()
         }
         // A request to open Settings for one particular thing lands on that thing. Cleared once
         // honoured, so reopening Settings later returns to wherever the user last was.

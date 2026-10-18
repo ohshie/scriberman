@@ -11,7 +11,8 @@ protocol RecordingMixdownCoordinating: Sendable {
         appURL: URL?,
         mixdownURL: URL,
         micStartHostTime: HostNanoseconds,
-        appStartHostTime: HostNanoseconds?
+        appStartHostTime: HostNanoseconds?,
+        timelineMixdown: Bool
     ) async -> Bool
 }
 
@@ -40,7 +41,8 @@ actor RecordingMixdownCoordinator: RecordingMixdownCoordinating {
         appURL: URL?,
         mixdownURL: URL,
         micStartHostTime: HostNanoseconds,
-        appStartHostTime: HostNanoseconds?
+        appStartHostTime: HostNanoseconds?,
+        timelineMixdown: Bool
     ) async -> Bool {
         var scopedWorkspaceRoot: URL?
         var didStartScopedAccess = false
@@ -78,7 +80,8 @@ actor RecordingMixdownCoordinator: RecordingMixdownCoordinating {
                 micStartHostTime: micStartHostTime,
                 appStartHostTime: appStartHostTime,
                 into: mixdownURL,
-                deleteSourceFiles: false
+                deleteSourceFiles: false,
+                timelineMixdown: timelineMixdown
             )
         } catch {
             logger.error("Mixdown failed for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
