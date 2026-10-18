@@ -139,6 +139,47 @@ final class AudioMixdownServiceTests {
         #expect(decoded.channelCount == 1)
     }
 
+    /// The mode passed in wins over the stored flag. The sidecars say both sources started
+    /// together; the host times say the app started half a second late. Only the timeline path
+    /// trusts the sidecars, so the opening of the mono-summed output tells the two modes apart:
+    /// mic plus app (0.25 − 0.55) on the timeline path, mic alone (0.25) on the legacy path.
+    @Test(arguments: [true, false])
+    func testRequestedTimelineModeWinsOverTheStoredFlag(timeline: Bool) async throws {
+        let suiteName = "AudioMixdownServiceTests-\(UUID().uuidString)"
+        let store = try #require(UserDefaults(suiteName: suiteName))
+        defer { store.removePersistentDomain(forName: suiteName) }
+        store.set(!timeline, forKey: AudioSyncConfig.FlagDefinitions.shipped.timelineMixdown.key)
+        let service = AudioMixdownService(outputFormat: .linearPCMCaf, audioSyncConfig: AudioSyncConfig(store: store))
+        let micURL = tempDirectoryURL.appendingPathComponent("mic-mode.wav")
+        let appURL = tempDirectoryURL.appendingPathComponent("app-mode.wav")
+        let outputURL = tempDirectoryURL.appendingPathComponent("mode.caf")
+
+        try writeMonoWAV(samples: Array(repeating: Float(0.25), count: 48_000), to: micURL)
+        try writeMonoWAV(samples: Array(repeating: Float(-0.55), count: 48_000), to: appURL)
+        try ensureReadableAudioFile(at: micURL)
+        try ensureReadableAudioFile(at: appURL)
+        try writeSidecar(for: micURL, segmentCount: 50)
+        try writeSidecar(for: appURL, segmentCount: 50)
+
+        try await service.mix(
+            micURL: micURL,
+            appURL: appURL,
+            micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
+            appStartHostTime: HostNanoseconds(nanoseconds: 1_500_000_000),
+            into: outputURL,
+            timelineMixdown: timeline
+        )
+
+        let decoded = try decodePCM(from: outputURL)
+        #expect(decoded.channelCount == 1)
+        let opening = mean(decoded.channelSamples[0].prefix(12_000))
+        if timeline {
+            #expect(abs(opening - -0.30) < 0.01)
+        } else {
+            #expect(abs(opening - 0.25) < 0.01)
+        }
+    }
+
     /// Below the ceiling the limiter leaves every frame alone, so each output sample is the mic
     /// sample plus the app sample. Float WAV inputs and the PCM output carry these values exactly.
     @Test
@@ -432,7 +473,8 @@ final class AudioMixdownServiceTests {
             appURL: nil,
             mixdownURL: mixdownURL,
             micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
-            appStartHostTime: nil
+            appStartHostTime: nil,
+            timelineMixdown: true
         )
 
         let persisted = try #require(try RecordingSession.fetch(id: session.id, in: ModelContext(container)))
@@ -467,7 +509,8 @@ final class AudioMixdownServiceTests {
             appURL: nil,
             mixdownURL: mixdownURL,
             micStartHostTime: HostNanoseconds(nanoseconds: 1_000_000_000),
-            appStartHostTime: nil
+            appStartHostTime: nil,
+            timelineMixdown: true
         )
 
         #expect(!committed)

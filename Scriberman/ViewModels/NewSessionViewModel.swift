@@ -234,8 +234,10 @@ final class NewSessionViewModel {
         userInputIdleProvider: any UserInputIdleProviding = SystemUserInputIdleProvider(),
         userDefaults _: UserDefaults = .standard,
         liveTranscriptionService: (any LiveTranscribing)? = nil,
-        saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() }
+        saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() },
+        audioSyncConfig: AudioSyncConfig = AudioSyncConfig()
     ) {
+        self.audioSyncConfig = audioSyncConfig
         self.saveContext = saveContext
         self.userInputIdleProvider = userInputIdleProvider
         self.liveTranscriptionService = liveTranscriptionService ?? LiveTranscriptionService(speakerEmbeddingStore: speakerEmbeddingStore)
@@ -843,10 +845,11 @@ final class NewSessionViewModel {
     /// Whether this recording's capture has been restarted at least once.
     var wasCaptureInterrupted: Bool { captureHealthMonitor.wasInterrupted }
 
-    /// Whether a detected capture death is acted on, or only observed and logged.
-    ///
-    /// Overridable so tests can exercise both sides without touching user defaults.
-    var isCaptureHealthRecoveryEnabled: Bool = AudioSyncConfig.isCaptureHealthRecoveryEnabled
+    private let audioSyncConfig: AudioSyncConfig
+
+    /// The flag values the current recording started with. Whether a detected capture death is
+    /// acted on, or only observed and logged, comes from here.
+    private var activeAudioSyncFlags: AudioSyncFlags?
 
     /// Set while a restart is in flight, so the 50 ms monitor loop cannot start a second one on top
     /// of it. Mirrors `RecordingService.isRecoveringMicCapture`.
@@ -879,7 +882,7 @@ final class NewSessionViewModel {
         let failures = snapshot.streamFailureCount
         let restarts = captureHealthMonitor.restartsIssued
 
-        guard isCaptureHealthRecoveryEnabled else {
+        guard activeAudioSyncFlags?.isCaptureHealthRecoveryEnabled == true else {
             let action = effect == .restart ? "restart capture" : "stop the recording"
             logger.warning(
                 "Capture health would \(action, privacy: .public) (recovery disabled). micFrames=\(mic, privacy: .public) appFrames=\(app, privacy: .public) streamFailures=\(failures, privacy: .public) restartsIssued=\(restarts, privacy: .public)"
@@ -1024,6 +1027,7 @@ final class NewSessionViewModel {
         title: String?
     ) async throws -> UUID {
         let liveSession = LiveRecordingSession()
+        let audioSyncFlags = audioSyncConfig.snapshot()
         do {
             let id = try await recordingService.startRecording(
                 in: workspace,
@@ -1033,8 +1037,10 @@ final class NewSessionViewModel {
                 appProcessID: appProcessID,
                 title: title,
                 liveAudioContinuation: liveSession.audio.continuation,
-                liveAudioClock: liveSession.clock
+                liveAudioClock: liveSession.clock,
+                audioSyncFlags: audioSyncFlags
             )
+            activeAudioSyncFlags = audioSyncFlags
             liveRecordingSession = liveSession
             return id
         } catch {
