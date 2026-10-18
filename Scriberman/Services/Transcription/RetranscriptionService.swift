@@ -100,13 +100,17 @@ actor RetranscriptionService {
                 colorHex: transcriptAligner.speakerColorHex(at:)
             )
 
-            session.retranscript = Transcript(
+            var retranscript = Transcript(
                 fullText: Transcript.fullText(joining: merged),
                 segments: merged,
                 speakers: speakers,
                 speakerEmbeddings: mergedEmbeddings,
                 voiceprintSpace: VoiceprintSpace.current
             )
+            if extracted.app == nil, (session as? RecordingSession)?.appAudioURL != nil {
+                retranscript.isSinglePassOfMixedAudio = true
+            }
+            session.retranscript = retranscript
             session.status = .done
             try? saveContext(context)
             if let recording = session as? RecordingSession {

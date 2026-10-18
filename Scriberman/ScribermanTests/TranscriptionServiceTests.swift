@@ -326,6 +326,41 @@ struct TranscriptionServiceTests {
         #expect(midpoints.last.map { $0 > 0.1 } == true)
     }
 
+    @Test(.enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason))
+    func transcribeMonoMixdownOfSessionWithAppAudioMarksSinglePass() async throws {
+        let transcript = try await transcribeMixdown(channels: [Array(repeating: 0.3, count: 48_000)], hasApp: true)
+        #expect(transcript.isSinglePassOfMixedAudio == true)
+    }
+
+    @Test(.enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason))
+    func transcribeMonoMixdownOfMicOnlySessionHasNoSinglePassMarker() async throws {
+        let transcript = try await transcribeMixdown(channels: [Array(repeating: 0.3, count: 48_000)], hasApp: false)
+        #expect(transcript.isSinglePassOfMixedAudio == nil)
+    }
+
+    @Test(.enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason))
+    func transcribeStereoMixdownHasNoSinglePassMarker() async throws {
+        let transcript = try await transcribeMixdown(
+            channels: [Array(repeating: 0.3, count: 48_000), Array(repeating: -0.5, count: 48_000)],
+            hasApp: true
+        )
+        #expect(transcript.isSinglePassOfMixedAudio == nil)
+    }
+
+    /// Transcribes a mixdown written from `channels` for a session with an app audio location when `hasApp`.
+    private func transcribeMixdown(channels: [[Float]], hasApp: Bool) async throws -> Transcript {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let mixdownURL = directory.appendingPathComponent("recording.m4a")
+        try M4ATestFile.write(channels: channels, sampleRate: 48_000, to: mixdownURL)
+
+        let service = TranscriptionService(segmentSpeech: { _ in [] }, prepareModelsHandler: { _ in })
+        let (container, sessionID) = try OfflineLabelFixture.sessionContainer(hasApp: hasApp, mixdownURL: mixdownURL)
+        return try await service.transcribe(sessionID: sessionID, modelContainer: container, workspace: OfflineLabelFixture.workspace)
+    }
+
     @Test
     func prepareModelsSucceedsWhenThreeRequiredWorkspaceGroupsExist() async throws {
         let service = TranscriptionService()

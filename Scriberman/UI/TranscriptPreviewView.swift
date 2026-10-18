@@ -4,13 +4,15 @@ struct TranscriptPreviewView: View {
     let blocks: [TranscriptBlock]
     let previewLimit: Int
     let onTap: (() -> Void)?
+    let showsAudioSource: Bool
 
     @State private var isHovering = false
 
-    init(blocks: [TranscriptBlock], previewLimit: Int = 4, onTap: (() -> Void)? = nil) {
+    init(blocks: [TranscriptBlock], previewLimit: Int = 4, onTap: (() -> Void)? = nil, showsAudioSource: Bool = true) {
         self.blocks = blocks
         self.previewLimit = previewLimit
         self.onTap = onTap
+        self.showsAudioSource = showsAudioSource
     }
 
     var body: some View {
@@ -24,7 +26,7 @@ struct TranscriptPreviewView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(previewBlocks) { block in
-                    TranscriptBlockView(block: block)
+                    TranscriptBlockView(block: block, showsAudioSource: showsAudioSource)
                 }
 
                 // The card opens the study view when clicked, and used to say so only by way of a

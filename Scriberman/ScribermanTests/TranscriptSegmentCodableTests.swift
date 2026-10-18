@@ -98,6 +98,23 @@ struct TranscriptCodableTests {
     }
 
     @Test
+    func singlePassMarkerRoundTrips() throws {
+        var transcript = Transcript(fullText: "", segments: [], speakers: [])
+        transcript.isSinglePassOfMixedAudio = true
+        let decoded = try JSONDecoder().decode(Transcript.self, from: JSONEncoder().encode(transcript))
+        #expect(decoded.isSinglePassOfMixedAudio == true)
+    }
+
+    @Test
+    func transcriptWithoutSinglePassMarkerDecodesWithNil() throws {
+        let data = Data("""
+        {"fullText":"hello","segments":[],"speakers":[]}
+        """.utf8)
+        let transcript = try JSONDecoder().decode(Transcript.self, from: data)
+        #expect(transcript.isSinglePassOfMixedAudio == nil)
+    }
+
+    @Test
     func oldPayloadDecodesToListsOfOne() throws {
         let data = Data("""
         {"fullText":"hello","segments":[],"speakers":[],"speakerEmbeddings":{"S1":[0.5,0.5],"S2":[1,0]}}

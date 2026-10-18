@@ -191,6 +191,60 @@ struct RetranscriptionServiceTests {
         #expect(try fetchRecordingSession(id: sessionID, in: container)?.status == .done)
     }
 
+    @Test(
+        "Mono mixdown of a session with app audio gives a single-pass retranscript",
+        .enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason)
+    )
+    func retranscribeMonoMixdownOfSessionWithAppAudioMarksSinglePass() async throws {
+        let retranscript = try await retranscribeMixdown(channels: [Array(repeating: 0.3, count: 48_000)], hasApp: true)
+        #expect(retranscript?.isSinglePassOfMixedAudio == true)
+    }
+
+    @Test(
+        "Mono mixdown of a mic-only session gives a retranscript without the single-pass marker",
+        .enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason)
+    )
+    func retranscribeMonoMixdownOfMicOnlySessionHasNoSinglePassMarker() async throws {
+        let retranscript = try #require(
+            try await retranscribeMixdown(channels: [Array(repeating: 0.3, count: 48_000)], hasApp: false)
+        )
+        #expect(retranscript.isSinglePassOfMixedAudio == nil)
+    }
+
+    @Test(
+        "Stereo mixdown gives a retranscript without the single-pass marker",
+        .enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason)
+    )
+    func retranscribeStereoMixdownHasNoSinglePassMarker() async throws {
+        let retranscript = try #require(
+            try await retranscribeMixdown(
+                channels: [Array(repeating: 0.3, count: 48_000), Array(repeating: -0.5, count: 48_000)],
+                hasApp: true
+            )
+        )
+        #expect(retranscript.isSinglePassOfMixedAudio == nil)
+    }
+
+    /// Retranscribes a mixdown written from `channels` for a session with an app audio location when `hasApp`.
+    private func retranscribeMixdown(channels: [[Float]], hasApp: Bool) async throws -> Transcript? {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let mixdownURL = directory.appendingPathComponent("recording.m4a")
+        try M4ATestFile.write(channels: channels, sampleRate: 48_000, to: mixdownURL)
+
+        let service = RetranscriptionService(
+            transcriptionService: TranscriptionService(),
+            prepareModelsHandler: { _ in },
+            transcribePassFromSamplesHandler: { _, _, _, _, _ in TranscriptionPassRunner.PassResult() }
+        )
+        let (container, sessionID) = try OfflineLabelFixture.sessionContainer(hasApp: hasApp, mixdownURL: mixdownURL)
+
+        await service.retranscribe(sessionID: sessionID, modelContainer: container, workspace: OfflineLabelFixture.workspace)
+        return try fetchRecordingSession(id: sessionID, in: container)?.retranscript
+    }
+
     @Test("Stereo retranscription success stores retranscript and sets done status")
     func retranscribeStereoSuccess() async throws {
         let transcriptionService = TranscriptionService()

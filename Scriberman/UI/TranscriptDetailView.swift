@@ -193,7 +193,8 @@ struct TranscriptDetailView: View {
         VStack(alignment: .leading, spacing: 18) {
             TranscriptPreviewView(
                 blocks: transcriptBlocks,
-                onTap: viewModel.displayedTranscript == nil ? nil : onOpenStudy
+                onTap: viewModel.displayedTranscript == nil ? nil : onOpenStudy,
+                showsAudioSource: viewModel.displayedTranscript?.isSinglePassOfMixedAudio != true
             )
         }
     }

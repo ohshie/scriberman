@@ -155,13 +155,17 @@ actor TranscriptionService: TranscriptionServiceProtocol {
             colorHex: transcriptAligner.speakerColorHex(at:)
         )
 
-        return Transcript(
+        var transcript = Transcript(
             fullText: Transcript.fullText(joining: mergedSegments),
             segments: mergedSegments,
             speakers: speakers,
             speakerEmbeddings: mergedEmbeddings,
             voiceprintSpace: VoiceprintSpace.current
         )
+        if extractedSamples.app == nil, session.appAudioURL != nil {
+            transcript.isSinglePassOfMixedAudio = true
+        }
+        return transcript
     }
 
     /// The speakers of an offline transcript, sorted by ID. A speaker matched to a stored profile
