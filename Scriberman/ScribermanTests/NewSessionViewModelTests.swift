@@ -16,6 +16,7 @@ struct NewSessionViewModelTests {
         menuBarSettings: MenuBarSettings,
         viewModel: NewSessionViewModel,
         context: ModelContext,
+        audioSyncStore: UserDefaults,
         cleanup: () -> Void
     )
 
@@ -57,7 +58,8 @@ struct NewSessionViewModelTests {
             permissionService: permissionService,
             userDefaults: userDefaults,
             liveTranscriptionService: transcriber,
-            saveContext: saveContext ?? { try $0.save() }
+            saveContext: saveContext ?? { try $0.save() },
+            audioSyncConfig: AudioSyncConfig(store: userDefaults)
         )
         let menuBarSettings = MenuBarSettings(userDefaults: userDefaults)
         viewModel.menuBarSettings = menuBarSettings
@@ -71,6 +73,7 @@ struct NewSessionViewModelTests {
             menuBarSettings,
             viewModel,
             context,
+            userDefaults,
             { userDefaults.removePersistentDomain(forName: userDefaultsSuiteName) }
         )
     }
@@ -312,7 +315,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testStateMachineTransitionsIdleToRecordingToStopped() async throws {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -345,7 +348,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testStartRecordingIncrementsUsageForSelectedDevice() async {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -362,7 +365,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testMonitorPublishesSeparateMicAndAppLevels() async {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, audioDeviceService, appAudioService, menuBarSettings)
 
@@ -392,7 +395,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testAppLevelStaysZeroWithoutAppCapture() async {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, audioDeviceService, appAudioService, menuBarSettings)
 
@@ -414,7 +417,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testStartRecordingIncrementsUsageForSelectedApp() async {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -432,7 +435,7 @@ struct NewSessionViewModelTests {
     @Test
     func testRestoredSelectionOnLaunchEnablesAppAudioForRecording() async {
         let restoredApp = CapturedApp(bundleID: "com.apple.Music", name: "Music", pid: 123, icon: nil)
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture(
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture(
             screenRecordingStatus: .granted,
             initialSelectedApp: restoredApp
         )
@@ -453,7 +456,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testStartRecordingPersistsLastUsedMicAndAppSelections() async {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context)
 
@@ -475,7 +478,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testStartRecordingClearsLastUsedAppWhenNoAppSelected() async {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, viewModel, context)
 
@@ -495,7 +498,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testStartRecordingPassesTitleToService() async {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -511,7 +514,7 @@ struct NewSessionViewModelTests {
     @Test
     func testStartRecordingPassesSelectedDisplayIDWhenScreenRecordingEnabled() async {
         let display = CaptureDisplay(displayID: 77, name: "Display 1", width: 1728, height: 1117)
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture(
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture(
             screenRecordingStatus: .granted,
             availableDisplays: [display],
             selectedDisplayID: display.displayID
@@ -530,7 +533,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testResetReturnsIdleFromRecordingState() {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -546,7 +549,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testIsIdleIsTrueWhenStateIsIdle() {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -557,7 +560,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testIsIdleIsFalseWhenRecording() {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -568,7 +571,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testCanRecordRequiresGrantedMicrophonePermission() {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -584,7 +587,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testCanRecordRequiresSelectedAppWhenAppAudioEnabled() {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -602,7 +605,7 @@ struct NewSessionViewModelTests {
     @Test
     func testCanRecordRequiresSelectedDisplayWhenScreenRecordingEnabled() {
         let display = CaptureDisplay(displayID: 55, name: "Display 1", width: 1512, height: 982)
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture(
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture(
             screenRecordingStatus: .granted,
             availableDisplays: [display],
             selectedDisplayID: display.displayID
@@ -620,7 +623,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testRecordAppAudioToggleRequestsScreenPermissionWhenNotGranted() {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -634,7 +637,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testRecordScreenToggleRequestsScreenPermissionWhenNotGranted() {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -648,7 +651,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testSelectAppSetsSelectedAppAndEnablesAppAudioWhenPermissionGranted() {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -664,7 +667,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testSelectAppNilDisablesAppAudioAndClearsSelection() {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -681,7 +684,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testSelectAppRequestsPermissionWhenNotGranted() {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -697,7 +700,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testMicPermissionWarningTextTracksMicStatus() {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -716,7 +719,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testScreenPermissionWarningTextTracksScreenStatus() {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -735,7 +738,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testRequestMicrophonePermissionInvokesPermissionService() async {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -750,7 +753,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testRequestScreenRecordingPermissionInvokesPermissionService() {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -761,7 +764,7 @@ struct NewSessionViewModelTests {
     @Test
     func testSingleAvailableDisplayCanBeUsedWithoutPicker() {
         let display = CaptureDisplay(displayID: 19, name: "Display 1", width: 2560, height: 1440)
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture(
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture(
             screenRecordingStatus: .granted,
             availableDisplays: [display],
             selectedDisplayID: display.displayID
@@ -781,7 +784,7 @@ struct NewSessionViewModelTests {
             CaptureDisplay(displayID: 1, name: "Display 1", width: 2560, height: 1440),
             CaptureDisplay(displayID: 2, name: "Display 2", width: 1920, height: 1080)
         ]
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture(
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture(
             screenRecordingStatus: .granted,
             availableDisplays: displays,
             selectedDisplayID: displays[0].displayID
@@ -796,7 +799,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testRecheckPermissionsInvokesCheckAndVerifyMethods() async {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -808,7 +811,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testRefreshAudioDevicesOnAppearCallsAudioDeviceServiceRefresh() {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -818,7 +821,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testRefreshAudioDevicesOnPanelExpandedCallsAudioDeviceServiceRefresh() {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -828,7 +831,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testAppAudioToggleRemainsEnabledWhenScreenPermissionNotGranted() {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -838,7 +841,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testAirPodsDisconnectScenarioUpdatesSelectedDeviceStateFromService() {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -861,7 +864,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testSelectedDeviceChangeWhileRecordingRetargetsRecordingService() async {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, audioDeviceService, appAudioService, permissionService, menuBarSettings, context)
 
@@ -876,7 +879,7 @@ struct NewSessionViewModelTests {
 
     @Test
     func testSelectedDeviceChangeWhileIdleDoesNotRetargetRecordingService() async {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, audioDeviceService, appAudioService, permissionService, menuBarSettings, context)
 
@@ -892,7 +895,7 @@ struct NewSessionViewModelTests {
 
     @Test(.tags(.sourceLint))
     func testNewSessionPanelShowsMicPermissionWarningIndicator() throws {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -905,7 +908,7 @@ struct NewSessionViewModelTests {
 
     @Test(.tags(.sourceLint))
     func testNewSessionPanelPromptRequestsMicPermissionViaViewModel() throws {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -915,7 +918,7 @@ struct NewSessionViewModelTests {
 
     @Test(.tags(.sourceLint))
     func testNewSessionPanelRefreshesAudioDevicesOnAppear() throws {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -925,7 +928,7 @@ struct NewSessionViewModelTests {
 
     @Test(.tags(.sourceLint))
     func testNewSessionPanelHasNoPermissionBannerAndWarnsOnScreenRow() throws {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -948,7 +951,7 @@ struct NewSessionViewModelTests {
 
     @Test(.tags(.sourceLint))
     func testRefreshAudioDevicesOnAppearPreparesLiveTranscriptionWithWorkspace() throws {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -959,7 +962,7 @@ struct NewSessionViewModelTests {
 
     @Test(.tags(.sourceLint))
     func testInitializationFailureMessageDirectsUserToSettingsModels() throws {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, cleanup) = makeFixture()
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
@@ -1254,11 +1257,11 @@ struct NewSessionViewModelTests {
         ]
         // Healthy at start, so any restart observed could only have come from capture health.
         fixture.recordingService.frameCountQueue = [(mic: 512, app: nil)]
-        // Explicit rather than relying on the shipped default, so the machine's user defaults
-        // cannot decide what this test asserts.
-        fixture.viewModel.isCaptureHealthRecoveryEnabled = false
+        fixture.audioSyncStore.set(false, forKey: AudioSyncConfig.FlagDefinitions.shipped.captureHealthRecovery.key)
 
         _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
+        // Turned on after the recording started: this recording keeps the value it started with.
+        fixture.audioSyncStore.set(true, forKey: AudioSyncConfig.FlagDefinitions.shipped.captureHealthRecovery.key)
         await waitUntil { fixture.viewModel.lastCaptureHealthEffect == .restart }
         try? await Task.sleep(for: .milliseconds(100))
 
@@ -1381,13 +1384,57 @@ struct NewSessionViewModelTests {
     ) {
         fixture.viewModel.startVerificationDelay = .milliseconds(1)
         fixture.viewModel.captureHealthEvaluationInterval = 0.01
-        fixture.viewModel.isCaptureHealthRecoveryEnabled = true
+        fixture.audioSyncStore.set(true, forKey: AudioSyncConfig.FlagDefinitions.shipped.captureHealthRecovery.key)
         fixture.viewModel.captureHealthConfiguration = CaptureHealthMonitor.Configuration(
             stallThreshold: stallThreshold,
             consecutiveRestartLimit: consecutiveRestartLimit,
             totalRestartLimit: 10
         )
         fixture.recordingService.isRecordingOverride = true
+    }
+
+    /// The view model is created before the flag is turned on; the next recording still uses it.
+    @Test
+    @MainActor
+    func testRecoveryTurnedOnAfterViewModelCreationAppliesToTheNextRecording() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.audioSyncStore.set(false, forKey: AudioSyncConfig.FlagDefinitions.shipped.captureHealthRecovery.key)
+        enableRecovery(fixture)
+        fixture.recordingService.captureHealthSnapshotQueue = [
+            CaptureHealthMonitor.Snapshot(micFrames: 512, appFrames: nil)
+        ]
+
+        _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
+        await waitUntil { fixture.recordingService.restartAudioCaptureInPlaceCallCount >= 1 }
+
+        #expect(fixture.recordingService.restartAudioCaptureInPlaceCallCount >= 1)
+    }
+
+    /// Each recording hands the recording service the flag values read when it started.
+    @Test
+    @MainActor
+    func testEachRecordingStartsWithTheFlagValuesCurrentAtItsStart() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.viewModel.startVerificationDelay = .milliseconds(1)
+        let keys = AudioSyncConfig.FlagDefinitions.shipped
+
+        fixture.audioSyncStore.set(false, forKey: keys.timelineMixdown.key)
+        fixture.audioSyncStore.set(true, forKey: keys.unifiedCapture.key)
+        fixture.audioSyncStore.set(false, forKey: keys.captureHealthRecovery.key)
+        _ = await fixture.viewModel.startRecording(title: "first", context: fixture.context)
+        _ = await fixture.viewModel.stopRecording(context: fixture.context)
+
+        fixture.audioSyncStore.set(true, forKey: keys.timelineMixdown.key)
+        fixture.audioSyncStore.set(false, forKey: keys.unifiedCapture.key)
+        fixture.audioSyncStore.set(true, forKey: keys.captureHealthRecovery.key)
+        _ = await fixture.viewModel.startRecording(title: "second", context: fixture.context)
+
+        #expect(fixture.recordingService.startCalls.map(\.audioSyncFlags) == [
+            AudioSyncFlags(isTimelineMixdownEnabled: false, isUnifiedCaptureEnabled: true, isCaptureHealthRecoveryEnabled: false),
+            AudioSyncFlags(isTimelineMixdownEnabled: true, isUnifiedCaptureEnabled: false, isCaptureHealthRecoveryEnabled: true)
+        ])
     }
 
     /// A stalled capture is restarted in place, not through the start path that overwrites the

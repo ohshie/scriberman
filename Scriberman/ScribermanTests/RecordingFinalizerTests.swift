@@ -35,6 +35,7 @@ struct RecordingFinalizerTests {
             mixdownURL: folder.appendingPathComponent("recording.m4a"),
             micStartHostTime: HostNanoseconds(nanoseconds: 1_000),
             appStartHostTime: HostNanoseconds(nanoseconds: 2_000),
+            timelineMixdown: true,
             screenMux: withMux ? ScreenVideoMuxRequest(
                 sessionID: sessionID,
                 screenTmpURL: folder.appendingPathComponent("screen-tmp.mov"),
@@ -146,7 +147,8 @@ private actor FakeMixdownCoordinator: RecordingMixdownCoordinating {
         appURL _: URL?,
         mixdownURL _: URL,
         micStartHostTime _: HostNanoseconds,
-        appStartHostTime _: HostNanoseconds?
+        appStartHostTime _: HostNanoseconds?,
+        timelineMixdown _: Bool
     ) async -> Bool {
         if !isOpen {
             await withCheckedContinuation { waiters.append($0) }
