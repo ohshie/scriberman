@@ -4,16 +4,16 @@
         <title>Scriberman</title>
         <item>
             <title>1.1.3</title>
-            <pubDate>Sun, 18 Oct 2026 19:26:09 +0200</pubDate>
+            <pubDate>Sun, 18 Oct 2026 19:49:18 +0200</pubDate>
             <sparkle:channel>beta</sparkle:channel>
-            <sparkle:version>31</sparkle:version>
+            <sparkle:version>32</sparkle:version>
             <sparkle:shortVersionString>1.1.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <description><![CDATA[<h2>Scriberman 1.1.3</h2>
 <p>Scriberman 1.1.3 release.</p>
 ]]></description>
-            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.1.3-beta.31/Scriberman-1.1.3-31-arm64.dmg" length="16788641" type="application/octet-stream" sparkle:edSignature="/QX5Bey914cCkTgyLyeD+eAAJfNvaEbpU6tkBqd3zE5mRfsQkDiIHD1JnP3vqCbGnRpNCGGhNpo2gCga52nNCQ=="/>
+            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.1.3-beta.32/Scriberman-1.1.3-32-arm64.dmg" length="16791185" type="application/octet-stream" sparkle:edSignature="gfmxyr2BU/4Ux/it/TSktI0OK4ab1yB3ouMR+dOG4aj7CJ6XNVn9FT+bmdYnpnc6X3w28KfVR1je47rm1ZFsAQ=="/>
         </item>
     <item>
             <title>1.1.2</title>
