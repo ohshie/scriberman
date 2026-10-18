@@ -18,7 +18,7 @@ final class JobsViewModelTests {
         transcriptionService = MockTranscriptionService()
         retranscriptionService = RetranscriptionService(
             transcriptionService: TranscriptionService(),
-            extractSamples: { _, _ in (mic: [0.1], app: nil) },
+            extractSamples: { _ in (mic: [0.1], app: nil) },
             prepareModelsHandler: { _ in },
             transcribePassFromSamplesHandler: { _, _, _, _, _ in TranscriptionPassRunner.PassResult() }
         )

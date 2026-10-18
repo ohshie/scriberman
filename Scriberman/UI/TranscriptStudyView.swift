@@ -99,7 +99,8 @@ struct TranscriptStudyView: View {
                                     }
                                     Self.seekAndPlay(block: block, player: audioPlayerViewModel)
                                 },
-                                speakerEditing: speakerEditing(for: block)
+                                speakerEditing: speakerEditing(for: block),
+                                showsAudioSource: transcript.isSinglePassOfMixedAudio != true
                             )
                             .zIndex(renamingBlockID == block.id ? 1 : 0)
                         }

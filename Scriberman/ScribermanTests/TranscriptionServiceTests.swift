@@ -202,7 +202,7 @@ struct TranscriptionServiceTests {
                 await recorder.record(samples)
                 return []
             },
-            extractSamples: { _, _ in
+            extractSamples: { _ in
                 (mic: [1.0, 2.0], app: [3.0, 4.0])
             },
             prepareModelsHandler: { _ in
@@ -239,6 +239,126 @@ struct TranscriptionServiceTests {
         #expect(captured.contains { $0 == [3.0, 4.0] })
         let prepared = await recorder.prepared
         #expect(prepared)
+    }
+
+    @Test(.enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason))
+    func transcribeMonoMixdownOfSessionWithAppAudioRunsOnePass() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let mixdownURL = directory.appendingPathComponent("recording.m4a")
+        try M4ATestFile.write(channels: [Array(repeating: 0.3, count: 48_000)], sampleRate: 48_000, to: mixdownURL)
+
+        let recorder = SampleRecorder()
+        let service = TranscriptionService(
+            segmentSpeech: { samples in
+                await recorder.record(samples)
+                return []
+            },
+            prepareModelsHandler: { _ in }
+        )
+        let (container, sessionID) = try OfflineLabelFixture.sessionContainer(hasApp: true, mixdownURL: mixdownURL)
+
+        _ = try await service.transcribe(sessionID: sessionID, modelContainer: container, workspace: OfflineLabelFixture.workspace)
+
+        let captured = await recorder.captured
+        #expect(captured.count == 1)
+        #expect(captured.first?.count == 16_000)
+    }
+
+    @Test(.enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason))
+    func transcribeMonoMixdownOfMicOnlySessionRunsOnePass() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let mixdownURL = directory.appendingPathComponent("recording.m4a")
+        try M4ATestFile.write(channels: [Array(repeating: 0.3, count: 48_000)], sampleRate: 48_000, to: mixdownURL)
+
+        let recorder = SampleRecorder()
+        let service = TranscriptionService(
+            segmentSpeech: { samples in
+                await recorder.record(samples)
+                return []
+            },
+            prepareModelsHandler: { _ in }
+        )
+        let (container, sessionID) = try OfflineLabelFixture.sessionContainer(hasApp: false, mixdownURL: mixdownURL)
+
+        _ = try await service.transcribe(sessionID: sessionID, modelContainer: container, workspace: OfflineLabelFixture.workspace)
+
+        let captured = await recorder.captured
+        #expect(captured.count == 1)
+        #expect(captured.first?.count == 16_000)
+    }
+
+    @Test(.enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason))
+    func transcribeStereoMixdownRunsMicAndAppPasses() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let mixdownURL = directory.appendingPathComponent("recording.m4a")
+        try M4ATestFile.write(
+            channels: [Array(repeating: 0.3, count: 48_000), Array(repeating: -0.5, count: 48_000)],
+            sampleRate: 48_000,
+            to: mixdownURL
+        )
+
+        let recorder = SampleRecorder()
+        let service = TranscriptionService(
+            segmentSpeech: { samples in
+                await recorder.record(samples)
+                return []
+            },
+            prepareModelsHandler: { _ in }
+        )
+        let (container, sessionID) = try OfflineLabelFixture.sessionContainer(hasApp: true, mixdownURL: mixdownURL)
+
+        _ = try await service.transcribe(sessionID: sessionID, modelContainer: container, workspace: OfflineLabelFixture.workspace)
+
+        let captured = await recorder.captured
+        #expect(captured.count == 2)
+        #expect(captured.allSatisfy { $0.count == 16_000 })
+        let midpoints = captured.map { $0[8_000] }.sorted()
+        #expect(midpoints.first.map { $0 < -0.2 } == true)
+        #expect(midpoints.last.map { $0 > 0.1 } == true)
+    }
+
+    @Test(.enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason))
+    func transcribeMonoMixdownOfSessionWithAppAudioMarksSinglePass() async throws {
+        let transcript = try await transcribeMixdown(channels: [Array(repeating: 0.3, count: 48_000)], hasApp: true)
+        #expect(transcript.isSinglePassOfMixedAudio == true)
+    }
+
+    @Test(.enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason))
+    func transcribeMonoMixdownOfMicOnlySessionHasNoSinglePassMarker() async throws {
+        let transcript = try await transcribeMixdown(channels: [Array(repeating: 0.3, count: 48_000)], hasApp: false)
+        #expect(transcript.isSinglePassOfMixedAudio == nil)
+    }
+
+    @Test(.enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason))
+    func transcribeStereoMixdownHasNoSinglePassMarker() async throws {
+        let transcript = try await transcribeMixdown(
+            channels: [Array(repeating: 0.3, count: 48_000), Array(repeating: -0.5, count: 48_000)],
+            hasApp: true
+        )
+        #expect(transcript.isSinglePassOfMixedAudio == nil)
+    }
+
+    /// Transcribes a mixdown written from `channels` for a session with an app audio location when `hasApp`.
+    private func transcribeMixdown(channels: [[Float]], hasApp: Bool) async throws -> Transcript {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let mixdownURL = directory.appendingPathComponent("recording.m4a")
+        try M4ATestFile.write(channels: channels, sampleRate: 48_000, to: mixdownURL)
+
+        let service = TranscriptionService(segmentSpeech: { _ in [] }, prepareModelsHandler: { _ in })
+        let (container, sessionID) = try OfflineLabelFixture.sessionContainer(hasApp: hasApp, mixdownURL: mixdownURL)
+        return try await service.transcribe(sessionID: sessionID, modelContainer: container, workspace: OfflineLabelFixture.workspace)
     }
 
     @Test
@@ -328,8 +448,8 @@ enum OfflineLabelFixture {
         return store
     }
 
-    static func extractSamples(hasApp: Bool) -> @Sendable (URL, Bool) throws -> (mic: [Float], app: [Float]?) {
-        { _, _ in
+    static func extractSamples(hasApp: Bool) -> @Sendable (URL) throws -> (mic: [Float], app: [Float]?) {
+        { _ in
             (
                 mic: Array(repeating: micSample, count: 16_000),
                 app: hasApp ? Array(repeating: appSample, count: 16_000) : nil
@@ -373,8 +493,8 @@ enum OfflineLabelFixture {
         )
     }
 
-    /// An in-memory store holding one recorded session with a mixdown, stereo when `hasApp`.
-    static func sessionContainer(hasApp: Bool) throws -> (ModelContainer, UUID) {
+    /// An in-memory store holding one recorded session with a mixdown, with an app audio location when `hasApp`.
+    static func sessionContainer(hasApp: Bool, mixdownURL: URL? = nil) throws -> (ModelContainer, UUID) {
         let container = try ModelContainer(
             for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
@@ -384,7 +504,7 @@ enum OfflineLabelFixture {
             duration: 1,
             micAudioURL: "/tmp/mic.wav",
             appAudioURL: hasApp ? "/tmp/app.wav" : nil,
-            mixdownURL: "/tmp/recording.m4a",
+            mixdownURL: mixdownURL?.path ?? "/tmp/recording.m4a",
             title: "Session",
             status: .recorded
         )

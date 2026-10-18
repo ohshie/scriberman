@@ -25,6 +25,12 @@ struct RetranscriptionServiceTests {
             defer { lock.unlock() }
             return value
         }
+
+        func update(_ body: (inout T) -> Void) {
+            lock.lock()
+            body(&value)
+            lock.unlock()
+        }
     }
 
     private let container: ModelContainer
@@ -117,12 +123,134 @@ struct RetranscriptionServiceTests {
         #expect(labels == ["Alice": "Alice", "app:Alice": "Alice"])
     }
 
+    @Test(
+        "Mono mixdown of a session with app audio retranscribes in one mic pass",
+        .enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason)
+    )
+    func retranscribeMonoMixdownOfSessionWithAppAudioRunsOnePass() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let mixdownURL = directory.appendingPathComponent("recording.m4a")
+        try M4ATestFile.write(channels: [Array(repeating: 0.3, count: 48_000)], sampleRate: 48_000, to: mixdownURL)
+
+        let passes = LockedValue<[(source: AudioSource, sampleCount: Int)]>([])
+        let service = RetranscriptionService(
+            transcriptionService: TranscriptionService(),
+            prepareModelsHandler: { _ in },
+            transcribePassFromSamplesHandler: { samples, source, _, _, _ in
+                passes.update { $0.append((source: source, sampleCount: samples.count)) }
+                return TranscriptionPassRunner.PassResult()
+            }
+        )
+        let (container, sessionID) = try OfflineLabelFixture.sessionContainer(hasApp: true, mixdownURL: mixdownURL)
+
+        await service.retranscribe(sessionID: sessionID, modelContainer: container, workspace: OfflineLabelFixture.workspace)
+
+        #expect(passes.get().map(\.source) == [.mic])
+        #expect(passes.get().first?.sampleCount == 16_000)
+        #expect(try fetchRecordingSession(id: sessionID, in: container)?.status == .done)
+    }
+
+    @Test(
+        "Stereo mixdown retranscribes in a mic pass and an app pass",
+        .enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason)
+    )
+    func retranscribeStereoMixdownRunsMicAndAppPasses() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let mixdownURL = directory.appendingPathComponent("recording.m4a")
+        try M4ATestFile.write(
+            channels: [Array(repeating: 0.3, count: 48_000), Array(repeating: -0.5, count: 48_000)],
+            sampleRate: 48_000,
+            to: mixdownURL
+        )
+
+        let passes = LockedValue<[AudioSource: [Float]]>([:])
+        let service = RetranscriptionService(
+            transcriptionService: TranscriptionService(),
+            prepareModelsHandler: { _ in },
+            transcribePassFromSamplesHandler: { samples, source, _, _, _ in
+                passes.update { $0[source] = samples }
+                return TranscriptionPassRunner.PassResult()
+            }
+        )
+        let (container, sessionID) = try OfflineLabelFixture.sessionContainer(hasApp: true, mixdownURL: mixdownURL)
+
+        await service.retranscribe(sessionID: sessionID, modelContainer: container, workspace: OfflineLabelFixture.workspace)
+
+        let captured = passes.get()
+        #expect(captured.count == 2)
+        #expect(captured[.mic]?.count == 16_000)
+        #expect(captured[.app]?.count == 16_000)
+        #expect((captured[.mic]?[8_000] ?? 0) > 0.1)
+        #expect((captured[.app]?[8_000] ?? 0) < -0.2)
+        #expect(try fetchRecordingSession(id: sessionID, in: container)?.status == .done)
+    }
+
+    @Test(
+        "Mono mixdown of a session with app audio gives a single-pass retranscript",
+        .enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason)
+    )
+    func retranscribeMonoMixdownOfSessionWithAppAudioMarksSinglePass() async throws {
+        let retranscript = try await retranscribeMixdown(channels: [Array(repeating: 0.3, count: 48_000)], hasApp: true)
+        #expect(retranscript?.isSinglePassOfMixedAudio == true)
+    }
+
+    @Test(
+        "Mono mixdown of a mic-only session gives a retranscript without the single-pass marker",
+        .enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason)
+    )
+    func retranscribeMonoMixdownOfMicOnlySessionHasNoSinglePassMarker() async throws {
+        let retranscript = try #require(
+            try await retranscribeMixdown(channels: [Array(repeating: 0.3, count: 48_000)], hasApp: false)
+        )
+        #expect(retranscript.isSinglePassOfMixedAudio == nil)
+    }
+
+    @Test(
+        "Stereo mixdown gives a retranscript without the single-pass marker",
+        .enabled(if: AudioIOAvailability.isAvailable, AudioIOAvailability.unavailableReason)
+    )
+    func retranscribeStereoMixdownHasNoSinglePassMarker() async throws {
+        let retranscript = try #require(
+            try await retranscribeMixdown(
+                channels: [Array(repeating: 0.3, count: 48_000), Array(repeating: -0.5, count: 48_000)],
+                hasApp: true
+            )
+        )
+        #expect(retranscript.isSinglePassOfMixedAudio == nil)
+    }
+
+    /// Retranscribes a mixdown written from `channels` for a session with an app audio location when `hasApp`.
+    private func retranscribeMixdown(channels: [[Float]], hasApp: Bool) async throws -> Transcript? {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let mixdownURL = directory.appendingPathComponent("recording.m4a")
+        try M4ATestFile.write(channels: channels, sampleRate: 48_000, to: mixdownURL)
+
+        let service = RetranscriptionService(
+            transcriptionService: TranscriptionService(),
+            prepareModelsHandler: { _ in },
+            transcribePassFromSamplesHandler: { _, _, _, _, _ in TranscriptionPassRunner.PassResult() }
+        )
+        let (container, sessionID) = try OfflineLabelFixture.sessionContainer(hasApp: hasApp, mixdownURL: mixdownURL)
+
+        await service.retranscribe(sessionID: sessionID, modelContainer: container, workspace: OfflineLabelFixture.workspace)
+        return try fetchRecordingSession(id: sessionID, in: container)?.retranscript
+    }
+
     @Test("Stereo retranscription success stores retranscript and sets done status")
     func retranscribeStereoSuccess() async throws {
         let transcriptionService = TranscriptionService()
         let service = RetranscriptionService(
             transcriptionService: transcriptionService,
-            extractSamples: { _, _ in
+            extractSamples: { _ in
                 (mic: [0.1, 0.2], app: [0.3, 0.4])
             },
             prepareModelsHandler: { _ in },
@@ -194,7 +322,7 @@ struct RetranscriptionServiceTests {
         let transcriptionService = TranscriptionService()
         let service = RetranscriptionService(
             transcriptionService: transcriptionService,
-            extractSamples: { _, _ in
+            extractSamples: { _ in
                 (mic: [0.1, 0.2], app: nil)
             },
             prepareModelsHandler: { _ in },
@@ -270,7 +398,7 @@ struct RetranscriptionServiceTests {
         let transcriptionService = TranscriptionService()
         let service = RetranscriptionService(
             transcriptionService: transcriptionService,
-            extractSamples: { _, _ in
+            extractSamples: { _ in
                 throw ForcedError.extraction
             },
             prepareModelsHandler: { _ in
@@ -311,13 +439,9 @@ struct RetranscriptionServiceTests {
     @Test("Imported session retranscription uses mono extraction")
     func retranscribeImportedSession() async throws {
         let transcriptionService = TranscriptionService()
-        let capturedIsStereo = LockedValue<Bool?>(nil)
         let service = RetranscriptionService(
             transcriptionService: transcriptionService,
-            extractSamples: { _, isStereo in
-                capturedIsStereo.set(isStereo)
-                return (mic: [0.1, 0.2], app: nil)
-            },
+            extractSamples: { _ in (mic: [0.1, 0.2], app: nil) },
             prepareModelsHandler: { _ in },
             transcribePassFromSamplesHandler: { _, source, _, _, _ in
                 #expect(source == .mic)
@@ -349,7 +473,6 @@ struct RetranscriptionServiceTests {
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()))
         await service.retranscribe(sessionID: sessionID, modelContainer: container, workspace: workspace)
 
-        #expect(capturedIsStereo.get() == false)
         let fetched = try fetchImportedSession(id: sessionID, in: container)
         #expect(fetched?.status == .done)
         #expect(fetched?.retranscript?.segments.first?.text == "imported")

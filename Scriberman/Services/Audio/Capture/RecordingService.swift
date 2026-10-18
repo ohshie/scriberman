@@ -1143,8 +1143,8 @@ actor RecordingService: RecordingServiceProtocol {
         }
         // An app source that wrote nothing is dropped here rather than carried into mixdown. Left
         // in place it produces no timing sidecar, which makes the timeline mix decline and fall
-        // back to the constant-offset path, yielding a stereo file with a dead channel instead of
-        // a clean mono one.
+        // back to the constant-offset path, which sums a silent app source into the mic instead of
+        // writing the mic-only mixdown.
         let appAudioMissing = RecordingStartVerifier.shouldFinalizeWithoutAppAudio(appFrames: appFramesAtStop)
         // Coverage is measured against the recording's duration, so a source that stopped partway
         // is reported even though it produced real audio. Zero coverage is the limiting case, and
