@@ -5,7 +5,7 @@ enum M4AChannelExtractorError: LocalizedError {
     case fileNotFound(String)
     case failedToOpenFile(String)
     case failedToReadFile(String)
-    case invalidChannelCount(expectedStereo: Bool, actual: Int)
+    case invalidChannelCount(actual: Int)
     case conversionFailed(String)
     case fileTooLong(frameCount: AVAudioFramePosition)
 
@@ -17,10 +17,7 @@ enum M4AChannelExtractorError: LocalizedError {
             return "Failed to open audio file: \(reason)"
         case .failedToReadFile(let reason):
             return "Failed to read audio file: \(reason)"
-        case .invalidChannelCount(let expectedStereo, let actual):
-            if expectedStereo {
-                return "Expected stereo audio with at least 2 channels, got \(actual)"
-            }
+        case .invalidChannelCount(let actual):
             return "Expected mono or stereo audio with at least 1 channel, got \(actual)"
         case .conversionFailed(let reason):
             return "Failed to resample audio: \(reason)"
@@ -35,7 +32,8 @@ struct M4AChannelExtractor {
     private let resampler = AudioResampler(targetSampleRate: 16_000)
     private let fileManager = FileManager.default
 
-    func extract(url: URL, isStereo: Bool) throws -> (mic: [Float], app: [Float]?) {
+    /// Returns mic and app samples for a file with two or more channels, and mic samples only for a one-channel file.
+    func extract(url: URL) throws -> (mic: [Float], app: [Float]?) {
         guard fileManager.fileExists(atPath: url.path) else {
             throw M4AChannelExtractorError.fileNotFound(url.path)
         }
@@ -47,8 +45,12 @@ struct M4AChannelExtractor {
             throw M4AChannelExtractorError.failedToOpenFile(error.localizedDescription)
         }
 
+        let channelCount = Int(file.processingFormat.channelCount)
+        guard channelCount >= 1 else {
+            throw M4AChannelExtractorError.invalidChannelCount(actual: channelCount)
+        }
         guard file.length > 0 else {
-            return (mic: [], app: isStereo ? [] : nil)
+            return (mic: [], app: channelCount >= 2 ? [] : nil)
         }
 
         guard let buffer = AVAudioPCMBuffer(
@@ -64,10 +66,6 @@ struct M4AChannelExtractor {
             throw M4AChannelExtractorError.failedToReadFile(error.localizedDescription)
         }
 
-        let channelCount = Int(buffer.format.channelCount)
-        guard channelCount >= (isStereo ? 2 : 1) else {
-            throw M4AChannelExtractorError.invalidChannelCount(expectedStereo: isStereo, actual: channelCount)
-        }
         guard let floatChannelData = buffer.floatChannelData else {
             throw M4AChannelExtractorError.failedToReadFile("Missing float channel data.")
         }
@@ -76,7 +74,7 @@ struct M4AChannelExtractor {
         let micRaw = Array(UnsafeBufferPointer(start: floatChannelData[0], count: frameCount))
         let mic = try resample(micRaw, sourceSampleRate: buffer.format.sampleRate)
 
-        if isStereo {
+        if channelCount >= 2 {
             let appRaw = Array(UnsafeBufferPointer(start: floatChannelData[1], count: frameCount))
             let app = try resample(appRaw, sourceSampleRate: buffer.format.sampleRate)
             return (mic: mic, app: app)
