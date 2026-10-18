@@ -38,13 +38,16 @@ actor AudioMixdownService {
         self.removeItemAtURL = removeItemAtURL
     }
 
+    /// `timelineMixdown` is the recording's own flag value; `nil` reads the stored flag, for
+    /// imports and for recordings saved without a flag snapshot.
     func mix(
         micURL: URL,
         appURL: URL?,
         micStartHostTime: HostNanoseconds,
         appStartHostTime: HostNanoseconds?,
         into outputURL: URL,
-        deleteSourceFiles: Bool = true
+        deleteSourceFiles: Bool = true,
+        timelineMixdown: Bool? = nil
     ) async throws {
         logger.info(
             "Mix request received. mic=\(micURL.path, privacy: .public) app=\(appURL?.path ?? "nil", privacy: .public) out=\(outputURL.path, privacy: .public) format=\(String(describing: self.outputFormat), privacy: .public)"
@@ -59,7 +62,7 @@ actor AudioMixdownService {
         let micSamples = try await sampleReader.read(from: micURL, label: "mic")
         logger.info("Mic samples loaded. count=\(micSamples.count, privacy: .public)")
 
-        if audioSyncConfig.isTimelineMixdownEnabled {
+        if timelineMixdown ?? audioSyncConfig.isTimelineMixdownEnabled {
             if try await attemptTimelineMix(micURL: micURL, appURL: appURL, micSamples: micSamples, into: outputURL) {
                 logger.notice("Used timeline (PTS-anchored) mixdown path.")
                 logger.info("Mix completed. outputExists=\(self.fileManager.fileExists(atPath: outputURL.path), privacy: .public)")

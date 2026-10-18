@@ -62,7 +62,32 @@ struct AudioSyncConfig: @unchecked Sendable {
     /// capture health to evaluating and logging without acting.
     var isCaptureHealthRecoveryEnabled: Bool { value(of: definitions.captureHealthRecovery) }
 
+    /// All three flags read now, for one recording to use from start to finalization.
+    func snapshot() -> AudioSyncFlags {
+        AudioSyncFlags(
+            isTimelineMixdownEnabled: isTimelineMixdownEnabled,
+            isUnifiedCaptureEnabled: isUnifiedCaptureEnabled,
+            isCaptureHealthRecoveryEnabled: isCaptureHealthRecoveryEnabled
+        )
+    }
+
     private func value(of flag: Flag) -> Bool {
         store.object(forKey: flag.key) as? Bool ?? flag.defaultValue
     }
+}
+
+/// The audio-sync flag values one recording was started with. Read once at start, then passed to
+/// capture, capture health, finalization, and recovery, so a flag change applies from the next
+/// recording and never to one in progress.
+struct AudioSyncFlags: Sendable, Equatable {
+    let isTimelineMixdownEnabled: Bool
+    let isUnifiedCaptureEnabled: Bool
+    let isCaptureHealthRecoveryEnabled: Bool
+
+    /// The values of `FlagDefinitions.shipped` with nothing stored.
+    static let shippedDefaults = AudioSyncFlags(
+        isTimelineMixdownEnabled: AudioSyncConfig.FlagDefinitions.shipped.timelineMixdown.defaultValue,
+        isUnifiedCaptureEnabled: AudioSyncConfig.FlagDefinitions.shipped.unifiedCapture.defaultValue,
+        isCaptureHealthRecoveryEnabled: AudioSyncConfig.FlagDefinitions.shipped.captureHealthRecovery.defaultValue
+    )
 }

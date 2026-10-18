@@ -233,6 +233,16 @@ actor RecordingService: RecordingServiceProtocol {
     typealias DefaultTagApplier = @Sendable (RecordingSession, ModelContext) throws -> Void
     typealias DateProvider = @Sendable () -> Date
 
+    /// A capture session about to start its ScreenCaptureKit stream.
+    enum CaptureSessionStart: Sendable {
+        case unified(UnifiedCaptureSession)
+        case appAudio(AppAudioCaptureSession)
+    }
+
+    /// Starts a capture session's stream. Injected so tests can start sessions on stub streams;
+    /// the real start needs live `SCShareableContent` and TCC grants.
+    typealias CaptureSessionStarter = @Sendable (CaptureSessionStart) async throws -> Void
+
     private let workspaceService: WorkspaceServiceProtocol
     private let modelContainer: ModelContainer
     private let notificationCenter: NotificationCenter
@@ -251,7 +261,7 @@ actor RecordingService: RecordingServiceProtocol {
     private let voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)?
     private let applyDefaultTag: DefaultTagApplier
     private let now: DateProvider
-    private let audioSyncConfig: AudioSyncConfig
+    private let startCaptureSession: CaptureSessionStarter
 
     private var audioEngine: AVAudioEngine?
     private let micStreamer = AudioFileStreamer(label: "mic")
@@ -261,6 +271,9 @@ actor RecordingService: RecordingServiceProtocol {
     private var recordingIdentifier: String?
     /// Chosen once at start and held until the recording is finalized.
     private var recordingFolderURL: URL?
+    /// The flag values the current recording started with. Capture start, every capture restart,
+    /// and finalization read these, never the stored flags.
+    private var recordingAudioSyncFlags: AudioSyncFlags = .shippedDefaults
     private var currentSessionID: UUID?
     private var appAudioURL: URL?
     private var micStartHostTime: HostNanoseconds?
@@ -351,7 +364,14 @@ actor RecordingService: RecordingServiceProtocol {
         voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)? = nil,
         defaultTagApplier: @escaping DefaultTagApplier = { try TagService().applyDefaultTag(to: $0, in: $1) },
         now: @escaping DateProvider = { Date() },
-        audioSyncConfig: AudioSyncConfig = AudioSyncConfig()
+        captureSessionStarter: @escaping CaptureSessionStarter = { start in
+            switch start {
+            case .unified(let session):
+                try await session.start()
+            case .appAudio(let session):
+                try await session.start()
+            }
+        }
     ) {
         self.workspaceService = workspaceService
         self.modelContainer = modelContainer
@@ -366,7 +386,7 @@ actor RecordingService: RecordingServiceProtocol {
         self.voiceProcessingPropertySetter = voiceProcessingPropertySetter
         self.applyDefaultTag = defaultTagApplier
         self.now = now
-        self.audioSyncConfig = audioSyncConfig
+        self.startCaptureSession = captureSessionStarter
         self.hardwareListenerQueue = DispatchQueue(label: "Scriberman.RecordingService.HardwareListeners")
         let mixdownCoordinator = mixdownCoordinator ?? RecordingMixdownCoordinator(
             workspaceService: workspaceService,
@@ -654,7 +674,7 @@ actor RecordingService: RecordingServiceProtocol {
         appProcessID: pid_t?
     ) async throws {
         var unifiedStarted = false
-        if audioSyncConfig.isUnifiedCaptureEnabled, let appProcessID {
+        if recordingAudioSyncFlags.isUnifiedCaptureEnabled, let appProcessID {
             do {
                 let unified = UnifiedCaptureSession(
                     micFileURL: micFileURL,
@@ -674,7 +694,7 @@ actor RecordingService: RecordingServiceProtocol {
                 unified.onStreamStopped = { [weak self] error in
                     Task { [weak self] in await self?.reportCaptureStreamFailure(error) }
                 }
-                try await unified.start()
+                try await startCaptureSession(.unified(unified))
                 self.unifiedCaptureSession = unified
                 self.appAudioURL = appFileURL
                 unifiedStarted = true
@@ -701,7 +721,7 @@ actor RecordingService: RecordingServiceProtocol {
             appSession.onStreamStopped = { [weak self] error in
                 Task { [weak self] in await self?.reportCaptureStreamFailure(error) }
             }
-            try await appSession.start()
+            try await startCaptureSession(.appAudio(appSession))
             self.appAudioCaptureSession = appSession
             self.appAudioURL = appFileURL
         } else {
@@ -838,7 +858,7 @@ actor RecordingService: RecordingServiceProtocol {
         }
 
         do {
-            try await replacement.start()
+            try await startCaptureSession(.unified(replacement))
         } catch {
             logger.error(
                 "Mid-session capture restart failed: \(error.localizedDescription, privacy: .public). Captured audio is retained."
@@ -881,7 +901,8 @@ actor RecordingService: RecordingServiceProtocol {
         appProcessID: pid_t? = nil,
         title: String? = nil,
         liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation? = nil,
-        liveAudioClock: LiveCaptureClock? = nil
+        liveAudioClock: LiveCaptureClock? = nil,
+        audioSyncFlags: AudioSyncFlags = .shippedDefaults
     ) async throws(RecordingError) -> UUID {
         guard case .idle = lifecycleState else {
             liveAudioContinuation?.finish()
@@ -951,6 +972,7 @@ actor RecordingService: RecordingServiceProtocol {
             // SCStream path on any failure.
             self.activeAppFileURL = appFileURL
             self.activeAppProcessID = appProcessID
+            self.recordingAudioSyncFlags = audioSyncFlags
             try await startAudioCapture(
                 micFileURL: micFileURL,
                 appFileURL: appFileURL,
@@ -999,6 +1021,8 @@ actor RecordingService: RecordingServiceProtocol {
                 capturedAppName: capturedAppName,
                 status: .recording
             )
+            // Saved with the session so recovery finalizes with the values the recording started with.
+            session.audioSyncFlags = audioSyncFlags
             let context = ModelContext(modelContainer)
             context.insert(session)
             // Applied here so the recording satisfies the one-to-three tag bound from the moment it
@@ -1006,6 +1030,9 @@ actor RecordingService: RecordingServiceProtocol {
             try applyDefaultTag(session, context)
             try context.save()
             self.currentSessionID = session.id
+            logger.notice(
+                "Recording \(session.id, privacy: .public) audio-sync flags: timelineMixdown=\(audioSyncFlags.isTimelineMixdownEnabled, privacy: .public) unifiedCapture=\(audioSyncFlags.isUnifiedCaptureEnabled, privacy: .public) captureHealthRecovery=\(audioSyncFlags.isCaptureHealthRecoveryEnabled, privacy: .public) unifiedStarted=\(self.unifiedCaptureSession != nil, privacy: .public)"
+            )
             registerMicHardwareListeners()
             didStart = true
             return session.id
@@ -1203,7 +1230,7 @@ actor RecordingService: RecordingServiceProtocol {
             // mux the raw mic/app tracks, which the finalizer keeps until the mux has finished.
             var screenMux: ScreenVideoMuxRequest?
             if shouldRunScreenMux, let videoStartHostTime {
-                let timelineEnabled = audioSyncConfig.isTimelineMixdownEnabled
+                let timelineEnabled = recordingAudioSyncFlags.isTimelineMixdownEnabled
                 screenMux = ScreenVideoMuxRequest(
                     sessionID: sessionID,
                     screenTmpURL: screenTmpVideoURL,
@@ -1224,6 +1251,7 @@ actor RecordingService: RecordingServiceProtocol {
                 mixdownURL: mixdownURL,
                 micStartHostTime: micStartHostTime,
                 appStartHostTime: appStartHostTime,
+                timelineMixdown: recordingAudioSyncFlags.isTimelineMixdownEnabled,
                 screenMux: screenMux
             ))
 
@@ -1683,7 +1711,8 @@ actor RecordingService: RecordingServiceProtocol {
             appURL: appURL,
             mixdownURL: mixdownURL,
             micStartHostTime: micStartHostTime,
-            appStartHostTime: appStartHostTime
+            appStartHostTime: appStartHostTime,
+            timelineMixdown: recordingAudioSyncFlags.isTimelineMixdownEnabled
         )
     }
 

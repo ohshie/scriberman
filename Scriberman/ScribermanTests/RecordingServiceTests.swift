@@ -1600,6 +1600,111 @@ final class RecordingServiceTests {
         #expect(sessions.first { $0.id == unmarkedID }?.wasCaptureInterrupted == false)
     }
 
+    // MARK: - Per-recording audio-sync flags
+
+    private func makeFlagFixture(captureDisplayID: CGDirectDisplayID? = nil) async throws -> (
+        service: RecordingService,
+        container: ModelContainer,
+        workspace: Workspace,
+        captureStarts: CaptureStartProbe,
+        mixdownCoordinator: MockRecordingMixdownCoordinator,
+        screenVideoMuxer: MockScreenVideoMuxer
+    ) {
+        let workspace = makeWorkspace()
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        let mixdownCoordinator = MockRecordingMixdownCoordinator()
+        let screenVideoMuxer = MockScreenVideoMuxer()
+        let screenSession = MockScreenCaptureSession()
+        screenSession.videoStartHostTime = HostNanoseconds(nanoseconds: 9_000)
+        let captureStarts = CaptureStartProbe()
+        let service = RecordingService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            micCaptureController: MockMicCaptureController(),
+            mixdownCoordinator: mixdownCoordinator,
+            screenVideoMuxer: screenVideoMuxer,
+            permissionChecker: {},
+            scopedAccessStarter: { _ in true },
+            scopedAccessStopper: { _ in },
+            screenCaptureSessionFactory: { screenSession },
+            captureSessionStarter: { try await captureStarts.start($0) }
+        )
+        return (service, container, workspace, captureStarts, mixdownCoordinator, screenVideoMuxer)
+    }
+
+    private func flags(timeline: Bool = true, unified: Bool = true, recovery: Bool = true) -> AudioSyncFlags {
+        AudioSyncFlags(
+            isTimelineMixdownEnabled: timeline,
+            isUnifiedCaptureEnabled: unified,
+            isCaptureHealthRecoveryEnabled: recovery
+        )
+    }
+
+    @Test(arguments: [true, false])
+    func testCaptureRestartUsesTheCaptureModeTheRecordingStartedWith(unified: Bool) async throws {
+        let fixture = try await makeFlagFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+
+        _ = try await fixture.service.startRecording(
+            in: fixture.workspace,
+            appProcessID: 4321,
+            title: "Session",
+            audioSyncFlags: flags(unified: unified)
+        )
+        let restarted = await fixture.service.restartAudioCapture()
+        _ = await fixture.service.stopRecording()
+
+        let expected: CaptureStartProbe.Kind = unified ? .unified : .appAudio
+        #expect(restarted)
+        #expect(fixture.captureStarts.kinds == [expected, expected])
+    }
+
+    @Test(arguments: [true, false])
+    func testFinalizationUsesTheTimelineModeTheRecordingStartedWith(timeline: Bool) async throws {
+        let fixture = try await makeFlagFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+
+        _ = try await fixture.service.startRecording(
+            in: fixture.workspace,
+            captureDisplayID: 42,
+            title: "Session",
+            audioSyncFlags: flags(timeline: timeline)
+        )
+        _ = await fixture.service.stopRecording()
+        await fixture.mixdownCoordinator.waitForCall()
+        await fixture.screenVideoMuxer.waitForCall()
+
+        #expect(await fixture.mixdownCoordinator.timelineModes() == [timeline])
+        let request = try #require(await fixture.screenVideoMuxer.requests().first)
+        #expect((request.timelineAudioURL != nil) == timeline)
+        #expect((request.audioAnchorHostTime != nil) == timeline)
+    }
+
+    @Test
+    func testRecordingStoresItsFlagSnapshotWhenItStarts() async throws {
+        let fixture = try await makeFlagFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        let started = flags(timeline: false, unified: true, recovery: false)
+
+        let sessionID = try await fixture.service.startRecording(
+            in: fixture.workspace,
+            title: "Session",
+            audioSyncFlags: started
+        )
+        // Read while still recording: a crash from here on must find the snapshot.
+        let session = try #require(try RecordingSession.fetch(id: sessionID, in: ModelContext(fixture.container)))
+        #expect(session.audioSyncFlags == started)
+        _ = await fixture.service.stopRecording()
+    }
+
     private func makeWorkspace() -> Workspace {
         let rootURL = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1984,6 +2089,7 @@ private actor MockScreenCaptureStopBlocker {
 private actor MockRecordingMixdownCoordinator: RecordingMixdownCoordinating {
     private struct Call: Sendable {
         let startedAt: Date
+        let timelineMixdown: Bool
     }
 
     private var calls: [Call] = []
@@ -1995,9 +2101,10 @@ private actor MockRecordingMixdownCoordinator: RecordingMixdownCoordinating {
         appURL _: URL?,
         mixdownURL _: URL,
         micStartHostTime _: HostNanoseconds,
-        appStartHostTime _: HostNanoseconds?
+        appStartHostTime _: HostNanoseconds?,
+        timelineMixdown: Bool
     ) async -> Bool {
-        calls.append(Call(startedAt: Date()))
+        calls.append(Call(startedAt: Date(), timelineMixdown: timelineMixdown))
         let continuations = waiters
         waiters.removeAll()
         for continuation in continuations {
@@ -2022,18 +2129,23 @@ private actor MockRecordingMixdownCoordinator: RecordingMixdownCoordinating {
     func firstCallStartedAt() -> Date? {
         calls.first?.startedAt
     }
+
+    func timelineModes() -> [Bool] {
+        calls.map(\.timelineMixdown)
+    }
 }
 
 private actor MockScreenVideoMuxer: ScreenVideoMuxing {
     private struct Call: Sendable {
         let startedAt: Date
+        let request: ScreenVideoMuxRequest
     }
 
     private var calls: [Call] = []
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
-    func runMux(request _: ScreenVideoMuxRequest) async {
-        calls.append(Call(startedAt: Date()))
+    func runMux(request: ScreenVideoMuxRequest) async {
+        calls.append(Call(startedAt: Date(), request: request))
         let continuations = waiters
         waiters.removeAll()
         for continuation in continuations {
@@ -2056,6 +2168,10 @@ private actor MockScreenVideoMuxer: ScreenVideoMuxing {
 
     func firstCallStartedAt() -> Date? {
         calls.first?.startedAt
+    }
+
+    func requests() -> [ScreenVideoMuxRequest] {
+        calls.map(\.request)
     }
 }
 
@@ -2155,6 +2271,33 @@ private final class StubUnifiedStream: UnifiedCaptureStreaming, @unchecked Senda
         updateCallCount += 1
         if let updateError {
             throw updateError
+        }
+    }
+}
+
+/// Records which capture session each start used, and starts it on a stub stream so no test
+/// reaches ScreenCaptureKit.
+private final class CaptureStartProbe: @unchecked Sendable {
+    enum Kind: Equatable {
+        case unified
+        case appAudio
+    }
+
+    private let lock = NSLock()
+    private var recorded: [Kind] = []
+
+    var kinds: [Kind] {
+        lock.withLock { recorded }
+    }
+
+    func start(_ start: RecordingService.CaptureSessionStart) async throws {
+        switch start {
+        case .unified(let session):
+            lock.withLock { recorded.append(.unified) }
+            try await session.start(stream: StubUnifiedStream())
+        case .appAudio(let session):
+            lock.withLock { recorded.append(.appAudio) }
+            try await session.start(stream: StubUnifiedStream())
         }
     }
 }

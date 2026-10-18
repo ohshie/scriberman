@@ -44,6 +44,11 @@ final class RecordingSession {
     var audioAnchorHostTimeNanos: Int64?
     /// Screen video mux attempts started by recovery.
     var screenMuxAttemptCountValue: Int?
+    /// The audio-sync flag values the recording started with, saved when the session is created so
+    /// recovery finalizes with them. `nil` on recordings made before the snapshot existed.
+    var audioSyncTimelineMixdownEnabled: Bool?
+    var audioSyncUnifiedCaptureEnabled: Bool?
+    var audioSyncCaptureHealthRecoveryEnabled: Bool?
     var transcriptData: Data?
     var retranscriptData: Data?
     var aiTransformationsData: Data?
@@ -99,6 +104,28 @@ final class RecordingSession {
     var mixdownAttemptCount: Int {
         get { mixdownAttemptCountValue ?? 0 }
         set { mixdownAttemptCountValue = newValue }
+    }
+
+    /// The audio-sync flags this recording started with, or `nil` when none were saved.
+    var audioSyncFlags: AudioSyncFlags? {
+        get {
+            guard let audioSyncTimelineMixdownEnabled,
+                  let audioSyncUnifiedCaptureEnabled,
+                  let audioSyncCaptureHealthRecoveryEnabled
+            else {
+                return nil
+            }
+            return AudioSyncFlags(
+                isTimelineMixdownEnabled: audioSyncTimelineMixdownEnabled,
+                isUnifiedCaptureEnabled: audioSyncUnifiedCaptureEnabled,
+                isCaptureHealthRecoveryEnabled: audioSyncCaptureHealthRecoveryEnabled
+            )
+        }
+        set {
+            audioSyncTimelineMixdownEnabled = newValue?.isTimelineMixdownEnabled
+            audioSyncUnifiedCaptureEnabled = newValue?.isUnifiedCaptureEnabled
+            audioSyncCaptureHealthRecoveryEnabled = newValue?.isCaptureHealthRecoveryEnabled
+        }
     }
 
     var screenMuxAttemptCount: Int {
