@@ -1,11 +1,13 @@
 import Foundation
 import Observation
+import SwiftData
 
 @MainActor
 @Observable
 final class TranscriptDetailViewModel {
     private let promptStore: AIPromptStore
     private let aiProviderService: AIProviderService
+    private let saveContext: @MainActor (ModelContext) throws -> Void
 
     let session: any TranscribableSession
 
@@ -24,11 +26,13 @@ final class TranscriptDetailViewModel {
     init(
         session: any TranscribableSession,
         aiProviderService: AIProviderService,
-        promptStore: AIPromptStore = AIPromptStore()
+        promptStore: AIPromptStore = AIPromptStore(),
+        saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() }
     ) {
         self.session = session
         self.aiProviderService = aiProviderService
         self.promptStore = promptStore
+        self.saveContext = saveContext
     }
 
     var displayedTranscript: Transcript? {
@@ -198,6 +202,46 @@ final class TranscriptDetailViewModel {
             promptStore.setLastUsedPromptID(promptID)
         } catch {
             transformationErrorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Title
+
+    /// What a title commit did, for the view to report.
+    enum TitleCommitResult: Equatable {
+        case saved
+        /// Saving the store failed. The session keeps its previous title.
+        case saveFailed(String)
+    }
+
+    /// Saves `title` as the session's title, then rewrites `transcript.md`, which carries it.
+    ///
+    /// A failed save is rolled back and the file is left alone, so the store, the list and the file
+    /// all keep the previous title.
+    @discardableResult
+    func commitTitle(_ title: String, context: ModelContext) -> TitleCommitResult {
+        let result = Self.saveTitle(title, of: session, context: context, saveContext: saveContext)
+        if result == .saved, let recording = session as? RecordingSession {
+            rewriteTranscriptMarkdown(for: recording)
+        }
+        return result
+    }
+
+    /// Sets and saves the title without touching `transcript.md`, rolling back a failed save. The
+    /// recording view uses this directly: its file is rewritten when the recording stops.
+    static func saveTitle(
+        _ title: String,
+        of session: any TranscribableSession,
+        context: ModelContext,
+        saveContext: @MainActor (ModelContext) throws -> Void = { try $0.save() }
+    ) -> TitleCommitResult {
+        session.title = title
+        do {
+            try saveContext(context)
+            return .saved
+        } catch {
+            context.rollback()
+            return .saveFailed(error.localizedDescription)
         }
     }
 }

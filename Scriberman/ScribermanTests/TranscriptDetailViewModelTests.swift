@@ -1,5 +1,6 @@
 import Foundation
 import OpenAI
+import SwiftData
 import Testing
 @testable import Scriberman
 
@@ -503,5 +504,75 @@ struct TranscriptDetailViewModelTests {
 
         let data = Data(payload.utf8)
         return try JSONDecoder().decode(ResponseObject.self, from: data)
+    }
+}
+
+// MARK: - Title commits
+
+extension TranscriptDetailViewModelTests {
+    @MainActor
+    private func makeTitleFixture(saveFails: Bool) throws -> (
+        viewModel: TranscriptDetailViewModel, session: RecordingSession, context: ModelContext,
+        container: ModelContainer, markdownURL: URL, directory: URL
+    ) {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = ModelContext(container)
+        let session = makeRecordingSession()
+        session.title = "Old Title"
+        session.micAudioURL = directory.appendingPathComponent("mic.wav").path
+        context.insert(session)
+        try context.save()
+        rewriteTranscriptMarkdown(for: session)
+
+        let (defaults, suiteName) = makeDefaults()
+        defer { cleanupDefaults(named: suiteName) }
+        let viewModel = TranscriptDetailViewModel(
+            session: session,
+            aiProviderService: makeService(defaults: defaults),
+            saveContext: { context in
+                if saveFails { throw TestError.expectedFailure }
+                try context.save()
+            }
+        )
+        return (viewModel, session, context, container, directory.appendingPathComponent("transcript.md"), directory)
+    }
+
+    @Test
+    @MainActor
+    func testFailedTitleSaveKeepsTitleAndTranscriptMarkdownAndReportsFailure() throws {
+        let fixture = try makeTitleFixture(saveFails: true)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+        let markdownBefore = try String(contentsOf: fixture.markdownURL, encoding: .utf8)
+
+        let result = fixture.viewModel.commitTitle("New Title", context: fixture.context)
+
+        #expect(result == .saveFailed("Expected failure"))
+        #expect(fixture.session.title == "Old Title")
+        let stored = try ModelContext(fixture.container).fetch(FetchDescriptor<RecordingSession>())
+        #expect(stored.map(\.title) == ["Old Title"])
+        #expect(try String(contentsOf: fixture.markdownURL, encoding: .utf8) == markdownBefore)
+    }
+
+    @Test
+    @MainActor
+    func testSavedTitleUpdatesStoreAndTranscriptMarkdown() throws {
+        let fixture = try makeTitleFixture(saveFails: false)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        let result = fixture.viewModel.commitTitle("New Title", context: fixture.context)
+
+        #expect(result == .saved)
+        #expect(fixture.session.title == "New Title")
+        let stored = try ModelContext(fixture.container).fetch(FetchDescriptor<RecordingSession>())
+        #expect(stored.map(\.title) == ["New Title"])
+        let markdown = try String(contentsOf: fixture.markdownURL, encoding: .utf8)
+        #expect(markdown.hasPrefix(MarkdownRenderer().header(for: fixture.session)))
+        #expect(markdown.contains("New Title"))
+        #expect(!markdown.contains("Old Title"))
     }
 }

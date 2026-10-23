@@ -11,6 +11,8 @@ struct TranscriptDetailView: View {
     let onRestoreOriginal: (() async throws -> Void)?
     let onOpenStudy: (() -> Void)?
     let onOpenTransformation: ((UUID) -> Void)?
+    /// Called when a title commit fails to save; the session keeps its previous title.
+    let onTitleNotSaved: () -> Void
 
     @Environment(\.modelContext) private var modelContext
     @State private var showingDeleteConfirmation = false
@@ -30,7 +32,8 @@ struct TranscriptDetailView: View {
         onDelete: @escaping () -> Void,
         onRestoreOriginal: (() async throws -> Void)? = nil,
         onOpenStudy: (() -> Void)?,
-        onOpenTransformation: ((UUID) -> Void)?
+        onOpenTransformation: ((UUID) -> Void)?,
+        onTitleNotSaved: @escaping () -> Void
     ) {
         self.session = session
         self.onReprocess = onReprocess
@@ -39,6 +42,7 @@ struct TranscriptDetailView: View {
         self.onRestoreOriginal = onRestoreOriginal
         self.onOpenStudy = onOpenStudy
         self.onOpenTransformation = onOpenTransformation
+        self.onTitleNotSaved = onTitleNotSaved
         _editingTitle = State(initialValue: session.title)
         _viewModel = State(initialValue: TranscriptDetailViewModel(session: session, aiProviderService: aiProviderService))
     }
@@ -256,11 +260,9 @@ struct TranscriptDetailView: View {
     }
 
     private func commitTitle() {
-        session.title = editingTitle
-        try? modelContext.save()
-        // The file carries the title.
-        if let recording = session as? RecordingSession {
-            rewriteTranscriptMarkdown(for: recording)
+        if case .saveFailed = viewModel.commitTitle(editingTitle, context: modelContext) {
+            editingTitle = session.title
+            onTitleNotSaved()
         }
     }
 }
