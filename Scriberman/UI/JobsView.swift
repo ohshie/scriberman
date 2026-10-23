@@ -75,11 +75,10 @@ struct JobsView: View {
         // The search row is a safe-area inset rather than a sibling in the stack. As a sibling the
         // list still scrolled its content up behind it — rows and the section header would slide
         // under the field and stay there until the list was dragged back down. An inset makes the
-        // scroll view reserve the space, and the material keeps anything passing beneath it hidden
-        // rather than showing through.
-        .safeAreaInset(edge: .top, spacing: 0) {
+        // scroll view reserve the space, and the safe-area bar's scroll edge effect keeps anything
+        // passing beneath it from competing with the field.
+        .safeAreaBar(edge: .top, spacing: 0) {
             searchBar
-                .background(.bar)
         }
         .navigationTitle("Jobs")
         .task {

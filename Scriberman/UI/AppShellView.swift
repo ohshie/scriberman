@@ -60,7 +60,7 @@ struct AppShellView: View {
         } detail: {
             if let selectedSession {
                 detailView(for: selectedSession)
-                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                    .safeAreaBar(edge: .bottom, spacing: 0) {
                         AudioPlayerBar(
                             viewModel: audioPlayerViewModel,
                             sessionHasAudio: audioURL(for: selectedSession) != nil || selectedSessionHasMixdownNil(selectedSession),
