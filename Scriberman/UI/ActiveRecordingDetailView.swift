@@ -18,8 +18,7 @@ struct ActiveRecordingDetailView: View {
         self.modelContext = modelContext
     }
 
-    /// Marks the end of the content, so following the transcript scrolls to the foot of the view —
-    /// which is where the Stop button is.
+    /// Marks the end of the content, so following the transcript scrolls to the foot of the view.
     private static let bottomAnchor = "recording-view-bottom"
 
     var body: some View {
@@ -51,27 +50,13 @@ struct ActiveRecordingDetailView: View {
                     // In the flow, not in a scroll view of their own. Two scrolling regions in one
                     // window means the wrong one moves under the pointer half the time; and a
                     // transcript penned into 120 points while the window has room is the smaller
-                    // half of the problem. Arriving segments push the controls below them down.
+                    // half of the problem. Arriving segments push the source cards below them down.
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(viewModel.liveSegments, id: \.id) { segment in
                             liveSegmentRow(for: segment)
                                 .id(segment.id)
                         }
                     }
-                }
-
-                HStack {
-                    Spacer()
-                    HeroCircleButton(
-                        innerShape: .roundedSquare,
-                        tint: .red,
-                        caption: "Stop"
-                    ) {
-                        Task {
-                            _ = await viewModel.stopRecording(context: modelContext)
-                        }
-                    }
-                    Spacer()
                 }
 
                 LazyVGrid(columns: [
@@ -104,9 +89,9 @@ struct ActiveRecordingDetailView: View {
                 titleFocused = false
             }
         }
-        // Following the transcript means scrolling to the foot of the view, so the newest text and
-        // the Stop button stay together. Suspended while the pointer is in the window: SwiftUI
-        // cannot report a selection, and a pointer in here is someone reading or selecting.
+        // Following the transcript means scrolling to the foot of the view. Suspended while the
+        // pointer is in the scroll view: SwiftUI cannot report a selection, and a pointer in here is
+        // someone reading or selecting.
         .onHover { hovering in
             isPointerOverSegments = hovering
         }
@@ -115,6 +100,24 @@ struct ActiveRecordingDetailView: View {
             withAnimation(.easeOut(duration: 0.2)) {
                 proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
             }
+        }
+        // Outside the scrolling content, so Stop stays in the window however long the transcript
+        // grows, including while following is suspended.
+        .safeAreaBar(edge: .bottom) {
+            HStack {
+                Spacer()
+                HeroCircleButton(
+                    innerShape: .roundedSquare,
+                    tint: .red,
+                    caption: "Stop"
+                ) {
+                    Task {
+                        _ = await viewModel.stopRecording(context: modelContext)
+                    }
+                }
+                Spacer()
+            }
+            .padding(.vertical, 16)
         }
         }
     }
