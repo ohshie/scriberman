@@ -133,6 +133,8 @@
 		C0DE4A11B2C3D4E5F6A70006 /* TranscriptCleanupEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE4A11B2C3D4E5F6A70005 /* TranscriptCleanupEngineTests.swift */; };
 		792751DE2F92CD9A0004BAF0 /* RecordingTranscriptSegment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 792751DD2F92CD9A0004BAF0 /* RecordingTranscriptSegment.swift */; };
 		7954B91C2FEA726D00870A9B /* HotkeyRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7954B91B2FEA726D00870A9B /* HotkeyRegistrar.swift */; };
+		B08A1E0100000000000000B1 /* HotkeyLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B08A1E0100000000000000F1 /* HotkeyLabel.swift */; };
+		B08A1E0100000000000000B2 /* HotkeyLabelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B08A1E0100000000000000F2 /* HotkeyLabelTests.swift */; };
 		7954B91E2FEA727300870A9B /* DictationHotkeySettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7954B91D2FEA727300870A9B /* DictationHotkeySettings.swift */; };
 		7954B9202FEA728300870A9B /* DictationCaptureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7954B91F2FEA728300870A9B /* DictationCaptureSession.swift */; };
 		7954B9222FEA728C00870A9B /* TextInjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7954B9212FEA728C00870A9B /* TextInjector.swift */; };
@@ -444,6 +446,8 @@
 		C0DE4A11B2C3D4E5F6A70005 /* TranscriptCleanupEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptCleanupEngineTests.swift; sourceTree = "<group>"; };
 		792751DD2F92CD9A0004BAF0 /* RecordingTranscriptSegment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingTranscriptSegment.swift; sourceTree = "<group>"; };
 		7954B91B2FEA726D00870A9B /* HotkeyRegistrar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyRegistrar.swift; sourceTree = "<group>"; };
+		B08A1E0100000000000000F1 /* HotkeyLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyLabel.swift; sourceTree = "<group>"; };
+		B08A1E0100000000000000F2 /* HotkeyLabelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/HotkeyLabelTests.swift"; sourceTree = SOURCE_ROOT; };
 		7954B91D2FEA727300870A9B /* DictationHotkeySettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationHotkeySettings.swift; sourceTree = "<group>"; };
 		7954B91F2FEA728300870A9B /* DictationCaptureSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationCaptureSession.swift; sourceTree = "<group>"; };
 		7954B9212FEA728C00870A9B /* TextInjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextInjector.swift; sourceTree = "<group>"; };
@@ -690,6 +694,7 @@
 				B5871E10D502FAEB70EDC99F /* MarkdownRendererTests.swift */,
 				8E2E0F5F51DABC96146DE26B /* RecordingStatusTests.swift */,
 				ABB74F3722FB4F63901ACA17 /* IdlePromptActionsTests.swift */,
+				B08A1E0100000000000000F2 /* HotkeyLabelTests.swift */,
 				90C96C56DC384901B1BDA27D /* IdlePromptPreferencesTests.swift */,
 				A5C0FF1E00000000000000F1 /* AudioSyncConfigTests.swift */,
 				D3F5E77100000000000000F1 /* DeveloperSettingsTests.swift */,
@@ -888,6 +893,7 @@
 			isa = PBXGroup;
 			children = (
 				7954B91B2FEA726D00870A9B /* HotkeyRegistrar.swift */,
+				B08A1E0100000000000000F1 /* HotkeyLabel.swift */,
 				7954B91D2FEA727300870A9B /* DictationHotkeySettings.swift */,
 				7954B91F2FEA728300870A9B /* DictationCaptureSession.swift */,
 				7954B9212FEA728C00870A9B /* TextInjector.swift */,
@@ -1433,6 +1439,7 @@
 				79C201882F7F8C15002A1163 /* WorkspaceOnboardingStep.swift in Sources */,
 				79AF5DC62F92DC510075AA88 /* TranscriptMarkdownWriter.swift in Sources */,
 				7954B91C2FEA726D00870A9B /* HotkeyRegistrar.swift in Sources */,
+				B08A1E0100000000000000B1 /* HotkeyLabel.swift in Sources */,
 				F0A1B2C3D4E5F60718293B47 /* AIProviderServiceProtocol.swift in Sources */,
 				F0A1B2C3D4E5F60718293B48 /* MicrophonePermissionProvider.swift in Sources */,
 				F0A1B2C3D4E5F60718293B49 /* ScreenRecordingPermissionProvider.swift in Sources */,
@@ -1558,6 +1565,7 @@
 				798732732F7D8EE600570A03 /* AudioFileProberTests.swift in Sources */,
 				A2E8F18069EB9CB0F14A58BA /* RecordingStatusTests.swift in Sources */,
 				CACA88E55CED472B8823033A /* IdlePromptActionsTests.swift in Sources */,
+				B08A1E0100000000000000B2 /* HotkeyLabelTests.swift in Sources */,
 				1BD6AE6B039F42B3904FA416 /* IdlePromptPreferencesTests.swift in Sources */,
 				A5C0FF1E00000000000000B1 /* AudioSyncConfigTests.swift in Sources */,
 				D3F5E77100000000000000B1 /* DeveloperSettingsTests.swift in Sources */,
