@@ -1,5 +1,6 @@
 import Foundation
 import OpenAI
+import SwiftData
 import Testing
 @testable import Scriberman
 
@@ -503,5 +504,668 @@ struct TranscriptDetailViewModelTests {
 
         let data = Data(payload.utf8)
         return try JSONDecoder().decode(ResponseObject.self, from: data)
+    }
+}
+
+
+/// What the transcript view shows and does, driven through the detail view model the way the view
+/// drives it.
+@MainActor
+struct TranscriptDetailViewModelTranscriptTests {
+    private func makeViewModel(
+        session: any TranscribableSession,
+        store: SpeakerEmbeddingStore? = nil
+    ) -> TranscriptDetailViewModel {
+        let suiteName = "TranscriptDetailViewModelTranscriptTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName) ?? .standard
+        return TranscriptDetailViewModel(
+            session: session,
+            aiProviderService: AIProviderService(keychainStore: MockKeychainStore(), store: AIProviderStore(defaults: defaults)),
+            promptStore: AIPromptStore(defaults: defaults),
+            store: store,
+            transcript: session.displayedTranscript
+        )
+    }
+
+    private func conversation() -> Transcript {
+        Transcript(
+            fullText: "hello there the migration plan later on the migration again",
+            segments: [
+                TranscriptSegment(speakerId: "S1", text: "hello there", startTime: 0, endTime: 2),
+                TranscriptSegment(speakerId: "S1", text: "the migration plan", startTime: 2, endTime: 4),
+                TranscriptSegment(speakerId: "S2", text: "later on", startTime: 6, endTime: 8),
+                TranscriptSegment(speakerId: "S1", text: "the migration again", startTime: 8, endTime: 10)
+            ],
+            speakers: [
+                TranscriptSpeaker(id: "S1", label: "Speaker 1", colorHex: "#112233"),
+                TranscriptSpeaker(id: "S2", label: "Speaker 2", colorHex: "#445566")
+            ]
+        )
+    }
+
+    private func conversationSession() -> RecordingSession {
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/conversation/mic.wav", title: "Conversation")
+        session.transcript = conversation()
+        return session
+    }
+
+    // MARK: - Blocks
+
+    @Test
+    func testBlocksAreTheGroupersBlocksForTheDisplayedTranscript() throws {
+        let session = conversationSession()
+        session.retranscript = Transcript(
+            fullText: "second pass",
+            segments: [TranscriptSegment(speakerId: "S9", text: "second pass", startTime: 0, endTime: 1)],
+            speakers: [TranscriptSpeaker(id: "S9", label: "Speaker 9", colorHex: "#778899")]
+        )
+        let viewModel = makeViewModel(session: session)
+
+        let expected = TranscriptGrouper.makeBlocks(from: try #require(session.retranscript))
+        #expect(viewModel.blocks.map(\.id) == expected.map(\.id))
+        #expect(viewModel.blocks.map(\.text) == ["second pass"])
+    }
+
+    @Test
+    func testRefreshFollowsTheDisplayedTranscriptAndItsMatches() {
+        let session = conversationSession()
+        let viewModel = makeViewModel(session: session)
+        viewModel.searchState.query = "migration"
+        viewModel.updateSearch()
+        #expect(viewModel.searchState.matches.count == 2)
+
+        session.retranscript = Transcript(
+            fullText: "no match here",
+            segments: [TranscriptSegment(speakerId: "S1", text: "no match here", startTime: 0, endTime: 1)],
+            speakers: [TranscriptSpeaker(id: "S1", label: "Speaker 1", colorHex: "#112233")]
+        )
+        viewModel.refreshTranscript()
+
+        #expect(viewModel.shownTranscript == session.retranscript)
+        #expect(viewModel.blocks.map(\.text) == ["no match here"])
+        #expect(viewModel.searchState.matches.isEmpty)
+    }
+
+    @Test
+    func testASessionWithoutATranscriptHasNoBlocks() {
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/empty/mic.wav", title: "Empty")
+        let viewModel = makeViewModel(session: session)
+
+        #expect(viewModel.shownTranscript == nil)
+        #expect(viewModel.blocks.isEmpty)
+    }
+
+    // MARK: - Active block
+
+    @Test
+    func testActiveBlockInsideBetweenAndAfterBlocks() {
+        let viewModel = makeViewModel(session: conversationSession())
+        let blocks = viewModel.blocks
+        #expect(blocks.count == 3)
+
+        #expect(viewModel.activeBlock(at: 0)?.id == blocks[0].id)
+        #expect(viewModel.activeBlock(at: 3.5)?.id == blocks[0].id)
+        #expect(viewModel.activeBlock(at: 7)?.id == blocks[1].id)
+        // Between the first block's end and the second block's start.
+        #expect(viewModel.activeBlock(at: 5) == nil)
+        #expect(viewModel.activeBlock(at: 10) == nil)
+        #expect(viewModel.activeBlock(at: 60) == nil)
+    }
+
+    // MARK: - Search seed
+
+    @Test
+    func testASeedAppliesTheQueryAndSelectsTheMatchedBlock() {
+        let viewModel = makeViewModel(session: conversationSession())
+        let lastBlock = viewModel.blocks[2]
+
+        let applied = viewModel.applySearchSeed(TranscriptStudySearchSeed(query: "migration", blockID: lastBlock.id))
+
+        #expect(applied)
+        #expect(viewModel.searchState.query == "migration")
+        #expect(viewModel.searchState.matches.count == 2)
+        #expect(viewModel.searchState.currentMatch?.blockID == lastBlock.id)
+        #expect(viewModel.isSearchVisible)
+    }
+
+    @Test
+    func testTheSameSeedWithANewTokenReapplies() {
+        let viewModel = makeViewModel(session: conversationSession())
+        let lastBlock = viewModel.blocks[2]
+        let first = TranscriptStudySearchSeed(query: "migration", blockID: lastBlock.id)
+        viewModel.applySearchSeed(first)
+        viewModel.searchState.next()
+        #expect(viewModel.searchState.currentMatch?.blockID == viewModel.blocks[0].id)
+
+        let again = TranscriptStudySearchSeed(query: first.query, blockID: first.blockID)
+        #expect(again != first)
+        viewModel.applySearchSeed(again)
+
+        #expect(viewModel.searchState.currentMatch?.blockID == lastBlock.id)
+    }
+
+    @Test
+    func testATitleOnlySeedSelectsNothing() {
+        let viewModel = makeViewModel(session: conversationSession())
+
+        viewModel.applySearchSeed(TranscriptStudySearchSeed(query: "Conversation", blockID: nil))
+
+        #expect(viewModel.searchState.currentMatch == nil)
+        #expect(viewModel.searchState.matches.isEmpty)
+    }
+
+    @Test
+    func testNoSeedOrAnEmptyQueryLeavesFindAlone() {
+        let viewModel = makeViewModel(session: conversationSession())
+
+        #expect(viewModel.applySearchSeed(nil) == false)
+        #expect(viewModel.applySearchSeed(TranscriptStudySearchSeed(query: "", blockID: viewModel.blocks[0].id)) == false)
+        #expect(viewModel.searchState.query.isEmpty)
+        #expect(viewModel.isSearchVisible == false)
+    }
+
+    // MARK: - Find
+
+    @Test
+    func testFindQueryUpdatesRangesAndStepsWrap() {
+        let viewModel = makeViewModel(session: conversationSession())
+        let blocks = viewModel.blocks
+
+        viewModel.presentSearch()
+        viewModel.searchState.query = "MIGRATION"
+        viewModel.updateSearch()
+
+        #expect(viewModel.isSearchVisible)
+        #expect(viewModel.searchState.ranges(in: blocks[0]).count == 1)
+        #expect(viewModel.searchState.ranges(in: blocks[1]).isEmpty)
+        #expect(viewModel.searchState.currentMatch?.blockID == blocks[0].id)
+        viewModel.searchState.next()
+        #expect(viewModel.searchState.currentMatch?.blockID == blocks[2].id)
+        viewModel.searchState.next()
+        #expect(viewModel.searchState.currentMatch?.blockID == blocks[0].id)
+        viewModel.searchState.previous()
+        #expect(viewModel.searchState.currentMatch?.blockID == blocks[2].id)
+    }
+
+    /// A seeded search is cleared by the same call as one the user typed.
+    @Test
+    func testClearingRemovesHighlights() {
+        let viewModel = makeViewModel(session: conversationSession())
+        viewModel.applySearchSeed(TranscriptStudySearchSeed(query: "migration", blockID: viewModel.blocks[2].id))
+
+        viewModel.clearSearch()
+
+        #expect(viewModel.searchState.query.isEmpty)
+        #expect(viewModel.searchState.matches.isEmpty)
+        #expect(viewModel.blocks.allSatisfy { viewModel.searchState.ranges(in: $0).isEmpty })
+        #expect(viewModel.searchState.currentMatch == nil)
+    }
+
+    // MARK: - Raw Markdown
+
+    @Test
+    func testRawMarkdownIsTheExportRendering() throws {
+        let session = conversationSession()
+        let viewModel = makeViewModel(session: session)
+
+        let exported = MarkdownRenderer().renderMarkdown(session: session, transcript: try #require(session.displayedTranscript))
+        #expect(viewModel.rawMarkdown == exported)
+    }
+
+    // MARK: - Speaker edits through the view model
+
+    private func makeStore() throws -> SpeakerEmbeddingStore {
+        let container = try ModelContainer(
+            for: SpeakerProfile.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        return SpeakerEmbeddingStore(modelContainer: container)
+    }
+
+    private func names(in store: SpeakerEmbeddingStore) async throws -> Set<String> {
+        Set(try await store.fetchAllSnapshots().map(\.name))
+    }
+
+    private func teachableConversation() -> Transcript {
+        var transcript = conversation()
+        transcript.voiceprintSpace = VoiceprintSpace.current
+        transcript.speakerVoiceprints = ["S1": [[1, 0]], "S2": [[0, 1]]]
+        return transcript
+    }
+
+    @Test
+    func testRenameWritesTheDisplayedPassAndTeachesItsSource() async throws {
+        let store = try makeStore()
+        let session = conversationSession()
+        session.retranscript = teachableConversation()
+        let firstPassBefore = session.transcriptData
+        let viewModel = makeViewModel(session: session, store: store)
+
+        await viewModel.renameSpeaker(id: "S1", to: "  Ana \n")?.value
+
+        #expect(viewModel.shownTranscript?.speakers.map(\.label) == ["Ana", "Speaker 2"])
+        #expect(session.retranscript == viewModel.shownTranscript)
+        #expect(session.transcriptData == firstPassBefore)
+        #expect(viewModel.blocks.first?.speaker.label == "Ana")
+        #expect(try await names(in: store) == ["Ana"])
+        let anaID = try #require(try await store.profileID(forName: "Ana"))
+        #expect(try await store.findProfileSnapshot(byID: anaID)?.embedding == [1, 0])
+
+        // The memory now holds the retranscript's voiceprint source: a second rename moves it.
+        await viewModel.renameSpeaker(id: "S1", to: "Bea")?.value
+        #expect(try await names(in: store) == ["Bea"])
+    }
+
+    @Test
+    func testRenameToTheSameLabelChangesNothing() throws {
+        let session = conversationSession()
+        let before = session.transcriptData
+        let viewModel = makeViewModel(session: session, store: try makeStore())
+
+        #expect(viewModel.renameSpeaker(id: "S1", to: "Speaker 1") == nil)
+        #expect(viewModel.renameSpeaker(id: "S1", to: "   ") == nil)
+        #expect(session.transcriptData == before)
+    }
+
+    @Test
+    func testRenameChangingOnlyCaseWritesButTeachesNothing() async throws {
+        let store = try makeStore()
+        let session = conversationSession()
+        session.transcript = teachableConversation()
+        let viewModel = makeViewModel(session: session, store: store)
+
+        #expect(viewModel.renameSpeaker(id: "S1", to: "speaker 1") == nil)
+
+        #expect(session.transcript?.speakers.first?.label == "speaker 1")
+        #expect(try await store.fetchAllSnapshots().isEmpty)
+    }
+
+    @Test
+    func testMergeIntoANamedSpeakerWritesAndTeachesItsProfile() async throws {
+        let store = try makeStore()
+        let session = conversationSession()
+        session.transcript = try #require(TranscriptSpeakerEditing.rename("S1", to: "Alice", in: teachableConversation()))
+        let viewModel = makeViewModel(session: session, store: store)
+        await viewModel.renameSpeaker(id: "S1", to: "Alicia")?.value
+        #expect(try await store.fetchAllSnapshots().map(\.sampleCount) == [1])
+
+        await viewModel.mergeSpeaker("S2", into: "S1")?.value
+
+        #expect(viewModel.shownTranscript?.speakers.map(\.id) == ["S1"])
+        #expect(session.transcript == viewModel.shownTranscript)
+        #expect(viewModel.blocks.count == 1)
+        #expect(try await names(in: store) == ["Alicia"])
+        #expect(try await store.fetchAllSnapshots().map(\.sampleCount) == [2])
+    }
+
+    @Test
+    func testResetWritesTheLabelAndForgetsWhatTheSpeakerTaught() async throws {
+        let store = try makeStore()
+        let session = conversationSession()
+        session.transcript = teachableConversation()
+        let viewModel = makeViewModel(session: session, store: store)
+        await viewModel.renameSpeaker(id: "S2", to: "Bob")?.value
+        #expect(try await names(in: store) == ["Bob"])
+
+        await viewModel.resetSpeaker("S2")?.value
+
+        #expect(session.transcript?.speakers.map(\.label) == ["Speaker 1", "Speaker 2"])
+        #expect(session.transcript == viewModel.shownTranscript)
+        #expect(try await store.fetchAllSnapshots().isEmpty)
+    }
+
+    @Test
+    func testAssigningABlockWritesTheDisplayedPassAndLeavesMemoryAlone() async throws {
+        let store = try makeStore()
+        let session = conversationSession()
+        session.transcript = teachableConversation()
+        let viewModel = makeViewModel(session: session, store: store)
+        let laterBlock = viewModel.blocks[1]
+
+        viewModel.assign(laterBlock, to: "S1")
+
+        #expect(viewModel.blocks.count == 1)
+        #expect(session.transcript == viewModel.shownTranscript)
+        #expect(try await store.fetchAllSnapshots().isEmpty)
+
+        viewModel.assign(viewModel.blocks[0], to: "missing")
+        #expect(session.transcript == viewModel.shownTranscript)
+        #expect(viewModel.blocks.count == 1)
+    }
+
+    @Test
+    func testEditsWithoutAStoreStillWriteTheTranscript() {
+        let session = conversationSession()
+        let viewModel = makeViewModel(session: session)
+
+        #expect(viewModel.renameSpeaker(id: "S1", to: "Ana") == nil)
+
+        #expect(session.transcript?.speakers.first?.label == "Ana")
+    }
+
+    // MARK: - Moved from the study view's tests
+
+    // MARK: - Session identity
+
+    /// Search result A, then search result B, then a speaker rename: only B may change.
+    @Test
+    func testRenamingASpeakerWritesOnlyTheViewsSession() throws {
+        let sessionA = RecordingSession(duration: 10, micAudioURL: "/tmp/a/mic.wav", title: "A")
+        let sessionB = RecordingSession(duration: 10, micAudioURL: "/tmp/b/mic.wav", title: "B")
+        sessionA.transcript = transcript(text: "session a words", speakerLabel: "Speaker 1")
+        sessionB.transcript = transcript(text: "session b words", speakerLabel: "Speaker 1")
+        let sessionABefore = sessionA.transcriptData
+
+        let shownForB = try #require(sessionB.retranscript ?? sessionB.transcript)
+        let renamed = try #require(TranscriptDetailViewModel.renameSpeaker(id: "S1", to: "Ana", in: shownForB, of: sessionB))
+
+        #expect(renamed.speakers.map(\.label) == ["Ana"])
+        #expect(sessionB.transcript?.speakers.map(\.label) == ["Ana"])
+        #expect(sessionB.transcript?.fullText == "session b words")
+        #expect(sessionA.transcriptData == sessionABefore)
+    }
+
+    @Test
+    func testRenamingWritesTheRetranscriptWhenOneIsDisplayed() throws {
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/c/mic.wav", title: "C")
+        session.transcript = transcript(text: "first pass", speakerLabel: "Speaker 1")
+        session.retranscript = transcript(text: "second pass", speakerLabel: "Speaker 1")
+        let firstPassBefore = session.transcriptData
+
+        let shown = try #require(session.retranscript)
+        _ = TranscriptDetailViewModel.renameSpeaker(id: "S1", to: "Ana", in: shown, of: session)
+
+        #expect(session.retranscript?.speakers.map(\.label) == ["Ana"])
+        #expect(session.transcriptData == firstPassBefore)
+    }
+
+    @Test
+    func testRenamingKeepsVoiceprintsAndProfileLinks() throws {
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/e/mic.wav", title: "E")
+        let profileID = UUID()
+        var original = transcript(text: "words", speakerLabel: "Speaker 1")
+        original.speakerEmbeddings = ["S1": [0.5]]
+        original.speakerProfileIDs = ["S1": profileID]
+        original.voiceprintSpace = VoiceprintSpace.current
+        session.transcript = original
+
+        let renamed = try #require(TranscriptDetailViewModel.renameSpeaker(id: "S1", to: "Ana", in: original, of: session))
+
+        #expect(renamed.speakerEmbeddings == ["S1": [0.5]])
+        #expect(renamed.speakerProfileIDs == ["S1": profileID])
+        #expect(renamed.voiceprintSpace == VoiceprintSpace.current)
+    }
+
+    @Test
+    func testAssigningABlockWritesTheDisplayedPassAndKeepsVoiceprints() throws {
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/k/mic.wav", title: "K")
+        var shown = Transcript(
+            fullText: "one two",
+            segments: [
+                TranscriptSegment(speakerId: "S1", text: "one", startTime: 0, endTime: 1),
+                TranscriptSegment(speakerId: "S1", text: "two", startTime: 1, endTime: 2)
+            ],
+            speakers: [TranscriptSpeaker(id: "S1", label: "Alice", colorHex: "#112233")],
+            voiceprintSpace: VoiceprintSpace.current
+        )
+        shown.speakerVoiceprints = ["S1": [[1, 0]]]
+        session.transcript = shown
+
+        let edited = try #require(TranscriptDetailViewModel.assign(segmentIDs: [shown.segments[1].id], to: nil, in: shown, of: session))
+
+        #expect(edited.speakers.map(\.label) == ["Alice", "Speaker 1"])
+        #expect(edited.speakerVoiceprints == shown.speakerVoiceprints)
+        #expect(session.transcript == edited)
+        #expect(TranscriptDetailViewModel.assign(segmentIDs: [], to: "missing", in: shown, of: session) == nil)
+    }
+
+    @Test
+    func testRenamingAnUnknownSpeakerWritesNothing() {
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/d/mic.wav", title: "D")
+        session.transcript = transcript(text: "words", speakerLabel: "Speaker 1")
+        let before = session.transcriptData
+
+        let result = TranscriptDetailViewModel.renameSpeaker(id: "missing", to: "Ana", in: session.transcript!, of: session)
+
+        #expect(result == nil)
+        #expect(session.transcriptData == before)
+    }
+
+    // MARK: - Rename into speaker memory
+
+    private func liveTranscript(voiceprint: [Float], voiceprintSpace: String? = VoiceprintSpace.current) -> Transcript {
+        var transcript = transcript(text: "words", speakerLabel: "Speaker 1")
+        transcript.speakerEmbeddings = ["S1": voiceprint]
+        transcript.voiceprintSpace = voiceprintSpace
+        return transcript
+    }
+
+    private let source = VoiceprintSource(sessionID: UUID(), pass: .transcript, speakerID: "S1")
+
+    /// Spec scenario "User names an unknown speaker".
+    @Test
+    func testRenamingAnUnknownSpeakerCreatesAProfile() async throws {
+        let store = try makeStore()
+
+        try await TranscriptDetailViewModel.updateSpeakerMemory(
+            forRenaming: "S1", to: "Bob", in: liveTranscript(voiceprint: [0.5, 0.5]), source: source, store: store
+        )
+
+        #expect(try await names(in: store) == ["Bob"])
+        let bobID = try #require(try await store.profileID(forName: "Bob"))
+        let bob = try #require(try await store.findProfileSnapshot(byID: bobID))
+        #expect(bob.embedding == [0.5, 0.5])
+        #expect(bob.sampleCount == 1)
+    }
+
+    /// Spec scenario "Rename to an existing profile's name".
+    @Test
+    func testRenamingToAnExistingNameFoldsIntoThatProfile() async throws {
+        let store = try makeStore()
+        let aliceID = try await store.teach(name: "Alice", voiceprint: [1, 0])
+
+        try await TranscriptDetailViewModel.updateSpeakerMemory(
+            forRenaming: "S1", to: "alice", in: liveTranscript(voiceprint: [0, 1]), source: source, store: store
+        )
+
+        #expect(try await names(in: store) == ["Alice"])
+        let alice = try #require(try await store.findProfileSnapshot(byID: aliceID))
+        #expect(alice.embedding == [0.5, 0.5])
+        #expect(alice.sampleCount == 2)
+    }
+
+    /// Spec scenario "Rename a speaker that was matched to another profile".
+    @Test
+    func testRenamingAMatchedSpeakerKeepsTheMatchedProfileName() async throws {
+        let store = try makeStore()
+        let aliceID = try await store.teach(name: "Alice", voiceprint: [0.1])
+
+        try await TranscriptDetailViewModel.updateSpeakerMemory(
+            forRenaming: "S1", to: "Carol", in: liveTranscript(voiceprint: [0.1]), source: source, store: store
+        )
+
+        #expect(try await store.findProfileSnapshot(byID: aliceID)?.name == "Alice")
+        #expect(try await store.findProfileSnapshot(byID: aliceID)?.embedding == [0.1])
+        #expect(try await names(in: store) == ["Alice", "Carol"])
+    }
+
+    /// Spec scenario "Rename in a transcript from before the voiceprint space".
+    @Test
+    func testRenamingInATranscriptWithoutVoiceprintSpaceWritesNothing() async throws {
+        let store = try makeStore()
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/h/mic.wav", title: "H")
+        let original = liveTranscript(voiceprint: [0.5], voiceprintSpace: nil)
+        session.transcript = original
+
+        let renamed = try #require(TranscriptDetailViewModel.renameSpeaker(id: "S1", to: "Bob", in: original, of: session))
+        try await TranscriptDetailViewModel.updateSpeakerMemory(forRenaming: "S1", to: "Bob", in: renamed, source: source, store: store)
+
+        #expect(session.transcript?.speakers.map(\.label) == ["Bob"])
+        #expect(try await store.fetchAllSnapshots().isEmpty)
+    }
+
+    @Test
+    func testRenamingWithARetranscriptTeachesFromTheRetranscriptPass() throws {
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/j/mic.wav", title: "J")
+        session.transcript = transcript(text: "first pass", speakerLabel: "Speaker 1")
+        #expect(TranscriptDetailViewModel.voiceprintSource(for: "S1", of: session).pass == .transcript)
+
+        session.retranscript = transcript(text: "second pass", speakerLabel: "Speaker 1")
+
+        let source = TranscriptDetailViewModel.voiceprintSource(for: "S1", of: session)
+        #expect(source == VoiceprintSource(sessionID: session.id, pass: .retranscript, speakerID: "S1"))
+    }
+
+    /// Spec scenario "Wrong name corrected by renaming again".
+    @Test
+    func testRenamingAgainMovesTheVoiceprints() async throws {
+        let store = try makeStore()
+        let shown = liveTranscript(voiceprint: [0.5, 0.5])
+
+        try await TranscriptDetailViewModel.updateSpeakerMemory(forRenaming: "S1", to: "Bob", in: shown, source: source, store: store)
+        try await TranscriptDetailViewModel.updateSpeakerMemory(forRenaming: "S1", to: "Carol", in: shown, source: source, store: store)
+
+        #expect(try await names(in: store) == ["Carol"])
+    }
+
+    private func twoSpeakerTranscript(targetLabel: String) -> Transcript {
+        var transcript = Transcript(
+            fullText: "one two",
+            segments: [
+                TranscriptSegment(speakerId: "S1", text: "one", startTime: 0, endTime: 1),
+                TranscriptSegment(speakerId: "S3", text: "two", startTime: 1, endTime: 2)
+            ],
+            speakers: [
+                TranscriptSpeaker(id: "S1", label: targetLabel, colorHex: "#112233"),
+                TranscriptSpeaker(id: "S3", label: "Speaker 3", colorHex: "#445566")
+            ],
+            voiceprintSpace: VoiceprintSpace.current
+        )
+        transcript.speakerVoiceprints = ["S1": [[1, 0]], "S3": [[0.9, 0.1]]]
+        return transcript
+    }
+
+    /// Spec scenario "Merge into a named speaker".
+    @Test
+    func testMergingIntoANamedSpeakerTeachesItsProfile() async throws {
+        let store = try makeStore()
+        for _ in 0..<4 {
+            try await store.teach(name: "Alice", voiceprint: [1, 0])
+        }
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/l/mic.wav", title: "L")
+        let original = twoSpeakerTranscript(targetLabel: "Alice")
+        session.transcript = original
+
+        let merged = try #require(TranscriptDetailViewModel.mergeSpeaker("S3", into: "S1", in: original, of: session))
+        try await TranscriptDetailViewModel.updateSpeakerMemory(
+            forMerging: "S3", into: "S1", in: original,
+            source: TranscriptDetailViewModel.voiceprintSource(for: "S3", of: session),
+            targetSource: TranscriptDetailViewModel.voiceprintSource(for: "S1", of: session),
+            store: store
+        )
+
+        #expect(session.transcript == merged)
+        #expect(try await store.fetchAllSnapshots().map(\.sampleCount) == [5])
+    }
+
+    /// Spec scenario "Merge into an unnamed speaker".
+    @Test
+    func testMergingIntoAnUnnamedSpeakerTeachesNothing() async throws {
+        let store = try makeStore()
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/m/mic.wav", title: "M")
+        let original = twoSpeakerTranscript(targetLabel: "Speaker 1")
+
+        try await TranscriptDetailViewModel.updateSpeakerMemory(
+            forMerging: "S3", into: "S1", in: original,
+            source: TranscriptDetailViewModel.voiceprintSource(for: "S3", of: session),
+            targetSource: TranscriptDetailViewModel.voiceprintSource(for: "S1", of: session),
+            store: store
+        )
+
+        #expect(try await store.fetchAllSnapshots().isEmpty)
+    }
+
+    /// Spec scenario "Wrong name undone".
+    @Test
+    func testResettingWritesTheLabelAndForgetsWhatTheSpeakerTaught() async throws {
+        let store = try makeStore()
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/n/mic.wav", title: "N")
+        let named = try #require(TranscriptSpeakerEditing.rename("S3", to: "Bob", in: twoSpeakerTranscript(targetLabel: "Speaker 1")))
+        session.transcript = named
+        let source = TranscriptDetailViewModel.voiceprintSource(for: "S3", of: session)
+        try await TranscriptDetailViewModel.updateSpeakerMemory(forRenaming: "S3", to: "Bob", in: named, source: source, store: store)
+        #expect(try await names(in: store) == ["Bob"])
+
+        let reset = try #require(TranscriptDetailViewModel.resetSpeaker("S3", in: named, of: session))
+        try await store.forget(source: source)
+
+        #expect(reset.speakers.map(\.label) == ["Speaker 1", "Speaker 2"])
+        #expect(session.transcript == reset)
+        #expect(try await store.fetchAllSnapshots().isEmpty)
+    }
+
+    @Test
+    func testRenamingWithoutAVoiceprintWritesNothing() async throws {
+        let store = try makeStore()
+        var transcript = transcript(text: "words", speakerLabel: "Speaker 1")
+        transcript.voiceprintSpace = VoiceprintSpace.current
+
+        try await TranscriptDetailViewModel.updateSpeakerMemory(forRenaming: "S1", to: "Bob", in: transcript, source: source, store: store)
+
+        #expect(try await store.fetchAllSnapshots().isEmpty)
+    }
+
+    /// Spec scenario "Rename after trim": the space survives the trim and both renames, and the
+    /// second rename still teaches speaker memory.
+    @Test
+    func testTrimThenRenameTwiceKeepsTeachingSpeakerMemory() async throws {
+        let store = try makeStore()
+        let session = RecordingSession(duration: 10, micAudioURL: "/tmp/i/mic.wav", title: "I")
+        let original = Transcript(
+            fullText: "one two three",
+            segments: [
+                TranscriptSegment(speakerId: "S1", text: "one", startTime: 0, endTime: 1),
+                TranscriptSegment(speakerId: "S2", text: "two", startTime: 1, endTime: 2),
+                TranscriptSegment(speakerId: "S1", text: "three", startTime: 8, endTime: 9)
+            ],
+            speakers: [
+                TranscriptSpeaker(id: "S1", label: "Speaker 1", colorHex: "#112233"),
+                TranscriptSpeaker(id: "S2", label: "Speaker 2", colorHex: "#445566")
+            ],
+            speakerEmbeddings: ["S1": [1, 0], "S2": [0, 1]],
+            voiceprintSpace: VoiceprintSpace.current
+        )
+
+        let trimmed = AudioTrimService.trimmedTranscript(original, end: 5)
+        #expect(trimmed.voiceprintSpace == VoiceprintSpace.current)
+        #expect(trimmed.segments.map(\.text) == ["one", "two"])
+        session.transcript = trimmed
+
+        let first = try #require(TranscriptDetailViewModel.renameSpeaker(id: "S1", to: "Ana", in: trimmed, of: session))
+        #expect(first.voiceprintSpace == VoiceprintSpace.current)
+        try await TranscriptDetailViewModel.updateSpeakerMemory(
+            forRenaming: "S1", to: "Ana", in: first,
+            source: TranscriptDetailViewModel.voiceprintSource(for: "S1", of: session), store: store
+        )
+
+        let second = try #require(TranscriptDetailViewModel.renameSpeaker(id: "S2", to: "Ben", in: first, of: session))
+        #expect(second.voiceprintSpace == VoiceprintSpace.current)
+        #expect(session.transcript?.voiceprintSpace == VoiceprintSpace.current)
+        try await TranscriptDetailViewModel.updateSpeakerMemory(
+            forRenaming: "S2", to: "Ben", in: second,
+            source: TranscriptDetailViewModel.voiceprintSource(for: "S2", of: session), store: store
+        )
+
+        #expect(try await names(in: store) == ["Ana", "Ben"])
+        let benID = try #require(try await store.profileID(forName: "Ben"))
+        #expect(try await store.findProfileSnapshot(byID: benID)?.embedding == [0, 1])
+    }
+
+    private func transcript(text: String, speakerLabel: String) -> Transcript {
+        Transcript(
+            fullText: text,
+            segments: [TranscriptSegment(speakerId: "S1", text: text, startTime: 0, endTime: 1)],
+            speakers: [TranscriptSpeaker(id: "S1", label: speakerLabel, colorHex: "#112233")]
+        )
     }
 }

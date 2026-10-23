@@ -1,4 +1,3 @@
-import OSLog
 import SwiftUI
 
 @MainActor
@@ -31,30 +30,24 @@ struct TranscriptStudyView: View {
     let session: any TranscribableSession
     let audioPlayerViewModel: AudioPlayerViewModel
     @Binding var autoScrollEnabled: Bool
-    @State private var transcript: Transcript
+    @State private var viewModel: TranscriptDetailViewModel
     /// The transcript the caller passed in, kept to notice when the session's displayed
     /// transcript changes while the view is open (a retranscription or a restore).
     private let inputTranscript: Transcript
-    let store: SpeakerEmbeddingStore?
     let showRawMarkdownToggle: Bool
     /// A search to apply on opening, or `nil` to open as the view always has — empty find bar, no
     /// match selected.
     let searchSeed: TranscriptStudySearchSeed?
 
     @State private var showRawMarkdown = false
-    @State private var isSearchVisible = false
-    @State private var searchState = TranscriptSearchState()
     @State private var scrollTargetID: UUID?
     /// The block whose speaker is being renamed inline.
     @State private var renamingBlockID: UUID?
-    /// Stored profiles, loaded when a rename starts, for the rename field's suggestions.
-    @State private var profiles: [SpeakerProfileSnapshot] = []
     @State private var isSpeakerListShown = false
-
-    private let markdownRenderer = MarkdownRenderer()
 
     init(
         session: any TranscribableSession,
+        aiProviderService: AIProviderService,
         audioPlayerViewModel: AudioPlayerViewModel,
         autoScrollEnabled: Binding<Bool>,
         transcript: Transcript,
@@ -65,9 +58,13 @@ struct TranscriptStudyView: View {
         self.session = session
         self.audioPlayerViewModel = audioPlayerViewModel
         self._autoScrollEnabled = autoScrollEnabled
-        self._transcript = State(initialValue: transcript)
+        self._viewModel = State(initialValue: TranscriptDetailViewModel(
+            session: session,
+            aiProviderService: aiProviderService,
+            store: store,
+            transcript: transcript
+        ))
         self.inputTranscript = transcript
-        self.store = store
         self.showRawMarkdownToggle = showRawMarkdownToggle
         self.searchSeed = searchSeed
     }
@@ -76,7 +73,7 @@ struct TranscriptStudyView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if showRawMarkdown {
-                    Text(rawMarkdown)
+                    Text(viewModel.rawMarkdown)
                         .font(.body.monospaced())
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -97,7 +94,7 @@ struct TranscriptStudyView: View {
                                     if renamingBlockID != block.id {
                                         renamingBlockID = nil
                                     }
-                                    Self.seekAndPlay(block: block, player: audioPlayerViewModel)
+                                    TranscriptDetailViewModel.seekAndPlay(block: block, player: audioPlayerViewModel)
                                 },
                                 speakerEditing: speakerEditing(for: block),
                                 showsAudioSource: transcript.isSinglePassOfMixedAudio != true
@@ -125,11 +122,10 @@ struct TranscriptStudyView: View {
         // A retranscription or restore changes the session's displayed transcript while the view
         // is open. The view's own speaker rename writes the same value back, so this is a no-op then.
         .onChange(of: inputTranscript) {
-            transcript = inputTranscript
-            searchState.update(blocks: blocks)
+            viewModel.refreshTranscript()
         }
         .onChange(of: searchState.query) {
-            searchState.update(blocks: blocks)
+            viewModel.updateSearch()
         }
         .onChange(of: searchState.currentMatch?.blockID) {
             scrollTargetID = searchState.currentMatch?.blockID
@@ -150,7 +146,7 @@ struct TranscriptStudyView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    loadProfiles()
+                    viewModel.loadProfiles()
                     isSpeakerListShown.toggle()
                 } label: {
                     Label("Speakers", systemImage: "person.2")
@@ -160,10 +156,10 @@ struct TranscriptStudyView: View {
                 .popover(isPresented: $isSpeakerListShown, arrowEdge: .bottom) {
                     SessionSpeakerListView(
                         transcript: transcript,
-                        profiles: profiles,
-                        onRename: { id, name in renameSpeaker(id: id, to: name) },
-                        onMerge: { id, targetID in mergeSpeaker(id, into: targetID) },
-                        onReset: { id in resetSpeaker(id) }
+                        profiles: viewModel.profiles,
+                        onRename: { id, name in viewModel.renameSpeaker(id: id, to: name) },
+                        onMerge: { id, targetID in viewModel.mergeSpeaker(id, into: targetID) },
+                        onReset: { id in viewModel.resetSpeaker(id) }
                     )
                 }
             }
@@ -195,37 +191,34 @@ struct TranscriptStudyView: View {
         }
     }
 
+    private var transcript: Transcript {
+        viewModel.shownTranscript ?? inputTranscript
+    }
+
     private var blocks: [TranscriptBlock] {
-        TranscriptGrouper.makeBlocks(from: transcript)
+        viewModel.blocks
+    }
+
+    private var searchState: TranscriptSearchState {
+        viewModel.searchState
+    }
+
+    private var isSearchVisible: Bool {
+        viewModel.isSearchVisible
     }
 
     private var activeBlock: TranscriptBlock? {
-        Self.activeBlock(for: blocks, currentTime: audioPlayerViewModel.currentTime)
-    }
-
-    static func activeBlock(for blocks: [TranscriptBlock], currentTime: Double) -> TranscriptBlock? {
-        let time = Float(currentTime)
-        return blocks.first { time >= $0.startTime && time < $0.endTime }
-    }
-
-    @MainActor
-    static func seekAndPlay(block: TranscriptBlock, player: any TranscriptPlaybackControlling) {
-        player.seek(to: Double(block.startTime))
-        player.play()
-    }
-
-    private var rawMarkdown: String {
-        markdownRenderer.renderMarkdown(session: session, transcript: transcript)
+        viewModel.activeBlock(at: audioPlayerViewModel.currentTime)
     }
 
     private func speakerEditing(for block: TranscriptBlock) -> TranscriptBlockView.SpeakerEditing {
         TranscriptBlockView.SpeakerEditing(
             isRenaming: renamingBlockID == block.id,
-            profiles: profiles,
+            profiles: viewModel.profiles,
             otherSpeakers: TranscriptGrouper.displaySpeakers(of: transcript).filter { $0.id != block.speaker.id },
             onBeginRename: {
                 renamingBlockID = block.id
-                loadProfiles()
+                viewModel.loadProfiles()
             },
             onEndRename: {
                 if renamingBlockID == block.id {
@@ -233,212 +226,12 @@ struct TranscriptStudyView: View {
                 }
             },
             onRename: { name in
-                renameSpeaker(id: block.speaker.id, to: name)
+                viewModel.renameSpeaker(id: block.speaker.id, to: name)
             },
             onAssign: { speakerID in
-                assign(block, to: speakerID)
+                viewModel.assign(block, to: speakerID)
             }
         )
-    }
-
-    /// Loads stored profiles for the rename field's suggestions.
-    private func loadProfiles() {
-        guard let store else { return }
-        Task {
-            do {
-                profiles = try await store.fetchAllSnapshots()
-            } catch {
-                Self.logger.error("Loading speaker profiles for suggestions failed: \(error.localizedDescription, privacy: .public)")
-            }
-        }
-    }
-
-    /// Gives one block to speaker `speakerID`, or to a new speaker for `nil`. Speaker memory does
-    /// not change.
-    private func assign(_ block: TranscriptBlock, to speakerID: String?) {
-        guard let updatedTranscript = Self.assign(segmentIDs: Set(block.segmentIDs), to: speakerID, in: transcript, of: session) else { return }
-        transcript = updatedTranscript
-    }
-
-    /// Gives the segments `segmentIDs` to speaker `speakerID`, or to a new speaker for `nil`, and
-    /// writes the result to `session`'s displayed pass. `nil` when the speaker is not in the
-    /// transcript.
-    static func assign(
-        segmentIDs: Set<UUID>,
-        to speakerID: String?,
-        in transcript: Transcript,
-        of session: any TranscribableSession
-    ) -> Transcript? {
-        var base = transcript
-        let targetID: String
-        if let speakerID {
-            guard transcript.speakers.contains(where: { $0.id == speakerID }) else { return nil }
-            targetID = speakerID
-        } else {
-            (base, targetID) = TranscriptSpeakerEditing.addSpeaker(to: transcript)
-        }
-        let updatedTranscript = TranscriptSpeakerEditing.reassign(segmentIDs: segmentIDs, to: targetID, in: base)
-        writeDisplayed(updatedTranscript, to: session)
-        return updatedTranscript
-    }
-
-    /// Merges speaker `id` into `targetID`, then teaches speaker memory as a rename of `id` to the
-    /// target's label would, when the target is named.
-    private func mergeSpeaker(_ id: String, into targetID: String) {
-        let original = transcript
-        guard let updatedTranscript = Self.mergeSpeaker(id, into: targetID, in: original, of: session) else { return }
-        transcript = updatedTranscript
-        guard let store else { return }
-        let source = Self.voiceprintSource(for: id, of: session)
-        let targetSource = Self.voiceprintSource(for: targetID, of: session)
-        Task {
-            do {
-                try await Self.updateSpeakerMemory(
-                    forMerging: id, into: targetID, in: original, source: source, targetSource: targetSource, store: store
-                )
-                loadProfiles()
-            } catch {
-                Self.logger.error("Teaching speaker memory a merge failed: \(error.localizedDescription, privacy: .public)")
-            }
-        }
-    }
-
-    /// Resets speaker `id` to `Speaker N` and removes the voiceprints it taught.
-    private func resetSpeaker(_ id: String) {
-        guard let updatedTranscript = Self.resetSpeaker(id, in: transcript, of: session) else { return }
-        transcript = updatedTranscript
-        guard let store else { return }
-        let source = Self.voiceprintSource(for: id, of: session)
-        Task {
-            do {
-                try await store.forget(source: source)
-                loadProfiles()
-            } catch {
-                Self.logger.error("Removing a reset speaker from speaker memory failed: \(error.localizedDescription, privacy: .public)")
-            }
-        }
-    }
-
-    /// Merges speaker `id` into `targetID` in `transcript` and writes the result to `session`'s
-    /// displayed pass. `nil` when either speaker is missing.
-    static func mergeSpeaker(
-        _ id: String,
-        into targetID: String,
-        in transcript: Transcript,
-        of session: any TranscribableSession
-    ) -> Transcript? {
-        guard let updatedTranscript = TranscriptSpeakerEditing.merge(id, into: targetID, in: transcript) else { return nil }
-        writeDisplayed(updatedTranscript, to: session)
-        return updatedTranscript
-    }
-
-    /// Resets speaker `id` in `transcript` and writes the result to `session`'s displayed pass.
-    /// `nil` when the speaker is missing.
-    static func resetSpeaker(_ id: String, in transcript: Transcript, of session: any TranscribableSession) -> Transcript? {
-        guard let updatedTranscript = TranscriptSpeakerEditing.reset(id, in: transcript) else { return nil }
-        writeDisplayed(updatedTranscript, to: session)
-        return updatedTranscript
-    }
-
-    /// Records in speaker memory that speaker `id` of `transcript`, the transcript before the
-    /// merge, was merged into `targetID`: what `id` taught is removed, and when the target is named
-    /// its profile is taught `id`'s voiceprints under the target's source.
-    static func updateSpeakerMemory(
-        forMerging id: String,
-        into targetID: String,
-        in transcript: Transcript,
-        source: VoiceprintSource,
-        targetSource: VoiceprintSource,
-        store: SpeakerEmbeddingStore
-    ) async throws {
-        let voiceprints = teachableVoiceprints(of: id, in: transcript) ?? []
-        let targetLabel = transcript.speakers.first { $0.id == targetID }?.label
-        let name = targetLabel.flatMap { TranscriptSpeakerEditing.isUnnamed(label: $0) ? nil : $0 }
-        try await store.retarget(from: source, to: targetSource, name: name, voiceprints: voiceprints)
-    }
-
-    private func renameSpeaker(id: String, to newName: String) {
-        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let previousLabel = transcript.speakers.first { $0.id == id }?.label
-        guard !name.isEmpty, name != previousLabel,
-              let updatedTranscript = Self.renameSpeaker(id: id, to: name, in: transcript, of: session)
-        else { return }
-        self.transcript = updatedTranscript
-
-        // Renaming to the label it already has teaches nothing new.
-        guard let store, previousLabel?.lowercased() != name.lowercased() else { return }
-        let source = Self.voiceprintSource(for: id, of: session)
-        Task {
-            do {
-                try await Self.updateSpeakerMemory(forRenaming: id, to: name, in: updatedTranscript, source: source, store: store)
-                loadProfiles()
-            } catch {
-                Self.logger.error("Teaching speaker memory a rename failed: \(error.localizedDescription, privacy: .public)")
-            }
-        }
-    }
-
-    private static let logger = Logger(subsystem: "Scriberman", category: "TranscriptStudyView")
-
-    /// The pass a speaker edit is written to, decided as `writeDisplayed` decides it.
-    static func displayedPass(of session: any TranscribableSession) -> TranscriptPass {
-        session.retranscript != nil ? .retranscript : .transcript
-    }
-
-    /// The source of the voiceprints speaker `id` of `session`'s displayed pass teaches.
-    static func voiceprintSource(for id: String, of session: any TranscribableSession) -> VoiceprintSource {
-        VoiceprintSource(sessionID: session.id, pass: displayedPass(of: session), speakerID: id)
-    }
-
-    /// Speaker `id`'s voiceprints when they can reach speaker memory: present, and in the current
-    /// voiceprint space.
-    static func teachableVoiceprints(of id: String, in transcript: Transcript) -> [[Float]]? {
-        guard transcript.voiceprintSpace == VoiceprintSpace.current,
-              let voiceprints = transcript.speakerVoiceprints?[id]?.filter({ !$0.isEmpty }),
-              !voiceprints.isEmpty
-        else { return nil }
-        return voiceprints
-    }
-
-    /// Teaches speaker memory that speaker `id` is called `name`: the voiceprints taught earlier
-    /// from `source` move to the profile with that name, which is created when absent, with the
-    /// speaker's voiceprints in `transcript`. Nothing changes when the transcript has no voiceprint
-    /// for the speaker or its voiceprints are from another voiceprint space.
-    static func updateSpeakerMemory(
-        forRenaming id: String,
-        to name: String,
-        in transcript: Transcript,
-        source: VoiceprintSource,
-        store: SpeakerEmbeddingStore
-    ) async throws {
-        guard let voiceprints = teachableVoiceprints(of: id, in: transcript) else { return }
-        try await store.teach(name: name, source: source, voiceprints: voiceprints)
-    }
-
-    /// Renames a speaker in `transcript` and writes the result to `session`'s displayed pass.
-    /// Returns the updated transcript, or `nil` when the speaker is not in it.
-    ///
-    /// `session` is the only session written: the caller passes the one the view belongs to.
-    static func renameSpeaker(
-        id: String,
-        to newName: String,
-        in transcript: Transcript,
-        of session: any TranscribableSession
-    ) -> Transcript? {
-        guard let updatedTranscript = TranscriptSpeakerEditing.rename(id, to: newName, in: transcript) else { return nil }
-        writeDisplayed(updatedTranscript, to: session)
-        return updatedTranscript
-    }
-
-    private static func writeDisplayed(_ transcript: Transcript, to session: any TranscribableSession) {
-        if session.retranscript != nil {
-            session.retranscript = transcript
-        } else {
-            session.transcript = transcript
-        }
-        if let recording = session as? RecordingSession {
-            rewriteTranscriptMarkdown(for: recording)
-        }
     }
 
     @ToolbarContentBuilder
@@ -471,33 +264,24 @@ struct TranscriptStudyView: View {
     /// Opens the find bar on the seeded query with the seeded match selected, and scrolls to it.
     ///
     /// Auto-scroll is turned off for the same reason presenting the find bar does: playback
-    /// position must not drag the view away from the match the user came here to read. No playback
-    /// is started — locating text and listening to it are separate intentions.
+    /// position must not drag the view away from the match the user came here to read.
     private func applySearchSeed() {
-        guard let searchSeed, !searchSeed.query.isEmpty else { return }
-
-        searchState.query = searchSeed.query
-        searchState.update(blocks: blocks)
-        if let blockID = searchSeed.blockID {
-            searchState.selectFirstMatch(inBlock: blockID)
-        }
+        guard viewModel.applySearchSeed(searchSeed) else { return }
 
         autoScrollEnabled = false
-        isSearchVisible = true
         scrollTargetID = searchState.currentMatch?.blockID
     }
 
     private func presentSearch() {
         withAnimation {
-            isSearchVisible = true
+            viewModel.presentSearch()
         }
     }
 
     private func dismissSearch() {
-        searchState.query = ""
-        searchState.update(blocks: blocks)
+        viewModel.clearSearch()
         withAnimation {
-            isSearchVisible = false
+            viewModel.isSearchVisible = false
         }
     }
 }

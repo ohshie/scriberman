@@ -269,6 +269,7 @@ struct AppShellView: View {
             } else if detailMode == .study, let transcript = session.displayedTranscript {
                 TranscriptStudyView(
                     session: session,
+                    aiProviderService: aiProviderService,
                     audioPlayerViewModel: audioPlayerViewModel,
                     autoScrollEnabled: $transcriptAutoScrollEnabled,
                     transcript: transcript,
@@ -318,6 +319,7 @@ struct AppShellView: View {
             if detailMode == .study, let transcript = session.displayedTranscript {
                 TranscriptStudyView(
                     session: session,
+                    aiProviderService: aiProviderService,
                     audioPlayerViewModel: audioPlayerViewModel,
                     autoScrollEnabled: $transcriptAutoScrollEnabled,
                     transcript: transcript,
