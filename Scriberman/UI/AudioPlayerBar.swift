@@ -61,6 +61,7 @@ struct AudioPlayerBar: View {
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(viewModel.isPlaying ? "Pause" : "Play")
 
             Slider(
                 value: Binding(
@@ -78,6 +79,8 @@ struct AudioPlayerBar: View {
                 }
             )
             .disabled(viewModel.duration <= 0)
+            .accessibilityLabel("Playback position")
+            .accessibilityValue(formatTime(viewModel.currentTime))
 
             Text("\(formatTime(viewModel.currentTime)) / \(formatTime(viewModel.duration))")
                 .font(.footnote)
@@ -93,6 +96,7 @@ struct AudioPlayerBar: View {
                 }
                 .buttonStyle(.plain)
                 .help("Resume Transcript Auto-Scroll")
+                .accessibilityLabel("Resume auto-scroll")
             }
 
             Button {

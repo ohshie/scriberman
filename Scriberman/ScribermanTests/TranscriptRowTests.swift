@@ -54,7 +54,7 @@ struct TranscriptRowTests {
     func testTheFinishedBlockKeepsItsOwnBehaviour() throws {
         let block = try source("../UI/TranscriptBlockView.swift")
 
-        #expect(block.contains(".onTapGesture {\n            onTap()"))
+        #expect(block.contains(".onTapGesture {\n            onTap?()"))
         #expect(block.contains("SpeakerNameField("))
         #expect(block.contains("highlightedText()"))
     }

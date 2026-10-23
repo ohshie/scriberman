@@ -11,6 +11,7 @@ struct ActiveRecordingDetailView: View {
     /// Whether the pointer is inside the live transcript, which suspends the scroll to the newest
     /// segment.
     @State private var isPointerOverSegments = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(session: RecordingSession, viewModel: NewSessionViewModel, modelContext: ModelContext) {
         self.session = session
@@ -112,7 +113,7 @@ struct ActiveRecordingDetailView: View {
         }
         .onChange(of: viewModel.liveSegments.count) {
             guard !isPointerOverSegments else { return }
-            withAnimation(.easeOut(duration: 0.2)) {
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
                 proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
             }
         }
@@ -152,6 +153,11 @@ struct ActiveRecordingDetailView: View {
                 .textSelection(.enabled)
                 .foregroundStyle(segment.isFinal ? .primary : .secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .contextMenu {
+            Button("Copy") {
+                copyToPasteboard(segment.text)
+            }
         }
     }
 
