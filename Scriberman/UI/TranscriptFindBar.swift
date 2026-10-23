@@ -62,9 +62,7 @@ struct TranscriptFindBar: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.bar)
-        .clipShape(Capsule())
-        .shadow(radius: 8, y: 2)
+        .glassEffect(.regular, in: .capsule)
         .onAppear {
             isSearchFieldFocused = true
         }

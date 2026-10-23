@@ -57,7 +57,7 @@ struct AITransformationDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(20)
         }
-        .safeAreaInset(edge: .top) {
+        .safeAreaBar(edge: .top) {
             Toggle(isOn: $showRawMarkdown) {
                 Text("Raw Markdown")
                     .font(.subheadline.weight(.medium))
@@ -65,7 +65,6 @@ struct AITransformationDetailView: View {
             .toggleStyle(.switch)
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
-            .background(.bar)
         }
         .task {
             viewModel.loadPrompts()

@@ -164,7 +164,7 @@ struct TranscriptStudyView: View {
                 }
             }
         }
-        .safeAreaInset(edge: .top) {
+        .safeAreaBar(edge: .top) {
             if showRawMarkdownToggle {
                 Toggle(isOn: $showRawMarkdown) {
                     Text("Raw Markdown")
@@ -175,10 +175,9 @@ struct TranscriptStudyView: View {
                 .padding(.vertical, 10)
                 // Full width: sized to the toggle, the bar showed as a patch under the toolbar.
                 .frame(maxWidth: .infinity)
-                .background(.bar)
             }
         }
-        .safeAreaInset(edge: .bottom) {
+        .safeAreaBar(edge: .bottom) {
             if isSearchVisible {
                 TranscriptFindBar(searchState: searchState) {
                     dismissSearch()

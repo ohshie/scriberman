@@ -31,8 +31,7 @@ struct AudioPlayerBar: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-                .background(.black.opacity(0.85), in: Capsule())
-                .environment(\.colorScheme, .dark)
+                .glassEffect(.regular, in: .capsule)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 12)
             }

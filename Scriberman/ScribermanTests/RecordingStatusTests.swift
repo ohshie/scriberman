@@ -332,7 +332,7 @@ struct RecordingStatusTests {
         let source = try jobsViewSource()
         // An inset on the whole stack, so it is there whatever the branch inside renders. It is
         // also what stops rows scrolling up behind the field and staying there.
-        #expect(source.contains(".safeAreaInset(edge: .top, spacing: 0) {"))
+        #expect(source.contains(".safeAreaBar(edge: .top, spacing: 0) {"))
         let branch = try #require(source.range(of: "if items.isEmpty && pendingSession == nil"))
         let insetBody = source[branch.upperBound...]
         #expect(insetBody.contains("searchBar"))
@@ -901,7 +901,6 @@ struct RecordingSessionTests {
         let blockSource = try sourceForFile(named: "TranscriptBlockView.swift")
         let rowSource = try sourceForFile(named: "TranscriptRowView.swift")
         let previewSource = try sourceForFile(named: "TranscriptPreviewView.swift")
-        let studySource = try sourceForFile(named: "TranscriptStudyView.swift")
 
         // The card lives in the shared row now, drawn the same way for a finished block and a live
         // segment. The block still owns the text inside it.
@@ -913,7 +912,6 @@ struct RecordingSessionTests {
         #expect(!(blockSource.contains("Color.black")))
 
         #expect(previewSource.contains(".background(.thinMaterial"))
-        #expect(studySource.contains(".background(.bar)"))
     }
 
     private func transcriptDetailSource() throws -> String {
