@@ -67,6 +67,8 @@ final class NewSessionViewModel {
     /// Set when a recording was stopped because it never started writing audio. The UI observes
     /// this to present the failure; the wording is owned by the view, not by this model.
     var didFailToStartRecording = false
+    /// The session whose start failed, kept while the failure panel is up so Open can show it.
+    private(set) var failedStartSessionID: UUID?
     /// How many live transcript segments of the last stopped recording could not be saved, or 0.
     /// Set by stop after its final save fails; the UI observes it, and the wording is the view's.
     var unsavedTranscriptSegmentCount = 0
@@ -788,12 +790,14 @@ final class NewSessionViewModel {
 
         state = .idle
         didFailToStartRecording = true
+        failedStartSessionID = sessionID
         onRecordingStartFailurePresentationChanged?(true)
     }
 
     /// Dismisses the failure panel. Nothing was captured, so there is no state to restore.
     func dismissRecordingStartFailure() {
         didFailToStartRecording = false
+        failedStartSessionID = nil
         onRecordingStartFailurePresentationChanged?(false)
     }
 
@@ -950,6 +954,7 @@ final class NewSessionViewModel {
 
         _ = await stopRecording(context: context)
         didFailToStartRecording = true
+        failedStartSessionID = sessionID
         onRecordingStartFailurePresentationChanged?(true)
     }
 

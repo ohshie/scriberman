@@ -14,6 +14,7 @@ struct AppShellView: View {
     @Environment(AppState.self) private var appState
     @Environment(AIProviderService.self) private var aiProviderService
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.controlActiveState) private var controlActiveState
     @Query(sort: \RecordingSession.createdAt, order: .reverse) private var recordingSessions: [RecordingSession]
     @Query(sort: \ImportedSession.createdAt, order: .reverse) private var importedSessions: [ImportedSession]
     @State private var selectedSession: JobsViewModel.SessionListItem?
@@ -146,7 +147,6 @@ struct AppShellView: View {
             Task {
                 await appState.calendarSuggestions.refresh()
             }
-            focusPendingSessionIfRequested()
         }
 
         .onChange(of: selectedSession) { oldValue, newValue in
@@ -195,41 +195,36 @@ struct AppShellView: View {
                 transcriptAutoScrollEnabled = true
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: AppDelegate.focusPendingSessionNotification)) { _ in
-            focusPendingSessionIfRequested()
+        // A request from outside any window is shown by the key main window. Each of these is a
+        // moment the request may have become showable: it arrived, this window became key, or the
+        // session it names reached this window's query.
+        .onAppear { showRequestedSession() }
+        .onChange(of: appState.sessionRequest) { showRequestedSession() }
+        .onChange(of: controlActiveState) { showRequestedSession() }
+        .onChange(of: recordingSessions.map(\.id)) { showRequestedSession() }
+        .onChange(of: appState.pendingSession?.id) { showRequestedSession() }
+    }
+
+    private func showRequestedSession() {
+        guard controlActiveState == .key else {
+            return
         }
-        .onReceive(NotificationCenter.default.publisher(for: AppDelegate.focusRecordingSessionNotification)) { notification in
-            guard let sessionID = notification.userInfo?["sessionID"] as? UUID else {
-                return
-            }
-            focusRecordingSession(sessionID: sessionID)
+
+        let request = appState.consumeSessionRequest { request in
+            sessionItem(for: request) != nil
+        }
+        if let request, let item = sessionItem(for: request) {
+            selectedSession = item
         }
     }
 
-    private func focusPendingSessionIfRequested() {
-        guard appState.consumePendingSessionFocusRequest() else {
-            return
+    private func sessionItem(for request: AppState.SessionRequest) -> JobsViewModel.SessionListItem? {
+        switch request {
+        case .pending:
+            return appState.pendingSession.map { .pending($0) }
+        case .recording(let sessionID):
+            return recordingSessions.first { $0.id == sessionID }.map { .recording($0) }
         }
-
-        guard let pendingSession = appState.pendingSession else {
-            return
-        }
-
-        selectedSession = .pending(pendingSession)
-    }
-
-    private func focusRecordingSession(sessionID: UUID, retriesRemaining: Int = 3) {
-        guard let session = recordingSessions.first(where: { $0.id == sessionID }) else {
-            if retriesRemaining > 0 {
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(120))
-                    focusRecordingSession(sessionID: sessionID, retriesRemaining: retriesRemaining - 1)
-                }
-            }
-            return
-        }
-
-        selectedSession = .recording(session)
     }
 
     @ViewBuilder

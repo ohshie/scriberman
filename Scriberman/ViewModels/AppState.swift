@@ -51,7 +51,9 @@ final class AppState {
     /// was last shown. Set by the places that send people to Settings for one specific thing.
     var requestedSettingsTab: SettingsTab?
     var sessionToTrim: RecordingSession?
-    private var shouldFocusPendingSessionFromMenuBar = false
+    /// A session asked for from outside a window (menu bar extra, calendar suggestion, start
+    /// failure panel), waiting for the key main window to show it. A newer request replaces it.
+    private(set) var sessionRequest: SessionRequest?
     private(set) var workspace: Workspace?
     private(set) var workspaceErrorMessage: String?
     var isBootstrapping = true
@@ -254,14 +256,23 @@ final class AppState {
         newSessionViewModel.reset()
     }
 
-    func requestPendingSessionFocusFromMenuBar() {
-        shouldFocusPendingSessionFromMenuBar = true
+    enum SessionRequest: Equatable {
+        case pending
+        case recording(UUID)
     }
 
-    func consumePendingSessionFocusRequest() -> Bool {
-        let shouldFocus = shouldFocusPendingSessionFromMenuBar
-        shouldFocusPendingSessionFromMenuBar = false
-        return shouldFocus
+    func requestSession(_ request: SessionRequest) {
+        sessionRequest = request
+    }
+
+    /// Hands the request to the window asking, if that window can show the session now. Otherwise
+    /// the request stays queued, so a session saved a moment after the request is still shown.
+    func consumeSessionRequest(isAvailable: (SessionRequest) -> Bool) -> SessionRequest? {
+        guard let request = sessionRequest, isAvailable(request) else {
+            return nil
+        }
+        sessionRequest = nil
+        return request
     }
 
     func bootstrapWorkspace() async {

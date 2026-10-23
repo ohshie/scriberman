@@ -426,15 +426,60 @@ final class AppStateTests {
     }
 
     @Test
-    func testPendingSessionFocusRequestConsumesOnce() {
-        let permissionService = MockPermissionService()
-        let services = makeServiceContainer(permissionService: permissionService)
-        let appState = AppState(services: services)
+    func sessionRequestIsConsumedOnce() {
+        let appState = AppState(services: makeServiceContainer(permissionService: MockPermissionService()))
+        let id = UUID()
 
-        #expect(appState.consumePendingSessionFocusRequest() == false)
-        appState.requestPendingSessionFocusFromMenuBar()
-        #expect(appState.consumePendingSessionFocusRequest())
-        #expect(appState.consumePendingSessionFocusRequest() == false)
+        #expect(appState.consumeSessionRequest(isAvailable: { _ in true }) == nil)
+        appState.requestSession(.recording(id))
+        #expect(appState.consumeSessionRequest(isAvailable: { _ in true }) == .recording(id))
+        #expect(appState.consumeSessionRequest(isAvailable: { _ in true }) == nil)
+        #expect(appState.sessionRequest == nil)
+    }
+
+    @Test
+    func sessionRequestForUnavailableSessionStaysPendingUntilItAppears() {
+        let appState = AppState(services: makeServiceContainer(permissionService: MockPermissionService()))
+        let id = UUID()
+        var visible: Set<UUID> = []
+        let isAvailable: (AppState.SessionRequest) -> Bool = { request in
+            guard case let .recording(requestedID) = request else { return false }
+            return visible.contains(requestedID)
+        }
+
+        appState.requestSession(.recording(id))
+        #expect(appState.consumeSessionRequest(isAvailable: isAvailable) == nil)
+        #expect(appState.sessionRequest == .recording(id))
+
+        visible.insert(id)
+        #expect(appState.consumeSessionRequest(isAvailable: isAvailable) == .recording(id))
+        #expect(appState.sessionRequest == nil)
+    }
+
+    @Test
+    func newerSessionRequestReplacesOlder() {
+        let appState = AppState(services: makeServiceContainer(permissionService: MockPermissionService()))
+        let older = UUID()
+        let newer = UUID()
+
+        appState.requestSession(.recording(older))
+        appState.requestSession(.recording(newer))
+        #expect(appState.consumeSessionRequest(isAvailable: { _ in true }) == .recording(newer))
+        #expect(appState.consumeSessionRequest(isAvailable: { _ in true }) == nil)
+
+        appState.requestSession(.recording(older))
+        appState.requestSession(.pending)
+        #expect(appState.consumeSessionRequest(isAvailable: { _ in true }) == .pending)
+    }
+
+    @Test
+    func sessionRequestWaitsWhileNoWindowConsumesIt() {
+        let appState = AppState(services: makeServiceContainer(permissionService: MockPermissionService()))
+
+        appState.requestSession(.pending)
+
+        #expect(appState.sessionRequest == .pending)
+        #expect(appState.consumeSessionRequest(isAvailable: { _ in true }) == .pending)
     }
 
     @Test

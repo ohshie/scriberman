@@ -1100,6 +1100,25 @@ struct NewSessionViewModelTests {
         #expect(fixture.viewModel.didFailToStartRecording)
     }
 
+    /// The failure panel's Open needs to know which session failed, so the window can show it.
+    @Test
+    @MainActor
+    func testFailedStartRemembersTheSessionUntilDismissed() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.viewModel.startVerificationDelay = .milliseconds(1)
+        fixture.recordingService.frameCountQueue = [(mic: 0, app: nil)]
+        fixture.recordingService.restartAudioCaptureResult = false
+
+        _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
+        await waitUntil { fixture.viewModel.didFailToStartRecording }
+
+        #expect(fixture.viewModel.failedStartSessionID == fixture.recordingService.startReturns)
+
+        fixture.viewModel.dismissRecordingStartFailure()
+        #expect(fixture.viewModel.failedStartSessionID == nil)
+    }
+
     /// The retry keeps the same session: no second session is persisted.
     @Test
     @MainActor

@@ -4,9 +4,6 @@ import SwiftData
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
-    static let focusPendingSessionNotification = Notification.Name("Scriberman.FocusPendingSession")
-    static let focusRecordingSessionNotification = Notification.Name("Scriberman.FocusRecordingSession")
-
     weak var appState: AppState?
     var modelContext: ModelContext?
     /// Floating "Still in progress. Stop?" panel for idle recordings.
@@ -138,7 +135,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             "showMainWindow activationPolicyChanged=\(changed) currentPolicy=\(String(describing: NSApp.activationPolicy), privacy: .public)"
         )
         syncStatusItemVisibilityFromSettings()
-        NotificationCenter.default.post(name: Self.focusPendingSessionNotification, object: nil)
     }
 
     private func showFirstTimeTrayAlert(window: NSWindow) {
@@ -439,11 +435,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 app: selectedApp,
                 context: modelContext
             ) {
-                NotificationCenter.default.post(
-                    name: Self.focusRecordingSessionNotification,
-                    object: nil,
-                    userInfo: ["sessionID": session.id]
-                )
+                appState.requestSession(.recording(session.id))
             }
         }
     }
@@ -462,11 +454,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
         Task {
             if let session = await appState.newSessionViewModel.stopRecording(context: modelContext) {
-                NotificationCenter.default.post(
-                    name: Self.focusRecordingSessionNotification,
-                    object: nil,
-                    userInfo: ["sessionID": session.id]
-                )
+                appState.requestSession(.recording(session.id))
             }
         }
     }
@@ -649,7 +637,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         guard result == .prepared else { return }
         appState.newSessionViewModel.refreshAudioDevicesOnPanelExpanded()
-        appState.requestPendingSessionFocusFromMenuBar()
+        appState.requestSession(.pending)
         showMainWindow()
     }
 
@@ -690,6 +678,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             }
             recordingStartFailurePrompt.show(
                 onOpen: { [weak self] in
+                    if let sessionID = self?.appState?.newSessionViewModel.failedStartSessionID {
+                        self?.appState?.requestSession(.recording(sessionID))
+                    }
                     NSApp.activate(ignoringOtherApps: true)
                     self?.mainWindow?.makeKeyAndOrderFront(nil)
                     Task { @MainActor [weak self] in
