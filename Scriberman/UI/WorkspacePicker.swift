@@ -3,7 +3,7 @@ import Foundation
 
 enum WorkspacePicker {
     @MainActor
-    static func chooseWorkspaceFolder() -> URL? {
+    static func chooseWorkspaceFolder() async -> URL? {
         let panel = NSOpenPanel()
         panel.title = "Select Scriberman Workspace"
         panel.message = "Recommended: ~/Documents/Scriberman"
@@ -17,6 +17,6 @@ enum WorkspacePicker {
             .appendingPathComponent("Scriberman", isDirectory: true)
         panel.directoryURL = defaultURL
 
-        return panel.runModal() == .OK ? panel.url : nil
+        return await runAttachedToWindow(panel) == .OK ? panel.url : nil
     }
 }

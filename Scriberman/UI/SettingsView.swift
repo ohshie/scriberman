@@ -412,9 +412,7 @@ struct SettingsView: View {
 
     private func pickWorkspaceAndApply() {
         Task {
-            guard let url = await MainActor.run(body: {
-                WorkspacePicker.chooseWorkspaceFolder()
-            }) else {
+            guard let url = await WorkspacePicker.chooseWorkspaceFolder() else {
                 return
             }
 
