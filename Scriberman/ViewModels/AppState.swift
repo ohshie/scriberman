@@ -51,6 +51,9 @@ final class AppState {
     /// was last shown. Set by the places that send people to Settings for one specific thing.
     var requestedSettingsTab: SettingsTab?
     var sessionToTrim: RecordingSession?
+    /// SwiftUI's `openSettings` action, registered by `ContentView`. Lets AppKit-hosted UI such as
+    /// the dictation HUD open the Settings scene.
+    @ObservationIgnored var openSettingsAction: (() -> Void)?
     private var shouldFocusPendingSessionFromMenuBar = false
     private(set) var workspace: Workspace?
     private(set) var workspaceErrorMessage: String?
@@ -254,6 +257,10 @@ final class AppState {
         newSessionViewModel.reset()
     }
 
+    func openSettings() {
+        openSettingsAction?()
+    }
+
     func requestPendingSessionFocusFromMenuBar() {
         shouldFocusPendingSessionFromMenuBar = true
     }
@@ -354,7 +361,7 @@ final class AppState {
         hotkeyRegistrar.onKeyDown = { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, requiredOnboardingStep == nil, !isChangingWorkspace else { return }
-                dictationHUD.show(for: dictationService)
+                dictationHUD.show(for: dictationService) { [weak self] in self?.openSettings() }
                 let deviceID = audioDeviceService.availableDevices.first {
                     $0.uid == menuBarSettings.lastUsedMicUID
                 }?.id

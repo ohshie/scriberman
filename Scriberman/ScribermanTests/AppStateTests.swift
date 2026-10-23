@@ -16,6 +16,17 @@ final class AppStateTests {
     }
 
     @Test
+    func testOpenSettingsCallsRegisteredAction() {
+        let appState = AppState(services: makeServiceContainer(permissionService: MockPermissionService()))
+        var calls = 0
+        appState.openSettingsAction = { calls += 1 }
+
+        appState.openSettings()
+
+        #expect(calls == 1)
+    }
+
+    @Test
     func testIsBootstrappingIsTrueInitially() {
         let appState = AppState(services: makeServiceContainer(permissionService: MockPermissionService()))
         #expect(appState.isBootstrapping)

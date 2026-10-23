@@ -127,8 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
         let changed = NSApp.setActivationPolicy(.regular)
         NSApp.unhide(nil)
-        _ = NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         if window.isMiniaturized {
             window.deminiaturize(nil)
         }
@@ -637,7 +636,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         guard let appState else { return }
         var result = await appState.prepareCalendarSession(id)
         if case let .needsTitleReplacement(draftID, title) = result {
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.activate()
             let alert = NSAlert()
             alert.alertStyle = .informational
             alert.messageText = "Replace Session Title?"
@@ -690,8 +689,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             }
             recordingStartFailurePrompt.show(
                 onOpen: { [weak self] in
-                    NSApp.activate(ignoringOtherApps: true)
-                    self?.mainWindow?.makeKeyAndOrderFront(nil)
+                    self?.showMainWindow()
                     Task { @MainActor [weak self] in
                         self?.appState?.newSessionViewModel.dismissRecordingStartFailure()
                     }
