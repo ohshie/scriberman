@@ -46,6 +46,14 @@ struct StatusTagViewTests {
         #expect(source.contains("Image(systemName: \"xmark\")"))
     }
 
+    /// The Pending pill is list content, so it carries a plain fill and no Liquid Glass.
+    @Test(.tags(.sourceLint))
+    func pendingPillHasPlainFillNotGlass() throws {
+        let source = try statusTagViewSource()
+        #expect(source.contains("Capsule().fill(Color(\"StatusPendingColor\")"))
+        #expect(!source.contains(".glassEffect("))
+    }
+
     @Test
     func downloadProgressHandlerNormalizesRepoDownloadsByPhaseWeight() {
         // Repo downloads (ASR/VAD/diarizer) emit fractions in [0, 0.5]: the

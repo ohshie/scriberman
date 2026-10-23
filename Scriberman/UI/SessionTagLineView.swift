@@ -5,8 +5,8 @@ import SwiftUI
 /// Replaces `TagDotsView`, which showed colour in the row's leading column with no label — you could
 /// see that a recording was tagged, not what with.
 ///
-/// Each tag is a coloured dot and its name inside a capsule with the same glass treatment the
-/// Pending status capsule uses.
+/// Each tag is a coloured dot and its name inside a capsule filled the same way as the Pending
+/// status capsule.
 ///
 /// The capsule is not decoration. Without a backdrop the chip sits directly on the list's selection
 /// fill, and a bare dot plus text does not survive that — a tag coloured near the accent disappears
@@ -15,9 +15,11 @@ import SwiftUI
 ///
 /// The name stays plain text rather than taking the tag's colour, because tag colours are random
 /// and user-chosen; some would be unreadable as text. The colour lives in the dot and the capsule's
-/// tint, where it cannot hurt legibility.
+/// fill, where it cannot hurt legibility.
 struct SessionTagLineView: View {
     let tags: [RecordingTag]
+
+    @Environment(\.colorSchemeContrast) private var contrast
 
     private static let dotSize: CGFloat = 7
     private static let dotLabelSpacing: CGFloat = 5
@@ -44,14 +46,15 @@ struct SessionTagLineView: View {
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    // The chip needs its own backdrop, and glass alone does not give it one: it
-                    // takes its material from what is behind it, so the chip reads on a selected
-                    // row and disappears on a plain one — the same tag drawn two ways in one list.
-                    // A faint tint of the tag's own colour sits under the glass, so the capsule is
-                    // there in both states and the glass still does its work over the selection.
+                    // A faint fill of the tag's own colour, no Liquid Glass: the chip is list
+                    // content, and glass is for controls and navigation. Increase Contrast adds an
+                    // outline.
                     .background(Capsule().fill(Color(tagHex: tag.colorHex).opacity(0.18)))
-                    .glassEffect(.regular, in: Capsule())
-                    .tint(Color(tagHex: tag.colorHex))
+                    .overlay {
+                        if contrast == .increased {
+                            Capsule().strokeBorder(Color(tagHex: tag.colorHex))
+                        }
+                    }
                     // Later tags give up space before earlier ones, so the first tag stays legible
                     // instead of every name being shortened equally.
                     .layoutPriority(priority(for: tag))

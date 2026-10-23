@@ -3,6 +3,8 @@ import SwiftUI
 struct StatusTagView: View {
     let status: RecordingStatus
 
+    @Environment(\.colorSchemeContrast) private var contrast
+
     @ViewBuilder
     var body: some View {
         switch status {
@@ -27,8 +29,14 @@ struct StatusTagView: View {
                 .foregroundStyle(Color("StatusPendingColor"))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
-                .glassEffect(.regular, in: Capsule())
-                .tint(Color("StatusPendingColor"))
+                // Plain fill, no Liquid Glass: the pill is list content, and glass is for controls
+                // and navigation. Increase Contrast adds an outline.
+                .background(Capsule().fill(Color("StatusPendingColor").opacity(0.18)))
+                .overlay {
+                    if contrast == .increased {
+                        Capsule().strokeBorder(Color("StatusPendingColor"))
+                    }
+                }
         }
     }
 }

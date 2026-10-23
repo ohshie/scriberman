@@ -218,14 +218,13 @@ struct RecordingStatusTests {
         #expect(viewModel.contains("TimeFormatter.displayFormat(seconds: Float(session.duration))"))
     }
 
-    /// Glass takes its material from what is behind it, so without a fill of its own the chip read
-    /// on a selected row and vanished on a plain one.
+    /// The chip is list content, so it carries a plain fill of its own and no Liquid Glass.
     @Test(.tags(.sourceLint))
     func testTheTagChipCarriesItsOwnBackdrop() throws {
         let source = try readSource(relativePathFromTests: "../UI/SessionTagLineView.swift")
 
         #expect(source.contains(".background(Capsule().fill(Color(tagHex: tag.colorHex).opacity(0.18)))"))
-        #expect(source.contains(".glassEffect(.regular, in: Capsule())"))
+        #expect(!source.contains(".glassEffect("))
     }
 
     private func readSource(relativePathFromTests: String) throws -> String {
@@ -392,12 +391,12 @@ struct RecordingStatusTests {
     @Test(.tags(.sourceLint))
     func testEachTagChipHasItsOwnBackdrop() throws {
         let source = try tagLineSource()
-        #expect(source.contains("glassEffect(.regular, in: Capsule())"))
-        #expect(source.contains(".tint(Color(tagHex: tag.colorHex))"))
+        #expect(source.contains("Capsule().fill(Color(tagHex: tag.colorHex)"))
+        #expect(!source.contains(".glassEffect("))
     }
 
     /// Tag colours are random and user-chosen, so some would be unreadable as text. Colour stays in
-    /// the dot and the tint.
+    /// the dot and the fill.
     @Test(.tags(.sourceLint))
     func testTheTagNameIsNotDrawnInTheTagColour() throws {
         let source = try tagLineSource()
