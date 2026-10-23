@@ -636,13 +636,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             alert.informativeText = "Session will be named “\(title)”."
             alert.addButton(withTitle: "Replace")
             alert.addButton(withTitle: "Keep Current")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            guard await runReplaceTitleAlert(alert) == .alertFirstButtonReturn else { return }
             result = await appState.confirmCalendarTitleReplacement(id, draftID: draftID)
         }
         guard result == .prepared else { return }
         appState.newSessionViewModel.refreshAudioDevicesOnPanelExpanded()
         appState.requestPendingSessionFocusFromMenuBar()
         showMainWindow()
+    }
+
+    /// Attaches the alert to the main window while it is on screen; with the window closed or in
+    /// the menu bar, runs it on its own.
+    private func runReplaceTitleAlert(_ alert: NSAlert) async -> NSApplication.ModalResponse {
+        guard let window = resolveMainWindow(), window.isVisible, !window.isMiniaturized else {
+            return alert.runModal()
+        }
+        return await alert.beginSheetModal(for: window)
     }
 
     func wireIdleSessionPrompt() {

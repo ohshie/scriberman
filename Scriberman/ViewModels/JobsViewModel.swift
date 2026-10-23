@@ -96,7 +96,7 @@ final class JobsViewModel {
     private let audioImportService: AudioImportService
     private let transcriptExportService: TranscriptExportService
     private let markdownRenderer: MarkdownRenderer
-    private let savePanelPresenter: @MainActor (_ suggestedName: String) -> URL?
+    private let savePanelPresenter: @MainActor (_ suggestedName: String) async -> URL?
     private let saveContext: @MainActor (ModelContext) throws -> Void
     private let logger = Logger(subsystem: "Scriberman", category: "JobsViewModel")
 
@@ -115,7 +115,7 @@ final class JobsViewModel {
         audioImportService: AudioImportService,
         transcriptExportService: TranscriptExportService = TranscriptExportService(),
         markdownRenderer: MarkdownRenderer = MarkdownRenderer(),
-        savePanelPresenter: @escaping @MainActor (_ suggestedName: String) -> URL? = JobsViewModel.defaultSavePanelPresenter(suggestedName:),
+        savePanelPresenter: @escaping @MainActor (_ suggestedName: String) async -> URL? = JobsViewModel.defaultSavePanelPresenter(suggestedName:),
         saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() }
     ) {
         self.workspaceService = workspaceService
@@ -702,7 +702,7 @@ final class JobsViewModel {
 
         let suggestedName = markdownRenderer.defaultFileName(for: session.title)
 
-        guard let destinationURL = savePanelPresenter(suggestedName) else {
+        guard let destinationURL = await savePanelPresenter(suggestedName) else {
             return
         }
 
@@ -721,8 +721,8 @@ final class JobsViewModel {
         return await deleteRecord(session, folder: folder, context: context)
     }
 
-    private static func defaultSavePanelPresenter(suggestedName: String) -> URL? {
-        presentMarkdownSavePanel(title: "Export Transcript", suggestedName: suggestedName)
+    private static func defaultSavePanelPresenter(suggestedName: String) async -> URL? {
+        await presentMarkdownSavePanel(title: "Export Transcript", suggestedName: suggestedName)
     }
 
     private static func isAudioURL(_ url: URL) -> Bool {

@@ -447,11 +447,10 @@ struct AppShellView: View {
         panel.canChooseFiles = true
         panel.allowedContentTypes = [.audio]
 
-        guard panel.runModal() == .OK else {
-            return
-        }
-
         Task {
+            guard await runAttachedToWindow(panel) == .OK else {
+                return
+            }
             let failed = await appState.jobsViewModel.importAudio(urls: panel.urls, context: modelContext)
             appState.discardPendingSession()
             if !failed.isEmpty {
@@ -656,14 +655,16 @@ struct AppShellView: View {
             sessionTitle: session.title,
             promptName: transformation.promptName
         )
-        guard let destinationURL = presentMarkdownSavePanel(title: "Export Transformation", suggestedName: suggestedName) else {
-            return
-        }
+        Task { @MainActor in
+            guard let destinationURL = await presentMarkdownSavePanel(title: "Export Transformation", suggestedName: suggestedName) else {
+                return
+            }
 
-        do {
-            try transformation.resultText.write(to: destinationURL, atomically: true, encoding: .utf8)
-        } catch {
-            studyActionErrorMessage = error.localizedDescription
+            do {
+                try transformation.resultText.write(to: destinationURL, atomically: true, encoding: .utf8)
+            } catch {
+                studyActionErrorMessage = error.localizedDescription
+            }
         }
     }
 }
