@@ -17,7 +17,7 @@ struct TranscriptBlockView: View {
         var isRenaming: Bool
         /// Stored profiles the rename field suggests.
         var profiles: [SpeakerProfileSnapshot]
-        /// The transcript's other speakers, with their display colours, for "assign this block to".
+        /// The transcript's other speakers, with their display colours, for "Assign to Speaker".
         var otherSpeakers: [TranscriptSpeaker]
         var onBeginRename: () -> Void
         var onEndRename: () -> Void
@@ -113,10 +113,10 @@ struct TranscriptBlockView: View {
             copyToPasteboard(block.text)
         }
         Divider()
-        Button("rename speaker") {
+        Button("Rename Speaker…") {
             speakerEditing.onBeginRename()
         }
-        Menu("assign this block to") {
+        Menu("Assign to Speaker") {
             ForEach(speakerEditing.otherSpeakers) { speaker in
                 Button {
                     speakerEditing.onAssign(speaker.id)
@@ -130,7 +130,7 @@ struct TranscriptBlockView: View {
                 }
             }
             Divider()
-            Button("new speaker") {
+            Button("New Speaker") {
                 speakerEditing.onAssign(nil)
             }
         }

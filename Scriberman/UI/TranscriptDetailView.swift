@@ -13,6 +13,8 @@ struct TranscriptDetailView: View {
     let onOpenTransformation: ((UUID) -> Void)?
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.openSettings) private var openSettings
+    @Environment(AppState.self) private var appState
     @State private var showingDeleteConfirmation = false
     @State private var showingRestoreConfirmation = false
     @State private var isRestoringOriginal = false
@@ -105,17 +107,17 @@ struct TranscriptDetailView: View {
                 Button(role: .destructive) {
                     showingDeleteConfirmation = true
                 } label: {
-                    Label("Delete Entry", systemImage: "trash")
+                    Label("Delete", systemImage: "trash")
                 }
             }
         }
-        .alert("Delete Entry", isPresented: $showingDeleteConfirmation) {
-            Button("Delete Entry", role: .destructive) {
+        .alert("Delete “\(session.title)”?", isPresented: $showingDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
                 onDelete()
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This permanently deletes the selected session.")
+            Text("This permanently deletes the session and its files.")
         }
         .restoreOriginalConfirmation(isPresented: $showingRestoreConfirmation) {
             restoreOriginal()
@@ -166,8 +168,10 @@ struct TranscriptDetailView: View {
     private var transformMenu: some View {
         Menu {
             if viewModel.prompts.isEmpty {
-                Button("Add prompts in Settings") {}
-                    .disabled(true)
+                Button("Open AI Settings") {
+                    appState.requestedSettingsTab = .ai
+                    openSettings()
+                }
             } else {
                 if viewModel.shouldWarnAboutTranscriptLength {
                     Section {

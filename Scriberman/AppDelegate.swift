@@ -9,7 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     weak var appState: AppState?
     var modelContext: ModelContext?
-    /// Floating "Still in progress. Stop?" panel for idle recordings.
+    /// Floating "Stop this recording?" panel for idle recordings.
     private let idleSessionPrompt = IdleSessionPromptController()
     /// Floating "Recording failed." panel for a recording that never started writing audio.
     private let recordingStartFailurePrompt = RecordingStartFailureController()

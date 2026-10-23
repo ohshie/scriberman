@@ -471,7 +471,7 @@ struct RecordingStatusTests {
             encoding: .utf8
         )
         #expect(detail.contains("showingDeleteConfirmation = true"))
-        #expect(detail.contains("alert(\"Delete Entry\", isPresented: $showingDeleteConfirmation)"))
+        #expect(detail.contains("alert(\"Delete “\\(session.title)”?\", isPresented: $showingDeleteConfirmation)"))
         #expect(detail.contains("role: .destructive"))
     }
 
@@ -852,7 +852,8 @@ struct RecordingSessionTests {
         #expect(source.contains("await viewModel.runTransformation()"))
         #expect(source.contains("AITransformationPreviewCard("))
         #expect(source.contains("SkeletonView()"))
-        #expect(source.contains("Add prompts in Settings"))
+        #expect(source.contains("Button(\"Open AI Settings\")"))
+        #expect(source.contains("appState.requestedSettingsTab = .ai"))
         #expect(source.contains("shouldWarnAboutTranscriptLength"))
         #expect(source.contains("copyToPasteboard(latestTransformation.resultText)"))
         #expect(source.contains("latestTransformation.resultText"))

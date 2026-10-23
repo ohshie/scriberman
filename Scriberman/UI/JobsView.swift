@@ -81,7 +81,7 @@ struct JobsView: View {
             searchBar
                 .background(.bar)
         }
-        .navigationTitle("Jobs")
+        .navigationTitle("Sessions")
         .task {
             await viewModel.refresh()
         }

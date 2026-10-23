@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Owns the floating "Still in progress. Stop?" panel.
+/// Owns the floating "Stop this recording?" panel.
 ///
 /// The panel deliberately replaces a user notification: notification banner-vs-alert style
 /// is a user preference the app cannot force, so a banner could silently auto-dismiss to
