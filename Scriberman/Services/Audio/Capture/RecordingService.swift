@@ -1295,9 +1295,7 @@ actor RecordingService: RecordingServiceProtocol {
     }
 
     private func makeSessionTitle(createdAt: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM dd, HH:mm"
-        return "Recording \(formatter.string(from: createdAt))"
+        "Recording \(TimeFormatter.displayMonthDayTime(createdAt))"
     }
 
     private func cleanupRecordingState(deleteScreenTmpVideo: Bool = true) async {

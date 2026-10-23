@@ -42,7 +42,7 @@ struct ActiveRecordingDetailView: View {
                 )
                     .frame(height: 110)
 
-                Text(durationText(currentDuration))
+                Text(TimeFormatter.displayFormat(seconds: Float(currentDuration)))
                     .font(.title3.monospacedDigit())
                     .foregroundStyle(.secondary)
 
@@ -156,13 +156,6 @@ struct ActiveRecordingDetailView: View {
                 .foregroundStyle(segment.isFinal ? .primary : .secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-    }
-
-    private func durationText(_ duration: TimeInterval) -> String {
-        let totalSeconds = max(0, Int(duration.rounded(.down)))
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        return String(format: "%02d:%02d", minutes, seconds)
     }
 
     private var editingTitle: Binding<String> {

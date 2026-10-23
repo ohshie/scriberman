@@ -78,7 +78,7 @@ struct AudioPlayerBar: View {
             )
             .disabled(viewModel.duration <= 0)
 
-            Text("\(formatTime(viewModel.currentTime)) / \(formatTime(viewModel.duration))")
+            Text("\(TimeFormatter.displayFormat(seconds: Float(viewModel.currentTime))) / \(TimeFormatter.displayFormat(seconds: Float(viewModel.duration)))")
                 .font(.footnote)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
@@ -110,17 +110,6 @@ struct AudioPlayerBar: View {
             .opacity(0)
             .allowsHitTesting(false)
         }
-    }
-
-    private func formatTime(_ seconds: Double) -> String {
-        guard seconds.isFinite, seconds > 0 else {
-            return "0:00"
-        }
-
-        let totalSeconds = Int(seconds.rounded(.down))
-        let minutes = totalSeconds / 60
-        let remainder = totalSeconds % 60
-        return String(format: "%d:%02d", minutes, remainder)
     }
 
     private func loadMixdownIfAvailable() {
