@@ -409,10 +409,6 @@ final class AppState {
     }
 
     private static func defaultPendingSessionTitle(referenceDate: Date = .now) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = .current
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return "Session \(formatter.string(from: referenceDate))"
+        "Session \(TimeFormatter.displayDateTime(referenceDate))"
     }
 }

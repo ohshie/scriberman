@@ -328,7 +328,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     private func addRecordingItems(to menu: NSMenu, duration: TimeInterval) {
-        let durationItem = NSMenuItem(title: "Recording: \(menuDuration(duration))", action: nil, keyEquivalent: "")
+        let durationItem = NSMenuItem(title: "Recording: \(TimeFormatter.displayFormat(seconds: Float(duration)))", action: nil, keyEquivalent: "")
         durationItem.isEnabled = false
         menu.addItem(durationItem)
 
@@ -496,13 +496,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
 
         appState.menuBarSettings.lastUsedAppBundleID = sender.representedObject as? String
-    }
-
-    private func menuDuration(_ duration: TimeInterval) -> String {
-        let totalSeconds = max(0, Int(duration.rounded(.down)))
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        return String(format: "%d:%02d", minutes, seconds)
     }
 
     @objc

@@ -413,15 +413,17 @@ final class JobsViewModel {
     func relativeTimestampText(
         for date: Date,
         referenceDate: Date = .now,
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        locale: Locale = .current
     ) -> String {
-        Self.relativeTimestampText(for: date, referenceDate: referenceDate, calendar: calendar)
+        Self.relativeTimestampText(for: date, referenceDate: referenceDate, calendar: calendar, locale: locale)
     }
 
     static func relativeTimestampText(
         for date: Date,
         referenceDate: Date = .now,
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        locale: Locale = .current
     ) -> String {
         if calendar.isDate(date, inSameDayAs: referenceDate) {
             let interval = max(0, Int(referenceDate.timeIntervalSince(date).rounded(.down)))
@@ -437,10 +439,7 @@ final class JobsViewModel {
             return "\(max(1, interval / 3_600))h ago"
         }
 
-        let formatter = DateFormatter()
-        formatter.locale = .current
-        formatter.dateFormat = "MMM d"
-        return formatter.string(from: date)
+        return TimeFormatter.displayMonthDay(date, locale: locale, calendar: calendar)
     }
 
     func transcribe(session: RecordingSession, context: ModelContext) {

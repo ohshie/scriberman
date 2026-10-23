@@ -235,10 +235,7 @@ struct TranscriptDetailView: View {
     }
 
     private var formattedDate: String {
-        let formatter = DateFormatter()
-        formatter.locale = .current
-        formatter.dateFormat = "MMM d, yyyy 'at' HH:mm"
-        return formatter.string(from: session.createdAt)
+        TimeFormatter.displayDateTime(session.createdAt)
     }
 
     private func restoreOriginal() {

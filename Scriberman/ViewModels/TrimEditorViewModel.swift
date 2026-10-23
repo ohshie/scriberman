@@ -23,7 +23,7 @@ final class TrimEditorViewModel {
     }
 
     var keepRangeLabel: String {
-        "Keep: 0:00 → \(formatTime(trimPosition))"
+        "Keep: 0:00 → \(TimeFormatter.displayFormat(seconds: Float(trimPosition)))"
     }
 
     var isAtFullDuration: Bool {
@@ -60,12 +60,5 @@ final class TrimEditorViewModel {
             self.error = error
         }
         isApplying = false
-    }
-
-    private func formatTime(_ seconds: Double) -> String {
-        let totalSeconds = Int(seconds)
-        let minutes = totalSeconds / 60
-        let secs = totalSeconds % 60
-        return String(format: "%d:%02d", minutes, secs)
     }
 }
