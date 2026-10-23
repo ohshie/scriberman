@@ -5,6 +5,8 @@ struct ActiveRecordingDetailView: View {
     let session: RecordingSession
     let viewModel: NewSessionViewModel
     let modelContext: ModelContext
+    /// Called when a title edit fails to save; the session keeps its previous title.
+    let onTitleNotSaved: () -> Void
 
     @FocusState private var titleFocused: Bool
     @State private var isTitleHovering = false
@@ -12,10 +14,16 @@ struct ActiveRecordingDetailView: View {
     /// segment.
     @State private var isPointerOverSegments = false
 
-    init(session: RecordingSession, viewModel: NewSessionViewModel, modelContext: ModelContext) {
+    init(
+        session: RecordingSession,
+        viewModel: NewSessionViewModel,
+        modelContext: ModelContext,
+        onTitleNotSaved: @escaping () -> Void
+    ) {
         self.session = session
         self.viewModel = viewModel
         self.modelContext = modelContext
+        self.onTitleNotSaved = onTitleNotSaved
     }
 
     /// Marks the end of the content, so following the transcript scrolls to the foot of the view.
@@ -162,8 +170,10 @@ struct ActiveRecordingDetailView: View {
         Binding(
             get: { session.title },
             set: { newValue in
-                session.title = newValue
-                try? modelContext.save()
+                let result = TranscriptDetailViewModel.saveTitle(newValue, of: session, context: modelContext)
+                if case .saveFailed = result {
+                    onTitleNotSaved()
+                }
             }
         )
     }

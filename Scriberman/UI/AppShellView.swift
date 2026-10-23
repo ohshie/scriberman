@@ -20,7 +20,7 @@ struct AppShellView: View {
     @State private var detailMode: DetailMode = .standard
     @State private var selectedTransformationID: UUID?
     @State private var studyActionErrorMessage: String?
-    /// A store or disk failure from deleting, importing or stopping, waiting to be shown.
+    /// A store or disk failure from deleting, importing, stopping or renaming, waiting to be shown.
     @State private var storeFailureAlert: StoreFailureAlert?
     @State private var audioPlayerViewModel = AudioPlayerViewModel()
     @State private var transcriptAutoScrollEnabled = true
@@ -263,7 +263,8 @@ struct AppShellView: View {
                 ActiveRecordingDetailView(
                     session: session,
                     viewModel: appState.newSessionViewModel,
-                    modelContext: modelContext
+                    modelContext: modelContext,
+                    onTitleNotSaved: { storeFailureAlert = .titleNotSaved }
                 )
                 .id(session.id)
             } else if detailMode == .study, let transcript = session.displayedTranscript {
@@ -310,7 +311,8 @@ struct AppShellView: View {
                     onOpenTransformation: { transformationID in
                         selectedTransformationID = transformationID
                         detailMode = .transformation
-                    }
+                    },
+                    onTitleNotSaved: { storeFailureAlert = .titleNotSaved }
                 )
                 .id(session.id)
             }
@@ -357,7 +359,8 @@ struct AppShellView: View {
                     onOpenTransformation: { transformationID in
                         selectedTransformationID = transformationID
                         detailMode = .transformation
-                    }
+                    },
+                    onTitleNotSaved: { storeFailureAlert = .titleNotSaved }
                 )
                 .id(session.id)
             }
@@ -671,6 +674,7 @@ private enum StoreFailureAlert: Equatable {
     case filesLeft(String)
     case importFailed([String])
     case transcriptNotSaved(Int)
+    case titleNotSaved
 
     var title: String {
         switch self {
@@ -678,6 +682,7 @@ private enum StoreFailureAlert: Equatable {
         case .filesLeft: "Files Left on Disk"
         case .importFailed: "Import Failed"
         case .transcriptNotSaved: "Transcript Not Fully Saved"
+        case .titleNotSaved: "Title Not Saved"
         }
     }
 
@@ -691,6 +696,8 @@ private enum StoreFailureAlert: Equatable {
             "\(fileNames.joined(separator: ", ")) could not be added to your library. Try importing it again."
         case .transcriptNotSaved(let count):
             "\(count) transcript lines from this recording could not be saved. The audio is intact; you can reprocess it to rebuild the transcript."
+        case .titleNotSaved:
+            "The new title could not be saved, so the session keeps its previous title."
         }
     }
 }

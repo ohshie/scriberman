@@ -861,15 +861,16 @@ struct RecordingSessionTests {
 
     
     
-    /// Spec scenario "Session rename rewrites the file": committing a title rewrites `transcript.md`.
+    /// Spec scenario "Session rename rewrites the file": the view commits the title through the view
+    /// model, which saves it and rewrites `transcript.md` (`TranscriptDetailViewModelTests`).
     @Test(.tags(.sourceLint))
-    func testCommittingTheTitleRewritesTranscriptMarkdown() throws {
+    func testCommittingTheTitleGoesThroughTheViewModel() throws {
         let source = try transcriptDetailSource()
         let start = try #require(source.range(of: "private func commitTitle()"))
         let function = String(source[start.upperBound...].prefix(400))
 
-        #expect(function.contains("session.title = editingTitle"))
-        #expect(function.contains("rewriteTranscriptMarkdown(for: recording)"))
+        #expect(function.contains("viewModel.commitTitle(editingTitle, context: modelContext)"))
+        #expect(function.contains("onTitleNotSaved()"))
     }
 
     @Test(.tags(.sourceLint))
