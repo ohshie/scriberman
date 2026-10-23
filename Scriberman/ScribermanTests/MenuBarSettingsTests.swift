@@ -18,6 +18,26 @@ struct MenuBarSettingsTests {
     }
 
     @Test
+    func testResetIsAvailableOnlyWhileALastUsedSourceIsRemembered() {
+        let (settings, cleanup) = makeSubject()
+        defer { cleanup() }
+
+        #expect(settings.canResetToDefaults == false)
+
+        settings.lastUsedMicUID = "mic-uid-1"
+        #expect(settings.canResetToDefaults)
+
+        settings.lastUsedMicUID = nil
+        settings.lastUsedAppBundleID = "com.apple.Music"
+        #expect(settings.canResetToDefaults)
+
+        settings.resetToDefaults()
+        #expect(settings.lastUsedMicUID == nil)
+        #expect(settings.lastUsedAppBundleID == nil)
+        #expect(settings.canResetToDefaults == false)
+    }
+
+    @Test
     func testPersistenceRoundTrip() {
         let suiteName = "MenuBarSettingsTests.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName) ?? .standard

@@ -21,6 +21,7 @@ struct JobsView: View {
 
 
     @Environment(\.modelContext) private var modelContext
+    @Query(sort: \RecordingTag.createdAt) private var allTags: [RecordingTag]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isShowingTagFilter = false
 
@@ -173,7 +174,7 @@ struct JobsView: View {
     /// The tags at least one recording carries. A lit tag is unlit by clicking it again, and with
     /// none lit the list is unfiltered — so no separate clear control.
     private var tagFilterList: some View {
-        let tags = (try? TagService().tagsInUse(in: modelContext)) ?? []
+        let tags = TagService.inUse(allTags)
         return VStack(alignment: .leading, spacing: 2) {
             ForEach(tags) { tag in
                 let isSelected = viewModel.selectedTagIDs.contains(tag.id)

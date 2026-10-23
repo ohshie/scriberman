@@ -186,6 +186,7 @@ struct SettingsView: View {
                                 Image(systemName: "arrow.counterclockwise")
                             }
                             .buttonStyle(.borderless)
+                            .disabled(!viewModel.canReset(.voiceProcessing))
                             .accessibilityLabel("Reset to default")
                         }
                         Text("Applies hardware noise suppression and echo cancellation to the microphone. Takes effect on the next recording. May add minor latency. Default: Off (disabled).")
@@ -208,6 +209,7 @@ struct SettingsView: View {
                                     Image(systemName: "arrow.counterclockwise")
                                 }
                                 .buttonStyle(.borderless)
+                                .disabled(!viewModel.canReset(.vadThreshold))
                                 .accessibilityLabel("Reset to default")
                             }
                             Slider(value: $bindableViewModel.vadThreshold, in: 0.50...0.98, step: 0.01)
@@ -228,6 +230,7 @@ struct SettingsView: View {
                                     Image(systemName: "arrow.counterclockwise")
                                 }
                                 .buttonStyle(.borderless)
+                                .disabled(!viewModel.canReset(.vadMinSpeechDuration))
                                 .accessibilityLabel("Reset to default")
                             }
                             Slider(value: $bindableViewModel.vadMinSpeechDuration, in: 0.10...2.0, step: 0.05)
@@ -254,6 +257,7 @@ struct SettingsView: View {
                                     Image(systemName: "arrow.counterclockwise")
                                 }
                                 .buttonStyle(.borderless)
+                                .disabled(!viewModel.canReset(.asrConfidenceGate))
                                 .accessibilityLabel("Reset to default")
                             }
                             Slider(value: $bindableViewModel.asrConfidenceGate, in: 0.0...1.0, step: 0.01)
@@ -280,6 +284,7 @@ struct SettingsView: View {
                                     Image(systemName: "arrow.counterclockwise")
                                 }
                                 .buttonStyle(.borderless)
+                                .disabled(!viewModel.canReset(.asrAmplitudeGate))
                                 .accessibilityLabel("Reset to default")
                             }
                             Slider(value: $bindableViewModel.asrAmplitudeGate, in: 0.0...0.10, step: 0.005)
@@ -332,6 +337,7 @@ struct SettingsView: View {
                         Button("Reset All Pipeline Settings to Defaults", role: .destructive) {
                             showResetAllConfirmation = true
                         }
+                        .disabled(!viewModel.canResetAllPipelineSettings)
                     }
 
                     Section("Speaker Profiles") {
@@ -441,6 +447,7 @@ struct SettingsView: View {
                         set: { promptVM.promptContentDraft = $0 }
                     ))
                         .frame(minHeight: 160)
+                        .accessibilityLabel("Prompt Details")
                 }
 
                 if let promptValidationMessage = promptVM.promptValidationMessage {

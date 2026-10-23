@@ -23,9 +23,9 @@ struct MenuBarSettingsView: View {
         }
 
         Button("Reset to Defaults") {
-            menuBarSettings.lastUsedMicUID = nil
-            menuBarSettings.lastUsedAppBundleID = nil
+            menuBarSettings.resetToDefaults()
         }
+        .disabled(!menuBarSettings.canResetToDefaults)
     }
 
     private var lastUsedMicrophoneName: String {

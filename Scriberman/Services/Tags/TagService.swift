@@ -71,10 +71,15 @@ struct TagService {
     /// The default tag appears here whenever any recording is untagged, since the default is never
     /// alongside another tag.
     func tagsInUse(in context: ModelContext) throws -> [RecordingTag] {
-        try context.fetch(
+        Self.inUse(try context.fetch(
             FetchDescriptor<RecordingTag>(sortBy: [SortDescriptor(\.createdAt)])
-        )
-        .filter { !$0.recordings.isEmpty }
+        ))
+    }
+
+    /// The tags in `tags` that at least one recording carries, in their original order. Views
+    /// that already hold every tag through a query filter with this rather than fetching again.
+    static func inUse(_ tags: [RecordingTag]) -> [RecordingTag] {
+        tags.filter { !$0.recordings.isEmpty }
     }
 
     // MARK: - Creating and editing
