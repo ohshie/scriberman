@@ -118,6 +118,18 @@ struct SessionSearchViewTests {
         #expect(!source.contains("private var tagFilterChips"))
     }
 
+    /// Fetching inside `body` runs a store fetch on every render and does not update when tags
+    /// change; the query does both.
+    @Test(.tags(.sourceLint))
+    func testTagFilterListReadsTagsThroughAQuery() throws {
+        let source = try jobsViewSource()
+        let list = try #require(functionBody(named: "private var tagFilterList: some View {", in: source))
+
+        #expect(source.contains("@Query(sort: \\RecordingTag.createdAt) private var allTags: [RecordingTag]"))
+        #expect(list.contains("TagService.inUse(allTags)"))
+        #expect(!list.contains("modelContext"))
+    }
+
     /// Without this a filtered list is indistinguishable from a short one, and the conclusion a
     /// user draws is that recordings are missing.
     @Test(.tags(.sourceLint))
