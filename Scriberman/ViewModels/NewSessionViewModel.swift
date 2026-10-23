@@ -27,7 +27,7 @@ final class NewSessionViewModel {
 
     // MARK: - Idle session prompt
 
-    /// True while the "Still in progress. Stop?" prompt should be on screen.
+    /// True while the "Stop this recording?" prompt should be on screen.
     var isIdlePromptVisible = false
     /// Supplies the current persisted idle-prompt settings. Injected at composition time so
     /// changes in Settings take effect on the next monitor tick.

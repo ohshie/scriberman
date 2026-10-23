@@ -81,7 +81,7 @@ struct JobsView: View {
         .safeAreaBar(edge: .top, spacing: 0) {
             searchBar
         }
-        .navigationTitle("Jobs")
+        .navigationTitle("Sessions")
         .task {
             await viewModel.refresh()
         }

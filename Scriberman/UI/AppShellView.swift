@@ -75,7 +75,7 @@ struct AppShellView: View {
                 ContentUnavailableView(
                     "Select a Session",
                     systemImage: "text.bubble",
-                    description: Text("Choose a session from the Jobs list to see its transcript and metadata.")
+                    description: Text("Choose a session from the list to see its transcript and details.")
                 ).navigationSplitViewColumnWidth(min: 560, ideal: 860)
             }
         }
