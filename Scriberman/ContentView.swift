@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         Group {
@@ -13,6 +14,9 @@ struct ContentView: View {
             } else {
                 AppShellView()
             }
+        }
+        .onAppear {
+            appState.openSettingsAction = { openSettings() }
         }
         .onChange(of: appState.requiredOnboardingStep) { _, _ in
             appState.applyReadiness()

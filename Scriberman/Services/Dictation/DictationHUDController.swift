@@ -9,9 +9,9 @@ import SwiftUI
 final class DictationHUDController {
     private var panel: NSPanel?
 
-    func show(for dictation: DictationService) {
+    func show(for dictation: DictationService, openSettings: @escaping () -> Void) {
         if panel == nil {
-            panel = makePanel(for: dictation)
+            panel = makePanel(for: dictation, openSettings: openSettings)
         }
         guard let panel else { return }
         position(panel)
@@ -22,11 +22,14 @@ final class DictationHUDController {
         panel?.orderOut(nil)
     }
 
-    private func makePanel(for dictation: DictationService) -> NSPanel {
+    private func makePanel(for dictation: DictationService, openSettings: @escaping () -> Void) -> NSPanel {
         let view = DictationHUDView(
             dictation: dictation,
             onEnableAccessibility: { Self.promptForAccessibility() },
-            onOpenSettings: { Self.openSettingsWindow() },
+            onOpenSettings: {
+                NSApp.activate()
+                openSettings()
+            },
             onDismiss: { [weak self] in self?.hide() }
         )
         let hosting = NSHostingView(rootView: view)
@@ -51,10 +54,5 @@ final class DictationHUDController {
         // concurrency-safe to reference under Swift 6.
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         AXIsProcessTrustedWithOptions(options)
-    }
-
-    private static func openSettingsWindow() {
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        NSApp.activate(ignoringOtherApps: true)
     }
 }
