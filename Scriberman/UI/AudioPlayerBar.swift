@@ -79,7 +79,7 @@ struct AudioPlayerBar: View {
             )
             .disabled(viewModel.duration <= 0)
             .accessibilityLabel("Playback position")
-            .accessibilityValue(formatTime(viewModel.currentTime))
+            .accessibilityValue(TimeFormatter.displayFormat(seconds: Float(viewModel.currentTime)))
 
             Text("\(TimeFormatter.displayFormat(seconds: Float(viewModel.currentTime))) / \(TimeFormatter.displayFormat(seconds: Float(viewModel.duration)))")
                 .font(.footnote)
