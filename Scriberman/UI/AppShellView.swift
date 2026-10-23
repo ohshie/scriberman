@@ -134,7 +134,7 @@ struct AppShellView: View {
                 )
             }
         }
-        .focusedSceneValue(\.trimTargetSession, selectedRecordingSession)
+        .focusedSceneValue(\.mainWindow, commandContext)
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else {
                 return
@@ -486,16 +486,63 @@ struct AppShellView: View {
         if !hideNewSessionButton {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    appState.selectPendingSession()
-                    appState.newSessionViewModel.refreshAudioDevicesOnPanelExpanded()
-                    if let pendingSession = appState.pendingSession {
-                        selectedSession = .pending(pendingSession)
-                    }
+                    startNewSession()
                 } label: {
                     Label("New Session", systemImage: "plus")
                 }
             }
         }
+    }
+
+    private func startNewSession() {
+        appState.selectPendingSession()
+        appState.newSessionViewModel.refreshAudioDevicesOnPanelExpanded()
+        if let pendingSession = appState.pendingSession {
+            selectedSession = .pending(pendingSession)
+        }
+    }
+
+    /// This window's selection and actions, published to the menu bar while the window is focused.
+    private var commandContext: MainWindowCommandContext {
+        MainWindowCommandContext(
+            selection: selectedSession,
+            availability: SessionCommandAvailability(
+                selection: commandSelection,
+                isRecordingRunning: !appState.newSessionViewModel.isIdle,
+                isTranscriptShown: isTranscriptShown,
+                hasLoadedAudio: audioPlayerViewModel.isReady,
+                // The session search field is always in the window, so Find always has a target.
+                hasFindTarget: true
+            ),
+            actions: MainWindowActions(
+                newSession: { startNewSession() },
+                importFile: { presentImportPanel() }
+            )
+        )
+    }
+
+    private var commandSelection: SessionCommandAvailability.Selection {
+        switch selectedSession {
+        case .none:
+            return .none
+        case .pending:
+            return .pending
+        case .recording(let session):
+            return .recording(session.status, isTrimmed: session.isTrimmed)
+        case .imported(let session):
+            return .imported(session.status)
+        }
+    }
+
+    /// The detail shows a transcript: the standard detail or the study view, not a transformation
+    /// and not a recording in progress.
+    private var isTranscriptShown: Bool {
+        guard detailMode != .transformation,
+              let session = selectedTranscribableSession,
+              session.status != .recording else {
+            return false
+        }
+        return session.displayedTranscript != nil
     }
 
     @ToolbarContentBuilder
@@ -545,11 +592,6 @@ struct AppShellView: View {
                 }
             )
         }
-    }
-
-    private var selectedRecordingSession: RecordingSession? {
-        guard case .recording(let session) = selectedSession else { return nil }
-        return session
     }
 
     private var selectedTranscribableSession: (any TranscribableSession)? {
