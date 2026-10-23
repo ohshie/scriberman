@@ -56,7 +56,6 @@ struct AppShellView: View {
                 onOpenSearchResult: { item in openSearchResult(item) }
             )
             .focused($isSessionListFocused)
-            .toolbar(removing: .sidebarToggle)
             .navigationSplitViewColumnWidth(min: 380, ideal: 460)
         } detail: {
             if let selectedSession {
@@ -81,8 +80,11 @@ struct AppShellView: View {
             }
         }
         .navigationSplitViewStyle(.prominentDetail)
+        // Sets the window's title, which Mission Control, the Window menu and the window switcher
+        // show. Removing the toolbar's title item below hides it from the toolbar only, so the editable
+        // header title stays the one visible title.
+        .navigationTitle(Self.windowTitle(for: selectedSession))
         .toolbar {
-            sidebarToolbar
             switch detailMode {
             case .standard:
                 jobsToolbar
@@ -216,6 +218,23 @@ struct AppShellView: View {
         if let request, let item = sessionItem(for: request) {
             selectedSession = item
         }
+    }
+
+    /// The selected session's title, or "Sessions" when nothing is selected or a new session is
+    /// being set up. Reading the title here makes the window follow a rename.
+    static func windowTitle(for item: JobsViewModel.SessionListItem?) -> String {
+        let title: String
+        switch item {
+        case .recording(let session):
+            title = session.title
+        case .imported(let session):
+            title = session.title
+        case .pending, nil:
+            title = ""
+        }
+
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Sessions" : trimmed
     }
 
     private func sessionItem(for request: AppState.SessionRequest) -> JobsViewModel.SessionListItem? {
@@ -451,18 +470,6 @@ struct AppShellView: View {
             if !failed.isEmpty {
                 storeFailureAlert = .importFailed(failed.map(\.lastPathComponent))
             }
-        }
-    }
-
-    @ToolbarContentBuilder
-    private var sidebarToolbar: some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
-            Button {
-                NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
-            } label: {
-                Image(systemName: "sidebar.left")
-            }
-            .help("Toggle Sidebar")
         }
     }
 
