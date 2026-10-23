@@ -59,7 +59,6 @@ struct TranscriptDetailView: View {
                 titleFocused = false
             }
         }
-        .navigationTitle("")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 if let onReprocess {

@@ -98,6 +98,7 @@
 		DC9E28C5381A4E4BB770DA58 /* SynchronizedAudioTimeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BB5F720213D4DCC8F8DE9C6 /* SynchronizedAudioTimeline.swift */; };
 		340DCED74830451F973E701D /* AudioSyncConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69CB7E64E73348B7AC45DDA7 /* AudioSyncConfig.swift */; };
 		B1EE4AA554C34DF8A4D66C98 /* SynchronizedAudioTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8831F4F4A0B4BB5B9FED267 /* SynchronizedAudioTimelineTests.swift */; };
+		D803A1E5C0FFEE0000000001 /* AppShellWindowTitleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D803A1E5C0FFEE0000000002 /* AppShellWindowTitleTests.swift */; };
 		857B8F0225BB4B61A466FB9F /* SessionFailureLogWriterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBCA38202AF6440099A54469 /* SessionFailureLogWriterTests.swift */; };
 		5454B2BF4834490A8DD16CFF /* RecordingStartVerifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A420C7884F864B3B98E369B1 /* RecordingStartVerifierTests.swift */; };
 		5BCED41384DF4A7EB2D579C9 /* SessionLogReadbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD8EC3033F374A55962CE98A /* SessionLogReadbackTests.swift */; };
@@ -409,6 +410,7 @@
 		8BB5F720213D4DCC8F8DE9C6 /* SynchronizedAudioTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Sync/SynchronizedAudioTimeline.swift"; sourceTree = SOURCE_ROOT; };
 		69CB7E64E73348B7AC45DDA7 /* AudioSyncConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Audio/Sync/AudioSyncConfig.swift"; sourceTree = SOURCE_ROOT; };
 		A8831F4F4A0B4BB5B9FED267 /* SynchronizedAudioTimelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/SynchronizedAudioTimelineTests.swift"; sourceTree = SOURCE_ROOT; };
+		D803A1E5C0FFEE0000000002 /* AppShellWindowTitleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/AppShellWindowTitleTests.swift"; sourceTree = SOURCE_ROOT; };
 		BBCA38202AF6440099A54469 /* SessionFailureLogWriterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/SessionFailureLogWriterTests.swift"; sourceTree = SOURCE_ROOT; };
 		A420C7884F864B3B98E369B1 /* RecordingStartVerifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/RecordingStartVerifierTests.swift"; sourceTree = SOURCE_ROOT; };
 		CD8EC3033F374A55962CE98A /* SessionLogReadbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/SessionLogReadbackTests.swift"; sourceTree = SOURCE_ROOT; };
@@ -696,6 +698,7 @@
 				BA3BB699A5FA453B97B90962 /* IdlePromptStateMachineTests.swift */,
 				E2696497D22F4111B22B003F /* CaptureActivityTrackerTests.swift */,
 				A8831F4F4A0B4BB5B9FED267 /* SynchronizedAudioTimelineTests.swift */,
+				D803A1E5C0FFEE0000000002 /* AppShellWindowTitleTests.swift */,
 				BBCA38202AF6440099A54469 /* SessionFailureLogWriterTests.swift */,
 				A420C7884F864B3B98E369B1 /* RecordingStartVerifierTests.swift */,
 				CD8EC3033F374A55962CE98A /* SessionLogReadbackTests.swift */,
@@ -1564,6 +1567,7 @@
 				CF84962F187B4329B65D149F /* IdlePromptStateMachineTests.swift in Sources */,
 				8DA06C06655B4579A70E574A /* CaptureActivityTrackerTests.swift in Sources */,
 				B1EE4AA554C34DF8A4D66C98 /* SynchronizedAudioTimelineTests.swift in Sources */,
+				D803A1E5C0FFEE0000000001 /* AppShellWindowTitleTests.swift in Sources */,
 				857B8F0225BB4B61A466FB9F /* SessionFailureLogWriterTests.swift in Sources */,
 				5454B2BF4834490A8DD16CFF /* RecordingStartVerifierTests.swift in Sources */,
 				5BCED41384DF4A7EB2D579C9 /* SessionLogReadbackTests.swift in Sources */,

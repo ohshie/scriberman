@@ -4,35 +4,23 @@ import Foundation
 @Suite("AppShell Sidebar Regression Tests")
 struct AppShellSidebarRegressionTests {
     
-    @Test("Sidebar column removes default sidebar toggle", .tags(.sourceLint))
-    func sidebarColumnRemovesDefaultSidebarToggle() throws {
+    @Test("Sidebar toggle is the system's own control", .tags(.sourceLint))
+    func sidebarToggleIsTheSystemControl() throws {
         let source = try appShellSource()
-        #expect(
-            source.contains(".toolbar(removing: .sidebarToggle)"),
-            "Sidebar column should remove the default sidebar toggle to avoid duplicate controls."
-        )
+        #expect(!source.contains(".toolbar(removing: .sidebarToggle)"))
+        #expect(!source.contains("NSSplitViewController.toggleSidebar"))
     }
 
-    @Test("Sidebar toolbar uses native split view toggle action", .tags(.sourceLint))
-    func sidebarToolbarUsesNativeSplitViewToggleAction() throws {
+    @Test("Window title is set on the split view and kept out of the toolbar", .tags(.sourceLint))
+    func windowTitleIsSetAndKeptOutOfTheToolbar() throws {
         let source = try appShellSource()
-        #expect(
-            source.contains("#selector(NSSplitViewController.toggleSidebar(_:))"),
-            "Sidebar toggle should use NSSplitViewController.toggleSidebar(_:) for native animation behavior."
-        )
-    }
+        #expect(source.contains(".navigationTitle(Self.windowTitle(for: selectedSession))"))
+        #expect(source.contains(".toolbar(removing: .title)"))
 
-    @Test("Sidebar toolbar uses navigation placement and sidebar left icon", .tags(.sourceLint))
-    func sidebarToolbarUsesNavigationPlacementAndSidebarLeftIcon() throws {
-        let source = try appShellSource()
-        #expect(
-            source.contains("ToolbarItem(placement: .navigation)"),
-            "Sidebar toggle should live in the navigation toolbar slot."
-        )
-        #expect(
-            source.contains("Image(systemName: \"sidebar.left\")"),
-            "Sidebar toggle should use the standard sidebar icon."
-        )
+        // A title set inside the detail column takes precedence over the split view's and would
+        // blank the window title.
+        let detailView = try transcriptDetailViewSource()
+        #expect(!detailView.contains(".navigationTitle("))
     }
 
     @Test("Sidebar toggle is not driven by manual column visibility state", .tags(.sourceLint))
