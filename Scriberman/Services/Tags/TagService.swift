@@ -142,6 +142,86 @@ struct TagService {
         try context.save()
     }
 
+    // MARK: - Undo
+
+    /// Applies `tag` to `session` as `assign(_:to:in:)` does, and registers the change with
+    /// `undoManager`.
+    @MainActor
+    @discardableResult
+    func assign(
+        _ tag: RecordingTag,
+        to session: RecordingSession,
+        in context: ModelContext,
+        undoManager: UndoManager?
+    ) throws -> Bool {
+        let previousTags = session.tags
+        let assigned = try assign(tag, to: session, in: context)
+        if assigned, session.tags.map(\.id) != previousTags.map(\.id) {
+            registerUndo(restoring: previousTags, of: session, in: context, undoManager: undoManager)
+        }
+        return assigned
+    }
+
+    /// Removes `tag` from `session` as `unassign(_:from:in:)` does, and registers the change with
+    /// `undoManager`.
+    @MainActor
+    func unassign(
+        _ tag: RecordingTag,
+        from session: RecordingSession,
+        in context: ModelContext,
+        undoManager: UndoManager?
+    ) throws {
+        let previousTags = session.tags
+        try unassign(tag, from: session, in: context)
+        if session.tags.map(\.id) != previousTags.map(\.id) {
+            registerUndo(restoring: previousTags, of: session, in: context, undoManager: undoManager)
+        }
+    }
+
+    /// Registers giving `session` back `tags` with `undoManager`. Undoing registers the opposite,
+    /// which is the redo.
+    @MainActor
+    private func registerUndo(
+        restoring tags: [RecordingTag],
+        of session: RecordingSession,
+        in context: ModelContext,
+        undoManager: UndoManager?
+    ) {
+        guard let undoManager else { return }
+        // The handler holds the session: the undo manager does not retain its target.
+        undoManager.registerUndo(withTarget: session) { [weak undoManager] _ in
+            // A session deleted since is left alone.
+            guard session.modelContext != nil, !session.isDeleted else { return }
+            do {
+                try restoreTags(tags, of: session, in: context, undoManager: undoManager)
+            } catch {
+                logger.error("Undoing a tag change failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        undoManager.setActionName(UndoActionName.changeTags)
+    }
+
+    /// Gives `session` exactly `tags`, less any deleted since, falling back to the default tag
+    /// when none is left.
+    @MainActor
+    private func restoreTags(
+        _ tags: [RecordingTag],
+        of session: RecordingSession,
+        in context: ModelContext,
+        undoManager: UndoManager?
+    ) throws {
+        let previousTags = session.tags
+        session.tags = tags.filter { $0.modelContext != nil && !$0.isDeleted }
+        try restoreFloorIfNeeded(for: session, in: context)
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+        registerUndo(restoring: previousTags, of: session, in: context, undoManager: undoManager)
+    }
+
     // MARK: - Deletion
 
     /// Deletes `tag` and removes it from every recording carrying it, restoring the floor on any

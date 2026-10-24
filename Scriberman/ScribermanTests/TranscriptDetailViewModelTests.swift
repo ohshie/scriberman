@@ -1239,3 +1239,211 @@ extension TranscriptDetailViewModelTests {
         #expect(!markdown.contains("Old Title"))
     }
 }
+
+// MARK: - Undo
+
+extension UndoManager {
+    /// An undo manager whose groups the test opens itself: there is no event loop to close them.
+    static func forTests() -> UndoManager {
+        let undoManager = UndoManager()
+        undoManager.groupsByEvent = false
+        return undoManager
+    }
+
+    /// Runs `body` as one undoable event.
+    @discardableResult
+    func asOneEvent<T>(_ body: () throws -> T) rethrows -> T {
+        beginUndoGrouping()
+        defer { endUndoGrouping() }
+        return try body()
+    }
+}
+
+extension TranscriptDetailViewModelTests {
+    @Test
+    @MainActor
+    func testUndoAndRedoATitleCommitRestoreStoreAndTranscriptMarkdown() throws {
+        let fixture = try makeTitleFixture(saveFails: false)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+        let undoManager = UndoManager.forTests()
+
+        undoManager.asOneEvent { _ = fixture.viewModel.commitTitle("New Title", context: fixture.context, undoManager: undoManager) }
+        #expect(undoManager.undoActionName == UndoActionName.renameSession)
+
+        undoManager.undo()
+        #expect(fixture.session.title == "Old Title")
+        #expect(try ModelContext(fixture.container).fetch(FetchDescriptor<RecordingSession>()).map(\.title) == ["Old Title"])
+        let undoneMarkdown = try String(contentsOf: fixture.markdownURL, encoding: .utf8)
+        #expect(undoneMarkdown.contains("Old Title"))
+        #expect(!undoneMarkdown.contains("New Title"))
+        #expect(undoManager.redoActionName == UndoActionName.renameSession)
+
+        undoManager.redo()
+        #expect(fixture.session.title == "New Title")
+        #expect(try ModelContext(fixture.container).fetch(FetchDescriptor<RecordingSession>()).map(\.title) == ["New Title"])
+        #expect(try String(contentsOf: fixture.markdownURL, encoding: .utf8).contains("New Title"))
+        #expect(undoManager.canUndo)
+    }
+
+    @Test
+    @MainActor
+    func testCommittingAnUnchangedOrUnsavedTitleRegistersNothing() throws {
+        let saved = try makeTitleFixture(saveFails: false)
+        defer { try? FileManager.default.removeItem(at: saved.directory) }
+        let failing = try makeTitleFixture(saveFails: true)
+        defer { try? FileManager.default.removeItem(at: failing.directory) }
+        let undoManager = UndoManager.forTests()
+
+        undoManager.asOneEvent { _ = saved.viewModel.commitTitle("Old Title", context: saved.context, undoManager: undoManager) }
+        undoManager.asOneEvent { _ = failing.viewModel.commitTitle("New Title", context: failing.context, undoManager: undoManager) }
+
+        #expect(undoManager.undoActionName.isEmpty)
+    }
+}
+
+extension TranscriptDetailViewModelTranscriptTests {
+    @Test
+    func testUndoAndRedoARenameRestoreTranscriptAndSpeakerMemory() async throws {
+        let store = try makeStore()
+        let session = conversationSession()
+        session.transcript = teachableConversation()
+        let before = session.transcript
+        let viewModel = makeViewModel(session: session, store: store)
+        let undoManager = UndoManager.forTests()
+
+        await undoManager.asOneEvent { viewModel.renameSpeaker(id: "S1", to: "Ana", undoManager: undoManager) }?.value
+        #expect(undoManager.undoActionName == UndoActionName.renameSpeaker)
+        #expect(try await names(in: store) == ["Ana"])
+
+        undoManager.undo()
+        await viewModel.speakerMemoryUpdate?.value
+        #expect(session.transcript == before)
+        #expect(viewModel.shownTranscript == before)
+        #expect(try await store.fetchAllSnapshots().isEmpty)
+
+        undoManager.redo()
+        await viewModel.speakerMemoryUpdate?.value
+        #expect(session.transcript?.speakers.map(\.label) == ["Ana", "Speaker 2"])
+        #expect(viewModel.shownTranscript == session.transcript)
+        #expect(try await names(in: store) == ["Ana"])
+    }
+
+    @Test
+    func testUndoAndRedoAMergeRestoreTranscriptAndSpeakerMemory() async throws {
+        let store = try makeStore()
+        let session = conversationSession()
+        session.transcript = try #require(TranscriptSpeakerEditing.rename("S1", to: "Alice", in: teachableConversation()))
+        let viewModel = makeViewModel(session: session, store: store)
+        await viewModel.renameSpeaker(id: "S1", to: "Alicia")?.value
+        let before = session.transcript
+        let undoManager = UndoManager.forTests()
+
+        await undoManager.asOneEvent { viewModel.mergeSpeaker("S2", into: "S1", undoManager: undoManager) }?.value
+        #expect(undoManager.undoActionName == UndoActionName.mergeSpeaker)
+        #expect(try await store.fetchAllSnapshots().map(\.sampleCount) == [2])
+
+        undoManager.undo()
+        await viewModel.speakerMemoryUpdate?.value
+        #expect(session.transcript == before)
+        #expect(viewModel.blocks.count == 3)
+        #expect(try await store.fetchAllSnapshots().map(\.sampleCount) == [1])
+        #expect(try await names(in: store) == ["Alicia"])
+
+        undoManager.redo()
+        await viewModel.speakerMemoryUpdate?.value
+        #expect(session.transcript?.speakers.map(\.id) == ["S1"])
+        #expect(try await store.fetchAllSnapshots().map(\.sampleCount) == [2])
+    }
+
+    @Test
+    func testUndoAndRedoAResetRestoreTranscriptAndSpeakerMemory() async throws {
+        let store = try makeStore()
+        let session = conversationSession()
+        session.transcript = teachableConversation()
+        let viewModel = makeViewModel(session: session, store: store)
+        await viewModel.renameSpeaker(id: "S2", to: "Bob")?.value
+        let before = session.transcript
+        let undoManager = UndoManager.forTests()
+
+        await undoManager.asOneEvent { viewModel.resetSpeaker("S2", undoManager: undoManager) }?.value
+        #expect(undoManager.undoActionName == UndoActionName.resetSpeaker)
+        #expect(try await store.fetchAllSnapshots().isEmpty)
+
+        undoManager.undo()
+        await viewModel.speakerMemoryUpdate?.value
+        #expect(session.transcript == before)
+        #expect(try await names(in: store) == ["Bob"])
+
+        undoManager.redo()
+        await viewModel.speakerMemoryUpdate?.value
+        #expect(session.transcript?.speakers.map(\.label) == ["Speaker 1", "Speaker 2"])
+        #expect(try await store.fetchAllSnapshots().isEmpty)
+    }
+
+    @Test
+    func testUndoAndRedoAReassignRestoreTheTranscript() async throws {
+        let store = try makeStore()
+        let session = conversationSession()
+        session.transcript = teachableConversation()
+        let before = session.transcript
+        let viewModel = makeViewModel(session: session, store: store)
+        let undoManager = UndoManager.forTests()
+        let laterBlock = viewModel.blocks[1]
+
+        undoManager.asOneEvent { viewModel.assign(laterBlock, to: "S1", undoManager: undoManager) }
+        #expect(undoManager.undoActionName == UndoActionName.reassignSpeaker)
+        let after = session.transcript
+
+        undoManager.undo()
+        await viewModel.speakerMemoryUpdate?.value
+        #expect(session.transcript == before)
+        #expect(viewModel.blocks.count == 3)
+
+        undoManager.redo()
+        await viewModel.speakerMemoryUpdate?.value
+        #expect(session.transcript == after)
+        #expect(viewModel.blocks.count == 1)
+        #expect(try await store.fetchAllSnapshots().isEmpty)
+    }
+
+    @Test
+    func testUndoAfterTheTranscriptChangedElsewhereLeavesItAlone() {
+        let session = conversationSession()
+        let viewModel = makeViewModel(session: session)
+        let undoManager = UndoManager.forTests()
+
+        undoManager.asOneEvent { _ = viewModel.renameSpeaker(id: "S1", to: "Ana", undoManager: undoManager) }
+        let retranscript = Transcript(
+            fullText: "second pass",
+            segments: [TranscriptSegment(speakerId: "S9", text: "second pass", startTime: 0, endTime: 1)],
+            speakers: [TranscriptSpeaker(id: "S9", label: "Speaker 9", colorHex: "#778899")]
+        )
+        session.retranscript = retranscript
+
+        undoManager.undo()
+
+        #expect(session.retranscript == retranscript)
+        #expect(session.transcript?.speakers.first?.label == "Ana")
+    }
+
+    @Test
+    func testUndoRewritesTranscriptMarkdown() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let session = conversationSession()
+        session.micAudioURL = directory.appendingPathComponent("mic.wav").path
+        let markdownURL = directory.appendingPathComponent("transcript.md")
+        let viewModel = makeViewModel(session: session)
+        let undoManager = UndoManager.forTests()
+
+        undoManager.asOneEvent { _ = viewModel.renameSpeaker(id: "S2", to: "Zoltan", undoManager: undoManager) }
+        #expect(try String(contentsOf: markdownURL, encoding: .utf8).contains("Zoltan"))
+
+        undoManager.undo()
+        #expect(!(try String(contentsOf: markdownURL, encoding: .utf8).contains("Zoltan")))
+
+        undoManager.redo()
+        #expect(try String(contentsOf: markdownURL, encoding: .utf8).contains("Zoltan"))
+    }
+}

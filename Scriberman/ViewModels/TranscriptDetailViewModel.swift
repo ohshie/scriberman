@@ -306,10 +306,14 @@ final class TranscriptDetailViewModel {
         }
     }
 
+    /// The latest speaker memory update: an edit's, or an undo's or redo's. Each one waits for the
+    /// one before it, so undo never restores memory under an update still running.
+    @ObservationIgnored private(set) var speakerMemoryUpdate: Task<Void, Never>?
+
     /// Renames speaker `id` and teaches speaker memory the name. The returned task is the speaker
     /// memory update, `nil` when there is none.
     @discardableResult
-    func renameSpeaker(id: String, to newName: String) -> Task<Void, Never>? {
+    func renameSpeaker(id: String, to newName: String, undoManager: UndoManager? = nil) -> Task<Void, Never>? {
         guard let shownTranscript else { return nil }
         let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         let previousLabel = shownTranscript.speakers.first { $0.id == id }?.label
@@ -319,69 +323,163 @@ final class TranscriptDetailViewModel {
         self.shownTranscript = updatedTranscript
 
         // Renaming to the label it already has teaches nothing new.
-        guard let store, previousLabel?.lowercased() != name.lowercased() else { return nil }
+        guard let store, previousLabel?.lowercased() != name.lowercased() else {
+            registerSpeakerEditUndo(UndoActionName.renameSpeaker, restoring: SpeakerEditState(transcript: shownTranscript), over: updatedTranscript, undoManager: undoManager)
+            return nil
+        }
         let source = Self.voiceprintSource(for: id, of: session)
-        return Task {
-            do {
-                try await Self.updateSpeakerMemory(forRenaming: id, to: name, in: updatedTranscript, source: source, store: store)
-                loadProfiles()
-            } catch {
-                Self.logger.error("Teaching speaker memory a rename failed: \(error.localizedDescription, privacy: .public)")
-            }
+        let before = SpeakerEditState(transcript: shownTranscript, sources: [source])
+        registerSpeakerEditUndo(UndoActionName.renameSpeaker, restoring: before, over: updatedTranscript, undoManager: undoManager)
+        return enqueueSpeakerMemoryUpdate(failure: "Teaching speaker memory a rename failed") {
+            before.memory = try await store.snapshot(of: before.sources)
+            try await Self.updateSpeakerMemory(forRenaming: id, to: name, in: updatedTranscript, source: source, store: store)
         }
     }
 
     /// Gives one block to speaker `speakerID`, or to a new speaker for `nil`. Speaker memory does
     /// not change.
-    func assign(_ block: TranscriptBlock, to speakerID: String?) {
+    func assign(_ block: TranscriptBlock, to speakerID: String?, undoManager: UndoManager? = nil) {
         guard let shownTranscript,
               let updatedTranscript = Self.assign(segmentIDs: Set(block.segmentIDs), to: speakerID, in: shownTranscript, of: session)
         else { return }
         self.shownTranscript = updatedTranscript
+        registerSpeakerEditUndo(UndoActionName.reassignSpeaker, restoring: SpeakerEditState(transcript: shownTranscript), over: updatedTranscript, undoManager: undoManager)
     }
 
     /// Merges speaker `id` into `targetID`, then teaches speaker memory as a rename of `id` to the
     /// target's label would, when the target is named. The returned task is the speaker memory
     /// update, `nil` when there is none.
     @discardableResult
-    func mergeSpeaker(_ id: String, into targetID: String) -> Task<Void, Never>? {
+    func mergeSpeaker(_ id: String, into targetID: String, undoManager: UndoManager? = nil) -> Task<Void, Never>? {
         guard let original = shownTranscript,
               let updatedTranscript = Self.mergeSpeaker(id, into: targetID, in: original, of: session)
         else { return nil }
         shownTranscript = updatedTranscript
-        guard let store else { return nil }
+        guard let store else {
+            registerSpeakerEditUndo(UndoActionName.mergeSpeaker, restoring: SpeakerEditState(transcript: original), over: updatedTranscript, undoManager: undoManager)
+            return nil
+        }
         let source = Self.voiceprintSource(for: id, of: session)
         let targetSource = Self.voiceprintSource(for: targetID, of: session)
-        return Task {
-            do {
-                try await Self.updateSpeakerMemory(
-                    forMerging: id, into: targetID, in: original, source: source, targetSource: targetSource, store: store
-                )
-                loadProfiles()
-            } catch {
-                Self.logger.error("Teaching speaker memory a merge failed: \(error.localizedDescription, privacy: .public)")
-            }
+        let before = SpeakerEditState(transcript: original, sources: [source, targetSource])
+        registerSpeakerEditUndo(UndoActionName.mergeSpeaker, restoring: before, over: updatedTranscript, undoManager: undoManager)
+        return enqueueSpeakerMemoryUpdate(failure: "Teaching speaker memory a merge failed") {
+            before.memory = try await store.snapshot(of: before.sources)
+            try await Self.updateSpeakerMemory(
+                forMerging: id, into: targetID, in: original, source: source, targetSource: targetSource, store: store
+            )
         }
     }
 
     /// Resets speaker `id` to `Speaker N` and removes the voiceprints it taught. The returned task
     /// is the speaker memory update, `nil` when there is none.
     @discardableResult
-    func resetSpeaker(_ id: String) -> Task<Void, Never>? {
+    func resetSpeaker(_ id: String, undoManager: UndoManager? = nil) -> Task<Void, Never>? {
         guard let shownTranscript,
               let updatedTranscript = Self.resetSpeaker(id, in: shownTranscript, of: session)
         else { return nil }
         self.shownTranscript = updatedTranscript
-        guard let store else { return nil }
+        guard let store else {
+            registerSpeakerEditUndo(UndoActionName.resetSpeaker, restoring: SpeakerEditState(transcript: shownTranscript), over: updatedTranscript, undoManager: undoManager)
+            return nil
+        }
         let source = Self.voiceprintSource(for: id, of: session)
-        return Task {
-            do {
-                try await store.forget(source: source)
-                loadProfiles()
-            } catch {
-                Self.logger.error("Removing a reset speaker from speaker memory failed: \(error.localizedDescription, privacy: .public)")
+        let before = SpeakerEditState(transcript: shownTranscript, sources: [source])
+        registerSpeakerEditUndo(UndoActionName.resetSpeaker, restoring: before, over: updatedTranscript, undoManager: undoManager)
+        return enqueueSpeakerMemoryUpdate(failure: "Removing a reset speaker from speaker memory failed") {
+            before.memory = try await store.snapshot(of: before.sources)
+            try await store.forget(source: source)
+        }
+    }
+
+    // MARK: - Undo
+
+    /// One side of a speaker edit, for undo and redo: the displayed transcript and what speaker
+    /// memory held for the edit's voiceprint sources. `memory` is filled in by the memory update
+    /// queue, before the update it precedes runs.
+    @MainActor
+    private final class SpeakerEditState {
+        let transcript: Transcript
+        let sources: Set<VoiceprintSource>
+        var memory: SpeakerMemorySnapshot?
+
+        init(transcript: Transcript, sources: Set<VoiceprintSource> = []) {
+            self.transcript = transcript
+            self.sources = sources
+        }
+    }
+
+    /// Registers putting the session back to `state`, from `current`, with `undoManager`. Undoing
+    /// registers the opposite, which is the redo.
+    private func registerSpeakerEditUndo(
+        _ actionName: String,
+        restoring state: SpeakerEditState,
+        over current: Transcript,
+        undoManager: UndoManager?
+    ) {
+        guard let undoManager else { return }
+        let wasStored = Self.isStored(session)
+        // The handler holds the view model: the undo manager does not retain its target, and the
+        // view that made the edit may be gone by the time it is undone.
+        undoManager.registerUndo(withTarget: self) { [weak undoManager] _ in
+            self.restoreSpeakerEdit(actionName, to: state, from: current, wasStored: wasStored, undoManager: undoManager)
+        }
+        undoManager.setActionName(actionName)
+    }
+
+    private func restoreSpeakerEdit(
+        _ actionName: String,
+        to state: SpeakerEditState,
+        from current: Transcript,
+        wasStored: Bool,
+        undoManager: UndoManager?
+    ) {
+        // A deleted session, or a transcript changed since by a retranscription or a restore, is
+        // left as it is.
+        guard !(wasStored && !Self.isStored(session)), session.displayedTranscript == current else {
+            Self.logger.notice("Skipped undoing a speaker edit: the transcript changed since.")
+            return
+        }
+        let currentState = SpeakerEditState(transcript: current, sources: state.sources)
+        Self.writeDisplayed(state.transcript, to: session)
+        shownTranscript = state.transcript
+        registerSpeakerEditUndo(actionName, restoring: currentState, over: state.transcript, undoManager: undoManager)
+
+        guard let store, !state.sources.isEmpty else { return }
+        enqueueSpeakerMemoryUpdate(failure: "Restoring speaker memory for an undone speaker edit failed") {
+            currentState.memory = try await store.snapshot(of: state.sources)
+            if let memory = state.memory {
+                try await store.restore(memory)
             }
         }
+    }
+
+    /// Runs `operation` after every speaker memory update queued before it, then reloads the
+    /// profiles.
+    @discardableResult
+    private func enqueueSpeakerMemoryUpdate(
+        failure: String,
+        _ operation: @escaping @MainActor () async throws -> Void
+    ) -> Task<Void, Never> {
+        let previous = speakerMemoryUpdate
+        let task = Task {
+            await previous?.value
+            do {
+                try await operation()
+                loadProfiles()
+            } catch {
+                Self.logger.error("\(failure, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        speakerMemoryUpdate = task
+        return task
+    }
+
+    /// Whether `session` is in a store. A session that was and is no longer has been deleted, and
+    /// an undo must not touch it.
+    private static func isStored(_ session: any TranscribableSession) -> Bool {
+        guard let model = session as? any PersistentModel else { return false }
+        return model.modelContext != nil && !model.isDeleted
     }
 
     private static let logger = Logger(subsystem: "Scriberman", category: "TranscriptDetailViewModel")
@@ -525,10 +623,22 @@ extension TranscriptDetailViewModel {
     /// A failed save is rolled back and the file is left alone, so the store, the list and the file
     /// all keep the previous title.
     @discardableResult
-    func commitTitle(_ title: String, context: ModelContext) -> TitleCommitResult {
+    func commitTitle(_ title: String, context: ModelContext, undoManager: UndoManager? = nil) -> TitleCommitResult {
+        let previousTitle = session.title
         let result = Self.saveTitle(title, of: session, context: context, saveContext: saveContext)
         if result == .saved, let recording = session as? RecordingSession {
             rewriteTranscriptMarkdown(for: recording)
+        }
+        if result == .saved, title != previousTitle, let undoManager {
+            let wasStored = Self.isStored(session)
+            // The handler holds the view model, as for speaker edits.
+            undoManager.registerUndo(withTarget: self) { [weak undoManager] _ in
+                guard !(wasStored && !Self.isStored(self.session)) else { return }
+                if case .saveFailed(let message) = self.commitTitle(previousTitle, context: context, undoManager: undoManager) {
+                    Self.logger.error("Saving an undone title failed: \(message, privacy: .public)")
+                }
+            }
+            undoManager.setActionName(UndoActionName.renameSession)
         }
         return result
     }
@@ -550,4 +660,19 @@ extension TranscriptDetailViewModel {
             return .saveFailed(error.localizedDescription)
         }
     }
+}
+
+// MARK: - Undo action names
+
+/// The names Edit > Undo and Redo show for each undoable edit.
+///
+/// PLACEHOLDERS, NOT FOR RELEASE: the maintainer has not supplied these strings yet (hig-alignment
+/// ticket 18). Replace each value with the maintainer's wording before shipping.
+enum UndoActionName {
+    static let renameSession = "PLACEHOLDER renameSession"
+    static let changeTags = "PLACEHOLDER changeTags"
+    static let renameSpeaker = "PLACEHOLDER renameSpeaker"
+    static let mergeSpeaker = "PLACEHOLDER mergeSpeaker"
+    static let reassignSpeaker = "PLACEHOLDER reassignSpeaker"
+    static let resetSpeaker = "PLACEHOLDER resetSpeaker"
 }

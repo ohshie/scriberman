@@ -44,6 +44,7 @@ struct TranscriptStudyView: View {
     /// The block whose speaker is being renamed inline.
     @State private var renamingBlockID: UUID?
     @State private var isSpeakerListShown = false
+    @Environment(\.undoManager) private var undoManager
 
     init(
         session: any TranscribableSession,
@@ -157,9 +158,9 @@ struct TranscriptStudyView: View {
                     SessionSpeakerListView(
                         transcript: transcript,
                         profiles: viewModel.profiles,
-                        onRename: { id, name in viewModel.renameSpeaker(id: id, to: name) },
-                        onMerge: { id, targetID in viewModel.mergeSpeaker(id, into: targetID) },
-                        onReset: { id in viewModel.resetSpeaker(id) }
+                        onRename: { id, name in viewModel.renameSpeaker(id: id, to: name, undoManager: undoManager) },
+                        onMerge: { id, targetID in viewModel.mergeSpeaker(id, into: targetID, undoManager: undoManager) },
+                        onReset: { id in viewModel.resetSpeaker(id, undoManager: undoManager) }
                     )
                 }
             }
@@ -225,10 +226,10 @@ struct TranscriptStudyView: View {
                 }
             },
             onRename: { name in
-                viewModel.renameSpeaker(id: block.speaker.id, to: name)
+                viewModel.renameSpeaker(id: block.speaker.id, to: name, undoManager: undoManager)
             },
             onAssign: { speakerID in
-                viewModel.assign(block, to: speakerID)
+                viewModel.assign(block, to: speakerID, undoManager: undoManager)
             }
         )
     }

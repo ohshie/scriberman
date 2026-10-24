@@ -15,6 +15,7 @@ struct TranscriptDetailView: View {
     let onTitleNotSaved: () -> Void
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.undoManager) private var undoManager
     @Environment(\.openSettings) private var openSettings
     @Environment(AppState.self) private var appState
     @State private var showingDeleteConfirmation = false
@@ -147,6 +148,12 @@ struct TranscriptDetailView: View {
                     }
                 }
                 .editableTitleHover(isHovering: $isTitleHovering)
+                // Undo and redo change the title outside the field.
+                .onChange(of: session.title) { _, title in
+                    if titleFocused == false {
+                        editingTitle = title
+                    }
+                }
 
             Text(headerFactsLine)
                 .font(.headline)
@@ -260,7 +267,7 @@ struct TranscriptDetailView: View {
     }
 
     private func commitTitle() {
-        if case .saveFailed = viewModel.commitTitle(editingTitle, context: modelContext) {
+        if case .saveFailed = viewModel.commitTitle(editingTitle, context: modelContext, undoManager: undoManager) {
             editingTitle = session.title
             onTitleNotSaved()
         }
