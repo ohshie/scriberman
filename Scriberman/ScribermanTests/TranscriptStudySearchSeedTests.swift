@@ -119,6 +119,16 @@ struct TranscriptStudySearchSeedTests {
         #expect(source.contains("TranscriptFindBar(searchState: searchState) {"))
     }
 
+    /// Escape closes the find bar only while focus is inside it, so it never takes the key from the
+    /// session search field.
+    @Test(.tags(.sourceLint))
+    func testTheFindBarHandlesEscapeThroughItsExitCommand() throws {
+        let bar = try readSourceFile(relativePathFromTests: "../UI/TranscriptFindBar.swift")
+
+        #expect(bar.contains(".onExitCommand {\n            onDismiss()\n        }"))
+        #expect(!bar.contains(".keyboardShortcut(.escape"))
+    }
+
     /// Clicking a result whose session is already selected changes no binding, so the row reports
     /// the click itself.
     @Test(.tags(.sourceLint))

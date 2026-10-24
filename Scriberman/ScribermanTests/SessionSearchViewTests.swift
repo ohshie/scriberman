@@ -41,20 +41,14 @@ struct SessionSearchViewTests {
         #expect(source.contains("parent.text = \"\""))
     }
 
-    /// SwiftUI shortcuts are handled at the window level, so the transcript find bar's Escape took
-    /// the key before the field's own editor saw it — Escape in the search field did nothing while
-    /// a transcript was open.
+    /// The find bar no longer binds Escape window-wide, so the field's own editor receives the key
+    /// and no event monitor is needed to get it first.
     @Test(.tags(.sourceLint))
-    func testEscapeIsInterceptedWhileTheFieldIsBeingEdited() throws {
+    func testEscapeReachesTheFieldWithoutAKeyMonitor() throws {
         let source = try readSourceFile(relativePathFromTests: "../UI/NativeSearchField.swift")
 
-        #expect(source.contains("NSEvent.addLocalMonitorForEvents(matching: .keyDown)"))
-        #expect(source.contains("event.keyCode == 53"))
-        // Only while this field holds the keyboard, and torn down when it stops.
-        #expect(source.contains("guard let field, field.currentEditor() != nil else { return event }"))
-        #expect(source.contains("func controlTextDidEndEditing"))
-        #expect(source.contains("stopWatchingForEscape()"))
-        #expect(source.contains("static func dismantleNSView"))
+        #expect(!source.contains("addLocalMonitorForEvents"))
+        #expect(!source.contains("NSEvent.removeMonitor"))
     }
 
     /// One handler owns ⌘F, so what it means is decided in one place rather than by whichever of
