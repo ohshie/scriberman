@@ -2,10 +2,10 @@ import Foundation
 import Testing
 @testable import Scriberman
 
-/// Opening a search result: the study view arrives with the query applied and the matched block
+/// Opening a search result: the detail view arrives with the query applied and the matched block
 /// selected, and nothing starts playing.
 @MainActor
-struct TranscriptStudySearchSeedTests {
+struct TranscriptSearchSeedTests {
     private func blocks(_ lines: [String]) -> [TranscriptBlock] {
         lines.enumerated().map { index, line in
             TranscriptBlock(
@@ -35,7 +35,7 @@ struct TranscriptStudySearchSeedTests {
         state.selectFirstMatch(inBlock: blocks[1].id)
 
         #expect(state.currentMatch?.blockID == blocks[1].id)
-        // The highlight the study view draws comes from the same selection.
+        // The highlight the detail view draws comes from the same selection.
         #expect(state.activeRange(in: blocks[1]) != nil)
         #expect(state.activeRange(in: blocks[0]) == nil)
     }
@@ -58,8 +58,8 @@ struct TranscriptStudySearchSeedTests {
     @Test
     func testTwoSeedsForTheSameMatchAreDifferentValues() {
         let blockID = UUID()
-        let first = TranscriptStudySearchSeed(query: "migration", blockID: blockID)
-        let second = TranscriptStudySearchSeed(query: "migration", blockID: blockID)
+        let first = TranscriptSearchSeed(query: "migration", blockID: blockID)
+        let second = TranscriptSearchSeed(query: "migration", blockID: blockID)
 
         // Clicking the same result again has to move the view again, so the seed must not compare
         // equal to the one already applied.
@@ -70,7 +70,7 @@ struct TranscriptStudySearchSeedTests {
 
     @Test(.tags(.sourceLint))
     func testTheSeedIsAppliedFromATaskKeyedOnIt() throws {
-        let source = try studyViewSource()
+        let source = try detailViewSource()
 
         #expect(source.contains(".task(id: searchSeed)"))
         #expect(source.contains("applySearchSeed()"))
@@ -80,7 +80,7 @@ struct TranscriptStudySearchSeedTests {
     /// scrolls to it and stops playback following.
     @Test(.tags(.sourceLint))
     func testApplyingASeedScrollsToTheSelectedMatch() throws {
-        let body = try #require(functionBody(named: "private func applySearchSeed()", in: try studyViewSource()))
+        let body = try #require(functionBody(named: "private func applySearchSeed()", in: try detailViewSource()))
 
         #expect(body.contains("guard viewModel.applySearchSeed(searchSeed) else { return }"))
         #expect(body.contains("autoScrollEnabled = false"))
@@ -90,7 +90,7 @@ struct TranscriptStudySearchSeedTests {
     /// Locating text and listening to it are separate intentions.
     @Test(.tags(.sourceLint))
     func testApplyingASeedStartsNoPlayback() throws {
-        let viewBody = try #require(functionBody(named: "private func applySearchSeed()", in: try studyViewSource()))
+        let viewBody = try #require(functionBody(named: "private func applySearchSeed()", in: try detailViewSource()))
         let modelBody = try #require(functionBody(named: "func applySearchSeed(", in: try viewModelSource()))
 
         #expect(!viewBody.contains("audioPlayerViewModel"))
@@ -110,7 +110,7 @@ struct TranscriptStudySearchSeedTests {
     /// same either way.
     @Test(.tags(.sourceLint))
     func testASeededSearchIsDismissedLikeAnyOther() throws {
-        let source = try studyViewSource()
+        let source = try detailViewSource()
         let dismiss = try #require(functionBody(named: "private func dismissSearch()", in: source))
 
         #expect(dismiss.contains("viewModel.clearSearch()"))
@@ -131,20 +131,10 @@ struct TranscriptStudySearchSeedTests {
         #expect(source.contains("including: viewModel.activeSearchQuery != nil ? .all : .none"))
     }
 
-    /// The selection change handler resets the detail view. Without this guard it would undo the
-    /// navigation that caused the change.
-    @Test(.tags(.sourceLint))
-    func testSelectingAResultIsNotResetByTheSelectionHandler() throws {
-        let source = try appShellSource()
-
-        #expect(source.contains("let isOpeningSearchResult = newValue != nil && newValue?.id == studySearchSeedItemID"))
-        #expect(source.contains("guard !isOpeningSearchResult else { return }"))
-    }
-
     // MARK: - Helpers
 
-    private func studyViewSource() throws -> String {
-        try readSourceFile(relativePathFromTests: "../UI/TranscriptStudyView.swift")
+    private func detailViewSource() throws -> String {
+        try readSourceFile(relativePathFromTests: "../UI/TranscriptDetailView.swift")
     }
 
     private func viewModelSource() throws -> String {

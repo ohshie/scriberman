@@ -62,14 +62,14 @@ struct SessionSearchViewTests {
     @Test(.tags(.sourceLint))
     func testOneHandlerOwnsTheFindShortcut() throws {
         let shell = try readSourceFile(relativePathFromTests: "../UI/AppShellView.swift")
-        let study = try readSourceFile(relativePathFromTests: "../UI/TranscriptStudyView.swift")
+        let detail = try readSourceFile(relativePathFromTests: "../UI/TranscriptDetailView.swift")
 
-        #expect(shell.contains("switch FindDestination(isTranscriptViewShown: detailMode == .study) {"))
+        #expect(shell.contains("switch FindDestination(isTranscriptViewShown: isTranscriptShown) {"))
         #expect(shell.contains("searchFocusRequest += 1"))
         #expect(shell.contains("transcriptFindRequest += 1"))
-        // The study view keeps its toolbar action, but the key belongs to the Edit menu.
-        #expect(!study.contains(".keyboardShortcut(\"f\", modifiers: .command)"))
-        #expect(study.contains(".onChange(of: findRequest)"))
+        // The detail view keeps its toolbar action, but the key belongs to the Edit menu.
+        #expect(!detail.contains(".keyboardShortcut(\"f\", modifiers: .command)"))
+        #expect(detail.contains(".onChange(of: findRequest)"))
     }
 
     /// Present whether or not the list has anything in it: it is how the list is searched, so it

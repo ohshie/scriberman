@@ -14,6 +14,7 @@ struct SessionCommandAvailability: Equatable {
         case reprocess
         case copyTranscript
         case export
+        case rawMarkdown
         case tags
         case transform
         case restoreOriginal
@@ -93,7 +94,7 @@ struct SessionCommandAvailability: Equatable {
                 }
             }
             if isTranscriptShown {
-                commands.formUnion([.copyTranscript, .export, .transform])
+                commands.formUnion([.copyTranscript, .export, .rawMarkdown, .transform])
             }
         }
 

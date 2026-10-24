@@ -285,7 +285,7 @@ final class TranscriptDetailViewModel {
     ///
     /// No playback is started: locating text and listening to it are separate intentions.
     @discardableResult
-    func applySearchSeed(_ searchSeed: TranscriptStudySearchSeed?) -> Bool {
+    func applySearchSeed(_ searchSeed: TranscriptSearchSeed?) -> Bool {
         guard let searchSeed, !searchSeed.query.isEmpty else { return false }
 
         searchState.query = searchSeed.query

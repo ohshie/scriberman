@@ -149,6 +149,7 @@ struct ScribermanApp: App {
         .modelContainer(modelContainer)
         .commands {
             SidebarCommands()
+            RawMarkdownCommands()
             FileCommands()
             SessionCommands(appState: appState)
             FindCommands()
