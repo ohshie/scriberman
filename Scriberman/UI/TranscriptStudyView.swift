@@ -188,6 +188,10 @@ struct TranscriptStudyView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        // Hard style while a bar is shown: the automatic edge effect lit the bars up under the
+        // pointer. Without a bar the edges keep the automatic style the toolbar and player bar use.
+        .scrollEdgeEffectStyle(showRawMarkdownToggle ? .hard : nil, for: .top)
+        .scrollEdgeEffectStyle(isSearchVisible ? .hard : nil, for: .bottom)
     }
 
     private var transcript: Transcript {
