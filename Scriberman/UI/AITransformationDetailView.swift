@@ -155,12 +155,14 @@ struct AITransformationDetailView: View {
             } label: {
                 Label("Copy", systemImage: "doc.on.doc")
             }
+            .help("Copy")
 
             Button {
                 onExport()
             } label: {
                 Label("Export", systemImage: "square.and.arrow.up")
             }
+            .help("Export")
         }
     }
 }

@@ -478,6 +478,7 @@ struct AppShellView: View {
                 } label: {
                     Label("New Session", systemImage: "plus")
                 }
+                .help("New Session")
             }
         }
     }

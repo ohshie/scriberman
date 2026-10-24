@@ -170,6 +170,7 @@ struct TranscriptDetailView: View {
                 } label: {
                     Label("Copy", systemImage: "doc.on.doc")
                 }
+                .help("Copy")
                 .disabled(!hasTranscript)
 
                 Button {
@@ -177,6 +178,7 @@ struct TranscriptDetailView: View {
                 } label: {
                     Label("Export", systemImage: "square.and.arrow.up")
                 }
+                .help("Export")
                 .disabled(!hasTranscript)
 
                 Button {
@@ -184,6 +186,7 @@ struct TranscriptDetailView: View {
                 } label: {
                     Label("Find", systemImage: "magnifyingglass")
                 }
+                .help("Find")
                 .disabled(!hasTranscript)
 
                 speakersButton
@@ -205,6 +208,7 @@ struct TranscriptDetailView: View {
                     } label: {
                         Label("Tags", systemImage: "tag")
                     }
+                    .help("Tags")
                 }
             }
         }
@@ -290,6 +294,7 @@ struct TranscriptDetailView: View {
         } label: {
             Label("Transform", systemImage: "sparkles")
         }
+        .help("Transform")
         .disabled(viewModel.isAIEnabled == false || viewModel.isRunningTransformation || viewModel.finalTranscriptText.isEmpty)
     }
 
