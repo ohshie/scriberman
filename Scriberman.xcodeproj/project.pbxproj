@@ -265,6 +265,7 @@
 		A9D1E2F3A4B5C6D7E8FB1003 /* UpdateServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9D1E2F3A4B5C6D7E8FB1004 /* UpdateServiceTests.swift */; };
 		A22A22A22A22A22A22A22A22 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22B22B22B22B22B22B22B22 /* KeychainStore.swift */; };
 		A2E8F18069EB9CB0F14A58BA /* RecordingStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E2E0F5F51DABC96146DE26B /* RecordingStatusTests.swift */; };
+		C15A0F1D00000000000000A1 /* MainWindowCommandsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C15A0F1D00000000000000A2 /* MainWindowCommandsTests.swift */; };
 		B7C1A0E2F3D4456789AB0C01 /* SessionCommandAvailabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7C1A0E2F3D4456789AB0C02 /* SessionCommandAvailabilityTests.swift */; };
 		A33A33A33A33A33A33A33A33 /* AIProviderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B33B33B33B33B33B33B33B33 /* AIProviderStore.swift */; };
 		A44A44A44A44A44A44A44A44 /* AIProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B44B44B44B44B44B44B44B44 /* AIProviderService.swift */; };
@@ -568,6 +569,7 @@
 		8762704F4A827AAB342E6E05 /* JobsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JobsView.swift; sourceTree = "<group>"; };
 		8A2AEE3DB783526C01DF1552 /* TranscriptionServiceProtocol.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TranscriptionServiceProtocol.swift; sourceTree = "<group>"; };
 		8E2E0F5F51DABC96146DE26B /* RecordingStatusTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RecordingStatusTests.swift; sourceTree = "<group>"; };
+		C15A0F1D00000000000000A2 /* MainWindowCommandsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MainWindowCommandsTests.swift; sourceTree = "<group>"; };
 		B7C1A0E2F3D4456789AB0C02 /* SessionCommandAvailabilityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionCommandAvailabilityTests.swift; sourceTree = "<group>"; };
 		8FF38F82AD4960A1C5B3E860 /* TokenStitcher.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TokenStitcher.swift; sourceTree = "<group>"; };
 		95199C39E12ED82DCA4C4932 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
@@ -700,6 +702,7 @@
 				B5871E10D502FAEB70EDC99F /* MarkdownRendererTests.swift */,
 				8E2E0F5F51DABC96146DE26B /* RecordingStatusTests.swift */,
 				B7C1A0E2F3D4456789AB0C02 /* SessionCommandAvailabilityTests.swift */,
+				C15A0F1D00000000000000A2 /* MainWindowCommandsTests.swift */,
 				ABB74F3722FB4F63901ACA17 /* IdlePromptActionsTests.swift */,
 				B08A1E0100000000000000F2 /* HotkeyLabelTests.swift */,
 				90C96C56DC384901B1BDA27D /* IdlePromptPreferencesTests.swift */,
@@ -1575,6 +1578,7 @@
 				798732732F7D8EE600570A03 /* AudioFileProberTests.swift in Sources */,
 				A2E8F18069EB9CB0F14A58BA /* RecordingStatusTests.swift in Sources */,
 				B7C1A0E2F3D4456789AB0C01 /* SessionCommandAvailabilityTests.swift in Sources */,
+				C15A0F1D00000000000000A1 /* MainWindowCommandsTests.swift in Sources */,
 				CACA88E55CED472B8823033A /* IdlePromptActionsTests.swift in Sources */,
 				B08A1E0100000000000000B2 /* HotkeyLabelTests.swift in Sources */,
 				1BD6AE6B039F42B3904FA416 /* IdlePromptPreferencesTests.swift in Sources */,

@@ -35,6 +35,9 @@ struct AppShellView: View {
     /// Bumped to ask the sidebar's search field for focus. The window owns the find shortcut, so
     /// there is one place that decides what ⌘F means at any moment.
     @State private var searchFocusRequest = 0
+    /// Bumped to ask the study view to open its find bar.
+    @State private var transcriptFindRequest = 0
+    @State private var textEditingObserver = TextEditingObserver()
     @FocusState private var isSessionListFocused: Bool
     /// The session the delete confirmation is asking about. The toolbar, the Session menu and the
     /// Delete key all ask through this one confirmation.
@@ -159,6 +162,11 @@ struct AppShellView: View {
             }
         }
         .focusedSceneValue(\.mainWindow, commandContext)
+        .background {
+            WindowReader { window in
+                textEditingObserver.observe(window)
+            }
+        }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else {
                 return
@@ -196,23 +204,6 @@ struct AppShellView: View {
             studySearchSeed = nil
             studySearchSeedItemID = nil
             detailMode = .standard
-        }
-        // One handler owns the find shortcut, so what ⌘F means is decided in one place rather than
-        // by whichever of two views happens to hold focus. With a transcript open it belongs to the
-        // find bar — that is the text you came to search. Otherwise the session list is the only
-        // thing there is to search, so it focuses the sidebar's field.
-        .background {
-            Button("Find") {
-                if detailMode == .study {
-                    NotificationCenter.default.post(name: .transcriptSearchRequested, object: nil)
-                } else {
-                    searchFocusRequest += 1
-                }
-            }
-            .keyboardShortcut("f", modifiers: .command)
-            .frame(width: 0, height: 0)
-            .opacity(0.001)
-            .accessibilityHidden(true)
         }
         .onChange(of: detailMode) { _, newValue in
             if newValue != .study {
@@ -312,7 +303,8 @@ struct AppShellView: View {
                     autoScrollEnabled: $transcriptAutoScrollEnabled,
                     transcript: transcript,
                     store: appState.backgroundServices.speakerEmbeddingStore,
-                    searchSeed: studySearchSeed
+                    searchSeed: studySearchSeed,
+                    findRequest: transcriptFindRequest
                 )
                 .id(session.id)
             } else if detailMode == .transformation {
@@ -357,7 +349,8 @@ struct AppShellView: View {
                     autoScrollEnabled: $transcriptAutoScrollEnabled,
                     transcript: transcript,
                     store: appState.backgroundServices.speakerEmbeddingStore,
-                    searchSeed: studySearchSeed
+                    searchSeed: studySearchSeed,
+                    findRequest: transcriptFindRequest
                 )
                 .id(session.id)
             } else if detailMode == .transformation {
@@ -549,6 +542,8 @@ struct AppShellView: View {
         MainWindowCommandContext(
             selection: selectedSession,
             availability: commandAvailability,
+            isPlaying: audioPlayerViewModel.isPlaying,
+            isEditingText: textEditingObserver.isEditingText,
             actions: MainWindowActions(
                 newSession: { startNewSession() },
                 importFile: { presentImportPanel() },
@@ -578,7 +573,11 @@ struct AppShellView: View {
                     guard case .recording(let session) = selectedSession else { return }
                     appState.sessionToTrim = session
                 },
-                delete: { requestDeletion() }
+                delete: { requestDeletion() },
+                startRecording: { startRecording() },
+                stopRecording: { stopRecording() },
+                playPause: { togglePlayback() },
+                find: { find() }
             ),
             modelContext: modelContext
         )
@@ -600,6 +599,49 @@ struct AppShellView: View {
     private func requestFromDetail(_ request: DetailCommandRequest) {
         detailMode = .standard
         detailCommandRequest = request
+    }
+
+    /// Records the way the new-session panel's Record button does: into the pending session, which
+    /// is created first when there is none. When recording cannot start yet, the panel stays shown
+    /// so its controls say why.
+    private func startRecording() {
+        startNewSession()
+        let viewModel = appState.newSessionViewModel
+        guard viewModel.canRecord, let pendingSession = appState.pendingSession else {
+            return
+        }
+
+        Task {
+            if let session = await viewModel.startRecording(title: pendingSession.title, context: modelContext) {
+                appState.discardPendingSession()
+                selectedSession = .recording(session)
+            }
+        }
+    }
+
+    private func stopRecording() {
+        Task {
+            _ = await appState.newSessionViewModel.stopRecording(context: modelContext)
+        }
+    }
+
+    private func togglePlayback() {
+        if audioPlayerViewModel.isPlaying {
+            audioPlayerViewModel.pause()
+        } else {
+            audioPlayerViewModel.play()
+        }
+    }
+
+    /// With a transcript open, Find searches it: that is the text you came to read. Otherwise the
+    /// session list is the only thing there is to search.
+    private func find() {
+        switch FindDestination(isTranscriptViewShown: detailMode == .study) {
+        case .transcriptFindBar:
+            transcriptFindRequest += 1
+        case .sessionSearch:
+            searchFocusRequest += 1
+        }
     }
 
     private var commandSelection: SessionCommandAvailability.Selection {
@@ -646,7 +688,7 @@ struct AppShellView: View {
                     exportTranscript(for: session)
                 },
                 onFind: {
-                    NotificationCenter.default.post(name: .transcriptSearchRequested, object: nil)
+                    find()
                 }
             )
         }
@@ -818,6 +860,30 @@ private enum StoreFailureAlert: Equatable {
             "\(count) transcript lines from this recording could not be saved. The audio is intact; you can reprocess it to rebuild the transcript."
         case .titleNotSaved:
             "The new title could not be saved, so the session keeps its previous title."
+        }
+    }
+}
+
+/// Reports the window this view is in, and again whenever it moves to another.
+private struct WindowReader: NSViewRepresentable {
+    let onWindowChange: (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> ReportingView {
+        let view = ReportingView()
+        view.onWindowChange = onWindowChange
+        return view
+    }
+
+    func updateNSView(_ nsView: ReportingView, context: Context) {
+        nsView.onWindowChange = onWindowChange
+    }
+
+    final class ReportingView: NSView {
+        var onWindowChange: ((NSWindow?) -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            onWindowChange?(window)
         }
     }
 }

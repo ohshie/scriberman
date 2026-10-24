@@ -64,13 +64,12 @@ struct SessionSearchViewTests {
         let shell = try readSourceFile(relativePathFromTests: "../UI/AppShellView.swift")
         let study = try readSourceFile(relativePathFromTests: "../UI/TranscriptStudyView.swift")
 
-        #expect(shell.contains("if detailMode == .study {"))
-        #expect(shell.contains("NotificationCenter.default.post(name: .transcriptSearchRequested"))
+        #expect(shell.contains("switch FindDestination(isTranscriptViewShown: detailMode == .study) {"))
         #expect(shell.contains("searchFocusRequest += 1"))
-        #expect(shell.contains(".keyboardShortcut(\"f\", modifiers: .command)"))
-        // The study view keeps its observer and its toolbar action, but no longer claims the key.
+        #expect(shell.contains("transcriptFindRequest += 1"))
+        // The study view keeps its toolbar action, but the key belongs to the Edit menu.
         #expect(!study.contains(".keyboardShortcut(\"f\", modifiers: .command)"))
-        #expect(study.contains("publisher(for: .transcriptSearchRequested)"))
+        #expect(study.contains(".onChange(of: findRequest)"))
     }
 
     /// Present whether or not the list has anything in it: it is how the list is searched, so it

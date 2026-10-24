@@ -159,6 +159,16 @@ struct SessionCommandAvailabilityTests {
         #expect(availability.isEnabled(.startRecording) == !row.isRecordingRunning)
     }
 
+    @Test(arguments: rows)
+    func playPauseIsEnabledOnlyWithAudioLoaded(_ row: Row) {
+        var withoutAudio = row
+        withoutAudio.hasLoadedAudio = false
+        #expect(!withoutAudio.availability.isEnabled(.playPause))
+        if row.availability.isEnabled(.playPause) {
+            #expect(row.hasLoadedAudio)
+        }
+    }
+
     @Test
     func noFocusedMainWindowDisablesEveryCommand() {
         let availability = SessionCommandAvailability.noMainWindow
