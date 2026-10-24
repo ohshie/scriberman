@@ -104,6 +104,8 @@ struct ActiveRecordingDetailView: View {
         .onHover { hovering in
             isPointerOverSegments = hovering
         }
+        // A permanent frosted band under the toolbar, as in the transcript detail.
+        .scrollEdgeEffectStyle(.hard, for: .top)
         .onChange(of: viewModel.liveSegments.count) {
             guard !isPointerOverSegments else { return }
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {

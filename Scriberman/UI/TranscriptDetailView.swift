@@ -156,6 +156,9 @@ struct TranscriptDetailView: View {
         // Hard style while the find bar is shown: the automatic edge effect lit the bar up under the
         // pointer. Without it the edge keeps the automatic style the player bar uses.
         .scrollEdgeEffectStyle(isSearchVisible ? .hard : nil, for: .bottom)
+        // A permanent frosted band under the toolbar, as in Photos. With the automatic style the
+        // band appeared only under the pointer, so scrolled text showed through the toolbar.
+        .scrollEdgeEffectStyle(.hard, for: .top)
         // Grouped by what each acts on, apart from the window's New Session. Reprocess, Restore
         // Original and Delete are in the Session menu.
         .toolbar {
