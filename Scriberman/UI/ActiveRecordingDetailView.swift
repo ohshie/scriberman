@@ -111,8 +111,9 @@ struct ActiveRecordingDetailView: View {
             }
         }
         // Outside the scrolling content, so Stop stays in the window however long the transcript
-        // grows, including while following is suspended.
-        .safeAreaBar(edge: .bottom) {
+        // grows, including while following is suspended. A plain inset: a safe-area bar extends the
+        // scroll edge effect under Stop, and that area lit up under the pointer.
+        .safeAreaInset(edge: .bottom) {
             HStack {
                 Spacer()
                 HeroCircleButton(

@@ -77,10 +77,12 @@ struct JobsView: View {
         // list still scrolled its content up behind it — rows and the section header would slide
         // under the field and stay there until the list was dragged back down. An inset makes the
         // scroll view reserve the space, and the safe-area bar's scroll edge effect keeps anything
-        // passing beneath it from competing with the field.
+        // passing beneath it from competing with the field. Hard style: the automatic edge effect
+        // lit the row up under the pointer.
         .safeAreaBar(edge: .top, spacing: 0) {
             searchBar
         }
+        .scrollEdgeEffectStyle(.hard, for: .top)
         .navigationTitle("Sessions")
         .task {
             await viewModel.refresh()

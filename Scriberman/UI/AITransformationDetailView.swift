@@ -66,6 +66,8 @@ struct AITransformationDetailView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
         }
+        // Hard style: the automatic edge effect lit the bar up under the pointer.
+        .scrollEdgeEffectStyle(.hard, for: .top)
         .task {
             viewModel.loadPrompts()
             syncSelectionWithAvailableTransformations()
