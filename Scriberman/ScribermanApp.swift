@@ -150,6 +150,8 @@ struct ScribermanApp: App {
         .commands {
             SidebarCommands()
             FileCommands()
+            FindCommands()
+            ControlsCommands()
             TrimCommands(appState: appState)
             ScribermanUpdateCommands(updateService: appState.updateService)
         }

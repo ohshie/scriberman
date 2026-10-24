@@ -38,6 +38,8 @@ struct TranscriptStudyView: View {
     /// A search to apply on opening, or `nil` to open as the view always has — empty find bar, no
     /// match selected.
     let searchSeed: TranscriptStudySearchSeed?
+    /// Bumped by the window's Find command to open the find bar.
+    let findRequest: Int
 
     @State private var showRawMarkdown = false
     @State private var scrollTargetID: UUID?
@@ -53,7 +55,8 @@ struct TranscriptStudyView: View {
         transcript: Transcript,
         store: SpeakerEmbeddingStore? = nil,
         showRawMarkdownToggle: Bool = true,
-        searchSeed: TranscriptStudySearchSeed? = nil
+        searchSeed: TranscriptStudySearchSeed? = nil,
+        findRequest: Int = 0
     ) {
         self.session = session
         self.audioPlayerViewModel = audioPlayerViewModel
@@ -67,6 +70,7 @@ struct TranscriptStudyView: View {
         self.inputTranscript = transcript
         self.showRawMarkdownToggle = showRawMarkdownToggle
         self.searchSeed = searchSeed
+        self.findRequest = findRequest
     }
 
     var body: some View {
@@ -135,7 +139,7 @@ struct TranscriptStudyView: View {
                 autoScrollEnabled = false
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .transcriptSearchRequested)) { _ in
+        .onChange(of: findRequest) {
             presentSearch()
         }
         .onScrollPhaseChange { _, newPhase in
@@ -283,8 +287,4 @@ struct TranscriptStudyView: View {
             viewModel.isSearchVisible = false
         }
     }
-}
-
-extension Notification.Name {
-    static let transcriptSearchRequested = Notification.Name("Scriberman.TranscriptSearchRequested")
 }

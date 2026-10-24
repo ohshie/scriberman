@@ -1,5 +1,6 @@
 import AppKit
 import UniformTypeIdentifiers
+import Observation
 
 /// Replaces the general pasteboard's contents with `text`. Every copy control goes through here.
 func copyToPasteboard(_ text: String) {
@@ -62,5 +63,35 @@ final class FloatingPanel: NSPanel {
         hidesOnDeactivate = false
         becomesKeyOnlyIfNeeded = true
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+    }
+}
+
+/// Whether a window's keyboard focus is in editable text: a text field's editor, a text view being
+/// edited. Selectable text that cannot be edited and focused controls do not count.
+@MainActor
+@Observable
+final class TextEditingObserver {
+    private(set) var isEditingText = false
+    @ObservationIgnored private var observation: NSKeyValueObservation?
+    @ObservationIgnored private weak var window: NSWindow?
+
+    /// Follows `window`'s first responder, replacing any window followed before.
+    func observe(_ window: NSWindow?) {
+        guard window !== self.window || observation == nil else { return }
+        observation?.invalidate()
+        self.window = window
+        observation = window?.observe(\.firstResponder, options: [.initial, .new]) { [weak self] window, _ in
+            MainActor.assumeIsolated {
+                self?.update(window.firstResponder)
+            }
+        }
+        update(window?.firstResponder)
+    }
+
+    private func update(_ responder: NSResponder?) {
+        let isEditing = (responder as? NSTextView)?.isEditable ?? false
+        if isEditing != isEditingText {
+            isEditingText = isEditing
+        }
     }
 }

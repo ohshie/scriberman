@@ -97,22 +97,6 @@ struct AudioPlayerBar: View {
                 .help("Resume Transcript Auto-Scroll")
                 .accessibilityLabel("Resume auto-scroll")
             }
-
-            Button {
-                if viewModel.isPlaying {
-                    viewModel.pause()
-                } else {
-                    viewModel.play()
-                }
-            } label: {
-                EmptyView()
-            }
-            .keyboardShortcut(.space, modifiers: [])
-            .disabled(viewModel.isReady == false)
-            .accessibilityHidden(true)
-            .frame(width: 0, height: 0)
-            .opacity(0)
-            .allowsHitTesting(false)
         }
     }
 
