@@ -4,10 +4,8 @@ import SwiftUI
 
 struct TranscriptDetailView: View {
     let session: any TranscribableSession
-    let onReprocess: (() -> Void)?
     let onCopy: () -> Void
-    /// Asks the window to confirm and delete the session.
-    let onDelete: () -> Void
+    let onExport: () -> Void
     /// Restores a trimmed recording to its pre-trim state; `nil` for sessions that cannot be trimmed.
     let onRestoreOriginal: (() async throws -> Void)?
     let onOpenStudy: (() -> Void)?
@@ -32,9 +30,8 @@ struct TranscriptDetailView: View {
     init(
         session: any TranscribableSession,
         aiProviderService: AIProviderService,
-        onReprocess: (() -> Void)?,
         onCopy: @escaping () -> Void,
-        onDelete: @escaping () -> Void,
+        onExport: @escaping () -> Void,
         onRestoreOriginal: (() async throws -> Void)? = nil,
         onOpenStudy: (() -> Void)?,
         onOpenTransformation: ((UUID) -> Void)?,
@@ -42,9 +39,8 @@ struct TranscriptDetailView: View {
         commandRequest: Binding<DetailCommandRequest?> = .constant(nil)
     ) {
         self.session = session
-        self.onReprocess = onReprocess
         self.onCopy = onCopy
-        self.onDelete = onDelete
+        self.onExport = onExport
         self.onRestoreOriginal = onRestoreOriginal
         self.onOpenStudy = onOpenStudy
         self.onOpenTransformation = onOpenTransformation
@@ -70,52 +66,41 @@ struct TranscriptDetailView: View {
                 titleFocused = false
             }
         }
+        // Grouped by what each acts on, apart from the window's New Session. Reprocess, Restore
+        // Original and Delete are in the Session menu.
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                if let onReprocess {
-                    Button {
-                        onReprocess()
-                    } label: {
-                        if viewModel.isReprocessing {
-                            Label("Reprocessing", systemImage: "hourglass")
-                        } else {
-                            Label("Reprocess", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                    }
-                    .disabled(!viewModel.canReprocess)
-                }
+            ToolbarSpacer(.fixed, placement: .primaryAction)
 
+            ToolbarItemGroup(placement: .primaryAction) {
                 Button {
                     onCopy()
                 } label: {
                     Label("Copy", systemImage: "doc.on.doc")
                 }
 
-                // Tags are a session action, so they live with the others rather than in the
-                // header. Only recordings carry tags.
-                if let recording = session as? RecordingSession {
+                Button {
+                    onExport()
+                } label: {
+                    Label("Export", systemImage: "square.and.arrow.up")
+                }
+            }
+
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+
+            ToolbarItem(placement: .primaryAction) {
+                transformMenu
+            }
+
+            // Only recordings carry tags.
+            if let recording = session as? RecordingSession {
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+
+                ToolbarItem(placement: .primaryAction) {
                     Menu {
                         TagAssignmentMenuContent(session: recording)
                     } label: {
                         Label("Tags", systemImage: "tag")
                     }
-                }
-
-                transformMenu
-
-                if onRestoreOriginal != nil, (session as? RecordingSession)?.isTrimmed == true {
-                    Button {
-                        showingRestoreConfirmation = true
-                    } label: {
-                        Label("Restore Original", systemImage: "arrow.counterclockwise")
-                    }
-                    .disabled(isRestoringOriginal)
-                }
-
-                Button(role: .destructive) {
-                    onDelete()
-                } label: {
-                    Label("Delete", systemImage: "trash")
                 }
             }
         }

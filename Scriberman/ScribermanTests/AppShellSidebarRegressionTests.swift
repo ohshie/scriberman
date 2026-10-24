@@ -158,7 +158,7 @@ struct AppShellSidebarRegressionTests {
     @Test("Detail toolbar Copy uses the shared transcript copy helper", .tags(.sourceLint))
     func detailToolbarCopyUsesSharedTranscriptCopyHelper() throws {
         let appShell = try appShellSource()
-        let wiring = "onCopy: {\n                        copyTranscript(for: session)\n                    },\n                    onDelete: {"
+        let wiring = "onCopy: {\n                        copyTranscript(for: session)\n                    },\n                    onExport: {"
         #expect(
             appShell.components(separatedBy: wiring).count - 1 == 2,
             "Both TranscriptDetailView call sites (recording and imported) should wire Copy to copyTranscript(for: session)."

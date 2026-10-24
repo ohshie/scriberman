@@ -317,13 +317,12 @@ struct AppShellView: View {
                 TranscriptDetailView(
                     session: session,
                     aiProviderService: aiProviderService,
-                    onReprocess: {
-                        appState.jobsViewModel.reprocess(session: session, context: modelContext)
-                    },
                     onCopy: {
                         copyTranscript(for: session)
                     },
-                    onDelete: { requestDeletion() },
+                    onExport: {
+                        exportTranscript(for: session)
+                    },
                     onRestoreOriginal: {
                         try await restoreOriginal(of: session)
                     },
@@ -363,13 +362,12 @@ struct AppShellView: View {
                 TranscriptDetailView(
                     session: session,
                     aiProviderService: aiProviderService,
-                    onReprocess: {
-                        appState.jobsViewModel.reprocess(session: session, context: modelContext)
-                    },
                     onCopy: {
                         copyTranscript(for: session)
                     },
-                    onDelete: { requestDeletion() },
+                    onExport: {
+                        exportTranscript(for: session)
+                    },
                     onOpenStudy: {
                         detailMode = .study
                     },
