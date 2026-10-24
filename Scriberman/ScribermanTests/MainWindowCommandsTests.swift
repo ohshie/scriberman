@@ -30,6 +30,12 @@ struct ControlsCommandsTests {
     }
 
     @Test
+    func rawMarkdownIsTitledForWhatItWillDo() {
+        #expect(RawMarkdownCommands.title(isShown: false) == "Show Raw Markdown")
+        #expect(RawMarkdownCommands.title(isShown: true) == "Hide Raw Markdown")
+    }
+
+    @Test
     func findOpensTheTranscriptFindBarOnlyInTheTranscriptView() {
         #expect(FindDestination(isTranscriptViewShown: true) == .transcriptFindBar)
         #expect(FindDestination(isTranscriptViewShown: false) == .sessionSearch)
@@ -75,6 +81,15 @@ struct ControlsAndFindMenuBarTests {
 
         #expect(find.keyEquivalent == "f")
         #expect(find.keyEquivalentModifierMask == .command)
+    }
+
+    @Test
+    func rawMarkdownIsInTheViewMenu() async throws {
+        let view = try await topMenu("View")
+        let rawMarkdown = try #require(view.items.first { $0.title == "Show Raw Markdown" })
+
+        #expect(rawMarkdown.keyEquivalent == "m")
+        #expect(rawMarkdown.keyEquivalentModifierMask == [.command, .shift])
     }
 }
 
@@ -176,13 +191,13 @@ struct ControlsAndFindCommandsSourceTests {
     func theHiddenShortcutButtonsAndTheFindNotificationAreGone() throws {
         let shell = try readSourceFile(relativePathFromTests: "../UI/AppShellView.swift")
         let player = try readSourceFile(relativePathFromTests: "../UI/AudioPlayerBar.swift")
-        let study = try readSourceFile(relativePathFromTests: "../UI/TranscriptStudyView.swift")
+        let detail = try readSourceFile(relativePathFromTests: "../UI/TranscriptDetailView.swift")
 
         #expect(!shell.contains(".keyboardShortcut("))
         #expect(!shell.contains(".opacity(0.001)"))
         #expect(!player.contains(".keyboardShortcut("))
         #expect(!player.contains("EmptyView()"))
-        for source in [shell, player, study] {
+        for source in [shell, player, detail] {
             #expect(!source.contains("transcriptSearchRequested"))
         }
     }

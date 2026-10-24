@@ -894,22 +894,9 @@ struct RecordingSessionTests {
     
     
     @Test(.tags(.sourceLint))
-    func testTranscriptDetailViewIncludesPreviewAndStudyNavigation() throws {
-        let source = try transcriptDetailSource()
-
-        #expect(source.contains("TranscriptPreviewView("))
-        #expect(source.contains("onTap: viewModel.displayedTranscript == nil ? nil : onOpenStudy"))
-        #expect(!(source.contains("Label(\"Study Transcript\", systemImage: \"book.pages\")")))
-        #expect(!(source.contains(".sheet(isPresented: $showingStudyTranscript)")))
-    }
-
-    
-    
-    @Test(.tags(.sourceLint))
     func testTranscriptConversationViewsUseAdaptiveStylesForLightDarkMode() throws {
         let blockSource = try sourceForFile(named: "TranscriptBlockView.swift")
         let rowSource = try sourceForFile(named: "TranscriptRowView.swift")
-        let previewSource = try sourceForFile(named: "TranscriptPreviewView.swift")
 
         // The card lives in the shared row now, drawn the same way for a finished block and a live
         // segment. The block still owns the text inside it.
@@ -920,7 +907,6 @@ struct RecordingSessionTests {
         #expect(!(blockSource.contains("Color.white")))
         #expect(!(blockSource.contains("Color.black")))
 
-        #expect(previewSource.contains(".background(.thinMaterial"))
     }
 
     private func transcriptDetailSource() throws -> String {

@@ -76,7 +76,7 @@ struct SessionCommandAvailabilityTests {
             isTranscriptShown: true,
             hasLoadedAudio: true,
             enabled: [.newSession, .importFile, .startRecording, .find, .playPause,
-                      .reprocess, .copyTranscript, .export, .tags, .transform, .trim, .delete]
+                      .reprocess, .copyTranscript, .export, .rawMarkdown, .tags, .transform, .trim, .delete]
         ),
         Row(
             name: "finished recording while another recording runs",
@@ -85,7 +85,7 @@ struct SessionCommandAvailabilityTests {
             isTranscriptShown: true,
             hasLoadedAudio: true,
             enabled: [.newSession, .importFile, .stopRecording, .find, .playPause,
-                      .reprocess, .copyTranscript, .export, .tags, .transform, .trim, .delete]
+                      .reprocess, .copyTranscript, .export, .rawMarkdown, .tags, .transform, .trim, .delete]
         ),
         Row(
             name: "finished, trimmed recording",
@@ -93,14 +93,14 @@ struct SessionCommandAvailabilityTests {
             isTranscriptShown: true,
             hasLoadedAudio: true,
             enabled: [.newSession, .importFile, .startRecording, .find, .playPause,
-                      .reprocess, .copyTranscript, .export, .tags, .transform, .restoreOriginal, .delete]
+                      .reprocess, .copyTranscript, .export, .rawMarkdown, .tags, .transform, .restoreOriginal, .delete]
         ),
         Row(
             name: "finished recording, audio not loaded",
             selection: .recording(.done, isTrimmed: false),
             isTranscriptShown: true,
             enabled: [.newSession, .importFile, .startRecording, .find,
-                      .copyTranscript, .export, .tags, .transform, .trim, .delete]
+                      .copyTranscript, .export, .rawMarkdown, .tags, .transform, .trim, .delete]
         ),
         Row(
             name: "finished recording, transcript not shown",
@@ -122,7 +122,7 @@ struct SessionCommandAvailabilityTests {
             isTranscriptShown: true,
             hasLoadedAudio: true,
             enabled: [.newSession, .importFile, .startRecording, .find, .playPause,
-                      .copyTranscript, .export, .tags, .transform, .delete]
+                      .copyTranscript, .export, .rawMarkdown, .tags, .transform, .delete]
         ),
         Row(
             name: "imported file being converted",
@@ -135,7 +135,7 @@ struct SessionCommandAvailabilityTests {
             isTranscriptShown: true,
             hasLoadedAudio: true,
             enabled: [.newSession, .importFile, .startRecording, .find, .playPause,
-                      .reprocess, .copyTranscript, .export, .transform, .delete]
+                      .reprocess, .copyTranscript, .export, .rawMarkdown, .transform, .delete]
         ),
     ]
 

@@ -10,6 +10,8 @@ struct MainWindowCommandContext {
     let isPlaying: Bool
     /// Editable text holds the window's keyboard, so single-key shortcuts must leave the key to it.
     let isEditingText: Bool
+    /// The transcript shows as Markdown text rather than passages.
+    let isRawMarkdownShown: Bool
     let actions: MainWindowActions
     /// The window's store context, for the Tags submenu that edits the selection's tags in place.
     let modelContext: ModelContext
@@ -32,6 +34,7 @@ struct MainWindowActions {
     let stopRecording: () -> Void
     let playPause: () -> Void
     let find: () -> Void
+    let toggleRawMarkdown: () -> Void
 }
 
 /// A Session menu command the detail view carries out, because it shows the command's
@@ -143,6 +146,24 @@ struct FindCommands: Commands {
             .keyboardShortcut("f", modifiers: .command)
             .disabled(!mainWindow.availability.isEnabled(.find))
         }
+    }
+}
+
+struct RawMarkdownCommands: Commands {
+    @FocusedValue(\.mainWindow) private var mainWindow: MainWindowCommandContext?
+
+    var body: some Commands {
+        CommandGroup(after: .sidebar) {
+            Button(Self.title(isShown: mainWindow?.isRawMarkdownShown ?? false)) {
+                mainWindow?.actions.toggleRawMarkdown()
+            }
+            .keyboardShortcut("m", modifiers: [.command, .shift])
+            .disabled(!mainWindow.availability.isEnabled(.rawMarkdown))
+        }
+    }
+
+    static func title(isShown: Bool) -> String {
+        isShown ? "Hide Raw Markdown" : "Show Raw Markdown"
     }
 }
 

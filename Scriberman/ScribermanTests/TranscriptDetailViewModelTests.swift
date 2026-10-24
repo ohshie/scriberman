@@ -619,7 +619,7 @@ struct TranscriptDetailViewModelTranscriptTests {
         let viewModel = makeViewModel(session: conversationSession())
         let lastBlock = viewModel.blocks[2]
 
-        let applied = viewModel.applySearchSeed(TranscriptStudySearchSeed(query: "migration", blockID: lastBlock.id))
+        let applied = viewModel.applySearchSeed(TranscriptSearchSeed(query: "migration", blockID: lastBlock.id))
 
         #expect(applied)
         #expect(viewModel.searchState.query == "migration")
@@ -632,12 +632,12 @@ struct TranscriptDetailViewModelTranscriptTests {
     func testTheSameSeedWithANewTokenReapplies() {
         let viewModel = makeViewModel(session: conversationSession())
         let lastBlock = viewModel.blocks[2]
-        let first = TranscriptStudySearchSeed(query: "migration", blockID: lastBlock.id)
+        let first = TranscriptSearchSeed(query: "migration", blockID: lastBlock.id)
         viewModel.applySearchSeed(first)
         viewModel.searchState.next()
         #expect(viewModel.searchState.currentMatch?.blockID == viewModel.blocks[0].id)
 
-        let again = TranscriptStudySearchSeed(query: first.query, blockID: first.blockID)
+        let again = TranscriptSearchSeed(query: first.query, blockID: first.blockID)
         #expect(again != first)
         viewModel.applySearchSeed(again)
 
@@ -648,7 +648,7 @@ struct TranscriptDetailViewModelTranscriptTests {
     func testATitleOnlySeedSelectsNothing() {
         let viewModel = makeViewModel(session: conversationSession())
 
-        viewModel.applySearchSeed(TranscriptStudySearchSeed(query: "Conversation", blockID: nil))
+        viewModel.applySearchSeed(TranscriptSearchSeed(query: "Conversation", blockID: nil))
 
         #expect(viewModel.searchState.currentMatch == nil)
         #expect(viewModel.searchState.matches.isEmpty)
@@ -659,7 +659,7 @@ struct TranscriptDetailViewModelTranscriptTests {
         let viewModel = makeViewModel(session: conversationSession())
 
         #expect(viewModel.applySearchSeed(nil) == false)
-        #expect(viewModel.applySearchSeed(TranscriptStudySearchSeed(query: "", blockID: viewModel.blocks[0].id)) == false)
+        #expect(viewModel.applySearchSeed(TranscriptSearchSeed(query: "", blockID: viewModel.blocks[0].id)) == false)
         #expect(viewModel.searchState.query.isEmpty)
         #expect(viewModel.isSearchVisible == false)
     }
@@ -691,7 +691,7 @@ struct TranscriptDetailViewModelTranscriptTests {
     @Test
     func testClearingRemovesHighlights() {
         let viewModel = makeViewModel(session: conversationSession())
-        viewModel.applySearchSeed(TranscriptStudySearchSeed(query: "migration", blockID: viewModel.blocks[2].id))
+        viewModel.applySearchSeed(TranscriptSearchSeed(query: "migration", blockID: viewModel.blocks[2].id))
 
         viewModel.clearSearch()
 

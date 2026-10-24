@@ -5,12 +5,6 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct AppShellView: View {
-    private enum DetailMode {
-        case standard
-        case study
-        case transformation
-    }
-
     @Environment(AppState.self) private var appState
     @Environment(AIProviderService.self) private var aiProviderService
     @Environment(\.scenePhase) private var scenePhase
@@ -18,31 +12,28 @@ struct AppShellView: View {
     @Query(sort: \RecordingSession.createdAt, order: .reverse) private var recordingSessions: [RecordingSession]
     @Query(sort: \ImportedSession.createdAt, order: .reverse) private var importedSessions: [ImportedSession]
     @State private var selectedSession: JobsViewModel.SessionListItem?
-    @State private var detailMode: DetailMode = .standard
+    /// The detail column's navigation: the session, or a transformation pushed on it.
+    @State private var detailNavigation = DetailNavigation()
+    /// The transformation the pushed view shows; its history picker changes it.
     @State private var selectedTransformationID: UUID?
     @State private var studyActionErrorMessage: String?
     /// A store or disk failure from deleting, importing, stopping or renaming, waiting to be shown.
     @State private var storeFailureAlert: StoreFailureAlert?
     @State private var audioPlayerViewModel = AudioPlayerViewModel()
     @State private var transcriptAutoScrollEnabled = true
-    /// The search to open the study view with, set when a search result is clicked and cleared on
-    /// any other navigation.
-    @State private var studySearchSeed: TranscriptStudySearchSeed?
-    /// Which item the seed belongs to. Selecting a result changes the selection, and the change
-    /// handler would otherwise clear the seed it was just given and send the view back to the
-    /// standard detail.
-    @State private var studySearchSeedItemID: String?
+    /// The selected session's transcript shows as Markdown text.
+    @State private var isRawMarkdownShown = false
     /// Bumped to ask the sidebar's search field for focus. The window owns the find shortcut, so
     /// there is one place that decides what ⌘F means at any moment.
     @State private var searchFocusRequest = 0
-    /// Bumped to ask the study view to open its find bar.
+    /// Bumped to ask the detail view to open its find bar.
     @State private var transcriptFindRequest = 0
     @State private var textEditingObserver = TextEditingObserver()
     @FocusState private var isSessionListFocused: Bool
     /// The session the delete confirmation is asking about. The toolbar, the Session menu and the
     /// Delete key all ask through this one confirmation.
     @State private var sessionPendingDeletion: JobsViewModel.SessionListItem?
-    /// A Session menu command waiting for the standard detail to carry it out.
+    /// A Session menu command waiting for the session's detail view to carry it out.
     @State private var detailCommandRequest: DetailCommandRequest?
 
     var body: some View {
@@ -68,18 +59,23 @@ struct AppShellView: View {
             .navigationSplitViewColumnWidth(min: 380, ideal: 460)
         } detail: {
             if let selectedSession {
-                detailView(for: selectedSession)
-                    .safeAreaBar(edge: .bottom, spacing: 0) {
-                        AudioPlayerBar(
-                            viewModel: audioPlayerViewModel,
-                            sessionHasAudio: audioURL(for: selectedSession) != nil || selectedSessionHasMixdownNil(selectedSession),
-                            mixdownURL: mixdownURLString(for: selectedSession),
-                            onResumeScroll: transcriptAutoScrollEnabled ? nil : {
-                                transcriptAutoScrollEnabled = true
-                            }
-                        )
-                    }
-                    .navigationSplitViewColumnWidth(min: 560, ideal: 860)
+                NavigationStack(path: $detailNavigation.path) {
+                    detailView(for: selectedSession)
+                        .navigationDestination(for: DetailNavigation.Destination.self) { destination in
+                            transformationView(for: destination)
+                        }
+                }
+                .safeAreaBar(edge: .bottom, spacing: 0) {
+                    AudioPlayerBar(
+                        viewModel: audioPlayerViewModel,
+                        sessionHasAudio: audioURL(for: selectedSession) != nil || selectedSessionHasMixdownNil(selectedSession),
+                        mixdownURL: mixdownURLString(for: selectedSession),
+                        onResumeScroll: transcriptAutoScrollEnabled ? nil : {
+                            transcriptAutoScrollEnabled = true
+                        }
+                    )
+                }
+                .navigationSplitViewColumnWidth(min: 560, ideal: 860)
             } else {
                 ContentUnavailableView(
                     "Select a Session",
@@ -94,14 +90,7 @@ struct AppShellView: View {
         // header title stays the one visible title.
         .navigationTitle(Self.windowTitle(for: selectedSession))
         .toolbar {
-            switch detailMode {
-            case .standard:
-                jobsToolbar
-            case .study:
-                studyModeToolbar
-            case .transformation:
-                transformationModeToolbar
-            }
+            jobsToolbar
         }
         .toolbar(removing: .title)
         .toolbar(removing: .search)
@@ -185,10 +174,6 @@ struct AppShellView: View {
                 return
             }
 
-            // A selection made by opening a search result arrives here carrying its seed. Resetting
-            // to the standard detail then would undo the navigation that caused this change.
-            let isOpeningSearchResult = newValue != nil && newValue?.id == studySearchSeedItemID
-
             transcriptAutoScrollEnabled = true
             audioPlayerViewModel.stop()
             if let url = audioURL(for: newValue) {
@@ -199,16 +184,8 @@ struct AppShellView: View {
 
             selectedTransformationID = nil
             detailCommandRequest = nil
-            guard !isOpeningSearchResult else { return }
-
-            studySearchSeed = nil
-            studySearchSeedItemID = nil
-            detailMode = .standard
-        }
-        .onChange(of: detailMode) { _, newValue in
-            if newValue != .study {
-                transcriptAutoScrollEnabled = true
-            }
+            isRawMarkdownShown = false
+            detailNavigation.selectionChanged(to: newValue?.id)
         }
         // A request from outside any window is shown by the key main window. Each of these is a
         // moment the request may have become showable: it arrived, this window became key, or the
@@ -295,92 +272,72 @@ struct AppShellView: View {
                     onTitleNotSaved: { storeFailureAlert = .titleNotSaved }
                 )
                 .id(session.id)
-            } else if detailMode == .study, let transcript = session.displayedTranscript {
-                TranscriptStudyView(
-                    session: session,
-                    aiProviderService: aiProviderService,
-                    audioPlayerViewModel: audioPlayerViewModel,
-                    autoScrollEnabled: $transcriptAutoScrollEnabled,
-                    transcript: transcript,
-                    store: appState.backgroundServices.speakerEmbeddingStore,
-                    searchSeed: studySearchSeed,
-                    findRequest: transcriptFindRequest
-                )
-                .id(session.id)
-            } else if detailMode == .transformation {
-                AITransformationDetailView(
-                    session: session,
-                    aiProviderService: aiProviderService,
-                    selectedTransformationID: $selectedTransformationID
-                )
             } else {
-                TranscriptDetailView(
-                    session: session,
-                    aiProviderService: aiProviderService,
-                    onReprocess: {
-                        appState.jobsViewModel.reprocess(session: session, context: modelContext)
-                    },
-                    onCopy: {
-                        copyTranscript(for: session)
-                    },
-                    onDelete: { requestDeletion() },
-                    onRestoreOriginal: {
-                        try await restoreOriginal(of: session)
-                    },
-                    onOpenStudy: {
-                        detailMode = .study
-                    },
-                    onOpenTransformation: { transformationID in
-                        selectedTransformationID = transformationID
-                        detailMode = .transformation
-                    },
-                    onTitleNotSaved: { storeFailureAlert = .titleNotSaved },
-                    commandRequest: $detailCommandRequest
-                )
-                .id(session.id)
+                sessionDetailView(for: session, onRestoreOriginal: {
+                    try await restoreOriginal(of: session)
+                })
             }
 
         case .imported(let session):
-            if detailMode == .study, let transcript = session.displayedTranscript {
-                TranscriptStudyView(
-                    session: session,
-                    aiProviderService: aiProviderService,
-                    audioPlayerViewModel: audioPlayerViewModel,
-                    autoScrollEnabled: $transcriptAutoScrollEnabled,
-                    transcript: transcript,
-                    store: appState.backgroundServices.speakerEmbeddingStore,
-                    searchSeed: studySearchSeed,
-                    findRequest: transcriptFindRequest
-                )
-                .id(session.id)
-            } else if detailMode == .transformation {
+            sessionDetailView(for: session, onRestoreOriginal: nil)
+        }
+    }
+
+    private func sessionDetailView(
+        for session: any TranscribableSession,
+        onRestoreOriginal: (() async throws -> Void)?
+    ) -> some View {
+        TranscriptDetailView(
+            session: session,
+            aiProviderService: aiProviderService,
+            audioPlayerViewModel: audioPlayerViewModel,
+            autoScrollEnabled: $transcriptAutoScrollEnabled,
+            transcript: session.displayedTranscript,
+            store: appState.backgroundServices.speakerEmbeddingStore,
+            searchSeed: detailNavigation.searchSeed,
+            findRequest: transcriptFindRequest,
+            isRawMarkdownShown: isRawMarkdownShown,
+            onReprocess: {
+                appState.jobsViewModel.reprocess(session: session, context: modelContext)
+            },
+            onCopy: {
+                copyTranscript(for: session)
+            },
+            onExport: {
+                exportTranscript(for: session)
+            },
+            onDelete: { requestDeletion() },
+            onRestoreOriginal: onRestoreOriginal,
+            onOpenTransformation: { transformationID in
+                selectedTransformationID = transformationID
+                detailNavigation.openTransformation(transformationID)
+            },
+            onTitleNotSaved: { storeFailureAlert = .titleNotSaved },
+            commandRequest: $detailCommandRequest
+        )
+        .id(session.id)
+    }
+
+    @ViewBuilder
+    private func transformationView(for destination: DetailNavigation.Destination) -> some View {
+        if let session = selectedTranscribableSession {
+            switch destination {
+            case .transformation:
                 AITransformationDetailView(
                     session: session,
                     aiProviderService: aiProviderService,
                     selectedTransformationID: $selectedTransformationID
                 )
-            } else {
-                TranscriptDetailView(
-                    session: session,
-                    aiProviderService: aiProviderService,
-                    onReprocess: {
-                        appState.jobsViewModel.reprocess(session: session, context: modelContext)
-                    },
-                    onCopy: {
-                        copyTranscript(for: session)
-                    },
-                    onDelete: { requestDeletion() },
-                    onOpenStudy: {
-                        detailMode = .study
-                    },
-                    onOpenTransformation: { transformationID in
-                        selectedTransformationID = transformationID
-                        detailMode = .transformation
-                    },
-                    onTitleNotSaved: { storeFailureAlert = .titleNotSaved },
-                    commandRequest: $detailCommandRequest
-                )
-                .id(session.id)
+                .toolbar {
+                    AITransformationDetailView.toolbarActions(
+                        onCopy: {
+                            copyTransformation(for: session)
+                        },
+                        onExport: {
+                            exportTransformation(for: session)
+                        }
+                    )
+                }
             }
         }
     }
@@ -544,6 +501,7 @@ struct AppShellView: View {
             availability: commandAvailability,
             isPlaying: audioPlayerViewModel.isPlaying,
             isEditingText: textEditingObserver.isEditingText,
+            isRawMarkdownShown: isRawMarkdownShown,
             actions: MainWindowActions(
                 newSession: { startNewSession() },
                 importFile: { presentImportPanel() },
@@ -577,7 +535,8 @@ struct AppShellView: View {
                 startRecording: { startRecording() },
                 stopRecording: { stopRecording() },
                 playPause: { togglePlayback() },
-                find: { find() }
+                find: { find() },
+                toggleRawMarkdown: { isRawMarkdownShown.toggle() }
             ),
             modelContext: modelContext
         )
@@ -594,10 +553,10 @@ struct AppShellView: View {
         )
     }
 
-    /// Hands a command to the standard detail, which shows its confirmation and result. From the
-    /// study or transformation view, the window goes back to the standard detail first.
+    /// Hands a command to the session's detail view, which shows its confirmation and result. From
+    /// a transformation, the window goes back to the session first.
     private func requestFromDetail(_ request: DetailCommandRequest) {
-        detailMode = .standard
+        detailNavigation.returnToSession()
         detailCommandRequest = request
     }
 
@@ -636,7 +595,7 @@ struct AppShellView: View {
     /// With a transcript open, Find searches it: that is the text you came to read. Otherwise the
     /// session list is the only thing there is to search.
     private func find() {
-        switch FindDestination(isTranscriptViewShown: detailMode == .study) {
+        switch FindDestination(isTranscriptViewShown: isTranscriptShown) {
         case .transcriptFindBar:
             transcriptFindRequest += 1
         case .sessionSearch:
@@ -657,64 +616,15 @@ struct AppShellView: View {
         }
     }
 
-    /// The detail shows a transcript: the standard detail or the study view, not a transformation
-    /// and not a recording in progress.
+    /// The detail shows a session's transcript: not a transformation and not a recording in
+    /// progress.
     private var isTranscriptShown: Bool {
-        guard detailMode != .transformation,
+        guard detailNavigation.isSessionShown,
               let session = selectedTranscribableSession,
               session.status != .recording else {
             return false
         }
         return session.displayedTranscript != nil
-    }
-
-    @ToolbarContentBuilder
-    private var studyModeToolbar: some ToolbarContent {
-        if let session = selectedTranscribableSession {
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    detailMode = .standard
-                } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .help("Back")
-            }
-
-            TranscriptStudyView.toolbarActions(
-                onCopy: {
-                    copyTranscript(for: session)
-                },
-                onExport: {
-                    exportTranscript(for: session)
-                },
-                onFind: {
-                    find()
-                }
-            )
-        }
-    }
-
-    @ToolbarContentBuilder
-    private var transformationModeToolbar: some ToolbarContent {
-        if let session = selectedTranscribableSession {
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    detailMode = .standard
-                } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .help("Back")
-            }
-
-            AITransformationDetailView.toolbarActions(
-                onCopy: {
-                    copyTransformation(for: session)
-                },
-                onExport: {
-                    exportTransformation(for: session)
-                }
-            )
-        }
     }
 
     private var selectedTranscribableSession: (any TranscribableSession)? {
@@ -732,8 +642,8 @@ struct AppShellView: View {
         }
     }
 
-    /// Opens a search result: the study view, with the query applied and the matched block
-    /// selected, so it scrolls there and highlights it.
+    /// Opens a search result: the session's detail view, with the query applied and the matched
+    /// block selected, so it scrolls there and highlights it.
     ///
     /// A title-only result has no match to seed, so it opens the session as any other selection
     /// would. Nothing here starts playback.
@@ -742,18 +652,11 @@ struct AppShellView: View {
 
         // The seed is set before the selection, so the selection's change handler already sees
         // which item it belongs to.
-        guard let match = appState.jobsViewModel.searchMatches[item.id] else {
-            studySearchSeed = nil
-            studySearchSeedItemID = nil
-            selectedSession = item
-            detailMode = .standard
-            return
+        let seed = appState.jobsViewModel.searchMatches[item.id].map {
+            TranscriptSearchSeed(query: query, blockID: $0.blockID)
         }
-
-        studySearchSeedItemID = item.id
-        studySearchSeed = TranscriptStudySearchSeed(query: query, blockID: match.blockID)
+        detailNavigation.openSearchResult(itemID: item.id, seed: seed)
         selectedSession = item
-        detailMode = .study
     }
 
     /// Copies the transcript as the export writes it — the same rendering, speakers and times
