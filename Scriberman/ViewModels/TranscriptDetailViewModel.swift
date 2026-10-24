@@ -665,14 +665,11 @@ extension TranscriptDetailViewModel {
 // MARK: - Undo action names
 
 /// The names Edit > Undo and Redo show for each undoable edit.
-///
-/// PLACEHOLDERS, NOT FOR RELEASE: the maintainer has not supplied these strings yet (hig-alignment
-/// ticket 18). Replace each value with the maintainer's wording before shipping.
 enum UndoActionName {
-    static let renameSession = "PLACEHOLDER renameSession"
-    static let changeTags = "PLACEHOLDER changeTags"
-    static let renameSpeaker = "PLACEHOLDER renameSpeaker"
-    static let mergeSpeaker = "PLACEHOLDER mergeSpeaker"
-    static let reassignSpeaker = "PLACEHOLDER reassignSpeaker"
-    static let resetSpeaker = "PLACEHOLDER resetSpeaker"
+    static let renameSession = "Rename"
+    static let changeTags = "Change Tags"
+    static let renameSpeaker = "Speaker Name"
+    static let mergeSpeaker = "Speaker Merge"
+    static let reassignSpeaker = "Passage Speaker"
+    static let resetSpeaker = "Speaker Reset"
 }
