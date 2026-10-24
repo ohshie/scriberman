@@ -157,15 +157,20 @@ final class TranscriptDetailViewModel {
     }
 
     func loadPrompts() {
-        prompts = promptStore.loadPrompts().sorted {
-            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-        }
+        prompts = Self.sortedPrompts(promptStore.loadPrompts())
 
         if let lastUsedPromptID = promptStore.loadLastUsedPromptID(),
            prompts.contains(where: { $0.id == lastUsedPromptID }) {
             selectedPromptID = lastUsedPromptID
         } else if selectedPromptID == nil {
             selectedPromptID = prompts.first?.id
+        }
+    }
+
+    /// Prompts in the order the Transform menus list them.
+    static func sortedPrompts(_ prompts: [AIPrompt]) -> [AIPrompt] {
+        prompts.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
     }
 

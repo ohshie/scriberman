@@ -18,6 +18,8 @@ struct JobsView: View {
     /// selected — a selection binding that does not change reports nothing, and clicking a result
     /// again still has to move the view to its match.
     var onOpenSearchResult: (JobsViewModel.SessionListItem) -> Void = { _ in }
+    /// Called when Delete is pressed in the list; `nil` while the selection cannot be deleted.
+    var onDeleteSelection: (() -> Void)? = nil
 
 
     @Environment(\.modelContext) private var modelContext
@@ -229,6 +231,7 @@ struct JobsView: View {
             }
         }
         .listStyle(.sidebar)
+        .onDeleteCommand(perform: onDeleteSelection)
     }
 
     @ViewBuilder
