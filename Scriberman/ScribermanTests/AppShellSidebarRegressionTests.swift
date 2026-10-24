@@ -4,35 +4,23 @@ import Foundation
 @Suite("AppShell Sidebar Regression Tests")
 struct AppShellSidebarRegressionTests {
     
-    @Test("Sidebar column removes default sidebar toggle", .tags(.sourceLint))
-    func sidebarColumnRemovesDefaultSidebarToggle() throws {
+    @Test("Sidebar toggle is the system's own control", .tags(.sourceLint))
+    func sidebarToggleIsTheSystemControl() throws {
         let source = try appShellSource()
-        #expect(
-            source.contains(".toolbar(removing: .sidebarToggle)"),
-            "Sidebar column should remove the default sidebar toggle to avoid duplicate controls."
-        )
+        #expect(!source.contains(".toolbar(removing: .sidebarToggle)"))
+        #expect(!source.contains("NSSplitViewController.toggleSidebar"))
     }
 
-    @Test("Sidebar toolbar uses native split view toggle action", .tags(.sourceLint))
-    func sidebarToolbarUsesNativeSplitViewToggleAction() throws {
+    @Test("Window title is set on the split view and kept out of the toolbar", .tags(.sourceLint))
+    func windowTitleIsSetAndKeptOutOfTheToolbar() throws {
         let source = try appShellSource()
-        #expect(
-            source.contains("#selector(NSSplitViewController.toggleSidebar(_:))"),
-            "Sidebar toggle should use NSSplitViewController.toggleSidebar(_:) for native animation behavior."
-        )
-    }
+        #expect(source.contains(".navigationTitle(Self.windowTitle(for: selectedSession))"))
+        #expect(source.contains(".toolbar(removing: .title)"))
 
-    @Test("Sidebar toolbar uses navigation placement and sidebar left icon", .tags(.sourceLint))
-    func sidebarToolbarUsesNavigationPlacementAndSidebarLeftIcon() throws {
-        let source = try appShellSource()
-        #expect(
-            source.contains("ToolbarItem(placement: .navigation)"),
-            "Sidebar toggle should live in the navigation toolbar slot."
-        )
-        #expect(
-            source.contains("Image(systemName: \"sidebar.left\")"),
-            "Sidebar toggle should use the standard sidebar icon."
-        )
+        // A title set inside the detail column takes precedence over the split view's and would
+        // blank the window title.
+        let detailView = try transcriptDetailViewSource()
+        #expect(!detailView.contains(".navigationTitle("))
     }
 
     @Test("Sidebar toggle is not driven by manual column visibility state", .tags(.sourceLint))
@@ -111,69 +99,13 @@ struct AppShellSidebarRegressionTests {
         )
     }
 
-    @Test("App shell defines detail mode and defaults to standard", .tags(.sourceLint))
-    func appShellDefinesDetailModeAndDefaultsToStandard() throws {
-        let source = try appShellSource()
-        #expect(
-            source.contains("private enum DetailMode"),
-            "App shell should define an explicit detail mode for in-place transcript navigation."
-        )
-        #expect(
-            source.contains("@State private var detailMode: DetailMode = .standard"),
-            "App shell should default detail mode to standard."
-        )
-    }
-
-    @Test("Preview tap switches detail mode to study", .tags(.sourceLint))
-    func previewTapSwitchesDetailModeToStudy() throws {
-        let source = try appShellSource()
-        #expect(
-            source.contains("onOpenStudy: {\n                        detailMode = .study"),
-            "Opening study mode should be triggered from transcript preview tap action."
-        )
-    }
-
-    @Test("App shell resets detail mode when selection changes", .tags(.sourceLint))
-    func appShellResetsDetailModeWhenSelectionChanges() throws {
-        let source = try appShellSource()
-        #expect(
-            source.contains(".onChange(of: selectedSession)"),
-            "App shell should observe selected session changes."
-        )
-        #expect(
-            source.contains("detailMode = .standard"),
-            "Selecting a different session should reset the detail mode to standard."
-        )
-    }
-
-    @Test("Study mode toolbar provides back button and study actions", .tags(.sourceLint))
-    func studyModeToolbarProvidesBackButtonAndStudyActions() throws {
-        let source = try appShellSource()
-        #expect(
-            source.contains("Image(systemName: \"chevron.left\")"),
-            "Study mode should provide icon-only chevron back navigation."
-        )
-        #expect(
-            source.contains("TranscriptStudyView.toolbarActions("),
-            "Study mode toolbar should include transcript copy and export actions."
-        )
-        #expect(
-            source.contains("copyTranscript(for: session)"),
-            "Study mode toolbar should wire copy action to transcript copy helper."
-        )
-        #expect(
-            source.contains("exportTranscript(for: session)"),
-            "Study mode toolbar should wire export action to transcript export helper."
-        )
-    }
-
     @Test("Detail toolbar Copy uses the shared transcript copy helper", .tags(.sourceLint))
     func detailToolbarCopyUsesSharedTranscriptCopyHelper() throws {
         let appShell = try appShellSource()
-        let wiring = "onCopy: {\n                        copyTranscript(for: session)\n                    },\n                    onDelete: {"
+        let wiring = "onCopy: {\n                copyTranscript(for: session)\n            },"
         #expect(
-            appShell.components(separatedBy: wiring).count - 1 == 2,
-            "Both TranscriptDetailView call sites (recording and imported) should wire Copy to copyTranscript(for: session)."
+            appShell.components(separatedBy: wiring).count - 1 == 1,
+            "The one TranscriptDetailView call site, used for recordings and imports, should wire Copy to copyTranscript(for: session)."
         )
 
         let detailView = try transcriptDetailViewSource()
@@ -184,15 +116,6 @@ struct AppShellSidebarRegressionTests {
         #expect(
             !detailView.contains("setString(viewModel.finalTranscriptText"),
             "TranscriptDetailView should not copy the unattributed transcript text."
-        )
-    }
-
-    @Test("Study mode renders TranscriptStudyView in place", .tags(.sourceLint))
-    func studyModeRendersTranscriptStudyViewInPlace() throws {
-        let source = try appShellSource()
-        #expect(
-            source.contains("else if detailMode == .study, let transcript = session.displayedTranscript {\n                TranscriptStudyView(\n                    session: session,\n                    audioPlayerViewModel: audioPlayerViewModel,\n                    autoScrollEnabled: $transcriptAutoScrollEnabled,\n                    transcript: transcript,\n                    store: appState.backgroundServices.speakerEmbeddingStore,\n                    searchSeed: studySearchSeed\n                )"),
-            "App shell should render TranscriptStudyView in the detail column when study mode is active."
         )
     }
 

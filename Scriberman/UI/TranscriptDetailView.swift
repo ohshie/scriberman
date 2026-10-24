@@ -2,18 +2,43 @@ import AppKit
 import SwiftData
 import SwiftUI
 
+@MainActor
+protocol TranscriptPlaybackControlling: AnyObject {
+    func seek(to seconds: Double)
+    func play()
+}
+
+extension AudioPlayerViewModel: TranscriptPlaybackControlling {}
+
+/// A finished or imported session: the editable title and facts line, the AI result, then the whole
+/// transcript with playback, find and speaker edits in place.
 struct TranscriptDetailView: View {
     let session: any TranscribableSession
-    let onReprocess: (() -> Void)?
+    let audioPlayerViewModel: AudioPlayerViewModel
+    @Binding var autoScrollEnabled: Bool
+    /// The transcript the caller passed in, kept to notice when the session's displayed
+    /// transcript changes while the view is open (a retranscription or a restore).
+    private let inputTranscript: Transcript?
+    /// A search to apply on opening, or `nil` to open with an empty find bar and no match selected.
+    let searchSeed: TranscriptSearchSeed?
+    /// Bumped by the window's Find command to open the find bar.
+    let findRequest: Int
+    /// Shows the transcript as its Markdown text instead of passages.
+    let isRawMarkdownShown: Bool
     let onCopy: () -> Void
-    let onDelete: () -> Void
+    let onExport: () -> Void
     /// Restores a trimmed recording to its pre-trim state; `nil` for sessions that cannot be trimmed.
     let onRestoreOriginal: (() async throws -> Void)?
-    let onOpenStudy: (() -> Void)?
     let onOpenTransformation: ((UUID) -> Void)?
+    /// Called when a title commit fails to save; the session keeps its previous title.
+    let onTitleNotSaved: () -> Void
+    /// A Session menu command for this view to carry out; cleared once handled.
+    @Binding var commandRequest: DetailCommandRequest?
 
     @Environment(\.modelContext) private var modelContext
-    @State private var showingDeleteConfirmation = false
+    @Environment(\.undoManager) private var undoManager
+    @Environment(\.openSettings) private var openSettings
+    @Environment(AppState.self) private var appState
     @State private var showingRestoreConfirmation = false
     @State private var isRestoringOriginal = false
     @State private var restoreErrorMessage: String?
@@ -21,26 +46,48 @@ struct TranscriptDetailView: View {
     @State private var viewModel: TranscriptDetailViewModel
     @FocusState private var titleFocused: Bool
     @State private var isTitleHovering = false
+    @State private var scrollTargetID: UUID?
+    /// The block whose speaker is being renamed inline.
+    @State private var renamingBlockID: UUID?
+    @State private var isSpeakerListShown = false
 
     init(
         session: any TranscribableSession,
         aiProviderService: AIProviderService,
-        onReprocess: (() -> Void)?,
+        audioPlayerViewModel: AudioPlayerViewModel,
+        autoScrollEnabled: Binding<Bool>,
+        transcript: Transcript?,
+        store: SpeakerEmbeddingStore? = nil,
+        searchSeed: TranscriptSearchSeed? = nil,
+        findRequest: Int = 0,
+        isRawMarkdownShown: Bool = false,
         onCopy: @escaping () -> Void,
-        onDelete: @escaping () -> Void,
+        onExport: @escaping () -> Void,
         onRestoreOriginal: (() async throws -> Void)? = nil,
-        onOpenStudy: (() -> Void)?,
-        onOpenTransformation: ((UUID) -> Void)?
+        onOpenTransformation: ((UUID) -> Void)?,
+        onTitleNotSaved: @escaping () -> Void,
+        commandRequest: Binding<DetailCommandRequest?> = .constant(nil)
     ) {
         self.session = session
-        self.onReprocess = onReprocess
+        self.audioPlayerViewModel = audioPlayerViewModel
+        _autoScrollEnabled = autoScrollEnabled
+        self.inputTranscript = transcript
+        self.searchSeed = searchSeed
+        self.findRequest = findRequest
+        self.isRawMarkdownShown = isRawMarkdownShown
         self.onCopy = onCopy
-        self.onDelete = onDelete
+        self.onExport = onExport
         self.onRestoreOriginal = onRestoreOriginal
-        self.onOpenStudy = onOpenStudy
         self.onOpenTransformation = onOpenTransformation
+        self.onTitleNotSaved = onTitleNotSaved
+        _commandRequest = commandRequest
         _editingTitle = State(initialValue: session.title)
-        _viewModel = State(initialValue: TranscriptDetailViewModel(session: session, aiProviderService: aiProviderService))
+        _viewModel = State(initialValue: TranscriptDetailViewModel(
+            session: session,
+            aiProviderService: aiProviderService,
+            store: store,
+            transcript: transcript
+        ))
     }
 
     var body: some View {
@@ -53,69 +100,117 @@ struct TranscriptDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(28)
         }
+        .scrollPosition(id: $scrollTargetID)
         .contentShape(Rectangle())
         .onTapGesture {
             if titleFocused {
                 titleFocused = false
             }
         }
-        .navigationTitle("")
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                if let onReprocess {
-                    Button {
-                        onReprocess()
-                    } label: {
-                        if viewModel.isReprocessing {
-                            Label("Reprocessing", systemImage: "hourglass")
-                        } else {
-                            Label("Reprocess", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                    }
-                    .disabled(!viewModel.canReprocess)
+        .onChange(of: activeBlock?.id) {
+            guard autoScrollEnabled else {
+                return
+            }
+            scrollTargetID = activeBlock?.id
+        }
+        // Keyed on the seed, so opening the same match again re-applies it: selecting a result
+        // whose session is already open changes no binding the view could otherwise notice.
+        .task(id: searchSeed) {
+            applySearchSeed()
+        }
+        // A retranscription or restore changes the session's displayed transcript while the view
+        // is open. The view's own speaker rename writes the same value back, so this is a no-op then.
+        .onChange(of: inputTranscript) {
+            viewModel.refreshTranscript()
+        }
+        .onChange(of: searchState.query) {
+            viewModel.updateSearch()
+        }
+        .onChange(of: searchState.currentMatch?.blockID) {
+            scrollTargetID = searchState.currentMatch?.blockID
+        }
+        .onChange(of: isSearchVisible) {
+            if isSearchVisible {
+                autoScrollEnabled = false
+            }
+        }
+        .onChange(of: findRequest) {
+            presentSearch()
+        }
+        .onScrollPhaseChange { _, newPhase in
+            if newPhase == .interacting {
+                autoScrollEnabled = false
+            }
+        }
+        .safeAreaBar(edge: .bottom) {
+            if isSearchVisible {
+                TranscriptFindBar(searchState: searchState) {
+                    dismissSearch()
                 }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        // Hard style while the find bar is shown: the automatic edge effect lit the bar up under the
+        // pointer. Without it the edge keeps the automatic style the player bar uses.
+        .scrollEdgeEffectStyle(isSearchVisible ? .hard : nil, for: .bottom)
+        // A permanent frosted band under the toolbar, as in Photos. With the automatic style the
+        // band appeared only under the pointer, so scrolled text showed through the toolbar.
+        .scrollEdgeEffectStyle(.hard, for: .top)
+        // Grouped by what each acts on, apart from the window's New Session. Reprocess, Restore
+        // Original and Delete are in the Session menu.
+        .toolbar {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
 
+            ToolbarItemGroup(placement: .primaryAction) {
                 Button {
                     onCopy()
                 } label: {
                     Label("Copy", systemImage: "doc.on.doc")
                 }
+                .help("Copy")
+                .disabled(!hasTranscript)
 
-                // Tags are a session action, so they live with the others rather than in the
-                // header. Only recordings carry tags.
-                if let recording = session as? RecordingSession {
+                Button {
+                    onExport()
+                } label: {
+                    Label("Export", systemImage: "square.and.arrow.up")
+                }
+                .help("Export")
+                .disabled(!hasTranscript)
+
+                Button {
+                    presentSearch()
+                } label: {
+                    Label("Find", systemImage: "magnifyingglass")
+                }
+                .help("Find")
+                .disabled(!hasTranscript)
+
+                speakersButton
+            }
+
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+
+            ToolbarItem(placement: .primaryAction) {
+                transformMenu
+            }
+
+            // Only recordings carry tags.
+            if let recording = session as? RecordingSession {
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+
+                ToolbarItem(placement: .primaryAction) {
                     Menu {
                         TagAssignmentMenuContent(session: recording)
                     } label: {
                         Label("Tags", systemImage: "tag")
                     }
-                }
-
-                transformMenu
-
-                if onRestoreOriginal != nil, (session as? RecordingSession)?.isTrimmed == true {
-                    Button {
-                        showingRestoreConfirmation = true
-                    } label: {
-                        Label("Restore Original", systemImage: "arrow.counterclockwise")
-                    }
-                    .disabled(isRestoringOriginal)
-                }
-
-                Button(role: .destructive) {
-                    showingDeleteConfirmation = true
-                } label: {
-                    Label("Delete Entry", systemImage: "trash")
+                    .help("Tags")
                 }
             }
-        }
-        .alert("Delete Entry", isPresented: $showingDeleteConfirmation) {
-            Button("Delete Entry", role: .destructive) {
-                onDelete()
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This permanently deletes the selected session.")
         }
         .restoreOriginalConfirmation(isPresented: $showingRestoreConfirmation) {
             restoreOriginal()
@@ -123,6 +218,11 @@ struct TranscriptDetailView: View {
         .task {
             viewModel.loadPrompts()
             viewModel.refreshSelectedTransformation()
+        }
+        .onChange(of: commandRequest, initial: true) { _, request in
+            guard let request else { return }
+            commandRequest = nil
+            handle(request)
         }
     }
 
@@ -142,6 +242,12 @@ struct TranscriptDetailView: View {
                     }
                 }
                 .editableTitleHover(isHovering: $isTitleHovering)
+                // Undo and redo change the title outside the field.
+                .onChange(of: session.title) { _, title in
+                    if titleFocused == false {
+                        editingTitle = title
+                    }
+                }
 
             Text(headerFactsLine)
                 .font(.headline)
@@ -166,8 +272,10 @@ struct TranscriptDetailView: View {
     private var transformMenu: some View {
         Menu {
             if viewModel.prompts.isEmpty {
-                Button("Add prompts in Settings") {}
-                    .disabled(true)
+                Button("Open AI Settings") {
+                    appState.requestedSettingsTab = .ai
+                    openSettings()
+                }
             } else {
                 if viewModel.shouldWarnAboutTranscriptLength {
                     Section {
@@ -186,22 +294,111 @@ struct TranscriptDetailView: View {
         } label: {
             Label("Transform", systemImage: "sparkles")
         }
+        .help("Transform")
         .disabled(viewModel.isAIEnabled == false || viewModel.isRunningTransformation || viewModel.finalTranscriptText.isEmpty)
     }
 
+    @ViewBuilder
     private var transcriptBody: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            TranscriptPreviewView(
-                blocks: transcriptBlocks,
-                onTap: viewModel.displayedTranscript == nil ? nil : onOpenStudy,
-                showsAudioSource: viewModel.displayedTranscript?.isSinglePassOfMixedAudio != true
-            )
+        if isRawMarkdownShown {
+            Text(viewModel.rawMarkdown)
+                .font(.body.monospaced())
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        } else if blocks.isEmpty {
+            Text("No transcript available.")
+                .foregroundStyle(.secondary)
+        } else {
+            LazyVStack(alignment: .leading, spacing: 12) {
+                ForEach(blocks) { block in
+                    TranscriptBlockView(
+                        block: block,
+                        isActive: activeBlock?.id == block.id,
+                        searchRanges: searchState.ranges(in: block),
+                        activeSearchRange: searchState.activeRange(in: block),
+                        onTap: {
+                            if renamingBlockID != block.id {
+                                renamingBlockID = nil
+                            }
+                            TranscriptDetailViewModel.seekAndPlay(block: block, player: audioPlayerViewModel)
+                        },
+                        speakerEditing: speakerEditing(for: block),
+                        showsAudioSource: viewModel.shownTranscript?.isSinglePassOfMixedAudio != true
+                    )
+                    .zIndex(renamingBlockID == block.id ? 1 : 0)
+                }
+            }
         }
     }
 
-    private var transcriptBlocks: [TranscriptBlock] {
-        guard let transcript = viewModel.displayedTranscript else { return [] }
-        return TranscriptGrouper.makeBlocks(from: transcript)
+    private var speakersButton: some View {
+        Button {
+            viewModel.loadProfiles()
+            isSpeakerListShown.toggle()
+        } label: {
+            Label("Speakers", systemImage: "person.2")
+        }
+        .help("Speakers")
+        .accessibilityLabel("Speakers")
+        .disabled(!hasTranscript)
+        .popover(isPresented: $isSpeakerListShown, arrowEdge: .bottom) {
+            if let transcript = viewModel.shownTranscript {
+                SessionSpeakerListView(
+                    transcript: transcript,
+                    profiles: viewModel.profiles,
+                    onRename: { id, name in viewModel.renameSpeaker(id: id, to: name, undoManager: undoManager) },
+                    onMerge: { id, targetID in viewModel.mergeSpeaker(id, into: targetID, undoManager: undoManager) },
+                    onReset: { id in viewModel.resetSpeaker(id, undoManager: undoManager) }
+                )
+            }
+        }
+    }
+
+    private var hasTranscript: Bool {
+        viewModel.shownTranscript != nil
+    }
+
+    private var blocks: [TranscriptBlock] {
+        viewModel.blocks
+    }
+
+    private var searchState: TranscriptSearchState {
+        viewModel.searchState
+    }
+
+    private var isSearchVisible: Bool {
+        viewModel.isSearchVisible
+    }
+
+    private var activeBlock: TranscriptBlock? {
+        viewModel.activeBlock(at: audioPlayerViewModel.currentTime)
+    }
+
+    private func speakerEditing(for block: TranscriptBlock) -> TranscriptBlockView.SpeakerEditing {
+        TranscriptBlockView.SpeakerEditing(
+            isRenaming: renamingBlockID == block.id,
+            profiles: viewModel.profiles,
+            otherSpeakers: viewModel.shownTranscript.map {
+                TranscriptGrouper.displaySpeakers(of: $0).filter { $0.id != block.speaker.id }
+            } ?? [],
+            onBeginRename: {
+                renamingBlockID = block.id
+                viewModel.loadProfiles()
+            },
+            onEndRename: {
+                if renamingBlockID == block.id {
+                    renamingBlockID = nil
+                }
+            },
+            onRename: { name in
+                viewModel.renameSpeaker(id: block.speaker.id, to: name, undoManager: undoManager)
+            },
+            onAssign: { speakerID in
+                viewModel.assign(block, to: speakerID, undoManager: undoManager)
+            }
+        )
     }
 
     private var aiTransformationSection: some View {
@@ -235,10 +432,46 @@ struct TranscriptDetailView: View {
     }
 
     private var formattedDate: String {
-        let formatter = DateFormatter()
-        formatter.locale = .current
-        formatter.dateFormat = "MMM d, yyyy 'at' HH:mm"
-        return formatter.string(from: session.createdAt)
+        TimeFormatter.displayDateTime(session.createdAt)
+    }
+
+    private func handle(_ request: DetailCommandRequest) {
+        switch request {
+        case .restoreOriginal:
+            if onRestoreOriginal != nil, !isRestoringOriginal {
+                showingRestoreConfirmation = true
+            }
+        case .transform(let promptID):
+            viewModel.loadPrompts()
+            viewModel.selectedPromptID = promptID
+            Task {
+                await viewModel.runTransformation()
+            }
+        }
+    }
+
+    /// Opens the find bar on the seeded query with the seeded match selected, and scrolls to it.
+    ///
+    /// Auto-scroll is turned off for the same reason presenting the find bar does: playback
+    /// position must not drag the view away from the match the user came here to read.
+    private func applySearchSeed() {
+        guard viewModel.applySearchSeed(searchSeed) else { return }
+
+        autoScrollEnabled = false
+        scrollTargetID = searchState.currentMatch?.blockID
+    }
+
+    private func presentSearch() {
+        withAnimation {
+            viewModel.presentSearch()
+        }
+    }
+
+    private func dismissSearch() {
+        viewModel.clearSearch()
+        withAnimation {
+            viewModel.isSearchVisible = false
+        }
     }
 
     private func restoreOriginal() {
@@ -256,11 +489,9 @@ struct TranscriptDetailView: View {
     }
 
     private func commitTitle() {
-        session.title = editingTitle
-        try? modelContext.save()
-        // The file carries the title.
-        if let recording = session as? RecordingSession {
-            rewriteTranscriptMarkdown(for: recording)
+        if case .saveFailed = viewModel.commitTitle(editingTitle, context: modelContext, undoManager: undoManager) {
+            editingTitle = session.title
+            onTitleNotSaved()
         }
     }
 }

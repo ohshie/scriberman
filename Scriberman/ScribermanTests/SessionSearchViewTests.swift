@@ -41,20 +41,14 @@ struct SessionSearchViewTests {
         #expect(source.contains("parent.text = \"\""))
     }
 
-    /// SwiftUI shortcuts are handled at the window level, so the transcript find bar's Escape took
-    /// the key before the field's own editor saw it — Escape in the search field did nothing while
-    /// a transcript was open.
+    /// The find bar no longer binds Escape window-wide, so the field's own editor receives the key
+    /// and no event monitor is needed to get it first.
     @Test(.tags(.sourceLint))
-    func testEscapeIsInterceptedWhileTheFieldIsBeingEdited() throws {
+    func testEscapeReachesTheFieldWithoutAKeyMonitor() throws {
         let source = try readSourceFile(relativePathFromTests: "../UI/NativeSearchField.swift")
 
-        #expect(source.contains("NSEvent.addLocalMonitorForEvents(matching: .keyDown)"))
-        #expect(source.contains("event.keyCode == 53"))
-        // Only while this field holds the keyboard, and torn down when it stops.
-        #expect(source.contains("guard let field, field.currentEditor() != nil else { return event }"))
-        #expect(source.contains("func controlTextDidEndEditing"))
-        #expect(source.contains("stopWatchingForEscape()"))
-        #expect(source.contains("static func dismantleNSView"))
+        #expect(!source.contains("addLocalMonitorForEvents"))
+        #expect(!source.contains("NSEvent.removeMonitor"))
     }
 
     /// One handler owns ⌘F, so what it means is decided in one place rather than by whichever of
@@ -62,15 +56,14 @@ struct SessionSearchViewTests {
     @Test(.tags(.sourceLint))
     func testOneHandlerOwnsTheFindShortcut() throws {
         let shell = try readSourceFile(relativePathFromTests: "../UI/AppShellView.swift")
-        let study = try readSourceFile(relativePathFromTests: "../UI/TranscriptStudyView.swift")
+        let detail = try readSourceFile(relativePathFromTests: "../UI/TranscriptDetailView.swift")
 
-        #expect(shell.contains("if detailMode == .study {"))
-        #expect(shell.contains("NotificationCenter.default.post(name: .transcriptSearchRequested"))
+        #expect(shell.contains("switch FindDestination(isTranscriptViewShown: isTranscriptShown) {"))
         #expect(shell.contains("searchFocusRequest += 1"))
-        #expect(shell.contains(".keyboardShortcut(\"f\", modifiers: .command)"))
-        // The study view keeps its observer and its toolbar action, but no longer claims the key.
-        #expect(!study.contains(".keyboardShortcut(\"f\", modifiers: .command)"))
-        #expect(study.contains("publisher(for: .transcriptSearchRequested)"))
+        #expect(shell.contains("transcriptFindRequest += 1"))
+        // The detail view keeps its toolbar action, but the key belongs to the Edit menu.
+        #expect(!detail.contains(".keyboardShortcut(\"f\", modifiers: .command)"))
+        #expect(detail.contains(".onChange(of: findRequest)"))
     }
 
     /// Present whether or not the list has anything in it: it is how the list is searched, so it
@@ -81,21 +74,21 @@ struct SessionSearchViewTests {
 
         // An inset applied to the whole stack, not a view inside the branch the empty state
         // replaces.
-        #expect(source.contains(".safeAreaInset(edge: .top, spacing: 0) {"))
-        let insetRange = try #require(source.range(of: ".safeAreaInset(edge: .top, spacing: 0) {"))
+        #expect(source.contains(".safeAreaBar(edge: .top, spacing: 0) {"))
+        let insetRange = try #require(source.range(of: ".safeAreaBar(edge: .top, spacing: 0) {"))
         let branchRange = try #require(source.range(of: "if items.isEmpty && pendingSession == nil"))
         #expect(insetRange.lowerBound > branchRange.lowerBound)
     }
 
     /// Rows scrolled up behind the field and stayed there until the list was dragged back down. As
-    /// a sibling in the stack the scroll view never reserved the space; as an inset it does, and
-    /// the material hides whatever passes beneath.
+    /// a sibling in the stack the scroll view never reserved the space; as a safe-area bar it does,
+    /// and the system scroll edge effect replaces the bar material that used to sit beneath it.
     @Test(.tags(.sourceLint))
-    func testTheSearchRowReservesItsSpaceAndIsOpaque() throws {
+    func testTheSearchRowReservesItsSpaceWithoutItsOwnBackground() throws {
         let source = try jobsViewSource()
 
-        #expect(source.contains(".safeAreaInset(edge: .top, spacing: 0) {"))
-        #expect(source.contains("searchBar\n                .background(.bar)"))
+        #expect(source.contains(".safeAreaBar(edge: .top, spacing: 0) {"))
+        #expect(!source.contains(".background(.bar)"))
     }
 
     /// The filter narrows the same set the query searches, so it stays in the search row.
@@ -116,6 +109,18 @@ struct SessionSearchViewTests {
         #expect(source.contains("tagFilterList"))
         // The permanently visible chip row it replaces is gone.
         #expect(!source.contains("private var tagFilterChips"))
+    }
+
+    /// Fetching inside `body` runs a store fetch on every render and does not update when tags
+    /// change; the query does both.
+    @Test(.tags(.sourceLint))
+    func testTagFilterListReadsTagsThroughAQuery() throws {
+        let source = try jobsViewSource()
+        let list = try #require(functionBody(named: "private var tagFilterList: some View {", in: source))
+
+        #expect(source.contains("@Query(sort: \\RecordingTag.createdAt) private var allTags: [RecordingTag]"))
+        #expect(list.contains("TagService.inUse(allTags)"))
+        #expect(!list.contains("modelContext"))
     }
 
     /// Without this a filtered list is indistinguishable from a short one, and the conclusion a

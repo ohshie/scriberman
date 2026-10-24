@@ -221,6 +221,43 @@ final class SettingsViewModel {
         }
     }
 
+    /// A value in Settings with its own reset button.
+    enum ResettableSetting: CaseIterable {
+        case voiceProcessing
+        case vadThreshold
+        case vadMinSpeechDuration
+        case asrConfidenceGate
+        case asrAmplitudeGate
+    }
+
+    /// Whether `setting` differs from its default, so its reset button has something to do.
+    func canReset(_ setting: ResettableSetting) -> Bool {
+        let d = LiveTranscriptionPipelineSettings.defaults
+        switch setting {
+        case .voiceProcessing:
+            return appAudioSettings.voiceProcessingEnabled
+        case .vadThreshold:
+            return !Self.isApproximatelyEqual(vadThreshold, d.vadThreshold)
+        case .vadMinSpeechDuration:
+            return !Self.isApproximatelyEqual(vadMinSpeechDuration, d.vadMinSpeechDuration)
+        case .asrConfidenceGate:
+            return !Self.isApproximatelyEqual(asrConfidenceGate, d.asrConfidenceGate)
+        case .asrAmplitudeGate:
+            return !Self.isApproximatelyEqual(asrAmplitudeGate, d.asrAmplitudeGate)
+        }
+    }
+
+    /// Whether anything `resetAllPipelineSettingsToDefaults()` touches differs from its default.
+    var canResetAllPipelineSettings: Bool {
+        ResettableSetting.allCases.contains { canReset($0) }
+    }
+
+    /// A slider stepping back to the default lands on `lower + n * step`, which can miss the
+    /// default literal by a rounding error (0.50 + 35 * 0.01 is 0.8500000000000001).
+    private static func isApproximatelyEqual(_ lhs: Double, _ rhs: Double) -> Bool {
+        abs(lhs - rhs) < 1e-9
+    }
+
     func resetAllPipelineSettingsToDefaults() {
         let d = LiveTranscriptionPipelineSettings.defaults
         vadThreshold = d.vadThreshold

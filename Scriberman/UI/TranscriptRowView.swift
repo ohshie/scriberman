@@ -24,9 +24,12 @@ struct TranscriptRowView<Identity: View, Content: View>: View {
     /// The block being played, which the finished transcript lifts.
     var isActive: Bool = false
     var activeColor: Color = .accentColor
+    /// Plays from this passage. `nil` where nothing can be played, such as while recording.
+    var onSeek: (() -> Void)?
     let content: Content
 
     @State private var isHovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(
         timeText: String? = nil,
@@ -34,6 +37,7 @@ struct TranscriptRowView<Identity: View, Content: View>: View {
         copyText: String,
         isActive: Bool = false,
         activeColor: Color = .accentColor,
+        onSeek: (() -> Void)? = nil,
         @ViewBuilder identity: () -> Identity,
         @ViewBuilder content: () -> Content
     ) {
@@ -42,6 +46,7 @@ struct TranscriptRowView<Identity: View, Content: View>: View {
         self.copyText = copyText
         self.isActive = isActive
         self.activeColor = activeColor
+        self.onSeek = onSeek
         self.identity = identity()
         self.content = content()
     }
@@ -52,9 +57,18 @@ struct TranscriptRowView<Identity: View, Content: View>: View {
                 identity
 
                 if let timeText {
-                    Text(timeText)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                    // The time is the passage's seek control for the keyboard and VoiceOver. The
+                    // card itself stays a container: it holds selectable text and the rename control.
+                    if let onSeek {
+                        Button(action: onSeek) {
+                            timeLabel(timeText)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Play from this passage")
+                        .accessibilityValue(timeText)
+                    } else {
+                        timeLabel(timeText)
+                    }
                 }
 
                 Spacer()
@@ -94,13 +108,26 @@ struct TranscriptRowView<Identity: View, Content: View>: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(isActive ? activeColor.opacity(0.4) : .clear, lineWidth: 1.5)
         }
-        .scaleEffect(isActive ? 1.01 : 1)
+        .scaleEffect(isActive && !reduceMotion ? 1.01 : 1)
         .shadow(color: isActive ? Color("ActiveBlockShadow") : .clear, radius: 6, x: 0, y: 3)
         .animation(.easeOut(duration: 0.15), value: isActive)
         .onHover { hovering in
             isHovering = hovering
         }
         .animation(.easeOut(duration: 0.12), value: isHovering)
+        .accessibilityElement(children: .contain)
+        .accessibilityActions {
+            if let onSeek {
+                Button("Play from this passage", action: onSeek)
+            }
+            Button("Copy passage", action: copy)
+        }
+    }
+
+    private func timeLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
     }
 
     private func copy() {

@@ -1,0 +1,172 @@
+import Foundation
+import Testing
+@testable import Scriberman
+
+/// Opening a search result: the detail view arrives with the query applied and the matched block
+/// selected, and nothing starts playing.
+@MainActor
+struct TranscriptSearchSeedTests {
+    private func blocks(_ lines: [String]) -> [TranscriptBlock] {
+        lines.enumerated().map { index, line in
+            TranscriptBlock(
+                speaker: TranscriptSpeaker(id: "speaker-\(index)", label: "Speaker", colorHex: "#112233"),
+                audioSource: .mic,
+                startTime: Float(index),
+                endTime: Float(index) + 1,
+                text: line
+            )
+        }
+    }
+
+    // MARK: - Selecting the seeded match
+
+    @Test
+    func testSelectingAMatchByBlockMovesOffTheFirstMatch() {
+        let blocks = blocks([
+            "the migration is mentioned here first",
+            "and the migration again later",
+        ])
+        let state = TranscriptSearchState()
+        state.query = "migration"
+        state.update(blocks: blocks)
+
+        #expect(state.currentMatch?.blockID == blocks[0].id)
+
+        state.selectFirstMatch(inBlock: blocks[1].id)
+
+        #expect(state.currentMatch?.blockID == blocks[1].id)
+        // The highlight the detail view draws comes from the same selection.
+        #expect(state.activeRange(in: blocks[1]) != nil)
+        #expect(state.activeRange(in: blocks[0]) == nil)
+    }
+
+    @Test
+    func testSelectingABlockWithNoMatchLeavesTheSelectionAlone() {
+        let blocks = blocks([
+            "the migration is mentioned here",
+            "nothing relevant in this one",
+        ])
+        let state = TranscriptSearchState()
+        state.query = "migration"
+        state.update(blocks: blocks)
+
+        state.selectFirstMatch(inBlock: blocks[1].id)
+
+        #expect(state.currentMatch?.blockID == blocks[0].id)
+    }
+
+    @Test
+    func testTwoSeedsForTheSameMatchAreDifferentValues() {
+        let blockID = UUID()
+        let first = TranscriptSearchSeed(query: "migration", blockID: blockID)
+        let second = TranscriptSearchSeed(query: "migration", blockID: blockID)
+
+        // Clicking the same result again has to move the view again, so the seed must not compare
+        // equal to the one already applied.
+        #expect(first != second)
+    }
+
+    // MARK: - The view's wiring
+
+    @Test(.tags(.sourceLint))
+    func testTheSeedIsAppliedFromATaskKeyedOnIt() throws {
+        let source = try detailViewSource()
+
+        #expect(source.contains(".task(id: searchSeed)"))
+        #expect(source.contains("applySearchSeed()"))
+    }
+
+    /// The view model selects the match (see `TranscriptDetailViewModelTranscriptTests`); the view
+    /// scrolls to it and stops playback following.
+    @Test(.tags(.sourceLint))
+    func testApplyingASeedScrollsToTheSelectedMatch() throws {
+        let body = try #require(functionBody(named: "private func applySearchSeed()", in: try detailViewSource()))
+
+        #expect(body.contains("guard viewModel.applySearchSeed(searchSeed) else { return }"))
+        #expect(body.contains("autoScrollEnabled = false"))
+        #expect(body.contains("scrollTargetID = searchState.currentMatch?.blockID"))
+    }
+
+    /// Locating text and listening to it are separate intentions.
+    @Test(.tags(.sourceLint))
+    func testApplyingASeedStartsNoPlayback() throws {
+        let viewBody = try #require(functionBody(named: "private func applySearchSeed()", in: try detailViewSource()))
+        let modelBody = try #require(functionBody(named: "func applySearchSeed(", in: try viewModelSource()))
+
+        #expect(!viewBody.contains("audioPlayerViewModel"))
+        #expect(!viewBody.contains(".play()"))
+        #expect(!modelBody.contains(".play()"))
+        #expect(!modelBody.contains("seekAndPlay"))
+    }
+
+    @Test(.tags(.sourceLint))
+    func testOpeningAResultStartsNoPlayback() throws {
+        let body = try #require(functionBody(named: "private func openSearchResult(", in: try appShellSource()))
+
+        #expect(!body.contains(".play()"))
+    }
+
+    /// A seeded search is dismissed by the same path as one the user opened, so Escape behaves the
+    /// same either way.
+    @Test(.tags(.sourceLint))
+    func testASeededSearchIsDismissedLikeAnyOther() throws {
+        let source = try detailViewSource()
+        let dismiss = try #require(functionBody(named: "private func dismissSearch()", in: source))
+
+        #expect(dismiss.contains("viewModel.clearSearch()"))
+        #expect(dismiss.contains("isSearchVisible = false"))
+        // The find bar's own Escape shortcut calls that one dismissal.
+        #expect(source.contains("TranscriptFindBar(searchState: searchState) {"))
+    }
+
+    /// Escape closes the find bar only while focus is inside it, so it never takes the key from the
+    /// session search field.
+    @Test(.tags(.sourceLint))
+    func testTheFindBarHandlesEscapeThroughItsExitCommand() throws {
+        let bar = try readSourceFile(relativePathFromTests: "../UI/TranscriptFindBar.swift")
+
+        #expect(bar.contains(".onExitCommand {\n            onDismiss()\n        }"))
+        #expect(!bar.contains(".keyboardShortcut(.escape"))
+    }
+
+    /// Clicking a result whose session is already selected changes no binding, so the row reports
+    /// the click itself.
+    @Test(.tags(.sourceLint))
+    func testAClickOnAResultIsReportedEvenWithoutASelectionChange() throws {
+        let source = try readSourceFile(relativePathFromTests: "../UI/JobsView.swift")
+
+        #expect(source.contains("TapGesture().onEnded { onOpenSearchResult(item) }"))
+        // Masked off when nothing is being searched, so it cannot compete with the row's own
+        // click-to-select.
+        #expect(source.contains("including: viewModel.activeSearchQuery != nil ? .all : .none"))
+    }
+
+    // MARK: - Helpers
+
+    private func detailViewSource() throws -> String {
+        try readSourceFile(relativePathFromTests: "../UI/TranscriptDetailView.swift")
+    }
+
+    private func viewModelSource() throws -> String {
+        try readSourceFile(relativePathFromTests: "../ViewModels/TranscriptDetailViewModel.swift")
+    }
+
+    private func appShellSource() throws -> String {
+        try readSourceFile(relativePathFromTests: "../UI/AppShellView.swift")
+    }
+
+    private func functionBody(named declaration: String, in source: String) -> String? {
+        guard let start = source.range(of: declaration) else { return nil }
+        let rest = source[start.upperBound...]
+        guard let end = rest.range(of: "\n    }\n") else { return String(rest) }
+        return String(rest[..<end.upperBound])
+    }
+
+    private func readSourceFile(relativePathFromTests: String) throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        return try String(
+            contentsOf: testsDirectory.appendingPathComponent(relativePathFromTests),
+            encoding: .utf8
+        )
+    }
+}

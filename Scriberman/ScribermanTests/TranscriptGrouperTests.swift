@@ -106,11 +106,11 @@ struct TranscriptGrouperTests {
             TranscriptBlock(speaker: speaker, audioSource: .mic, startTime: 4, endTime: 5, text: "C")
         ]
 
-        #expect(TranscriptStudyView.activeBlock(for: blocks, currentTime: 0)?.text == "A")
-        #expect(TranscriptStudyView.activeBlock(for: blocks, currentTime: 1.999)?.text == "A")
-        #expect(TranscriptStudyView.activeBlock(for: blocks, currentTime: 2)?.text == "B")
-        #expect(TranscriptStudyView.activeBlock(for: blocks, currentTime: 3) == nil)
-        #expect(TranscriptStudyView.activeBlock(for: blocks, currentTime: 4)?.text == "C")
+        #expect(TranscriptDetailViewModel.activeBlock(for: blocks, currentTime: 0)?.text == "A")
+        #expect(TranscriptDetailViewModel.activeBlock(for: blocks, currentTime: 1.999)?.text == "A")
+        #expect(TranscriptDetailViewModel.activeBlock(for: blocks, currentTime: 2)?.text == "B")
+        #expect(TranscriptDetailViewModel.activeBlock(for: blocks, currentTime: 3) == nil)
+        #expect(TranscriptDetailViewModel.activeBlock(for: blocks, currentTime: 4)?.text == "C")
     }
 
     @Test
@@ -120,8 +120,8 @@ struct TranscriptGrouperTests {
             TranscriptBlock(speaker: speaker, audioSource: .mic, startTime: 1, endTime: 2, text: "A")
         ]
 
-        #expect(TranscriptStudyView.activeBlock(for: blocks, currentTime: 0.5) == nil)
-        #expect(TranscriptStudyView.activeBlock(for: blocks, currentTime: 2.0) == nil)
-        #expect(TranscriptStudyView.activeBlock(for: blocks, currentTime: 10.0) == nil)
+        #expect(TranscriptDetailViewModel.activeBlock(for: blocks, currentTime: 0.5) == nil)
+        #expect(TranscriptDetailViewModel.activeBlock(for: blocks, currentTime: 2.0) == nil)
+        #expect(TranscriptDetailViewModel.activeBlock(for: blocks, currentTime: 10.0) == nil)
     }
 }

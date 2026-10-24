@@ -31,8 +31,7 @@ struct AudioPlayerBar: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-                .background(.black.opacity(0.85), in: Capsule())
-                .environment(\.colorScheme, .dark)
+                .glassEffect(.regular, in: .capsule)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 12)
             }
@@ -61,6 +60,7 @@ struct AudioPlayerBar: View {
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(viewModel.isPlaying ? "Pause" : "Play")
 
             Slider(
                 value: Binding(
@@ -78,8 +78,10 @@ struct AudioPlayerBar: View {
                 }
             )
             .disabled(viewModel.duration <= 0)
+            .accessibilityLabel("Playback position")
+            .accessibilityValue(TimeFormatter.displayFormat(seconds: Float(viewModel.currentTime)))
 
-            Text("\(formatTime(viewModel.currentTime)) / \(formatTime(viewModel.duration))")
+            Text("\(TimeFormatter.displayFormat(seconds: Float(viewModel.currentTime))) / \(TimeFormatter.displayFormat(seconds: Float(viewModel.duration)))")
                 .font(.footnote)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
@@ -93,35 +95,9 @@ struct AudioPlayerBar: View {
                 }
                 .buttonStyle(.plain)
                 .help("Resume Transcript Auto-Scroll")
+                .accessibilityLabel("Resume auto-scroll")
             }
-
-            Button {
-                if viewModel.isPlaying {
-                    viewModel.pause()
-                } else {
-                    viewModel.play()
-                }
-            } label: {
-                EmptyView()
-            }
-            .keyboardShortcut(.space, modifiers: [])
-            .disabled(viewModel.isReady == false)
-            .accessibilityHidden(true)
-            .frame(width: 0, height: 0)
-            .opacity(0)
-            .allowsHitTesting(false)
         }
-    }
-
-    private func formatTime(_ seconds: Double) -> String {
-        guard seconds.isFinite, seconds > 0 else {
-            return "0:00"
-        }
-
-        let totalSeconds = Int(seconds.rounded(.down))
-        let minutes = totalSeconds / 60
-        let remainder = totalSeconds % 60
-        return String(format: "%d:%02d", minutes, remainder)
     }
 
     private func loadMixdownIfAvailable() {

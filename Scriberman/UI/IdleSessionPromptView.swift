@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Content of the floating "Still in progress. Stop?" prompt shown when a mic + app
+/// Content of the floating "Stop this recording?" prompt shown when a mic + app
 /// recording has been idle for the configured threshold. Recording continues while this is
 /// on screen; the panel persists until the user acts or activity resumes.
 struct IdleSessionPromptView: View {
@@ -11,7 +11,7 @@ struct IdleSessionPromptView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Still in progress. Stop?")
+            Text("Stop this recording?")
                 .font(.headline)
 
             HStack(spacing: 10) {

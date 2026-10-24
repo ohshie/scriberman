@@ -352,7 +352,7 @@ struct RecordingTranscriptPersistenceTests {
         session.transcript = transcript
         rewriteTranscriptMarkdown(for: session)
 
-        _ = TranscriptStudyView.renameSpeaker(id: "speaker_mic_0", to: "Bob", in: transcript, of: session)
+        _ = TranscriptDetailViewModel.renameSpeaker(id: "speaker_mic_0", to: "Bob", in: transcript, of: session)
 
         let contents = try String(contentsOf: markdownURL, encoding: .utf8)
         #expect(contents.contains("**Bob** [00:00 – 00:01]\none\n"))

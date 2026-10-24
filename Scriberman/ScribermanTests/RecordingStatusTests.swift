@@ -218,14 +218,13 @@ struct RecordingStatusTests {
         #expect(viewModel.contains("TimeFormatter.displayFormat(seconds: Float(session.duration))"))
     }
 
-    /// Glass takes its material from what is behind it, so without a fill of its own the chip read
-    /// on a selected row and vanished on a plain one.
+    /// The chip is list content, so it carries a plain fill of its own and no Liquid Glass.
     @Test(.tags(.sourceLint))
     func testTheTagChipCarriesItsOwnBackdrop() throws {
         let source = try readSource(relativePathFromTests: "../UI/SessionTagLineView.swift")
 
         #expect(source.contains(".background(Capsule().fill(Color(tagHex: tag.colorHex).opacity(0.18)))"))
-        #expect(source.contains(".glassEffect(.regular, in: Capsule())"))
+        #expect(!source.contains(".glassEffect("))
     }
 
     private func readSource(relativePathFromTests: String) throws -> String {
@@ -294,8 +293,8 @@ struct RecordingStatusTests {
     func testCarriedTagsAreMarkedAndToggleBothWays() throws {
         let source = try assignmentMenuSource()
         #expect(source.contains("systemImage: \"checkmark\""))
-        #expect(source.contains("try service.unassign(tag, from: session, in: modelContext)"))
-        #expect(source.contains("try service.assign(tag, to: session, in: modelContext)"))
+        #expect(source.contains("try service.unassign(tag, from: session, in: modelContext, undoManager: undoManager)"))
+        #expect(source.contains("try service.assign(tag, to: session, in: modelContext, undoManager: undoManager)"))
     }
 
     /// The list and the detail toolbar share one menu body, so they cannot drift on which tags are
@@ -312,7 +311,7 @@ struct RecordingStatusTests {
         #expect(detail.contains("TagAssignmentMenuContent(session: recording)"))
     }
 
-    /// Tags are a session action, so the control sits with Transform and Delete.
+    /// Tags are a session action, so the detail toolbar carries the control in its own group.
     @Test(.tags(.sourceLint))
     func testTheDetailToolbarCarriesATagsControl() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -333,7 +332,7 @@ struct RecordingStatusTests {
         let source = try jobsViewSource()
         // An inset on the whole stack, so it is there whatever the branch inside renders. It is
         // also what stops rows scrolling up behind the field and staying there.
-        #expect(source.contains(".safeAreaInset(edge: .top, spacing: 0) {"))
+        #expect(source.contains(".safeAreaBar(edge: .top, spacing: 0) {"))
         let branch = try #require(source.range(of: "if items.isEmpty && pendingSession == nil"))
         let insetBody = source[branch.upperBound...]
         #expect(insetBody.contains("searchBar"))
@@ -392,12 +391,12 @@ struct RecordingStatusTests {
     @Test(.tags(.sourceLint))
     func testEachTagChipHasItsOwnBackdrop() throws {
         let source = try tagLineSource()
-        #expect(source.contains("glassEffect(.regular, in: Capsule())"))
-        #expect(source.contains(".tint(Color(tagHex: tag.colorHex))"))
+        #expect(source.contains("Capsule().fill(Color(tagHex: tag.colorHex)"))
+        #expect(!source.contains(".glassEffect("))
     }
 
     /// Tag colours are random and user-chosen, so some would be unreadable as text. Colour stays in
-    /// the dot and the tint.
+    /// the dot and the fill.
     @Test(.tags(.sourceLint))
     func testTheTagNameIsNotDrawnInTheTagColour() throws {
         let source = try tagLineSource()
@@ -462,17 +461,35 @@ struct RecordingStatusTests {
         #expect(!source.contains("showClearAllConfirmation"))
     }
 
-    /// The detail toolbar keeps the confirmation it already had, and is now the only route.
+    /// The Session menu and the Delete key ask the window's confirmation; only its Delete button
+    /// deletes.
     @Test(.tags(.sourceLint))
-    func testTheDetailToolbarStillConfirmsBeforeDeleting() throws {
+    func testDeletingAsksTheWindowsConfirmation() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let shell = try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/AppShellView.swift"),
+            encoding: .utf8
+        )
+        #expect(shell.contains("delete: { requestDeletion() }"))
+        #expect(shell.contains("presenting: sessionPendingDeletion"))
+        #expect(shell.contains("Button(\"Delete\", role: .destructive) {\n                delete(item)"))
+    }
+
+    /// The detail toolbar groups Copy and Export, Transform, and Tags with fixed spacers. Reprocess,
+    /// Restore Original and Delete are reached through the Session menu instead.
+    @Test(.tags(.sourceLint))
+    func testTheDetailToolbarKeepsOnlyTheGroupedActions() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let detail = try String(
             contentsOf: testsDirectory.appendingPathComponent("../UI/TranscriptDetailView.swift"),
             encoding: .utf8
         )
-        #expect(detail.contains("showingDeleteConfirmation = true"))
-        #expect(detail.contains("alert(\"Delete Entry\", isPresented: $showingDeleteConfirmation)"))
-        #expect(detail.contains("role: .destructive"))
+        #expect(detail.components(separatedBy: "ToolbarSpacer(.fixed, placement: .primaryAction)").count - 1 == 3)
+        #expect(detail.contains("Label(\"Export\", systemImage: \"square.and.arrow.up\")"))
+        #expect(!detail.contains("Label(\"Reprocess\""))
+        #expect(!detail.contains("Label(\"Restore Original\""))
+        #expect(!detail.contains("Label(\"Delete\""))
+        #expect(!detail.contains("role: .destructive"))
     }
 
     // MARK: - Row layout
@@ -852,7 +869,8 @@ struct RecordingSessionTests {
         #expect(source.contains("await viewModel.runTransformation()"))
         #expect(source.contains("AITransformationPreviewCard("))
         #expect(source.contains("SkeletonView()"))
-        #expect(source.contains("Add prompts in Settings"))
+        #expect(source.contains("Button(\"Open AI Settings\")"))
+        #expect(source.contains("appState.requestedSettingsTab = .ai"))
         #expect(source.contains("shouldWarnAboutTranscriptLength"))
         #expect(source.contains("copyToPasteboard(latestTransformation.resultText)"))
         #expect(source.contains("latestTransformation.resultText"))
@@ -862,15 +880,16 @@ struct RecordingSessionTests {
 
     
     
-    /// Spec scenario "Session rename rewrites the file": committing a title rewrites `transcript.md`.
+    /// Spec scenario "Session rename rewrites the file": the view commits the title through the view
+    /// model, which saves it and rewrites `transcript.md` (`TranscriptDetailViewModelTests`).
     @Test(.tags(.sourceLint))
-    func testCommittingTheTitleRewritesTranscriptMarkdown() throws {
+    func testCommittingTheTitleGoesThroughTheViewModel() throws {
         let source = try transcriptDetailSource()
         let start = try #require(source.range(of: "private func commitTitle()"))
         let function = String(source[start.upperBound...].prefix(400))
 
-        #expect(function.contains("session.title = editingTitle"))
-        #expect(function.contains("rewriteTranscriptMarkdown(for: recording)"))
+        #expect(function.contains("viewModel.commitTitle(editingTitle, context: modelContext, undoManager: undoManager)"))
+        #expect(function.contains("onTitleNotSaved()"))
     }
 
     @Test(.tags(.sourceLint))
@@ -886,23 +905,9 @@ struct RecordingSessionTests {
     
     
     @Test(.tags(.sourceLint))
-    func testTranscriptDetailViewIncludesPreviewAndStudyNavigation() throws {
-        let source = try transcriptDetailSource()
-
-        #expect(source.contains("TranscriptPreviewView("))
-        #expect(source.contains("onTap: viewModel.displayedTranscript == nil ? nil : onOpenStudy"))
-        #expect(!(source.contains("Label(\"Study Transcript\", systemImage: \"book.pages\")")))
-        #expect(!(source.contains(".sheet(isPresented: $showingStudyTranscript)")))
-    }
-
-    
-    
-    @Test(.tags(.sourceLint))
     func testTranscriptConversationViewsUseAdaptiveStylesForLightDarkMode() throws {
         let blockSource = try sourceForFile(named: "TranscriptBlockView.swift")
         let rowSource = try sourceForFile(named: "TranscriptRowView.swift")
-        let previewSource = try sourceForFile(named: "TranscriptPreviewView.swift")
-        let studySource = try sourceForFile(named: "TranscriptStudyView.swift")
 
         // The card lives in the shared row now, drawn the same way for a finished block and a live
         // segment. The block still owns the text inside it.
@@ -913,8 +918,6 @@ struct RecordingSessionTests {
         #expect(!(blockSource.contains("Color.white")))
         #expect(!(blockSource.contains("Color.black")))
 
-        #expect(previewSource.contains(".background(.thinMaterial"))
-        #expect(studySource.contains(".background(.bar)"))
     }
 
     private func transcriptDetailSource() throws -> String {

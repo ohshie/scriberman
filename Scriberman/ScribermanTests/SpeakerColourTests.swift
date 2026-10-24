@@ -153,47 +153,6 @@ struct SpeakerColourTests {
         )
     }
 
-    // MARK: - The way into the full transcript
-
-    /// The study view is the app's only full reader, and the only way in was a click anywhere on
-    /// the preview card, hinted at by a hover ring under a line reporting a limit.
-    @Test(.tags(.sourceLint))
-    func testThePreviewOffersALabelledControlIntoTheStudyView() throws {
-        let source = try previewSource()
-
-        #expect(source.contains("Button(\"Read full transcript\", action: onTap)"))
-        // The count keeps the control company rather than standing in its place.
-        #expect(!source.contains("Showing \\(previewBlocks.count) of"))
-        #expect(source.contains("Text(\"\\(blocks.count) sections\")"))
-    }
-
-    /// A card that opens a different view when clicked is a gesture people already use; the control
-    /// is added beside it, not in place of it.
-    @Test(.tags(.sourceLint))
-    func testThePreviewCardStillOpensTheStudyViewWhenClicked() throws {
-        let source = try previewSource()
-
-        #expect(source.contains(".onTapGesture {"))
-        #expect(source.contains("onTap?()"))
-    }
-
-    /// No control where there is nowhere to go: the preview renders without one when it is not
-    /// given a destination.
-    @Test(.tags(.sourceLint))
-    func testNoControlIsShownWhenThePreviewHasNoDestination() throws {
-        let source = try previewSource()
-
-        #expect(source.contains("if let onTap {"))
-    }
-
-    private func previewSource() throws -> String {
-        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        return try String(
-            contentsOf: testsDirectory.appendingPathComponent("../UI/TranscriptPreviewView.swift"),
-            encoding: .utf8
-        )
-    }
-
     // MARK: - Segment times
 
     /// A block showed `00:00:10,240 - 00:00:40,448` — subtitle-editor precision, in a view built

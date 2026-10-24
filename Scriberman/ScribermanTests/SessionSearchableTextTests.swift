@@ -143,7 +143,7 @@ final class SessionSearchableTextTests {
     @Test(.tags(.sourceLint))
     func testNoTranscriptBlobIsAssignedOutsideTheModelLayer() throws {
         let writers = [
-            "../UI/TranscriptStudyView.swift",
+            "../ViewModels/TranscriptDetailViewModel.swift",
             "../ViewModels/NewSessionViewModel.swift",
             "../ViewModels/JobsViewModel.swift",
             "../Services/Transcription/RetranscriptionService.swift",

@@ -5,21 +5,29 @@ struct ActiveRecordingDetailView: View {
     let session: RecordingSession
     let viewModel: NewSessionViewModel
     let modelContext: ModelContext
+    /// Called when a title edit fails to save; the session keeps its previous title.
+    let onTitleNotSaved: () -> Void
 
     @FocusState private var titleFocused: Bool
     @State private var isTitleHovering = false
     /// Whether the pointer is inside the live transcript, which suspends the scroll to the newest
     /// segment.
     @State private var isPointerOverSegments = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(session: RecordingSession, viewModel: NewSessionViewModel, modelContext: ModelContext) {
+    init(
+        session: RecordingSession,
+        viewModel: NewSessionViewModel,
+        modelContext: ModelContext,
+        onTitleNotSaved: @escaping () -> Void
+    ) {
         self.session = session
         self.viewModel = viewModel
         self.modelContext = modelContext
+        self.onTitleNotSaved = onTitleNotSaved
     }
 
-    /// Marks the end of the content, so following the transcript scrolls to the foot of the view —
-    /// which is where the Stop button is.
+    /// Marks the end of the content, so following the transcript scrolls to the foot of the view.
     private static let bottomAnchor = "recording-view-bottom"
 
     var body: some View {
@@ -43,7 +51,7 @@ struct ActiveRecordingDetailView: View {
                 )
                     .frame(height: 110)
 
-                Text(durationText(currentDuration))
+                Text(TimeFormatter.displayFormat(seconds: Float(currentDuration)))
                     .font(.title3.monospacedDigit())
                     .foregroundStyle(.secondary)
 
@@ -51,27 +59,13 @@ struct ActiveRecordingDetailView: View {
                     // In the flow, not in a scroll view of their own. Two scrolling regions in one
                     // window means the wrong one moves under the pointer half the time; and a
                     // transcript penned into 120 points while the window has room is the smaller
-                    // half of the problem. Arriving segments push the controls below them down.
+                    // half of the problem. Arriving segments push the source cards below them down.
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(viewModel.liveSegments, id: \.id) { segment in
                             liveSegmentRow(for: segment)
                                 .id(segment.id)
                         }
                     }
-                }
-
-                HStack {
-                    Spacer()
-                    HeroCircleButton(
-                        innerShape: .roundedSquare,
-                        tint: .red,
-                        caption: "Stop"
-                    ) {
-                        Task {
-                            _ = await viewModel.stopRecording(context: modelContext)
-                        }
-                    }
-                    Spacer()
                 }
 
                 LazyVGrid(columns: [
@@ -104,17 +98,38 @@ struct ActiveRecordingDetailView: View {
                 titleFocused = false
             }
         }
-        // Following the transcript means scrolling to the foot of the view, so the newest text and
-        // the Stop button stay together. Suspended while the pointer is in the window: SwiftUI
-        // cannot report a selection, and a pointer in here is someone reading or selecting.
+        // Following the transcript means scrolling to the foot of the view. Suspended while the
+        // pointer is in the scroll view: SwiftUI cannot report a selection, and a pointer in here is
+        // someone reading or selecting.
         .onHover { hovering in
             isPointerOverSegments = hovering
         }
+        // A permanent frosted band under the toolbar, as in the transcript detail.
+        .scrollEdgeEffectStyle(.hard, for: .top)
         .onChange(of: viewModel.liveSegments.count) {
             guard !isPointerOverSegments else { return }
-            withAnimation(.easeOut(duration: 0.2)) {
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
                 proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
             }
+        }
+        // Outside the scrolling content, so Stop stays in the window however long the transcript
+        // grows, including while following is suspended. A plain inset: a safe-area bar extends the
+        // scroll edge effect under Stop, and that area lit up under the pointer.
+        .safeAreaInset(edge: .bottom) {
+            HStack {
+                Spacer()
+                HeroCircleButton(
+                    innerShape: .roundedSquare,
+                    tint: .red,
+                    caption: "Stop"
+                ) {
+                    Task {
+                        _ = await viewModel.stopRecording(context: modelContext)
+                    }
+                }
+                Spacer()
+            }
+            .padding(.vertical, 16)
         }
         }
     }
@@ -153,21 +168,21 @@ struct ActiveRecordingDetailView: View {
                 .foregroundStyle(segment.isFinal ? .primary : .secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-    }
-
-    private func durationText(_ duration: TimeInterval) -> String {
-        let totalSeconds = max(0, Int(duration.rounded(.down)))
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        return String(format: "%02d:%02d", minutes, seconds)
+        .contextMenu {
+            Button("Copy") {
+                copyToPasteboard(segment.text)
+            }
+        }
     }
 
     private var editingTitle: Binding<String> {
         Binding(
             get: { session.title },
             set: { newValue in
-                session.title = newValue
-                try? modelContext.save()
+                let result = TranscriptDetailViewModel.saveTitle(newValue, of: session, context: modelContext)
+                if case .saveFailed = result {
+                    onTitleNotSaved()
+                }
             }
         )
     }

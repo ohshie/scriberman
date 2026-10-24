@@ -39,6 +39,16 @@ final class MenuBarSettings {
         didSet { userDefaults.set(lastUsedAppBundleID, forKey: Key.lastUsedAppBundleID) }
     }
 
+    /// Whether a last-used source is remembered, so "Reset to Defaults" has something to clear.
+    var canResetToDefaults: Bool {
+        lastUsedMicUID != nil || lastUsedAppBundleID != nil
+    }
+
+    func resetToDefaults() {
+        lastUsedMicUID = nil
+        lastUsedAppBundleID = nil
+    }
+
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
         isInTrayMode = userDefaults.bool(forKey: Key.isInTrayMode)

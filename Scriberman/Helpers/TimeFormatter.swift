@@ -24,6 +24,10 @@ enum TimeFormatter {
     /// Truncating, like `format`: a 94.6-second recording is 1:34 and has not reached 1:35 — which
     /// is also what its player counts up to.
     static func displayFormat(seconds: Float) -> String {
+        guard seconds.isFinite else {
+            return displayFormat(seconds: 0)
+        }
+
         let totalSeconds = max(0, Int(seconds.rounded(.down)))
         let hours = totalSeconds / 3_600
         let minutes = (totalSeconds % 3_600) / 60
@@ -44,5 +48,25 @@ enum TimeFormatter {
         let milliseconds = totalMilliseconds % 1_000
 
         return String(format: "%02d:%02d:%02d,%03d", hours, minutes, remainingSeconds, milliseconds)
+    }
+
+    // MARK: - Dates
+
+    /// Date and time of a session: the detail header and the default session title.
+    ///
+    /// System format styles, so the order of day and month and the 12- or 24-hour clock follow the
+    /// user's region settings. File names keep their fixed patterns; this is only for the screen.
+    static func displayDateTime(_ date: Date, locale: Locale = .current, calendar: Calendar = .current) -> String {
+        date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened, locale: locale, calendar: calendar, timeZone: calendar.timeZone))
+    }
+
+    /// Day and month of a session in the list, in the same order as `displayDateTime`.
+    static func displayMonthDay(_ date: Date, locale: Locale = .current, calendar: Calendar = .current) -> String {
+        date.formatted(Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone).month(.abbreviated).day())
+    }
+
+    /// Day, month and time without the year: the title of a finished recording.
+    static func displayMonthDayTime(_ date: Date, locale: Locale = .current, calendar: Calendar = .current) -> String {
+        date.formatted(Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone).month(.abbreviated).day().hour().minute())
     }
 }

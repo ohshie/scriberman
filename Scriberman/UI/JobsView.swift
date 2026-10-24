@@ -18,9 +18,12 @@ struct JobsView: View {
     /// selected — a selection binding that does not change reports nothing, and clicking a result
     /// again still has to move the view to its match.
     var onOpenSearchResult: (JobsViewModel.SessionListItem) -> Void = { _ in }
+    /// Called when Delete is pressed in the list; `nil` while the selection cannot be deleted.
+    var onDeleteSelection: (() -> Void)? = nil
 
 
     @Environment(\.modelContext) private var modelContext
+    @Query(sort: \RecordingTag.createdAt) private var allTags: [RecordingTag]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isShowingTagFilter = false
 
@@ -75,13 +78,14 @@ struct JobsView: View {
         // The search row is a safe-area inset rather than a sibling in the stack. As a sibling the
         // list still scrolled its content up behind it — rows and the section header would slide
         // under the field and stay there until the list was dragged back down. An inset makes the
-        // scroll view reserve the space, and the material keeps anything passing beneath it hidden
-        // rather than showing through.
-        .safeAreaInset(edge: .top, spacing: 0) {
+        // scroll view reserve the space, and the safe-area bar's scroll edge effect keeps anything
+        // passing beneath it from competing with the field. Hard style: the automatic edge effect
+        // lit the row up under the pointer.
+        .safeAreaBar(edge: .top, spacing: 0) {
             searchBar
-                .background(.bar)
         }
-        .navigationTitle("Jobs")
+        .scrollEdgeEffectStyle(.hard, for: .top)
+        .navigationTitle("Sessions")
         .task {
             await viewModel.refresh()
         }
@@ -173,7 +177,7 @@ struct JobsView: View {
     /// The tags at least one recording carries. A lit tag is unlit by clicking it again, and with
     /// none lit the list is unfiltered — so no separate clear control.
     private var tagFilterList: some View {
-        let tags = (try? TagService().tagsInUse(in: modelContext)) ?? []
+        let tags = TagService.inUse(allTags)
         return VStack(alignment: .leading, spacing: 2) {
             ForEach(tags) { tag in
                 let isSelected = viewModel.selectedTagIDs.contains(tag.id)
@@ -227,6 +231,7 @@ struct JobsView: View {
             }
         }
         .listStyle(.sidebar)
+        .onDeleteCommand(perform: onDeleteSelection)
     }
 
     @ViewBuilder
