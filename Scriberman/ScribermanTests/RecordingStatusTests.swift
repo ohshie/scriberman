@@ -293,8 +293,8 @@ struct RecordingStatusTests {
     func testCarriedTagsAreMarkedAndToggleBothWays() throws {
         let source = try assignmentMenuSource()
         #expect(source.contains("systemImage: \"checkmark\""))
-        #expect(source.contains("try service.unassign(tag, from: session, in: modelContext)"))
-        #expect(source.contains("try service.assign(tag, to: session, in: modelContext)"))
+        #expect(source.contains("try service.unassign(tag, from: session, in: modelContext, undoManager: undoManager)"))
+        #expect(source.contains("try service.assign(tag, to: session, in: modelContext, undoManager: undoManager)"))
     }
 
     /// The list and the detail toolbar share one menu body, so they cannot drift on which tags are
@@ -870,7 +870,7 @@ struct RecordingSessionTests {
         let start = try #require(source.range(of: "private func commitTitle()"))
         let function = String(source[start.upperBound...].prefix(400))
 
-        #expect(function.contains("viewModel.commitTitle(editingTitle, context: modelContext)"))
+        #expect(function.contains("viewModel.commitTitle(editingTitle, context: modelContext, undoManager: undoManager)"))
         #expect(function.contains("onTitleNotSaved()"))
     }
 

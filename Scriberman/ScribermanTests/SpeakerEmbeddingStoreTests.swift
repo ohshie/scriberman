@@ -800,3 +800,68 @@ private extension Sequence {
         return result
     }
 }
+
+// MARK: - Undo snapshots
+
+extension SpeakerEmbeddingStoreTests {
+    private func source(_ speakerID: String, session: UUID) -> VoiceprintSource {
+        VoiceprintSource(sessionID: session, pass: .transcript, speakerID: speakerID)
+    }
+
+    @Test("Restoring a snapshot brings back a profile the edit deleted, with its ID and name")
+    func restoreRecreatesDeletedProfile() async throws {
+        let session = UUID()
+        let anaID = try await store.teach(name: "Ana", source: source("S1", session: session), voiceprints: [[1, 0]])
+        let snapshot = try await store.snapshot(of: [source("S1", session: session)])
+
+        try await store.forget(source: source("S1", session: session))
+        #expect(try await store.fetchAllSnapshots().isEmpty)
+
+        try await store.restore(snapshot)
+
+        let profiles = try await store.fetchAllSnapshots()
+        #expect(profiles.map(\.id) == [anaID])
+        #expect(profiles.map(\.name) == ["Ana"])
+        #expect(profiles.map(\.embedding) == [[1, 0]])
+        #expect(try await store.voiceprintSnapshots(profileID: anaID).map(\.source) == [source("S1", session: session)])
+    }
+
+    @Test("Restoring a snapshot removes what the edit taught and keeps other sources")
+    func restoreRemovesTaughtVoiceprints() async throws {
+        let session = UUID()
+        let bobID = try await store.teach(name: "Bob", source: source("S2", session: session), voiceprints: [[0, 1]])
+        let snapshot = try await store.snapshot(of: [source("S1", session: session)])
+
+        try await store.teach(name: "Bob", source: source("S1", session: session), voiceprints: [[1, 0]])
+        try await store.teach(name: "Cid", source: source("S1", session: session), voiceprints: [[1, 1]])
+        #expect(Set(try await store.fetchAllSnapshots().map(\.name)) == ["Bob", "Cid"])
+
+        try await store.restore(snapshot)
+
+        let profiles = try await store.fetchAllSnapshots()
+        #expect(profiles.map(\.id) == [bobID])
+        #expect(profiles.map(\.sampleCount) == [1])
+        #expect(profiles.map(\.embedding) == [[0, 1]])
+    }
+
+    @Test("Restoring a snapshot puts a voiceprint back into a profile the edit emptied and refilled")
+    func restoreIntoProfileEmptiedByTheRestore() async throws {
+        let session = UUID()
+        let aliciaID = try await store.teach(name: "Alicia", source: source("S1", session: session), voiceprints: [[1, 0]])
+        let sources: Set<VoiceprintSource> = [source("S1", session: session), source("S2", session: session)]
+        let snapshot = try await store.snapshot(of: sources)
+
+        try await store.retarget(
+            from: source("S2", session: session), to: source("S1", session: session),
+            name: "Alicia", voiceprints: [[0, 1]]
+        )
+        #expect(try await store.fetchAllSnapshots().map(\.sampleCount) == [2])
+
+        try await store.restore(snapshot)
+
+        let profiles = try await store.fetchAllSnapshots()
+        #expect(profiles.map(\.id) == [aliciaID])
+        #expect(profiles.map(\.sampleCount) == [1])
+        #expect(profiles.map(\.embedding) == [[1, 0]])
+    }
+}
