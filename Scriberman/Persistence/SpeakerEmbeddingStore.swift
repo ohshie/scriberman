@@ -140,7 +140,81 @@ actor SpeakerEmbeddingStore {
         return try fetchAll().first { $0.name.lowercased() == target && $0.id != excludedID }?.id
     }
 
+    // MARK: - Undo
+
+    /// What speaker memory holds for `sources`, for undoing an edit that teaches or forgets them.
+    func snapshot(of sources: Set<VoiceprintSource>) throws -> SpeakerMemorySnapshot {
+        var voiceprints: [SpeakerMemorySnapshot.Voiceprint] = []
+        for source in sources {
+            for voiceprint in try fetchVoiceprints(from: source) {
+                guard let profile = voiceprint.profile else { continue }
+                voiceprints.append(SpeakerMemorySnapshot.Voiceprint(
+                    profile: SpeakerProfileSnapshot(profile: profile),
+                    embedding: voiceprint.embedding,
+                    weight: voiceprint.weight,
+                    source: source,
+                    createdAt: voiceprint.createdAt
+                ))
+            }
+        }
+        return SpeakerMemorySnapshot(sources: sources, voiceprints: voiceprints)
+    }
+
+    /// Puts speaker memory back to `snapshot` for its sources: what they taught since is removed,
+    /// and what they had taught is restored, recreating a deleted profile with its ID and name.
+    /// Other sources are untouched.
+    func restore(_ snapshot: SpeakerMemorySnapshot) throws {
+        var touched: [UUID: SpeakerProfile] = [:]
+        for source in snapshot.sources {
+            for voiceprint in try fetchVoiceprints(from: source) {
+                if let profile = voiceprint.profile {
+                    profile.voiceprints.removeAll { $0.id == voiceprint.id }
+                    touched[profile.id] = profile
+                }
+                modelContext.delete(voiceprint)
+            }
+        }
+        for stored in snapshot.voiceprints {
+            let profile: SpeakerProfile
+            if let existing = try touched[stored.profile.id] ?? SpeakerProfile.fetch(id: stored.profile.id, in: modelContext) {
+                profile = existing
+            } else {
+                profile = SpeakerProfile(
+                    id: stored.profile.id,
+                    name: stored.profile.name,
+                    embedding: [],
+                    voiceprintSpace: stored.profile.voiceprintSpace
+                )
+                modelContext.insert(profile)
+            }
+            profile.lastSeen = stored.profile.lastSeen
+            let voiceprint = SpeakerVoiceprint(
+                embedding: stored.embedding,
+                weight: stored.weight,
+                source: stored.source,
+                createdAt: stored.createdAt
+            )
+            modelContext.insert(voiceprint)
+            profile.voiceprints.append(voiceprint)
+            touched[profile.id] = profile
+        }
+        for profile in touched.values {
+            removeOrRecompute(profile, removing: [])
+        }
+        try modelContext.save()
+    }
+
     // MARK: - Private
+
+    private func fetchVoiceprints(from source: VoiceprintSource) throws -> [SpeakerVoiceprint] {
+        let sessionID: UUID? = source.sessionID
+        let pass: String? = source.pass.rawValue
+        let speakerID: String? = source.speakerID
+        let descriptor = FetchDescriptor<SpeakerVoiceprint>(predicate: #Predicate {
+            $0.sourceSessionID == sessionID && $0.sourcePass == pass && $0.sourceSpeakerID == speakerID
+        })
+        return try modelContext.fetch(descriptor)
+    }
 
     private func fetchAll() throws -> [SpeakerProfile] {
         try modelContext.fetch(FetchDescriptor<SpeakerProfile>()).sorted { $0.lastSeen > $1.lastSeen }
@@ -178,13 +252,7 @@ actor SpeakerEmbeddingStore {
     /// Deletes every voiceprint taught from `source`, then each affected profile left with none.
     /// Does not save.
     private func removeVoiceprints(from source: VoiceprintSource) throws {
-        let sessionID: UUID? = source.sessionID
-        let pass: String? = source.pass.rawValue
-        let speakerID: String? = source.speakerID
-        let descriptor = FetchDescriptor<SpeakerVoiceprint>(predicate: #Predicate {
-            $0.sourceSessionID == sessionID && $0.sourcePass == pass && $0.sourceSpeakerID == speakerID
-        })
-        let voiceprints = try modelContext.fetch(descriptor)
+        let voiceprints = try fetchVoiceprints(from: source)
         var removedByProfile: [UUID: (profile: SpeakerProfile, ids: Set<UUID>)] = [:]
         for voiceprint in voiceprints {
             if let profile = voiceprint.profile {
@@ -229,4 +297,18 @@ actor SpeakerEmbeddingStore {
         profile.embedding = sum.map { $0 / Float(total) }
         profile.sampleCount = total
     }
+}
+
+/// What speaker memory held for some voiceprint sources, for undoing a speaker edit.
+struct SpeakerMemorySnapshot: Sendable {
+    struct Voiceprint: Sendable {
+        let profile: SpeakerProfileSnapshot
+        let embedding: [Float]
+        let weight: Int
+        let source: VoiceprintSource
+        let createdAt: Date
+    }
+
+    let sources: Set<VoiceprintSource>
+    let voiceprints: [Voiceprint]
 }

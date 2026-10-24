@@ -58,13 +58,15 @@ struct TranscriptFindBar: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Close find")
             .help("Close find")
-            .keyboardShortcut(.escape, modifiers: [])
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.bar)
-        .clipShape(Capsule())
-        .shadow(radius: 8, y: 2)
+        .glassEffect(.regular, in: .capsule)
+        // Only while focus is inside the bar: a shortcut was window-wide and took Escape from the
+        // session search field.
+        .onExitCommand {
+            onDismiss()
+        }
         .onAppear {
             isSearchFieldFocused = true
         }

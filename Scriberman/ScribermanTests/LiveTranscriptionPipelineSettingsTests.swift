@@ -139,6 +139,64 @@ struct LiveTranscriptionPipelineSettingsTests {
         #expect(audioUD.bool(forKey: "audio.voiceProcessingEnabled") == false)
     }
 
+    /// Each per-row reset is offered only while its value differs from the default.
+    @Test
+    func eachResetIsAvailableOnlyWhileItsValueDiffersFromTheDefault() {
+        let suiteName = "LiveTranscriptionPipelineSettingsTests.canReset.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        let audioUD = UserDefaults(suiteName: suiteName + ".audio")!
+        defer {
+            userDefaults.removePersistentDomain(forName: suiteName)
+            audioUD.removePersistentDomain(forName: suiteName + ".audio")
+        }
+
+        let audioSettings = AppAudioSettings(userDefaults: audioUD)
+        let vm = makeViewModel(userDefaults: userDefaults, appAudioSettings: audioSettings)
+        let d = LiveTranscriptionPipelineSettings.defaults
+
+        for setting in SettingsViewModel.ResettableSetting.allCases {
+            #expect(vm.canReset(setting) == false, "\(setting) at default")
+        }
+        #expect(vm.canResetAllPipelineSettings == false)
+
+        audioSettings.voiceProcessingEnabled = true
+        vm.vadThreshold = 0.60
+        vm.vadMinSpeechDuration = 1.0
+        vm.asrConfidenceGate = 0.5
+        vm.asrAmplitudeGate = 0.03
+        for setting in SettingsViewModel.ResettableSetting.allCases {
+            #expect(vm.canReset(setting), "\(setting) changed")
+        }
+        #expect(vm.canResetAllPipelineSettings)
+
+        audioSettings.voiceProcessingEnabled = false
+        vm.vadThreshold = d.vadThreshold
+        #expect(vm.canReset(.voiceProcessing) == false)
+        #expect(vm.canReset(.vadThreshold) == false)
+        #expect(vm.canReset(.vadMinSpeechDuration))
+        #expect(vm.canResetAllPipelineSettings)
+
+        vm.resetAllPipelineSettingsToDefaults()
+        for setting in SettingsViewModel.ResettableSetting.allCases {
+            #expect(vm.canReset(setting) == false, "\(setting) after reset all")
+        }
+        #expect(vm.canResetAllPipelineSettings == false)
+    }
+
+    /// A slider walking back to the default lands on `lower + n * step`, which can miss the
+    /// default literal by a rounding error.
+    @Test
+    func aSliderValueThatRoundsToTheDefaultCountsAsTheDefault() {
+        let suiteName = "LiveTranscriptionPipelineSettingsTests.canResetRounding.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let vm = makeViewModel(userDefaults: userDefaults)
+        vm.vadThreshold = 0.50 + 35 * 0.01
+
+        #expect(vm.canReset(.vadThreshold) == false)
+    }
+
     @Test
     func cleanupRulesPersistRoundTrip() {
         let suiteName = "LiveTranscriptionPipelineSettingsTests.rules.\(UUID().uuidString)"

@@ -4,12 +4,9 @@ import SwiftData
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
-    static let focusPendingSessionNotification = Notification.Name("Scriberman.FocusPendingSession")
-    static let focusRecordingSessionNotification = Notification.Name("Scriberman.FocusRecordingSession")
-
     weak var appState: AppState?
     var modelContext: ModelContext?
-    /// Floating "Still in progress. Stop?" panel for idle recordings.
+    /// Floating "Stop this recording?" panel for idle recordings.
     private let idleSessionPrompt = IdleSessionPromptController()
     /// Floating "Recording failed." panel for a recording that never started writing audio.
     private let recordingStartFailurePrompt = RecordingStartFailureController()
@@ -127,8 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
         let changed = NSApp.setActivationPolicy(.regular)
         NSApp.unhide(nil)
-        _ = NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         if window.isMiniaturized {
             window.deminiaturize(nil)
         }
@@ -138,7 +134,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             "showMainWindow activationPolicyChanged=\(changed) currentPolicy=\(String(describing: NSApp.activationPolicy), privacy: .public)"
         )
         syncStatusItemVisibilityFromSettings()
-        NotificationCenter.default.post(name: Self.focusPendingSessionNotification, object: nil)
     }
 
     private func showFirstTimeTrayAlert(window: NSWindow) {
@@ -328,7 +323,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     private func addRecordingItems(to menu: NSMenu, duration: TimeInterval) {
-        let durationItem = NSMenuItem(title: "Recording: \(menuDuration(duration))", action: nil, keyEquivalent: "")
+        let durationItem = NSMenuItem(title: "Recording: \(TimeFormatter.displayFormat(seconds: Float(duration)))", action: nil, keyEquivalent: "")
         durationItem.isEnabled = false
         menu.addItem(durationItem)
 
@@ -439,11 +434,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 app: selectedApp,
                 context: modelContext
             ) {
-                NotificationCenter.default.post(
-                    name: Self.focusRecordingSessionNotification,
-                    object: nil,
-                    userInfo: ["sessionID": session.id]
-                )
+                appState.requestSession(.recording(session.id))
             }
         }
     }
@@ -462,11 +453,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
         Task {
             if let session = await appState.newSessionViewModel.stopRecording(context: modelContext) {
-                NotificationCenter.default.post(
-                    name: Self.focusRecordingSessionNotification,
-                    object: nil,
-                    userInfo: ["sessionID": session.id]
-                )
+                appState.requestSession(.recording(session.id))
             }
         }
     }
@@ -496,13 +483,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
 
         appState.menuBarSettings.lastUsedAppBundleID = sender.representedObject as? String
-    }
-
-    private func menuDuration(_ duration: TimeInterval) -> String {
-        let totalSeconds = max(0, Int(duration.rounded(.down)))
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        return String(format: "%d:%02d", minutes, seconds)
     }
 
     @objc
@@ -637,20 +617,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         guard let appState else { return }
         var result = await appState.prepareCalendarSession(id)
         if case let .needsTitleReplacement(draftID, title) = result {
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.activate()
             let alert = NSAlert()
             alert.alertStyle = .informational
             alert.messageText = "Replace Session Title?"
             alert.informativeText = "Session will be named “\(title)”."
             alert.addButton(withTitle: "Replace")
             alert.addButton(withTitle: "Keep Current")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            guard await runReplaceTitleAlert(alert) == .alertFirstButtonReturn else { return }
             result = await appState.confirmCalendarTitleReplacement(id, draftID: draftID)
         }
         guard result == .prepared else { return }
         appState.newSessionViewModel.refreshAudioDevicesOnPanelExpanded()
-        appState.requestPendingSessionFocusFromMenuBar()
+        appState.requestSession(.pending)
         showMainWindow()
+    }
+
+    /// Attaches the alert to the main window while it is on screen; with the window closed or in
+    /// the menu bar, runs it on its own.
+    private func runReplaceTitleAlert(_ alert: NSAlert) async -> NSApplication.ModalResponse {
+        guard let window = resolveMainWindow(), window.isVisible, !window.isMiniaturized else {
+            return alert.runModal()
+        }
+        return await alert.beginSheetModal(for: window)
     }
 
     func wireIdleSessionPrompt() {
@@ -690,8 +679,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             }
             recordingStartFailurePrompt.show(
                 onOpen: { [weak self] in
-                    NSApp.activate(ignoringOtherApps: true)
-                    self?.mainWindow?.makeKeyAndOrderFront(nil)
+                    if let sessionID = self?.appState?.newSessionViewModel.failedStartSessionID {
+                        self?.appState?.requestSession(.recording(sessionID))
+                    }
+                    self?.showMainWindow()
                     Task { @MainActor [weak self] in
                         self?.appState?.newSessionViewModel.dismissRecordingStartFailure()
                     }

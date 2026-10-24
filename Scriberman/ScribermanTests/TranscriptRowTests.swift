@@ -54,7 +54,7 @@ struct TranscriptRowTests {
     func testTheFinishedBlockKeepsItsOwnBehaviour() throws {
         let block = try source("../UI/TranscriptBlockView.swift")
 
-        #expect(block.contains(".onTapGesture {\n            onTap()"))
+        #expect(block.contains(".onTapGesture {\n            onTap?()"))
         #expect(block.contains("SpeakerNameField("))
         #expect(block.contains("highlightedText()"))
     }
@@ -78,7 +78,7 @@ struct TranscriptRowTests {
     }
 
     /// One scrolling region in the window, not two. Segments sit in the view's own flow, so
-    /// arriving text pushes the Stop button and the source cards down rather than filling a pane.
+    /// arriving text pushes the source cards down rather than filling a pane.
     @Test(.tags(.sourceLint))
     func testTheRecordingViewHasASingleScroll() throws {
         let live = try liveViewSource()
@@ -86,23 +86,15 @@ struct TranscriptRowTests {
         #expect(live.components(separatedBy: "ScrollView {").count - 1 == 1)
         #expect(!live.contains(".frame(height: 120)"))
         #expect(!live.contains(".containerRelativeFrame(.vertical"))
-        // The segments are in the same VStack as the controls below them.
-        let segments = try #require(live.range(of: "ForEach(viewModel.liveSegments"))
-        let stop = try #require(live.range(of: "HeroCircleButton("))
-        #expect(segments.lowerBound < stop.lowerBound)
     }
 
-    /// Following the transcript scrolls to the foot of the view, which is where Stop is — so the
-    /// newest text and the button that ends the recording stay together.
+    /// Following the transcript scrolls to the foot of the view.
     @Test(.tags(.sourceLint))
-    func testFollowingTheTranscriptKeepsStopInView() throws {
+    func testFollowingTheTranscriptScrollsToTheFoot() throws {
         let live = try liveViewSource()
 
         #expect(live.contains("proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)"))
         #expect(live.contains(".id(Self.bottomAnchor)"))
-        let anchor = try #require(live.range(of: ".id(Self.bottomAnchor)"))
-        let stop = try #require(live.range(of: "HeroCircleButton("))
-        #expect(anchor.lowerBound > stop.lowerBound)
     }
 
     // MARK: - Copying the whole transcript

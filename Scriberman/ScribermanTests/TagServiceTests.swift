@@ -579,3 +579,105 @@ struct TagServiceTests {
         #expect(TagColor.components(fromHex: "bad") == nil)
     }
 }
+
+// MARK: - Undo
+
+extension TagServiceTests {
+    private func tagIDs(of session: RecordingSession, in context: ModelContext) throws -> [UUID] {
+        let sessionID = session.id
+        let stored = try ModelContext(context.container)
+            .fetch(FetchDescriptor<RecordingSession>(predicate: #Predicate { $0.id == sessionID }))
+        return stored.first?.tags.map(\.id).sorted { $0.uuidString < $1.uuidString } ?? []
+    }
+
+    @Test
+    @MainActor
+    func testUndoAndRedoAnAssignmentRestoreTheSavedTags() throws {
+        let context = try makeContext()
+        let service = service
+        let session = makeSession(in: context)
+        try service.applyDefaultTag(to: session, in: context)
+        let defaultID = try #require(session.tags.first?.id)
+        let work = try service.createTag(name: "Work", in: context)
+        let undoManager = UndoManager.forTests()
+
+        _ = try undoManager.asOneEvent { try service.assign(work, to: session, in: context, undoManager: undoManager) }
+        #expect(undoManager.undoActionName == UndoActionName.changeTags)
+
+        undoManager.undo()
+        #expect(session.tags.map(\.id) == [defaultID])
+        #expect(try tagIDs(of: session, in: context) == [defaultID])
+
+        undoManager.redo()
+        #expect(session.tags.map(\.id) == [work.id])
+        #expect(try tagIDs(of: session, in: context) == [work.id])
+    }
+
+    @Test
+    @MainActor
+    func testUndoAndRedoAnUnassignmentRestoreTheSavedTags() throws {
+        let context = try makeContext()
+        let service = service
+        let session = makeSession(in: context)
+        try service.applyDefaultTag(to: session, in: context)
+        let defaultID = try #require(session.tags.first?.id)
+        let work = try service.createTag(name: "Work", in: context)
+        _ = try service.assign(work, to: session, in: context)
+        let undoManager = UndoManager.forTests()
+
+        try undoManager.asOneEvent { try service.unassign(work, from: session, in: context, undoManager: undoManager) }
+        #expect(undoManager.undoActionName == UndoActionName.changeTags)
+        #expect(session.tags.map(\.id) == [defaultID])
+
+        undoManager.undo()
+        #expect(session.tags.map(\.id) == [work.id])
+        #expect(try tagIDs(of: session, in: context) == [work.id])
+
+        undoManager.redo()
+        #expect(session.tags.map(\.id) == [defaultID])
+        #expect(try tagIDs(of: session, in: context) == [defaultID])
+    }
+
+    @Test
+    @MainActor
+    func testARefusedAssignmentRegistersNothing() throws {
+        let context = try makeContext()
+        let service = service
+        let session = makeSession(in: context)
+        for name in ["A", "B", "C"] {
+            _ = try service.assign(try service.createTag(name: name, in: context), to: session, in: context)
+        }
+        let fourth = try service.createTag(name: "D", in: context)
+        let undoManager = UndoManager.forTests()
+
+        let assigned = try undoManager.asOneEvent { try service.assign(fourth, to: session, in: context, undoManager: undoManager) }
+
+        #expect(!assigned)
+        #expect(undoManager.undoActionName.isEmpty)
+    }
+
+    @Test
+    @MainActor
+    func testUndoAfterTheTagWasDeletedFallsBackToTheDefault() throws {
+        let context = try makeContext()
+        let service = service
+        let session = makeSession(in: context)
+        try service.applyDefaultTag(to: session, in: context)
+        let defaultID = try #require(session.tags.first?.id)
+        let work = try service.createTag(name: "Work", in: context)
+        let client = try service.createTag(name: "Client", in: context)
+        _ = try service.assign(work, to: session, in: context)
+        let undoManager = UndoManager.forTests()
+
+        _ = try undoManager.asOneEvent { try service.assign(client, to: session, in: context, undoManager: undoManager) }
+        try service.unassign(work, from: session, in: context)
+        try service.delete(work, in: context)
+        try undoManager.asOneEvent { try service.unassign(client, from: session, in: context, undoManager: undoManager) }
+
+        undoManager.undo()
+        #expect(session.tags.map(\.id) == [client.id])
+        undoManager.undo()
+        #expect(session.tags.map(\.id) == [defaultID])
+        #expect(try tagIDs(of: session, in: context) == [defaultID])
+    }
+}

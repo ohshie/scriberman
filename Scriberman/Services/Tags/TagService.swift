@@ -71,10 +71,15 @@ struct TagService {
     /// The default tag appears here whenever any recording is untagged, since the default is never
     /// alongside another tag.
     func tagsInUse(in context: ModelContext) throws -> [RecordingTag] {
-        try context.fetch(
+        Self.inUse(try context.fetch(
             FetchDescriptor<RecordingTag>(sortBy: [SortDescriptor(\.createdAt)])
-        )
-        .filter { !$0.recordings.isEmpty }
+        ))
+    }
+
+    /// The tags in `tags` that at least one recording carries, in their original order. Views
+    /// that already hold every tag through a query filter with this rather than fetching again.
+    static func inUse(_ tags: [RecordingTag]) -> [RecordingTag] {
+        tags.filter { !$0.recordings.isEmpty }
     }
 
     // MARK: - Creating and editing
@@ -135,6 +140,86 @@ struct TagService {
         session.tags.removeAll { $0.id == tag.id }
         try restoreFloorIfNeeded(for: session, in: context)
         try context.save()
+    }
+
+    // MARK: - Undo
+
+    /// Applies `tag` to `session` as `assign(_:to:in:)` does, and registers the change with
+    /// `undoManager`.
+    @MainActor
+    @discardableResult
+    func assign(
+        _ tag: RecordingTag,
+        to session: RecordingSession,
+        in context: ModelContext,
+        undoManager: UndoManager?
+    ) throws -> Bool {
+        let previousTags = session.tags
+        let assigned = try assign(tag, to: session, in: context)
+        if assigned, session.tags.map(\.id) != previousTags.map(\.id) {
+            registerUndo(restoring: previousTags, of: session, in: context, undoManager: undoManager)
+        }
+        return assigned
+    }
+
+    /// Removes `tag` from `session` as `unassign(_:from:in:)` does, and registers the change with
+    /// `undoManager`.
+    @MainActor
+    func unassign(
+        _ tag: RecordingTag,
+        from session: RecordingSession,
+        in context: ModelContext,
+        undoManager: UndoManager?
+    ) throws {
+        let previousTags = session.tags
+        try unassign(tag, from: session, in: context)
+        if session.tags.map(\.id) != previousTags.map(\.id) {
+            registerUndo(restoring: previousTags, of: session, in: context, undoManager: undoManager)
+        }
+    }
+
+    /// Registers giving `session` back `tags` with `undoManager`. Undoing registers the opposite,
+    /// which is the redo.
+    @MainActor
+    private func registerUndo(
+        restoring tags: [RecordingTag],
+        of session: RecordingSession,
+        in context: ModelContext,
+        undoManager: UndoManager?
+    ) {
+        guard let undoManager else { return }
+        // The handler holds the session: the undo manager does not retain its target.
+        undoManager.registerUndo(withTarget: session) { [weak undoManager] _ in
+            // A session deleted since is left alone.
+            guard session.modelContext != nil, !session.isDeleted else { return }
+            do {
+                try restoreTags(tags, of: session, in: context, undoManager: undoManager)
+            } catch {
+                logger.error("Undoing a tag change failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        undoManager.setActionName(UndoActionName.changeTags)
+    }
+
+    /// Gives `session` exactly `tags`, less any deleted since, falling back to the default tag
+    /// when none is left.
+    @MainActor
+    private func restoreTags(
+        _ tags: [RecordingTag],
+        of session: RecordingSession,
+        in context: ModelContext,
+        undoManager: UndoManager?
+    ) throws {
+        let previousTags = session.tags
+        session.tags = tags.filter { $0.modelContext != nil && !$0.isDeleted }
+        try restoreFloorIfNeeded(for: session, in: context)
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+        registerUndo(restoring: previousTags, of: session, in: context, undoManager: undoManager)
     }
 
     // MARK: - Deletion

@@ -13,6 +13,7 @@ struct AISettingsView: View {
     @State private var customModelDraft = ""
     @State private var customModelErrorMessage: String?
     @State private var isAddingCustomModel = false
+    @State private var promptPendingDeletion: AIPrompt?
     @FocusState private var focusedField: Field?
 
     var body: some View {
@@ -125,7 +126,7 @@ struct AISettingsView: View {
                                 }
 
                                 Button("Delete", role: .destructive) {
-                                    promptVM.deletePrompt(prompt)
+                                    promptPendingDeletion = prompt
                                 }
                             }
                         }
@@ -139,6 +140,21 @@ struct AISettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .alert(
+            promptPendingDeletion.map { "Delete \u{201C}\($0.name)\u{201D}?" } ?? "",
+            isPresented: Binding(
+                get: { promptPendingDeletion != nil },
+                set: { if !$0 { promptPendingDeletion = nil } }
+            ),
+            presenting: promptPendingDeletion
+        ) { prompt in
+            Button("Delete", role: .destructive) {
+                promptVM.deletePrompt(prompt)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This cannot be undone.")
+        }
         .task {
             promptVM.loadPrompts()
         }
