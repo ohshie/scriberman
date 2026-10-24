@@ -9,6 +9,7 @@ import SwiftUI
 struct TagAssignmentMenuContent: View {
     let session: RecordingSession
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.undoManager) private var undoManager
     @Environment(\.openSettings) private var openSettings
     @Environment(AppState.self) private var appState
 
@@ -66,9 +67,9 @@ struct TagAssignmentMenuContent: View {
     private func toggle(_ tag: RecordingTag, isCarried: Bool) {
         do {
             if isCarried {
-                try service.unassign(tag, from: session, in: modelContext)
+                try service.unassign(tag, from: session, in: modelContext, undoManager: undoManager)
             } else {
-                _ = try service.assign(tag, to: session, in: modelContext)
+                _ = try service.assign(tag, to: session, in: modelContext, undoManager: undoManager)
             }
         } catch {
             logger.error("Changing a recording's tags failed: \(error.localizedDescription, privacy: .public)")

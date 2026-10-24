@@ -6,8 +6,11 @@ struct TranscriptBlockView: View {
     let isActive: Bool
     let searchRanges: [Range<String.Index>]
     let activeSearchRange: Range<String.Index>?
-    let onTap: () -> Void
+    /// Seeks to the block and plays. `nil` where there is no player, such as the preview.
+    let onTap: (() -> Void)?
     var speakerEditing: SpeakerEditing?
+    /// `false` for a transcript whose segments' source does not say which capture stream a voice came from.
+    var showsAudioSource: Bool
 
     /// What a block of a saved transcript needs to edit its speaker. The caller owns which block is
     /// renaming, so a click on another block can close the field.
@@ -15,7 +18,7 @@ struct TranscriptBlockView: View {
         var isRenaming: Bool
         /// Stored profiles the rename field suggests.
         var profiles: [SpeakerProfileSnapshot]
-        /// The transcript's other speakers, with their display colours, for "assign this block to".
+        /// The transcript's other speakers, with their display colours, for "Assign to Speaker".
         var otherSpeakers: [TranscriptSpeaker]
         var onBeginRename: () -> Void
         var onEndRename: () -> Void
@@ -29,8 +32,9 @@ struct TranscriptBlockView: View {
         isActive: Bool = false,
         searchRanges: [Range<String.Index>] = [],
         activeSearchRange: Range<String.Index>? = nil,
-        onTap: @escaping () -> Void = {},
-        speakerEditing: SpeakerEditing? = nil
+        onTap: (() -> Void)? = nil,
+        speakerEditing: SpeakerEditing? = nil,
+        showsAudioSource: Bool = true
     ) {
         self.block = block
         self.isActive = isActive
@@ -38,25 +42,31 @@ struct TranscriptBlockView: View {
         self.activeSearchRange = activeSearchRange
         self.onTap = onTap
         self.speakerEditing = speakerEditing
+        self.showsAudioSource = showsAudioSource
     }
 
     var body: some View {
         TranscriptRowView(
             timeText: startTimeText,
-            audioSource: block.audioSource,
+            audioSource: showsAudioSource ? block.audioSource : nil,
             copyText: block.text,
             isActive: isActive,
-            activeColor: speakerColor
+            activeColor: speakerColor,
+            onSeek: onTap
         ) {
             speakerIdentity
         } content: {
             transcriptText
         }
         .onTapGesture {
-            onTap()
+            onTap?()
         }
         .contextMenu {
+            Button("Copy") {
+                copyToPasteboard(block.text)
+            }
             if let speakerEditing {
+                Divider()
                 blockMenu(speakerEditing)
             }
         }
@@ -105,14 +115,10 @@ struct TranscriptBlockView: View {
 
     @ViewBuilder
     private func blockMenu(_ speakerEditing: SpeakerEditing) -> some View {
-        Button("Copy") {
-            copyToPasteboard(block.text)
-        }
-        Divider()
-        Button("rename speaker") {
+        Button("Rename Speaker…") {
             speakerEditing.onBeginRename()
         }
-        Menu("assign this block to") {
+        Menu("Assign to Speaker") {
             ForEach(speakerEditing.otherSpeakers) { speaker in
                 Button {
                     speakerEditing.onAssign(speaker.id)
@@ -126,7 +132,7 @@ struct TranscriptBlockView: View {
                 }
             }
             Divider()
-            Button("new speaker") {
+            Button("New Speaker") {
                 speakerEditing.onAssign(nil)
             }
         }

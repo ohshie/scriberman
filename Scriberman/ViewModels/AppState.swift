@@ -51,7 +51,12 @@ final class AppState {
     /// was last shown. Set by the places that send people to Settings for one specific thing.
     var requestedSettingsTab: SettingsTab?
     var sessionToTrim: RecordingSession?
-    private var shouldFocusPendingSessionFromMenuBar = false
+    /// SwiftUI's `openSettings` action, registered by `ContentView`. Lets AppKit-hosted UI such as
+    /// the dictation HUD open the Settings scene.
+    @ObservationIgnored var openSettingsAction: (() -> Void)?
+    /// A session asked for from outside a window (menu bar extra, calendar suggestion, start
+    /// failure panel), waiting for the key main window to show it. A newer request replaces it.
+    private(set) var sessionRequest: SessionRequest?
     private(set) var workspace: Workspace?
     private(set) var workspaceErrorMessage: String?
     var isBootstrapping = true
@@ -254,14 +259,27 @@ final class AppState {
         newSessionViewModel.reset()
     }
 
-    func requestPendingSessionFocusFromMenuBar() {
-        shouldFocusPendingSessionFromMenuBar = true
+    func openSettings() {
+        openSettingsAction?()
     }
 
-    func consumePendingSessionFocusRequest() -> Bool {
-        let shouldFocus = shouldFocusPendingSessionFromMenuBar
-        shouldFocusPendingSessionFromMenuBar = false
-        return shouldFocus
+    enum SessionRequest: Equatable {
+        case pending
+        case recording(UUID)
+    }
+
+    func requestSession(_ request: SessionRequest) {
+        sessionRequest = request
+    }
+
+    /// Hands the request to the window asking, if that window can show the session now. Otherwise
+    /// the request stays queued, so a session saved a moment after the request is still shown.
+    func consumeSessionRequest(isAvailable: (SessionRequest) -> Bool) -> SessionRequest? {
+        guard let request = sessionRequest, isAvailable(request) else {
+            return nil
+        }
+        sessionRequest = nil
+        return request
     }
 
     func bootstrapWorkspace() async {
@@ -354,7 +372,7 @@ final class AppState {
         hotkeyRegistrar.onKeyDown = { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, requiredOnboardingStep == nil, !isChangingWorkspace else { return }
-                dictationHUD.show(for: dictationService)
+                dictationHUD.show(for: dictationService) { [weak self] in self?.openSettings() }
                 let deviceID = audioDeviceService.availableDevices.first {
                     $0.uid == menuBarSettings.lastUsedMicUID
                 }?.id
@@ -409,10 +427,6 @@ final class AppState {
     }
 
     private static func defaultPendingSessionTitle(referenceDate: Date = .now) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = .current
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return "Session \(formatter.string(from: referenceDate))"
+        "Session \(TimeFormatter.displayDateTime(referenceDate))"
     }
 }

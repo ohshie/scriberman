@@ -8,6 +8,7 @@ struct RecordingSessionRow: View {
     /// Absent for a title match — there is no transcript hit to show — and for an unsearched list.
     var searchSnippet: SessionSearchSnippet? = nil
     @State private var isPulsing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -97,9 +98,9 @@ struct RecordingSessionRow: View {
             Circle()
                 .fill(Color("StatusRecordingColor"))
                 .frame(width: 8, height: 8)
-                .opacity(isPulsing ? 1.0 : 0.35)
+                .opacity(isPulsing || reduceMotion ? 1.0 : 0.35)
                 .animation(
-                    .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+                    reduceMotion ? nil : .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
                     value: isPulsing
                 )
                 .onAppear {

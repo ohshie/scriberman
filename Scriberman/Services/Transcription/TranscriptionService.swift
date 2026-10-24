@@ -27,7 +27,7 @@ enum TranscriptionError: LocalizedError {
 actor TranscriptionService: TranscriptionServiceProtocol {
     typealias ResampleAudioFile = (URL) throws -> [Float]
     typealias SegmentSpeech = ([Float]) async throws -> [VadSegment]
-    typealias ExtractSamples = (URL, Bool) throws -> (mic: [Float], app: [Float]?)
+    typealias ExtractSamples = (URL) throws -> (mic: [Float], app: [Float]?)
     typealias PrepareModelsHandler = (Workspace) async throws -> Void
 
     private let fileManager = FileManager.default
@@ -50,8 +50,8 @@ actor TranscriptionService: TranscriptionServiceProtocol {
             try AudioConverter().resampleAudioFile(url)
         },
         segmentSpeech: SegmentSpeech? = nil,
-        extractSamples: @escaping ExtractSamples = { url, isStereo in
-            try M4AChannelExtractor().extract(url: url, isStereo: isStereo)
+        extractSamples: @escaping ExtractSamples = { url in
+            try M4AChannelExtractor().extract(url: url)
         },
         prepareModelsHandler: PrepareModelsHandler? = nil,
         makePassEngines: TranscriptionPassRunner.MakePassEngines? = nil
@@ -118,7 +118,7 @@ actor TranscriptionService: TranscriptionServiceProtocol {
 
         let extractedSamples: (mic: [Float], app: [Float]?)
         do {
-            extractedSamples = try extractSamples(mixdownURL, session.appAudioURL != nil)
+            extractedSamples = try extractSamples(mixdownURL)
         } catch {
             throw TranscriptionError.failedToTranscribe("M4A extraction failed - \(error.localizedDescription)")
         }
@@ -155,13 +155,17 @@ actor TranscriptionService: TranscriptionServiceProtocol {
             colorHex: transcriptAligner.speakerColorHex(at:)
         )
 
-        return Transcript(
+        var transcript = Transcript(
             fullText: Transcript.fullText(joining: mergedSegments),
             segments: mergedSegments,
             speakers: speakers,
             speakerEmbeddings: mergedEmbeddings,
             voiceprintSpace: VoiceprintSpace.current
         )
+        if extractedSamples.app == nil, session.appAudioURL != nil {
+            transcript.isSinglePassOfMixedAudio = true
+        }
+        return transcript
     }
 
     /// The speakers of an offline transcript, sorted by ID. A speaker matched to a stored profile

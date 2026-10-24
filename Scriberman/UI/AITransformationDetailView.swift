@@ -57,7 +57,7 @@ struct AITransformationDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(20)
         }
-        .safeAreaInset(edge: .top) {
+        .safeAreaBar(edge: .top) {
             Toggle(isOn: $showRawMarkdown) {
                 Text("Raw Markdown")
                     .font(.subheadline.weight(.medium))
@@ -65,8 +65,9 @@ struct AITransformationDetailView: View {
             .toggleStyle(.switch)
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
-            .background(.bar)
         }
+        // Hard style: the automatic edge effect lit the bar up under the pointer.
+        .scrollEdgeEffectStyle(.hard, for: .top)
         .task {
             viewModel.loadPrompts()
             syncSelectionWithAvailableTransformations()
@@ -154,12 +155,14 @@ struct AITransformationDetailView: View {
             } label: {
                 Label("Copy", systemImage: "doc.on.doc")
             }
+            .help("Copy")
 
             Button {
                 onExport()
             } label: {
                 Label("Export", systemImage: "square.and.arrow.up")
             }
+            .help("Export")
         }
     }
 }

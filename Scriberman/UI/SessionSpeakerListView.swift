@@ -22,7 +22,9 @@ enum SessionSpeakerList {
             Row(
                 speaker: speaker,
                 isMatched: profileNames.contains(speaker.label.lowercased()),
-                audioSource: transcript.segments.first { $0.speakerId == speaker.id }?.audioSource,
+                audioSource: transcript.isSinglePassOfMixedAudio == true
+                    ? nil
+                    : transcript.segments.first { $0.speakerId == speaker.id }?.audioSource,
                 talkTime: times[speaker.id] ?? 0
             )
         }

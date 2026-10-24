@@ -81,7 +81,7 @@ struct AudioPlayerViewModelTests {
             text: "Hello"
         )
 
-        TranscriptStudyView.seekAndPlay(block: block, player: player)
+        TranscriptDetailViewModel.seekAndPlay(block: block, player: player)
 
         #expect(player.soughtTime == Double(block.startTime))
         #expect(player.actions == ["seek", "play"])

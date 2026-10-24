@@ -24,9 +24,9 @@ final class M4AChannelExtractorTests {
         let mic = Array(repeating: Float(0.25), count: oneSecond48k)
         let app = Array(repeating: Float(-0.5), count: oneSecond48k)
 
-        try writeM4A(channels: [mic, app], sampleRate: 48_000, to: url)
+        try M4ATestFile.write(channels: [mic, app], sampleRate: 48_000, to: url)
 
-        let extracted = try extractor.extract(url: url, isStereo: true)
+        let extracted = try extractor.extract(url: url)
 
         #expect(extracted.app != nil)
         #expect(extracted.mic.count == 16_000)
@@ -42,9 +42,9 @@ final class M4AChannelExtractorTests {
         let halfSecond48k = 24_000
         let mic = Array(repeating: Float(0.4), count: halfSecond48k)
 
-        try writeM4A(channels: [mic], sampleRate: 48_000, to: url)
+        try M4ATestFile.write(channels: [mic], sampleRate: 48_000, to: url)
 
-        let extracted = try extractor.extract(url: url, isStereo: false)
+        let extracted = try extractor.extract(url: url)
 
         #expect(extracted.app == nil)
         #expect(extracted.mic.count == 8_000)
@@ -57,7 +57,7 @@ final class M4AChannelExtractorTests {
         let missingURL = tempDirectoryURL.appendingPathComponent("missing.m4a")
 
         do {
-            _ = try extractor.extract(url: missingURL, isStereo: false)
+            _ = try extractor.extract(url: missingURL)
             Issue.record("Expected extraction to throw for missing input file")
             return
         } catch {
@@ -73,9 +73,9 @@ final class M4AChannelExtractorTests {
         let inputSampleCount = 48_000 * durationSeconds
         let mic = Array(repeating: Float(0.2), count: inputSampleCount)
 
-        try writeM4A(channels: [mic], sampleRate: 48_000, to: url)
+        try M4ATestFile.write(channels: [mic], sampleRate: 48_000, to: url)
 
-        let extracted = try extractor.extract(url: url, isStereo: false)
+        let extracted = try extractor.extract(url: url)
         #expect(extracted.mic.count == 16_000 * durationSeconds)
     }
 
@@ -100,7 +100,21 @@ final class M4AChannelExtractorTests {
         }
     }
 
-    private func writeM4A(channels: [[Float]], sampleRate: Double, to url: URL) throws {
+    private func mean<S: Sequence>(_ sequence: S) -> Float where S.Element == Float {
+        var total: Float = 0
+        var count = 0
+        for value in sequence {
+            total += value
+            count += 1
+        }
+        guard count > 0 else { return 0 }
+        return total / Float(count)
+    }
+}
+
+/// Writes AAC M4A files with one entry of `channels` per channel, for tests that read real mixdowns.
+enum M4ATestFile {
+    static func write(channels: [[Float]], sampleRate: Double, to url: URL) throws {
         guard !channels.isEmpty else {
             Issue.record("Expected at least one channel.")
             throw RecordingError.failedToStart("Expected at least one channel.")
@@ -152,16 +166,5 @@ final class M4AChannelExtractorTests {
             try outputFile.write(from: buffer)
             index += frames
         }
-    }
-
-    private func mean<S: Sequence>(_ sequence: S) -> Float where S.Element == Float {
-        var total: Float = 0
-        var count = 0
-        for value in sequence {
-            total += value
-            count += 1
-        }
-        guard count > 0 else { return 0 }
-        return total / Float(count)
     }
 }

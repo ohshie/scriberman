@@ -73,19 +73,7 @@ struct WorkspaceOnboardingStep: View {
         isSelectingFolder = true
         defer { isSelectingFolder = false }
 
-        guard let url = await MainActor.run(body: {
-            let panel = NSOpenPanel()
-            panel.title = "Select Scriberman Workspace"
-            panel.message = "Recommended: ~/Documents/Scriberman"
-            panel.canChooseFiles = false
-            panel.canChooseDirectories = true
-            panel.allowsMultipleSelection = false
-            panel.canCreateDirectories = true
-            panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Documents", isDirectory: true)
-                .appendingPathComponent("Scriberman", isDirectory: true)
-            return panel.runModal() == .OK ? panel.url : nil
-        }) else {
+        guard let url = await WorkspacePicker.chooseWorkspaceFolder() else {
             return
         }
 

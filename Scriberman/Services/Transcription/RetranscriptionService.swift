@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 actor RetranscriptionService {
-    typealias ExtractSamples = @Sendable (URL, Bool) throws -> (mic: [Float], app: [Float]?)
+    typealias ExtractSamples = @Sendable (URL) throws -> (mic: [Float], app: [Float]?)
     typealias PrepareModels = @Sendable (Workspace) async throws -> Void
     typealias TranscribePassFromSamples = @Sendable ([Float], AudioSource, Workspace, LiveTranscriptionPipelineSettings, TranscriptionPassRunner.SharedPassEngines?) async throws -> TranscriptionPassRunner.PassResult
     typealias SaveContext = @Sendable (ModelContext) throws -> Void
@@ -22,8 +22,8 @@ actor RetranscriptionService {
         saveContext: SaveContext? = nil
     ) {
         self.transcriptionService = transcriptionService
-        self.extractSamples = extractSamples ?? { url, isStereo in
-            try M4AChannelExtractor().extract(url: url, isStereo: isStereo)
+        self.extractSamples = extractSamples ?? { url in
+            try M4AChannelExtractor().extract(url: url)
         }
         self.prepareModelsHandler = prepareModelsHandler ?? { workspace in
             try await transcriptionService.prepareModels(workspace: workspace)
@@ -63,11 +63,7 @@ actor RetranscriptionService {
             return
         }
 
-        var mixdownPath: String?
-        var isStereo = false
-        
-        mixdownPath = session.mixdownURL
-        isStereo = (session as? RecordingSession)?.appAudioURL != nil
+        let mixdownPath = session.mixdownURL
         if mixdownPath == nil {
             session.status = .error("No mixdown available for retranscription")
             try? saveContext(context)
@@ -82,7 +78,7 @@ actor RetranscriptionService {
 
         do {
             let mixdownURL = URL(fileURLWithPath: mixdownPath)
-            let extracted = try extractSamples(mixdownURL, isStereo)
+            let extracted = try extractSamples(mixdownURL)
             try await prepareModelsHandler(workspace)
 
             let sharedEngines = await transcriptionService.makeSharedPassEngines()
@@ -104,13 +100,17 @@ actor RetranscriptionService {
                 colorHex: transcriptAligner.speakerColorHex(at:)
             )
 
-            session.retranscript = Transcript(
+            var retranscript = Transcript(
                 fullText: Transcript.fullText(joining: merged),
                 segments: merged,
                 speakers: speakers,
                 speakerEmbeddings: mergedEmbeddings,
                 voiceprintSpace: VoiceprintSpace.current
             )
+            if extracted.app == nil, (session as? RecordingSession)?.appAudioURL != nil {
+                retranscript.isSinglePassOfMixedAudio = true
+            }
+            session.retranscript = retranscript
             session.status = .done
             try? saveContext(context)
             if let recording = session as? RecordingSession {

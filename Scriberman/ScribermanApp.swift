@@ -149,7 +149,11 @@ struct ScribermanApp: App {
         .modelContainer(modelContainer)
         .commands {
             SidebarCommands()
-            TrimCommands(appState: appState)
+            RawMarkdownCommands()
+            FileCommands()
+            SessionCommands(appState: appState)
+            FindCommands()
+            ControlsCommands()
             ScribermanUpdateCommands(updateService: appState.updateService)
         }
 
