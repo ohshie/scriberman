@@ -6,6 +6,7 @@ struct TranscriptDetailView: View {
     let session: any TranscribableSession
     let onReprocess: (() -> Void)?
     let onCopy: () -> Void
+    /// Asks the window to confirm and delete the session.
     let onDelete: () -> Void
     /// Restores a trimmed recording to its pre-trim state; `nil` for sessions that cannot be trimmed.
     let onRestoreOriginal: (() async throws -> Void)?
@@ -13,11 +14,12 @@ struct TranscriptDetailView: View {
     let onOpenTransformation: ((UUID) -> Void)?
     /// Called when a title commit fails to save; the session keeps its previous title.
     let onTitleNotSaved: () -> Void
+    /// A Session menu command for this view to carry out; cleared once handled.
+    @Binding var commandRequest: DetailCommandRequest?
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openSettings) private var openSettings
     @Environment(AppState.self) private var appState
-    @State private var showingDeleteConfirmation = false
     @State private var showingRestoreConfirmation = false
     @State private var isRestoringOriginal = false
     @State private var restoreErrorMessage: String?
@@ -35,7 +37,8 @@ struct TranscriptDetailView: View {
         onRestoreOriginal: (() async throws -> Void)? = nil,
         onOpenStudy: (() -> Void)?,
         onOpenTransformation: ((UUID) -> Void)?,
-        onTitleNotSaved: @escaping () -> Void
+        onTitleNotSaved: @escaping () -> Void,
+        commandRequest: Binding<DetailCommandRequest?> = .constant(nil)
     ) {
         self.session = session
         self.onReprocess = onReprocess
@@ -45,6 +48,7 @@ struct TranscriptDetailView: View {
         self.onOpenStudy = onOpenStudy
         self.onOpenTransformation = onOpenTransformation
         self.onTitleNotSaved = onTitleNotSaved
+        _commandRequest = commandRequest
         _editingTitle = State(initialValue: session.title)
         _viewModel = State(initialValue: TranscriptDetailViewModel(session: session, aiProviderService: aiProviderService))
     }
@@ -108,19 +112,11 @@ struct TranscriptDetailView: View {
                 }
 
                 Button(role: .destructive) {
-                    showingDeleteConfirmation = true
+                    onDelete()
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
             }
-        }
-        .alert("Delete “\(session.title)”?", isPresented: $showingDeleteConfirmation) {
-            Button("Delete", role: .destructive) {
-                onDelete()
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This permanently deletes the session and its files.")
         }
         .restoreOriginalConfirmation(isPresented: $showingRestoreConfirmation) {
             restoreOriginal()
@@ -128,6 +124,11 @@ struct TranscriptDetailView: View {
         .task {
             viewModel.loadPrompts()
             viewModel.refreshSelectedTransformation()
+        }
+        .onChange(of: commandRequest, initial: true) { _, request in
+            guard let request else { return }
+            commandRequest = nil
+            handle(request)
         }
     }
 
@@ -243,6 +244,21 @@ struct TranscriptDetailView: View {
 
     private var formattedDate: String {
         TimeFormatter.displayDateTime(session.createdAt)
+    }
+
+    private func handle(_ request: DetailCommandRequest) {
+        switch request {
+        case .restoreOriginal:
+            if onRestoreOriginal != nil, !isRestoringOriginal {
+                showingRestoreConfirmation = true
+            }
+        case .transform(let promptID):
+            viewModel.loadPrompts()
+            viewModel.selectedPromptID = promptID
+            Task {
+                await viewModel.runTransformation()
+            }
+        }
     }
 
     private func restoreOriginal() {

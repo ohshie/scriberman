@@ -36,6 +36,11 @@ struct AppShellView: View {
     /// there is one place that decides what ⌘F means at any moment.
     @State private var searchFocusRequest = 0
     @FocusState private var isSessionListFocused: Bool
+    /// The session the delete confirmation is asking about. The toolbar, the Session menu and the
+    /// Delete key all ask through this one confirmation.
+    @State private var sessionPendingDeletion: JobsViewModel.SessionListItem?
+    /// A Session menu command waiting for the standard detail to carry it out.
+    @State private var detailCommandRequest: DetailCommandRequest?
 
     var body: some View {
         NavigationSplitView {
@@ -53,7 +58,8 @@ struct AppShellView: View {
                 onDiscardPendingSession: { appState.discardPendingSession() },
                 searchFocusRequest: searchFocusRequest,
                 onSearchEscape: { isSessionListFocused = true },
-                onOpenSearchResult: { item in openSearchResult(item) }
+                onOpenSearchResult: { item in openSearchResult(item) },
+                onDeleteSelection: commandAvailability.isEnabled(.delete) ? { requestDeletion() } : nil
             )
             .focused($isSessionListFocused)
             .navigationSplitViewColumnWidth(min: 380, ideal: 460)
@@ -108,6 +114,21 @@ struct AppShellView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(studyActionErrorMessage ?? "Unknown error.")
+        }
+        .alert(
+            "Delete “\(sessionPendingDeletion.map(Self.title(of:)) ?? "")”?",
+            isPresented: Binding(
+                get: { sessionPendingDeletion != nil },
+                set: { if !$0 { sessionPendingDeletion = nil } }
+            ),
+            presenting: sessionPendingDeletion
+        ) { item in
+            Button("Delete", role: .destructive) {
+                delete(item)
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: { _ in
+            Text("This permanently deletes the session and its files.")
         }
         .alert(
             storeFailureAlert?.title ?? "",
@@ -169,6 +190,7 @@ struct AppShellView: View {
             }
 
             selectedTransformationID = nil
+            detailCommandRequest = nil
             guard !isOpeningSearchResult else { return }
 
             studySearchSeed = nil
@@ -223,18 +245,19 @@ struct AppShellView: View {
     /// The selected session's title, or "Sessions" when nothing is selected or a new session is
     /// being set up. Reading the title here makes the window follow a rename.
     static func windowTitle(for item: JobsViewModel.SessionListItem?) -> String {
-        let title: String
+        let trimmed = (item.map(title(of:)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Sessions" : trimmed
+    }
+
+    private static func title(of item: JobsViewModel.SessionListItem) -> String {
         switch item {
         case .recording(let session):
-            title = session.title
+            session.title
         case .imported(let session):
-            title = session.title
-        case .pending, nil:
-            title = ""
+            session.title
+        case .pending:
+            ""
         }
-
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "Sessions" : trimmed
     }
 
     private func sessionItem(for request: AppState.SessionRequest) -> JobsViewModel.SessionListItem? {
@@ -308,14 +331,7 @@ struct AppShellView: View {
                     onCopy: {
                         copyTranscript(for: session)
                     },
-                    onDelete: {
-                        let item = selectedSession
-                        selectedSession = nil
-                        Task {
-                            let result = await appState.jobsViewModel.delete(session: session, context: modelContext)
-                            handleDeletion(result, of: item)
-                        }
-                    },
+                    onDelete: { requestDeletion() },
                     onRestoreOriginal: {
                         try await restoreOriginal(of: session)
                     },
@@ -326,7 +342,8 @@ struct AppShellView: View {
                         selectedTransformationID = transformationID
                         detailMode = .transformation
                     },
-                    onTitleNotSaved: { storeFailureAlert = .titleNotSaved }
+                    onTitleNotSaved: { storeFailureAlert = .titleNotSaved },
+                    commandRequest: $detailCommandRequest
                 )
                 .id(session.id)
             }
@@ -359,14 +376,7 @@ struct AppShellView: View {
                     onCopy: {
                         copyTranscript(for: session)
                     },
-                    onDelete: {
-                        let item = selectedSession
-                        selectedSession = nil
-                        Task {
-                            let result = await appState.jobsViewModel.deleteImported(session: session, context: modelContext)
-                            handleDeletion(result, of: item)
-                        }
-                    },
+                    onDelete: { requestDeletion() },
                     onOpenStudy: {
                         detailMode = .study
                     },
@@ -374,7 +384,8 @@ struct AppShellView: View {
                         selectedTransformationID = transformationID
                         detailMode = .transformation
                     },
-                    onTitleNotSaved: { storeFailureAlert = .titleNotSaved }
+                    onTitleNotSaved: { storeFailureAlert = .titleNotSaved },
+                    commandRequest: $detailCommandRequest
                 )
                 .id(session.id)
             }
@@ -382,6 +393,31 @@ struct AppShellView: View {
     }
 
     @Environment(\.modelContext) private var modelContext
+
+    /// Asks the delete confirmation about the selected session.
+    private func requestDeletion() {
+        guard commandAvailability.isEnabled(.delete) else { return }
+        sessionPendingDeletion = selectedSession
+    }
+
+    /// Deletes a session the user confirmed.
+    private func delete(_ item: JobsViewModel.SessionListItem) {
+        if selectedSession?.id == item.id {
+            selectedSession = nil
+        }
+        Task {
+            let result: JobsViewModel.DeletionResult
+            switch item {
+            case .recording(let session):
+                result = await appState.jobsViewModel.delete(session: session, context: modelContext)
+            case .imported(let session):
+                result = await appState.jobsViewModel.deleteImported(session: session, context: modelContext)
+            case .pending:
+                return
+            }
+            handleDeletion(result, of: item)
+        }
+    }
 
     /// Reports a deletion. A failed save leaves the session in place, so its row is selected again.
     private func handleDeletion(_ result: JobsViewModel.DeletionResult, of item: JobsViewModel.SessionListItem?) {
@@ -512,19 +548,58 @@ struct AppShellView: View {
     private var commandContext: MainWindowCommandContext {
         MainWindowCommandContext(
             selection: selectedSession,
-            availability: SessionCommandAvailability(
-                selection: commandSelection,
-                isRecordingRunning: !appState.newSessionViewModel.isIdle,
-                isTranscriptShown: isTranscriptShown,
-                hasLoadedAudio: audioPlayerViewModel.isReady,
-                // The session search field is always in the window, so Find always has a target.
-                hasFindTarget: true
-            ),
+            availability: commandAvailability,
             actions: MainWindowActions(
                 newSession: { startNewSession() },
-                importFile: { presentImportPanel() }
-            )
+                importFile: { presentImportPanel() },
+                transcribe: {
+                    guard case .recording(let session) = selectedSession else { return }
+                    appState.jobsViewModel.transcribe(session: session, context: modelContext)
+                },
+                reprocess: {
+                    guard let session = selectedTranscribableSession else { return }
+                    appState.jobsViewModel.reprocess(session: session, context: modelContext)
+                },
+                copyTranscript: {
+                    guard let session = selectedTranscribableSession else { return }
+                    copyTranscript(for: session)
+                },
+                export: {
+                    guard let session = selectedTranscribableSession else { return }
+                    exportTranscript(for: session)
+                },
+                transform: { promptID in
+                    requestFromDetail(.transform(promptID: promptID))
+                },
+                restoreOriginal: {
+                    requestFromDetail(.restoreOriginal)
+                },
+                trim: {
+                    guard case .recording(let session) = selectedSession else { return }
+                    appState.sessionToTrim = session
+                },
+                delete: { requestDeletion() }
+            ),
+            modelContext: modelContext
         )
+    }
+
+    private var commandAvailability: SessionCommandAvailability {
+        SessionCommandAvailability(
+            selection: commandSelection,
+            isRecordingRunning: !appState.newSessionViewModel.isIdle,
+            isTranscriptShown: isTranscriptShown,
+            hasLoadedAudio: audioPlayerViewModel.isReady,
+            // The session search field is always in the window, so Find always has a target.
+            hasFindTarget: true
+        )
+    }
+
+    /// Hands a command to the standard detail, which shows its confirmation and result. From the
+    /// study or transformation view, the window goes back to the standard detail first.
+    private func requestFromDetail(_ request: DetailCommandRequest) {
+        detailMode = .standard
+        detailCommandRequest = request
     }
 
     private var commandSelection: SessionCommandAvailability.Selection {

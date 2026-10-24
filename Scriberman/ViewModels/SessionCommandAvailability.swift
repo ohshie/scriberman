@@ -29,6 +29,12 @@ struct SessionCommandAvailability: Equatable {
         case imported(RecordingStatus)
     }
 
+    /// The Session menu's items, in menu order.
+    static let sessionMenuCommands: [Command] = [
+        .transcribe, .reprocess, .copyTranscript, .export, .tags,
+        .transform, .restoreOriginal, .trim, .delete,
+    ]
+
     /// Settings or no window is focused: no main-window command may act.
     static let noMainWindow = SessionCommandAvailability(enabledCommands: [])
 

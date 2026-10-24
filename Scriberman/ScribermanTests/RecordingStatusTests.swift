@@ -461,7 +461,8 @@ struct RecordingStatusTests {
         #expect(!source.contains("showClearAllConfirmation"))
     }
 
-    /// The detail toolbar keeps the confirmation it already had, and is now the only route.
+    /// The detail toolbar asks the window's confirmation, which the Session menu and the Delete key
+    /// share; only its Delete button deletes.
     @Test(.tags(.sourceLint))
     func testTheDetailToolbarStillConfirmsBeforeDeleting() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -469,9 +470,15 @@ struct RecordingStatusTests {
             contentsOf: testsDirectory.appendingPathComponent("../UI/TranscriptDetailView.swift"),
             encoding: .utf8
         )
-        #expect(detail.contains("showingDeleteConfirmation = true"))
-        #expect(detail.contains("alert(\"Delete “\\(session.title)”?\", isPresented: $showingDeleteConfirmation)"))
-        #expect(detail.contains("role: .destructive"))
+        #expect(detail.contains("role: .destructive) {\n                    onDelete()"))
+
+        let shell = try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/AppShellView.swift"),
+            encoding: .utf8
+        )
+        #expect(shell.contains("onDelete: { requestDeletion() }"))
+        #expect(shell.contains("presenting: sessionPendingDeletion"))
+        #expect(shell.contains("Button(\"Delete\", role: .destructive) {\n                delete(item)"))
     }
 
     // MARK: - Row layout
