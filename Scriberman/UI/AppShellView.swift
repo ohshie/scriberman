@@ -297,16 +297,12 @@ struct AppShellView: View {
             searchSeed: detailNavigation.searchSeed,
             findRequest: transcriptFindRequest,
             isRawMarkdownShown: isRawMarkdownShown,
-            onReprocess: {
-                appState.jobsViewModel.reprocess(session: session, context: modelContext)
-            },
             onCopy: {
                 copyTranscript(for: session)
             },
             onExport: {
                 exportTranscript(for: session)
             },
-            onDelete: { requestDeletion() },
             onRestoreOriginal: onRestoreOriginal,
             onOpenTransformation: { transformationID in
                 selectedTransformationID = transformationID

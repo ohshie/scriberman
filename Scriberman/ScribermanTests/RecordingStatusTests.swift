@@ -311,7 +311,7 @@ struct RecordingStatusTests {
         #expect(detail.contains("TagAssignmentMenuContent(session: recording)"))
     }
 
-    /// Tags are a session action, so the control sits with Transform and Delete.
+    /// Tags are a session action, so the detail toolbar carries the control in its own group.
     @Test(.tags(.sourceLint))
     func testTheDetailToolbarCarriesATagsControl() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -461,24 +461,35 @@ struct RecordingStatusTests {
         #expect(!source.contains("showClearAllConfirmation"))
     }
 
-    /// The detail toolbar asks the window's confirmation, which the Session menu and the Delete key
-    /// share; only its Delete button deletes.
+    /// The Session menu and the Delete key ask the window's confirmation; only its Delete button
+    /// deletes.
     @Test(.tags(.sourceLint))
-    func testTheDetailToolbarStillConfirmsBeforeDeleting() throws {
+    func testDeletingAsksTheWindowsConfirmation() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let shell = try String(
+            contentsOf: testsDirectory.appendingPathComponent("../UI/AppShellView.swift"),
+            encoding: .utf8
+        )
+        #expect(shell.contains("delete: { requestDeletion() }"))
+        #expect(shell.contains("presenting: sessionPendingDeletion"))
+        #expect(shell.contains("Button(\"Delete\", role: .destructive) {\n                delete(item)"))
+    }
+
+    /// The detail toolbar groups Copy and Export, Transform, and Tags with fixed spacers. Reprocess,
+    /// Restore Original and Delete are reached through the Session menu instead.
+    @Test(.tags(.sourceLint))
+    func testTheDetailToolbarKeepsOnlyTheGroupedActions() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let detail = try String(
             contentsOf: testsDirectory.appendingPathComponent("../UI/TranscriptDetailView.swift"),
             encoding: .utf8
         )
-        #expect(detail.contains("role: .destructive) {\n                    onDelete()"))
-
-        let shell = try String(
-            contentsOf: testsDirectory.appendingPathComponent("../UI/AppShellView.swift"),
-            encoding: .utf8
-        )
-        #expect(shell.contains("onDelete: { requestDeletion() }"))
-        #expect(shell.contains("presenting: sessionPendingDeletion"))
-        #expect(shell.contains("Button(\"Delete\", role: .destructive) {\n                delete(item)"))
+        #expect(detail.components(separatedBy: "ToolbarSpacer(.fixed, placement: .primaryAction)").count - 1 == 3)
+        #expect(detail.contains("Label(\"Export\", systemImage: \"square.and.arrow.up\")"))
+        #expect(!detail.contains("Label(\"Reprocess\""))
+        #expect(!detail.contains("Label(\"Restore Original\""))
+        #expect(!detail.contains("Label(\"Delete\""))
+        #expect(!detail.contains("role: .destructive"))
     }
 
     // MARK: - Row layout

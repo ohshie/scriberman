@@ -25,11 +25,8 @@ struct TranscriptDetailView: View {
     let findRequest: Int
     /// Shows the transcript as its Markdown text instead of passages.
     let isRawMarkdownShown: Bool
-    let onReprocess: (() -> Void)?
     let onCopy: () -> Void
     let onExport: () -> Void
-    /// Asks the window to confirm and delete the session.
-    let onDelete: () -> Void
     /// Restores a trimmed recording to its pre-trim state; `nil` for sessions that cannot be trimmed.
     let onRestoreOriginal: (() async throws -> Void)?
     let onOpenTransformation: ((UUID) -> Void)?
@@ -64,10 +61,8 @@ struct TranscriptDetailView: View {
         searchSeed: TranscriptSearchSeed? = nil,
         findRequest: Int = 0,
         isRawMarkdownShown: Bool = false,
-        onReprocess: (() -> Void)?,
         onCopy: @escaping () -> Void,
         onExport: @escaping () -> Void,
-        onDelete: @escaping () -> Void,
         onRestoreOriginal: (() async throws -> Void)? = nil,
         onOpenTransformation: ((UUID) -> Void)?,
         onTitleNotSaved: @escaping () -> Void,
@@ -80,10 +75,8 @@ struct TranscriptDetailView: View {
         self.searchSeed = searchSeed
         self.findRequest = findRequest
         self.isRawMarkdownShown = isRawMarkdownShown
-        self.onReprocess = onReprocess
         self.onCopy = onCopy
         self.onExport = onExport
-        self.onDelete = onDelete
         self.onRestoreOriginal = onRestoreOriginal
         self.onOpenTransformation = onOpenTransformation
         self.onTitleNotSaved = onTitleNotSaved
@@ -163,21 +156,12 @@ struct TranscriptDetailView: View {
         // Hard style while the find bar is shown: the automatic edge effect lit the bar up under the
         // pointer. Without it the edge keeps the automatic style the player bar uses.
         .scrollEdgeEffectStyle(isSearchVisible ? .hard : nil, for: .bottom)
+        // Grouped by what each acts on, apart from the window's New Session. Reprocess, Restore
+        // Original and Delete are in the Session menu.
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                if let onReprocess {
-                    Button {
-                        onReprocess()
-                    } label: {
-                        if viewModel.isReprocessing {
-                            Label("Reprocessing", systemImage: "hourglass")
-                        } else {
-                            Label("Reprocess", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                    }
-                    .disabled(!viewModel.canReprocess)
-                }
+            ToolbarSpacer(.fixed, placement: .primaryAction)
 
+            ToolbarItemGroup(placement: .primaryAction) {
                 Button {
                     onCopy()
                 } label: {
@@ -200,32 +184,24 @@ struct TranscriptDetailView: View {
                 .disabled(!hasTranscript)
 
                 speakersButton
+            }
 
-                // Tags are a session action, so they live with the others rather than in the
-                // header. Only recordings carry tags.
-                if let recording = session as? RecordingSession {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+
+            ToolbarItem(placement: .primaryAction) {
+                transformMenu
+            }
+
+            // Only recordings carry tags.
+            if let recording = session as? RecordingSession {
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+
+                ToolbarItem(placement: .primaryAction) {
                     Menu {
                         TagAssignmentMenuContent(session: recording)
                     } label: {
                         Label("Tags", systemImage: "tag")
                     }
-                }
-
-                transformMenu
-
-                if onRestoreOriginal != nil, (session as? RecordingSession)?.isTrimmed == true {
-                    Button {
-                        showingRestoreConfirmation = true
-                    } label: {
-                        Label("Restore Original", systemImage: "arrow.counterclockwise")
-                    }
-                    .disabled(isRestoringOriginal)
-                }
-
-                Button(role: .destructive) {
-                    onDelete()
-                } label: {
-                    Label("Delete", systemImage: "trash")
                 }
             }
         }
