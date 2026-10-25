@@ -112,6 +112,7 @@
 		4D0400000000000000000001 /* PendingDeletionsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0400000000000000000002 /* PendingDeletionsViewModelTests.swift */; };
 		4D0400000000000000000003 /* PendingDeletionsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0400000000000000000004 /* PendingDeletionsViewModel.swift */; };
 		4D0400000000000000000005 /* PendingDeletionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0400000000000000000006 /* PendingDeletionsView.swift */; };
+		5E1D0C0500000000000000E1 /* SessionExpiryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1D0C0500000000000000E2 /* SessionExpiryTests.swift */; };
 		5E1D0C0A0000000000000008 /* SessionSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1D0C0A0000000000000009 /* SessionSnapshotTests.swift */; };
 		7A1C0E5B1B2F4A0C8D3E5F09 /* CaptureAccountingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1C0E5B1B2F4A0C8D3E5F0A /* CaptureAccountingTests.swift */; };
 		7A1C0E5B1B2F4A0C8D3E5F07 /* CaptureRestartContinuityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1C0E5B1B2F4A0C8D3E5F08 /* CaptureRestartContinuityTests.swift */; };
@@ -437,6 +438,7 @@
 		4D0400000000000000000002 /* PendingDeletionsViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/PendingDeletionsViewModelTests.swift"; sourceTree = SOURCE_ROOT; };
 		4D0400000000000000000004 /* PendingDeletionsViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PendingDeletionsViewModel.swift; sourceTree = "<group>"; };
 		4D0400000000000000000006 /* PendingDeletionsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PendingDeletionsView.swift; sourceTree = "<group>"; };
+		5E1D0C0500000000000000E2 /* SessionExpiryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/SessionExpiryTests.swift"; sourceTree = SOURCE_ROOT; };
 		5E1D0C0A0000000000000009 /* SessionSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/SessionSnapshotTests.swift"; sourceTree = SOURCE_ROOT; };
 		7A1C0E5B1B2F4A0C8D3E5F0A /* CaptureAccountingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/CaptureAccountingTests.swift"; sourceTree = SOURCE_ROOT; };
 		7A1C0E5B1B2F4A0C8D3E5F08 /* CaptureRestartContinuityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/CaptureRestartContinuityTests.swift"; sourceTree = SOURCE_ROOT; };
@@ -736,6 +738,7 @@
 				7B2D1F6C1C3A5B0D9E4F6006 /* TagServiceTests.swift */,
 				5E1D0C0A000000000000000B /* SessionDeletionCoordinatorTests.swift */,
 				4D0400000000000000000002 /* PendingDeletionsViewModelTests.swift */,
+				5E1D0C0500000000000000E2 /* SessionExpiryTests.swift */,
 				5E1D0C0A0000000000000009 /* SessionSnapshotTests.swift */,
 				7A1C0E5B1B2F4A0C8D3E5F0A /* CaptureAccountingTests.swift */,
 				7A1C0E5B1B2F4A0C8D3E5F08 /* CaptureRestartContinuityTests.swift */,
@@ -1624,6 +1627,7 @@
 				7B2D1F6C1C3A5B0D9E4F6005 /* TagServiceTests.swift in Sources */,
 				5E1D0C0A000000000000000A /* SessionDeletionCoordinatorTests.swift in Sources */,
 				4D0400000000000000000001 /* PendingDeletionsViewModelTests.swift in Sources */,
+				5E1D0C0500000000000000E1 /* SessionExpiryTests.swift in Sources */,
 				5E1D0C0A0000000000000008 /* SessionSnapshotTests.swift in Sources */,
 				7A1C0E5B1B2F4A0C8D3E5F09 /* CaptureAccountingTests.swift in Sources */,
 				7A1C0E5B1B2F4A0C8D3E5F07 /* CaptureRestartContinuityTests.swift in Sources */,

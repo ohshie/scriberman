@@ -20,7 +20,7 @@ final class PendingDeletionsViewModel {
     }
 
     /// How long a deleted session can be restored.
-    static let restorePeriod: TimeInterval = 24 * 60 * 60
+    static let restorePeriod = SessionDeletionCoordinator.holdDuration
 
     private(set) var rows: [Row] = []
     private(set) var isOpen = false

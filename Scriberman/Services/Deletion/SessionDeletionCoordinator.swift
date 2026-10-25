@@ -1,4 +1,5 @@
 import Accessibility
+import Combine
 import Foundation
 import OSLog
 import SwiftData
@@ -16,6 +17,8 @@ import SwiftData
 final class SessionDeletionCoordinator {
     static let deletedAnnouncement = "Session deleted"
     static let restoredAnnouncement = "Session restored"
+    /// How long a deleted session stays restorable before it is removed for good.
+    static let holdDuration: TimeInterval = 24 * 60 * 60
 
     /// Keeps a removal observer registered for as long as it is retained.
     final class RemovalObservation {
@@ -122,6 +125,7 @@ final class SessionDeletionCoordinator {
     private let announce: @MainActor (String) -> Void
     private let startAccess: @MainActor (URL) -> Bool
     private let stopAccess: @MainActor (URL) -> Void
+    private let scheduleExpiry: @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> AnyCancellable
     private let logger = Logger(subsystem: "Scriberman", category: "SessionDeletion")
 
     private var holds: [UUID: Hold] = [:]
@@ -129,6 +133,8 @@ final class SessionDeletionCoordinator {
     private var operations: [UUID: (token: UUID, tail: Task<Void, Never>)] = [:]
     private var removalObservations: [WeakObservation] = []
     let holdingChanges = HoldingChanges()
+    /// The pending expiry of each session this run holds. Replacing one cancels it.
+    private var expiryTimers: [UUID: AnyCancellable] = [:]
 
     init(
         workspaceService: WorkspaceServiceProtocol,
@@ -137,7 +143,9 @@ final class SessionDeletionCoordinator {
         now: @escaping @MainActor () -> Date = { .now },
         announce: @escaping @MainActor (String) -> Void = SessionDeletionCoordinator.postAnnouncement,
         startAccess: @escaping @MainActor (URL) -> Bool = { $0.startAccessingSecurityScopedResource() },
-        stopAccess: @escaping @MainActor (URL) -> Void = { $0.stopAccessingSecurityScopedResource() }
+        stopAccess: @escaping @MainActor (URL) -> Void = { $0.stopAccessingSecurityScopedResource() },
+        scheduleExpiry: @escaping @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> AnyCancellable
+            = SessionDeletionCoordinator.schedule
     ) {
         self.workspaceService = workspaceService
         self.tagService = tagService
@@ -146,10 +154,22 @@ final class SessionDeletionCoordinator {
         self.announce = announce
         self.startAccess = startAccess
         self.stopAccess = stopAccess
+        self.scheduleExpiry = scheduleExpiry
     }
 
     static func postAnnouncement(_ text: String) {
         AccessibilityNotification.Announcement(text).post()
+    }
+
+    /// Runs `action` on the main actor `delay` seconds from now, unless the returned value is
+    /// cancelled first.
+    static func schedule(after delay: TimeInterval, _ action: @escaping @MainActor () -> Void) -> AnyCancellable {
+        let task = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(max(0, delay)))
+            guard !Task.isCancelled else { return }
+            action()
+        }
+        return AnyCancellable { task.cancel() }
     }
 
     /// Calls `handler` with a session's `id` as it starts leaving the store — on delete and on redo
@@ -223,6 +243,7 @@ final class SessionDeletionCoordinator {
             guard result == .deleted, let workspace else { return result }
             let target = DeletionUndoTarget(sessionID: sessionID)
             holds[sessionID] = Hold(workspace: workspace, target: target, undoManager: undoManager)
+            startExpiry(of: sessionID)
             if let undoManager {
                 undoManager.beginUndoGrouping()
                 registerUndo(of: target, context: context, undoManager: undoManager)
@@ -407,6 +428,7 @@ final class SessionDeletionCoordinator {
                 let (result, workspace) = await self.hold(session, context: context)
                 if result == .deleted, let workspace {
                     self.holds[sessionID] = Hold(workspace: workspace, target: target, undoManager: undoManager)
+                    self.startExpiry(of: sessionID)
                     self.announce(Self.deletedAnnouncement)
                 } else {
                     undoManager.removeAllActions(withTarget: target)
@@ -461,6 +483,7 @@ final class SessionDeletionCoordinator {
             if let hold = holds.removeValue(forKey: sessionID) {
                 hold.undoManager?.removeAllActions(withTarget: hold.target)
             }
+            expiryTimers[sessionID] = nil
             let isScoped = startAccess(workspace.rootURL)
             defer { if isScoped { stopAccess(workspace.rootURL) } }
             let holding = HoldingFolder(workspace: workspace)
@@ -473,6 +496,58 @@ final class SessionDeletionCoordinator {
                 return .folderLeft(folder)
             }
         }.value
+    }
+
+    // MARK: - Expiry
+
+    /// Schedules removing the session for good once it has been held for `holdDuration`. Called
+    /// right after the session is held, so the snapshot's deletion time is `now()`.
+    private func startExpiry(of sessionID: UUID) {
+        scheduleExpiry(at: now().addingTimeInterval(Self.holdDuration), sessionID: sessionID)
+    }
+
+    /// The delay is measured on `now()`, so an injected clock and the timer agree.
+    private func scheduleExpiry(at date: Date, sessionID: UUID) {
+        expiryTimers[sessionID] = scheduleExpiry(date.timeIntervalSince(now())) { [weak self] in
+            guard let self else { return }
+            expiryTimers[sessionID] = nil
+            enqueue(sessionID) { await self.expire(sessionID) }
+        }
+    }
+
+    /// Removes the held session for good if its deletion time in the snapshot is `holdDuration`
+    /// ago, and removes its undo entries. Failures are logged and leave the session held.
+    private func expire(_ sessionID: UUID) async {
+        guard let hold = holds[sessionID] else { return }
+        guard await workspaceService.currentWorkspace() == hold.workspace else {
+            logger.notice("Skipped removing a held session of a workspace that is not active.")
+            return
+        }
+        let workspace = hold.workspace
+        let isScoped = startAccess(workspace.rootURL)
+        defer { if isScoped { stopAccess(workspace.rootURL) } }
+
+        let holding = HoldingFolder(workspace: workspace)
+        let folder = holding.heldFolder(for: sessionID)
+        let deadline: Date
+        do {
+            deadline = try SessionSnapshot.read(from: folder).deletedAt.addingTimeInterval(Self.holdDuration)
+        } catch {
+            logger.error("Could not read the snapshot of an expiring held session; it stays held: \(folder.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        guard deadline <= now() else {
+            scheduleExpiry(at: deadline, sessionID: sessionID)
+            return
+        }
+        do {
+            try holding.remove(sessionID: sessionID)
+        } catch {
+            logger.error("Could not remove an expired held session: \(folder.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        holds[sessionID] = nil
+        hold.undoManager?.removeAllActions(withTarget: hold.target)
     }
 
     // MARK: - Helpers
