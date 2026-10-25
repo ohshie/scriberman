@@ -19,6 +19,7 @@ actor RecordingRecoveryService {
     private let retireSources: RetireSources
     // Sessions whose finalization is running in this process are left to the finalizer.
     private let isFinalizing: @Sendable (UUID) -> Bool
+    private let sessionJobs: SessionJobs
     // No capture survives a process boundary: a .recording session created
     // before this instant is crash-interrupted by definition (design D1).
     private let launchedAt: Date
@@ -32,7 +33,8 @@ actor RecordingRecoveryService {
         performMixdown: MixdownHandler? = nil,
         performMux: MuxHandler? = nil,
         retireSources: @escaping RetireSources = { try RecordingSourceFiles.retire(micURL: $0, appURL: $1) },
-        isFinalizing: @escaping @Sendable (UUID) -> Bool = { _ in false }
+        isFinalizing: @escaping @Sendable (UUID) -> Bool = { _ in false },
+        sessionJobs: SessionJobs = SessionJobs()
     ) {
         self.workspaceService = workspaceService
         self.modelContainer = modelContainer
@@ -57,11 +59,16 @@ actor RecordingRecoveryService {
         if let performMux {
             self.performMux = performMux
         } else {
-            let muxer = ScreenVideoMuxer(workspaceService: workspaceService, modelContainer: modelContainer)
+            let muxer = ScreenVideoMuxer(
+                workspaceService: workspaceService,
+                modelContainer: modelContainer,
+                sessionJobs: sessionJobs
+            )
             self.performMux = { await muxer.runMux(request: $0) }
         }
         self.retireSources = retireSources
         self.isFinalizing = isFinalizing
+        self.sessionJobs = sessionJobs
     }
 
     func sweepIncompleteSessions() async {
@@ -86,35 +93,73 @@ actor RecordingRecoveryService {
             return
         }
 
-        normalizeCrashInterruptedSessions(sessions, context: context)
+        // The sweep holds these sessions across awaits, and a delete can run meanwhile. Each step
+        // writes nothing for a session deleted since this fetch.
+        let fetched = sessions.map { (session: $0, generation: sessionJobs.generation(of: $0.id)) }
+
+        normalizeCrashInterruptedSessions(fetched, context: context)
 
         // Exclude .recording sessions (capture still in progress — only
         // post-launch sessions can still carry this status after normalization)
         // and sessions this process is still finalizing.
-        let candidates = sessions.filter { session in
+        let candidates = fetched.filter { session, _ in
             if case .recording = session.status { return false }
             return !isFinalizing(session.id)
         }
 
-        var eligible: [RecordingSession] = []
-        for session in candidates where session.mixdownURL == nil {
-            if adoptCompletedMixdown(session, context: context) { continue }
+        var eligible: [FetchedSession] = []
+        for (session, generation) in candidates where session.mixdownURL == nil {
+            let adopted = await runStep(as: generation, Task {
+                self.adoptCompletedMixdown(session, generation: generation, context: context)
+            })
+            if adopted { continue }
             if fileManager.fileExists(atPath: session.micAudioURL) {
-                eligible.append(session)
+                eligible.append((session, generation))
             }
         }
 
         logger.info("Recovery sweep: \(eligible.count, privacy: .public) eligible session(s)")
-        for session in eligible {
-            await recoverSession(session, context: context)
+        for (session, generation) in eligible {
+            await runStep(as: generation, Task {
+                await self.recoverSession(session, generation: generation, context: context)
+            })
         }
 
-        for session in candidates {
-            await retryScreenMuxIfNeeded(session, context: context)
+        for (session, generation) in candidates {
+            await runStep(as: generation, Task {
+                await self.retryScreenMuxIfNeeded(session, generation: generation, context: context)
+            })
         }
-        for session in candidates {
-            retireLeftoverSourcesIfNeeded(session)
+        for (session, generation) in candidates {
+            await runStep(as: generation, Task {
+                self.retireLeftoverSourcesIfNeeded(session, generation: generation)
+            })
         }
+    }
+
+    private typealias FetchedSession = (session: RecordingSession, generation: SessionJobs.Generation)
+
+    /// Awaits `step`, one step of recovery for the session of `generation`, as a job of that
+    /// session: a delete of it cancels the step and waits for it.
+    private func runStep<Success: Sendable>(
+        as generation: SessionJobs.Generation,
+        _ step: Task<Success, Never>
+    ) async -> Success {
+        sessionJobs.track(step, as: generation)
+        return await withTaskCancellationHandler {
+            await step.value
+        } onCancel: {
+            step.cancel()
+        }
+    }
+
+    /// Whether recovery may still write for the session of `generation`; logs when it may not.
+    private func mayWrite(_ generation: SessionJobs.Generation, _ step: StaticString) -> Bool {
+        guard sessionJobs.mayWrite(generation) else {
+            logger.notice("Recovery skipped \(step, privacy: .public) for session \(generation.sessionID, privacy: .public): it was deleted.")
+            return false
+        }
+        return true
     }
 
     private func mixdownURL(for session: RecordingSession) -> URL {
@@ -123,10 +168,15 @@ actor RecordingRecoveryService {
 
     /// Saves a readable `recording.m4a` left by an interrupted finalization as the session's
     /// mixdown, so the raw inputs are not required (design D4).
-    private func adoptCompletedMixdown(_ session: RecordingSession, context: ModelContext) -> Bool {
+    private func adoptCompletedMixdown(
+        _ session: RecordingSession,
+        generation: SessionJobs.Generation,
+        context: ModelContext
+    ) -> Bool {
         let outputURL = mixdownURL(for: session)
         guard fileManager.fileExists(atPath: outputURL.path),
-              RecordingSourceFiles.isUsableMixdown(at: outputURL)
+              RecordingSourceFiles.isUsableMixdown(at: outputURL),
+              mayWrite(generation, "adopting its mixdown")
         else {
             return false
         }
@@ -149,7 +199,11 @@ actor RecordingRecoveryService {
 
     /// Retries a pending or failed screen mux with the mixdown as its audio (design D3). Each
     /// attempt is counted before it starts, so a quit mid-mux still uses one up.
-    private func retryScreenMuxIfNeeded(_ session: RecordingSession, context: ModelContext) async {
+    private func retryScreenMuxIfNeeded(
+        _ session: RecordingSession,
+        generation: SessionJobs.Generation,
+        context: ModelContext
+    ) async {
         guard let state = session.screenMuxState,
               ScreenMuxState(rawValue: state) != nil,
               let videoStartNanos = session.videoStartHostTimeNanos,
@@ -162,7 +216,8 @@ actor RecordingRecoveryService {
         let screenTmpURL = RecordingFileLayout.screenTmpVideoURL(in: folderURL)
         let mixdownURL = URL(fileURLWithPath: mixdownPath)
         guard fileManager.fileExists(atPath: screenTmpURL.path),
-              fileManager.fileExists(atPath: mixdownURL.path)
+              fileManager.fileExists(atPath: mixdownURL.path),
+              mayWrite(generation, "the screen mux retry")
         else {
             return
         }
@@ -195,12 +250,13 @@ actor RecordingRecoveryService {
 
     /// Deletes raw inputs a finished finalization left behind (design D2). Requires a usable
     /// mixdown. A screen mux retry reads the mixdown, not these files.
-    private func retireLeftoverSourcesIfNeeded(_ session: RecordingSession) {
+    private func retireLeftoverSourcesIfNeeded(_ session: RecordingSession, generation: SessionJobs.Generation) {
         guard let mixdownPath = session.mixdownURL else { return }
         let micURL = URL(fileURLWithPath: session.micAudioURL)
         let appURL = session.appAudioURL.map { URL(fileURLWithPath: $0) }
         guard RecordingSourceFiles.anyExist(micURL: micURL, appURL: appURL, fileManager: fileManager),
-              RecordingSourceFiles.isUsableMixdown(at: URL(fileURLWithPath: mixdownPath))
+              RecordingSourceFiles.isUsableMixdown(at: URL(fileURLWithPath: mixdownPath)),
+              mayWrite(generation, "retiring its raw inputs")
         else {
             return
         }
@@ -226,11 +282,13 @@ actor RecordingRecoveryService {
     /// Flips sessions stranded in `.recording` by a crash or power loss so
     /// they become eligible for mixdown recovery. Sessions created after this
     /// process launched are never touched — they may be genuinely recording.
-    private func normalizeCrashInterruptedSessions(_ sessions: [RecordingSession], context: ModelContext) {
+    private func normalizeCrashInterruptedSessions(_ sessions: [FetchedSession], context: ModelContext) {
         var normalizedCount = 0
-        for session in sessions {
+        for (session, generation) in sessions {
             guard case .recording = session.status, session.createdAt < launchedAt else { continue }
-            if fileManager.fileExists(atPath: session.micAudioURL) {
+            let hasAudio = fileManager.fileExists(atPath: session.micAudioURL)
+            guard mayWrite(generation, "normalizing") else { continue }
+            if hasAudio {
                 session.status = .recorded
                 logger.info("Normalized crash-interrupted session \(session.id, privacy: .public) to .recorded")
             } else {
@@ -244,8 +302,13 @@ actor RecordingRecoveryService {
         }
     }
 
-    private func recoverSession(_ session: RecordingSession, context: ModelContext) async {
+    private func recoverSession(
+        _ session: RecordingSession,
+        generation: SessionJobs.Generation,
+        context: ModelContext
+    ) async {
         let sessionID = session.id
+        guard mayWrite(generation, "the mixdown") else { return }
 
         // 4.2: Already exhausted attempts — ensure error state is set and bail
         if session.mixdownAttemptCount >= Self.maxMixdownAttempts {
@@ -261,6 +324,7 @@ actor RecordingRecoveryService {
 
         session.status = .converting
         try? context.save()
+        guard mayWrite(generation, "the mixdown") else { return }
 
         // Crash-stale WAV headers make the data unreadable; repair before
         // mixdown (design D2). Failures are non-fatal — the mixdown attempt
@@ -272,12 +336,14 @@ actor RecordingRecoveryService {
 
         do {
             try await performMixdown(micURL, appURL, outputURL, session.audioSyncFlags?.isTimelineMixdownEnabled)
+            guard mayWrite(generation, "saving its mixdown") else { return }
             session.mixdownURL = outputURL.path
             session.status = .recorded
             try? context.save()
             logger.info("Recovery mixdown succeeded for session \(sessionID, privacy: .public)")
             // The inputs are retired by the leftover-source step once the saved mixdown is usable.
         } catch {
+            guard mayWrite(generation, "counting a failed mixdown") else { return }
             session.mixdownAttemptCount += 1
             let attempts = session.mixdownAttemptCount
             logger.error("Recovery mixdown attempt \(attempts, privacy: .public) failed for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")

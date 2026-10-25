@@ -92,7 +92,8 @@ struct ServiceContainer {
                 recoveryService: RecordingRecoveryService(
                     workspaceService: workspaceService,
                     modelContainer: modelContainer,
-                    isFinalizing: { recordingFinalizer.isFinalizing(sessionID: $0) }
+                    isFinalizing: { recordingFinalizer.isFinalizing(sessionID: $0) },
+                    sessionJobs: sessionJobs
                 ),
                 recordingFinalizer: recordingFinalizer,
                 sessionJobs: sessionJobs

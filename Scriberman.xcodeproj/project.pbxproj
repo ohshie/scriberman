@@ -215,6 +215,7 @@
 		E5C0DE02B2C3D4E5F6A90002 /* WavHeaderRepairerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5C0DE02B2C3D4E5F6A90001 /* WavHeaderRepairerTests.swift */; };
 		79AF5DC62F92DC510075AA88 /* TranscriptMarkdownWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79AF5DC52F92DC510075AA88 /* TranscriptMarkdownWriter.swift */; };
 		79AF5DC82F92DCC40075AA88 /* RecordingRecoveryServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79AF5DC72F92DCC40075AA88 /* RecordingRecoveryServiceTests.swift */; };
+		09AB0D010000000000000002 /* RecordingRecoveryDeletionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09AB0D010000000000000001 /* RecordingRecoveryDeletionTests.swift */; };
 		79AF5DCA2F92DCD30075AA88 /* RecordingTranscriptPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79AF5DC92F92DCD30075AA88 /* RecordingTranscriptPersistenceTests.swift */; };
 		79AF763F2F7FF35600F5B259 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 79AF763E2F7FF35600F5B259 /* Assets.xcassets */; };
 		79BE35232F7E52ED00DB542F /* ThirdPartySendable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BE35222F7E52ED00DB542F /* ThirdPartySendable.swift */; };
@@ -547,6 +548,7 @@
 		E5C0DE02B2C3D4E5F6A90001 /* WavHeaderRepairerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WavHeaderRepairerTests.swift; sourceTree = "<group>"; };
 		79AF5DC52F92DC510075AA88 /* TranscriptMarkdownWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptMarkdownWriter.swift; sourceTree = "<group>"; };
 		79AF5DC72F92DCC40075AA88 /* RecordingRecoveryServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingRecoveryServiceTests.swift; sourceTree = "<group>"; };
+		09AB0D010000000000000001 /* RecordingRecoveryDeletionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingRecoveryDeletionTests.swift; sourceTree = "<group>"; };
 		79AF5DC92F92DCD30075AA88 /* RecordingTranscriptPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingTranscriptPersistenceTests.swift; sourceTree = "<group>"; };
 		79AF763E2F7FF35600F5B259 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		79BE35222F7E52ED00DB542F /* ThirdPartySendable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThirdPartySendable.swift; sourceTree = "<group>"; };
@@ -815,6 +817,7 @@
 				79155F242F84188C0082157E /* LiveTranscriptionPipelineSettingsTests.swift */,
 				79A11C1E2F856CEC0084F195 /* AppAudioSettingsTests.swift */,
 				79AF5DC72F92DCC40075AA88 /* RecordingRecoveryServiceTests.swift */,
+				09AB0D010000000000000001 /* RecordingRecoveryDeletionTests.swift */,
 				E5C0DE02B2C3D4E5F6A90001 /* WavHeaderRepairerTests.swift */,
 				F1A7E002B2C3D4E5F6AA0001 /* WaveBallisticsTests.swift */,
 				79AF5DC92F92DCD30075AA88 /* RecordingTranscriptPersistenceTests.swift */,
@@ -1690,6 +1693,7 @@
 				79E005DC2F76777E00D3EAD9 /* MockAudioDeviceService.swift in Sources */,
 				A66A66A66A66A66A66A66A66 /* MockKeychainStore.swift in Sources */,
 				79AF5DC82F92DCC40075AA88 /* RecordingRecoveryServiceTests.swift in Sources */,
+				09AB0D010000000000000002 /* RecordingRecoveryDeletionTests.swift in Sources */,
 				E5C0DE02B2C3D4E5F6A90002 /* WavHeaderRepairerTests.swift in Sources */,
 				F1A7E002B2C3D4E5F6AA0002 /* WaveBallisticsTests.swift in Sources */,
 				79E005E02F767AE100D3EAD9 /* AppAudioServiceTests.swift in Sources */,
