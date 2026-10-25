@@ -43,17 +43,10 @@ struct ActiveRecordingDetailView: View {
                     }
                     .editableTitleHover(isHovering: $isTitleHovering)
 
-                FlowingWaveView(
-                    level: viewModel.micAudioLevel,
-                    appLevel: viewModel.appAudioLevel,
-                    showAppWave: viewModel.recordAppAudio,
-                    isRecording: true
-                )
+                RecordingMeterView(viewModel: viewModel)
                     .frame(height: 110)
 
-                Text(TimeFormatter.displayFormat(seconds: Float(currentDuration)))
-                    .font(.title3.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                RecordingTimerView(session: session, viewModel: viewModel)
 
                 if !viewModel.liveSegments.isEmpty {
                     // In the flow, not in a scroll view of their own. Two scrolling regions in one
@@ -134,14 +127,6 @@ struct ActiveRecordingDetailView: View {
         }
     }
 
-    private var currentDuration: TimeInterval {
-        if case .recording = viewModel.state {
-            return viewModel.elapsedTime
-        }
-
-        return session.duration
-    }
-
     /// A live segment, drawn in the same card as a finished one.
     ///
     /// No speaker: diarization runs after the recording, so the source the audio came from occupies
@@ -185,5 +170,46 @@ struct ActiveRecordingDetailView: View {
                 }
             }
         )
+    }
+}
+
+/// The wave meter. Its own view so the levels, written on every monitor pass, are read here and
+/// not in the recording view's body, which holds the live transcript.
+private struct RecordingMeterView: View {
+    let viewModel: NewSessionViewModel
+
+    var body: some View {
+        FlowingWaveView(
+            level: viewModel.micAudioLevel,
+            appLevel: viewModel.appAudioLevel,
+            showAppWave: viewModel.recordAppAudio,
+            isRecording: true
+        )
+    }
+}
+
+/// The recording timer. Its own view so the elapsed time is read here and not in the recording
+/// view's body.
+struct RecordingTimerView: View {
+    let session: RecordingSession
+    let viewModel: NewSessionViewModel
+
+    var body: some View {
+        Text(TimeFormatter.displayFormat(seconds: Float(currentDuration)))
+            .font(.title3.monospacedDigit())
+            .foregroundStyle(.secondary)
+    }
+
+    private var currentDuration: TimeInterval {
+        Self.displayedDuration(viewModel: viewModel, session: session)
+    }
+
+    /// The elapsed time while a recording runs, otherwise the session's saved duration.
+    static func displayedDuration(viewModel: NewSessionViewModel, session: RecordingSession) -> TimeInterval {
+        if case .recording = viewModel.state {
+            return viewModel.elapsedTime
+        }
+
+        return session.duration
     }
 }

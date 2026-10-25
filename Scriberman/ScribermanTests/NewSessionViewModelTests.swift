@@ -663,6 +663,33 @@ struct NewSessionViewModelTests {
     }
 
     @Test
+    func recordingTimerShowsElapsedTimeWhileRecording() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.permissionService.micStatus = .granted
+        fixture.recordingService.isRecordingOverride = true
+        var now = Date(timeIntervalSinceReferenceDate: 1_000)
+        fixture.viewModel.clock = { now }
+        let session = RecordingSession(createdAt: .now, duration: 3_600, micAudioURL: "/tmp/mic.wav", title: "Saved", status: .recording)
+
+        await fixture.viewModel.startRecording(title: "Session", context: fixture.context)
+        now = now.addingTimeInterval(42)
+        await waitUntil { fixture.viewModel.elapsedTime == 42 }
+
+        #expect(RecordingTimerView.displayedDuration(viewModel: fixture.viewModel, session: session) == 42)
+        fixture.viewModel.reset()
+    }
+
+    @Test
+    func recordingTimerShowsSavedDurationWhenNotRecording() {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        let session = RecordingSession(createdAt: .now, duration: 125, micAudioURL: "/tmp/mic.wav", title: "Saved", status: .done)
+
+        #expect(RecordingTimerView.displayedDuration(viewModel: fixture.viewModel, session: session) == 125)
+    }
+
+    @Test
     func testStartRecordingIncrementsUsageForSelectedApp() async {
         let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
