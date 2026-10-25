@@ -280,6 +280,28 @@ struct NewSessionViewModelTests {
         #expect(fixture.viewModel.unsavedTranscriptSegmentCount == 2)
     }
 
+    // MARK: - Following the live transcript
+
+    /// At the 100-segment cap a new segment replaces the oldest, so the count stays the same and
+    /// only the newest segment's identity tells the view to follow.
+    @Test
+    func aNewSegmentAtTheCapChangesTheNewestSegment() async throws {
+        let saves = SaveScript(failing: [])
+        let (fixture, transcriber, _) = try await startScriptedRecording(saves: saves)
+        defer { fixture.cleanup() }
+        for index in 1...100 {
+            await transcriber.emit("segment \(index)")
+        }
+        await waitUntil { fixture.viewModel.liveSegments.count == 100 }
+
+        let newest = await transcriber.emit("segment 101")
+        await waitUntil { fixture.viewModel.newestLiveSegmentID == newest }
+
+        #expect(fixture.viewModel.newestLiveSegmentID == newest)
+        #expect(fixture.viewModel.liveSegments.count == 100)
+        _ = await fixture.viewModel.stopRecording(context: fixture.context)
+    }
+
     private func startScriptedRecording(
         saves: SaveScript,
         micAudioURL: String = "/tmp/live-save-test/mic.wav"
@@ -364,55 +386,333 @@ struct NewSessionViewModelTests {
     }
 
     @Test
-    func testMonitorPublishesSeparateMicAndAppLevels() async {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
-        defer { cleanup() }
-        _ = (workspaceService, audioDeviceService, appAudioService, menuBarSettings)
+    func monitorWritesMicAndAppLevelsToTheLevelBoxIndependently() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.permissionService.micStatus = .granted
+        fixture.recordingService.isRecordingOverride = true
+        fixture.recordingService.audioLevelsOverride = (mic: 0.3, app: 0.7)
 
-        permissionService.micStatus = .granted
-        recordingService.isRecordingOverride = true
-        recordingService.audioLevelsOverride = (mic: 0.3, app: 0.7)
+        await fixture.viewModel.startRecording(title: "Session", context: fixture.context)
+        let levels = fixture.viewModel.meterLevels
+        await waitUntil { levels.mic == 0.3 && levels.app == 0.7 }
+        #expect(fixture.viewModel.state == .recording)
+        #expect(levels.mic == 0.3)
+        #expect(levels.app == 0.7)
 
-        await viewModel.startRecording(title: "Session", context: context)
+        fixture.recordingService.audioLevelsOverride = (mic: 0.3, app: 0.1)
+        await waitUntil { levels.app == 0.1 }
+        #expect(levels.mic == 0.3)
+        #expect(levels.app == 0.1)
 
-        let deadline = Date().addingTimeInterval(3)
-        while Date() < deadline, viewModel.appAudioLevel != 0.7 {
-            try? await Task.sleep(for: .milliseconds(20))
-        }
-
-        #expect(viewModel.micAudioLevel == 0.3)
-        #expect(viewModel.appAudioLevel == 0.7)
-        if case .recording(_, let level) = viewModel.state {
-            #expect(level == 0.7)
-        } else {
-            Issue.record("Expected recording state, got \(viewModel.state)")
-        }
-
-        viewModel.reset()
-        #expect(viewModel.micAudioLevel == 0)
-        #expect(viewModel.appAudioLevel == 0)
+        fixture.recordingService.audioLevelsOverride = (mic: 0.9, app: 0.1)
+        await waitUntil { levels.mic == 0.9 }
+        #expect(levels.mic == 0.9)
+        #expect(levels.app == 0.1)
+        fixture.viewModel.reset()
     }
 
     @Test
-    func testAppLevelStaysZeroWithoutAppCapture() async {
-        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
-        defer { cleanup() }
-        _ = (workspaceService, audioDeviceService, appAudioService, menuBarSettings)
+    func resetReturnsTheLevelBoxToZero() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.permissionService.micStatus = .granted
+        fixture.recordingService.isRecordingOverride = true
+        fixture.recordingService.audioLevelsOverride = (mic: 0.3, app: 0.7)
 
-        permissionService.micStatus = .granted
-        recordingService.isRecordingOverride = true
-        recordingService.audioLevelsOverride = (mic: 0.5, app: 0)
+        await fixture.viewModel.startRecording(title: "Session", context: fixture.context)
+        let levels = fixture.viewModel.meterLevels
+        await waitUntil { levels.mic == 0.3 && levels.app == 0.7 }
+        #expect(levels.mic == 0.3)
+        #expect(levels.app == 0.7)
 
-        await viewModel.startRecording(title: "Session", context: context)
+        fixture.viewModel.reset()
+        #expect(levels.mic == 0)
+        #expect(levels.app == 0)
+    }
 
-        let deadline = Date().addingTimeInterval(3)
-        while Date() < deadline, viewModel.micAudioLevel != 0.5 {
-            try? await Task.sleep(for: .milliseconds(20))
+    @Test
+    func testRecordingElapsedTimeFollowsInjectedClock() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.permissionService.micStatus = .granted
+        fixture.recordingService.isRecordingOverride = true
+        var now = Date(timeIntervalSinceReferenceDate: 1_000)
+        fixture.viewModel.clock = { now }
+
+        await fixture.viewModel.startRecording(title: "Session", context: fixture.context)
+        now = now.addingTimeInterval(90)
+
+        await waitUntil(timeout: .seconds(3)) { fixture.viewModel.elapsedTime == 90 }
+        #expect(fixture.viewModel.elapsedTime == 90)
+
+        fixture.viewModel.reset()
+    }
+
+    @Test
+    func appLevelStaysZeroWithoutAppCapture() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.permissionService.micStatus = .granted
+        fixture.recordingService.isRecordingOverride = true
+        fixture.recordingService.audioLevelsOverride = (mic: 0.5, app: 0)
+
+        await fixture.viewModel.startRecording(title: "Session", context: fixture.context)
+        let levels = fixture.viewModel.meterLevels
+        await waitUntil { levels.mic == 0.5 }
+
+        #expect(levels.mic == 0.5)
+        #expect(levels.app == 0)
+        fixture.viewModel.reset()
+    }
+
+    // MARK: - Observation during a recording
+
+    /// Counts how often observers of one value are told it changed. `withObservationTracking`
+    /// fires once per registration, so the counter re-arms after every notification.
+    @MainActor
+    private final class ObservationCounter {
+        private(set) var count = 0
+        private let read: @MainActor () -> Void
+
+        init(_ read: @escaping @MainActor () -> Void) {
+            self.read = read
+            arm()
         }
 
-        #expect(viewModel.micAudioLevel == 0.5)
-        #expect(viewModel.appAudioLevel == 0)
-        viewModel.reset()
+        private func arm() {
+            withObservationTracking {
+                read()
+            } onChange: { [weak self] in
+                MainActor.assumeIsolated { self?.count += 1 }
+                Task { @MainActor in self?.arm() }
+            }
+        }
+    }
+
+    /// Changes the mock's levels and waits until the monitor has published each one, so a
+    /// negative assertion afterwards cannot pass because the monitor never ran.
+    private func confirmTicks(_ fixture: Fixture, passes: Int = 5) async {
+        for pass in 1...passes {
+            let mic = Float(pass) / 10
+            let app = Float(pass) / 20
+            fixture.recordingService.audioLevelsOverride = (mic: mic, app: app)
+            let levels = fixture.viewModel.meterLevels
+            await waitUntil { levels.mic == mic && levels.app == app }
+            #expect(levels.mic == mic)
+            #expect(levels.app == app)
+        }
+    }
+
+    @Test
+    func monitorTicksDoNotNotifyReadersOfRecordingStatusOrLiveSegments() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.permissionService.micStatus = .granted
+        fixture.recordingService.isRecordingOverride = true
+
+        await fixture.viewModel.startRecording(title: "Session", context: fixture.context)
+        let stateReaders = ObservationCounter { _ = fixture.viewModel.state }
+        let isIdleReaders = ObservationCounter { _ = fixture.viewModel.isIdle }
+        let liveSegmentReaders = ObservationCounter { _ = fixture.viewModel.liveSegments }
+
+        await confirmTicks(fixture)
+
+        #expect(stateReaders.count == 0)
+        #expect(isIdleReaders.count == 0)
+        #expect(liveSegmentReaders.count == 0)
+        fixture.viewModel.reset()
+    }
+
+    @Test
+    func levelChangesNotifyNoReaderOfTheViewModel() async {
+        // A transcriber that starts cleanly, a clock that stands still, and capture health
+        // evaluated only on the first pass, so nothing but the levels changes while the observer
+        // is armed. The warm-up passes let that first evaluation finish before arming.
+        let transcriber = ScriptedLiveTranscriber()
+        let fixture = makeFixture(transcriber: transcriber)
+        defer { fixture.cleanup() }
+        fixture.permissionService.micStatus = .granted
+        fixture.recordingService.isRecordingOverride = true
+        let now = Date(timeIntervalSinceReferenceDate: 1_000)
+        fixture.viewModel.clock = { now }
+        fixture.viewModel.captureHealthEvaluationInterval = .infinity
+
+        await fixture.viewModel.startRecording(title: "Session", context: fixture.context)
+        await transcriber.waitUntilStarted()
+        await confirmTicks(fixture, passes: 2)
+        let viewModel = fixture.viewModel
+        let readers = ObservationCounter {
+            _ = viewModel.state
+            _ = viewModel.elapsedTime
+            _ = viewModel.liveSegments
+            _ = viewModel.errorMessage
+            _ = viewModel.isIdlePromptVisible
+            _ = viewModel.didFailToStartRecording
+            _ = viewModel.failedStartSessionID
+            _ = viewModel.unsavedTranscriptSegmentCount
+            _ = viewModel.recordAppAudio
+            _ = viewModel.recordScreen
+            _ = viewModel.lastCaptureHealthEffect
+        }
+
+        await confirmTicks(fixture)
+
+        #expect(readers.count == 0)
+        fixture.viewModel.reset()
+    }
+
+    @Test
+    func startNotifiesReadersOfRecordingStatus() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.permissionService.micStatus = .granted
+        fixture.recordingService.isRecordingOverride = true
+        let stateReaders = ObservationCounter { _ = fixture.viewModel.state }
+        let isIdleReaders = ObservationCounter { _ = fixture.viewModel.isIdle }
+
+        await fixture.viewModel.startRecording(title: "Session", context: fixture.context)
+
+        #expect(fixture.viewModel.state == .recording)
+        #expect(stateReaders.count >= 1)
+        #expect(isIdleReaders.count >= 1)
+        fixture.viewModel.reset()
+    }
+
+    @Test
+    func stopNotifiesReadersOfRecordingStatus() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.permissionService.micStatus = .granted
+        fixture.recordingService.isRecordingOverride = true
+        await fixture.viewModel.startRecording(title: "Session", context: fixture.context)
+        await confirmTicks(fixture)
+        let stateReaders = ObservationCounter { _ = fixture.viewModel.state }
+        let isIdleReaders = ObservationCounter { _ = fixture.viewModel.isIdle }
+
+        _ = await fixture.viewModel.stopRecording(context: fixture.context)
+
+        #expect(fixture.viewModel.isIdle)
+        #expect(stateReaders.count >= 1)
+        #expect(isIdleReaders.count >= 1)
+    }
+
+    @Test
+    func resetNotifiesReadersOfRecordingStatus() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.permissionService.micStatus = .granted
+        fixture.recordingService.isRecordingOverride = true
+        await fixture.viewModel.startRecording(title: "Session", context: fixture.context)
+        await confirmTicks(fixture)
+        let stateReaders = ObservationCounter { _ = fixture.viewModel.state }
+        let isIdleReaders = ObservationCounter { _ = fixture.viewModel.isIdle }
+
+        fixture.viewModel.reset()
+
+        #expect(fixture.viewModel.isIdle)
+        #expect(stateReaders.count >= 1)
+        #expect(isIdleReaders.count >= 1)
+    }
+
+    @Test
+    func captureEndingOnItsOwnNotifiesReadersOfRecordingStatus() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.permissionService.micStatus = .granted
+        fixture.recordingService.isRecordingOverride = true
+        await fixture.viewModel.startRecording(title: "Session", context: fixture.context)
+        await confirmTicks(fixture)
+        let stateReaders = ObservationCounter { _ = fixture.viewModel.state }
+        let isIdleReaders = ObservationCounter { _ = fixture.viewModel.isIdle }
+
+        fixture.recordingService.isRecordingOverride = false
+        await waitUntil { fixture.viewModel.isIdle }
+
+        #expect(fixture.viewModel.isIdle)
+        #expect(stateReaders.count >= 1)
+        #expect(isIdleReaders.count >= 1)
+        fixture.viewModel.reset()
+    }
+
+    @Test
+    func elapsedTimeNotifiesReadersOnlyWhenTheWholeSecondChanges() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.permissionService.micStatus = .granted
+        fixture.recordingService.isRecordingOverride = true
+        var now = Date(timeIntervalSinceReferenceDate: 1_000)
+        fixture.viewModel.clock = { now }
+
+        await fixture.viewModel.startRecording(title: "Session", context: fixture.context)
+        let elapsedReaders = ObservationCounter { _ = fixture.viewModel.elapsedTime }
+
+        now = now.addingTimeInterval(0.4)
+        await confirmTicks(fixture)
+        now = now.addingTimeInterval(0.5)
+        await confirmTicks(fixture)
+
+        #expect(elapsedReaders.count == 0)
+        #expect(fixture.viewModel.elapsedTime == 0)
+
+        now = now.addingTimeInterval(0.2)
+        await waitUntil { fixture.viewModel.elapsedTime == 1 }
+
+        #expect(fixture.viewModel.elapsedTime == 1)
+        #expect(elapsedReaders.count >= 1)
+        fixture.viewModel.reset()
+    }
+
+    @Test
+    func secondRecordingElapsedTimeStartsFromZero() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.permissionService.micStatus = .granted
+        fixture.recordingService.isRecordingOverride = true
+        var now = Date(timeIntervalSinceReferenceDate: 1_000)
+        fixture.viewModel.clock = { now }
+
+        await fixture.viewModel.startRecording(title: "First", context: fixture.context)
+        now = now.addingTimeInterval(90)
+        await waitUntil { fixture.viewModel.elapsedTime == 90 }
+        #expect(fixture.viewModel.elapsedTime == 90)
+        _ = await fixture.viewModel.stopRecording(context: fixture.context)
+
+        now = now.addingTimeInterval(600)
+        await fixture.viewModel.startRecording(title: "Second", context: fixture.context)
+
+        #expect(fixture.viewModel.elapsedTime == 0)
+        await confirmTicks(fixture)
+        #expect(fixture.viewModel.elapsedTime == 0)
+        fixture.viewModel.reset()
+    }
+
+    @Test
+    func recordingTimerShowsElapsedTimeWhileRecording() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.permissionService.micStatus = .granted
+        fixture.recordingService.isRecordingOverride = true
+        var now = Date(timeIntervalSinceReferenceDate: 1_000)
+        fixture.viewModel.clock = { now }
+        let session = RecordingSession(createdAt: .now, duration: 3_600, micAudioURL: "/tmp/mic.wav", title: "Saved", status: .recording)
+
+        await fixture.viewModel.startRecording(title: "Session", context: fixture.context)
+        now = now.addingTimeInterval(42)
+        await waitUntil { fixture.viewModel.elapsedTime == 42 }
+
+        #expect(RecordingTimerView.displayedDuration(viewModel: fixture.viewModel, session: session) == 42)
+        fixture.viewModel.reset()
+    }
+
+    @Test
+    func recordingTimerShowsSavedDurationWhenNotRecording() {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        let session = RecordingSession(createdAt: .now, duration: 125, micAudioURL: "/tmp/mic.wav", title: "Saved", status: .done)
+
+        #expect(RecordingTimerView.displayedDuration(viewModel: fixture.viewModel, session: session) == 125)
     }
 
     @Test
@@ -537,7 +837,7 @@ struct NewSessionViewModelTests {
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
-        viewModel.state = .recording(duration: 10, level: 0)
+        viewModel.state = .recording
 
         viewModel.reset()
 
@@ -564,7 +864,7 @@ struct NewSessionViewModelTests {
         defer { cleanup() }
         _ = (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context)
 
-        viewModel.state = .recording(duration: 1, level: 0.5)
+        viewModel.state = .recording
 
         #expect(!(viewModel.isIdle))
     }

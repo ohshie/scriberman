@@ -409,7 +409,7 @@ final class AppStateTests {
         )
 
         appState.selectPendingSession()
-        appState.newSessionViewModel.state = .recording(duration: 10, level: 0)
+        appState.newSessionViewModel.state = .recording
         appState.discardPendingSession()
 
         #expect(appState.pendingSession == nil)
@@ -557,7 +557,7 @@ final class AppStateTests {
         )
         let url = URL(fileURLWithPath: "/tmp/candidate")
         #expect(appState.isWorkspaceChangeAllowed)
-        appState.newSessionViewModel.state = .recording(duration: 1, level: 0)
+        appState.newSessionViewModel.state = .recording
         #expect(!appState.isWorkspaceChangeAllowed)
         await appState.selectWorkspace(url: url)
         appState.newSessionViewModel.state = .idle
@@ -682,7 +682,7 @@ final class AppStateTests {
     @Test
     func calendarStepWaitsForActiveCapture() async {
         let appState = await makeCalendarStepAppState(defaults: makeCalendarDefaults())
-        appState.newSessionViewModel.state = .recording(duration: 0, level: 0)
+        appState.newSessionViewModel.state = .recording
         #expect(appState.requiredOnboardingStep == nil)
         appState.newSessionViewModel.state = .idle
         #expect(appState.requiredOnboardingStep == .calendar)
@@ -741,7 +741,7 @@ final class AppStateTests {
     @Test
     func preparingDuringCaptureChangesNothing() async {
         let (appState, _, id) = await makeSuggestingAppState()
-        appState.newSessionViewModel.state = .recording(duration: 0, level: 0)
+        appState.newSessionViewModel.state = .recording
         appState.calendarSuggestions.setCaptureActive(true)
 
         #expect(await appState.prepareCalendarSession(id) == .unavailable)
@@ -789,7 +789,7 @@ final class AppStateTests {
         #expect(appState.pendingSession?.title == replacementTitle)
 
         let currentDraftID = appState.pendingSession!.id
-        appState.newSessionViewModel.state = .recording(duration: 0, level: 0)
+        appState.newSessionViewModel.state = .recording
         #expect(await appState.confirmCalendarTitleReplacement(id, draftID: currentDraftID) == .unavailable)
         #expect(appState.pendingSession?.title == replacementTitle)
         #expect(!appState.newSessionViewModel.isIdle)
@@ -813,7 +813,7 @@ final class AppStateTests {
         let (appState, _, _) = await makeSuggestingAppState()
         appState.selectPendingSession()
         let draft = appState.pendingSession
-        appState.newSessionViewModel.state = .recording(duration: 12, level: 0)
+        appState.newSessionViewModel.state = .recording
 
         await appState.calendarSuggestions.setEnabled(false)
 
