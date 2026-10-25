@@ -531,7 +531,13 @@ final class JobsViewModel {
             logger.error("Refusing to remove a session folder with no workspace available.")
             return false
         }
-        guard Self.isRemovableSessionFolder(folder, in: workspace) else {
+        return Self.removeSessionFolder(folder, in: workspace)
+    }
+
+    /// Removes `folder` if it is a session folder of `workspace`, and returns whether it is gone.
+    nonisolated static func removeSessionFolder(_ folder: URL, in workspace: Workspace) -> Bool {
+        let logger = Logger(subsystem: "Scriberman", category: "JobsViewModel")
+        guard isRemovableSessionFolder(folder, in: workspace) else {
             logger.error(
                 "Refusing to remove a session folder outside the workspace: \(folder.path, privacy: .public)"
             )

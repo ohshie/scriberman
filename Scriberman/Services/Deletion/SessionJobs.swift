@@ -24,6 +24,7 @@ final class SessionJobs: Sendable {
         var generations: [UUID: Int] = [:]
         var jobs: [UUID: [UUID: Job]] = [:]
         var draining: Set<UUID> = []
+        var folders: [UUID: URL] = [:]
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -105,6 +106,17 @@ final class SessionJobs: Sendable {
             }
         }
         state.withLock { _ = $0.draining.remove(sessionID) }
+    }
+
+    /// Records the folder a job created for a session whose record does not name it yet, such as
+    /// an import's folder before conversion sets its mixdown, so a delete can remove it.
+    func recordFolder(_ folder: URL, of sessionID: UUID) {
+        state.withLock { $0.folders[sessionID] = folder }
+    }
+
+    /// The folder a job recorded for the session, forgotten as it is returned.
+    func takeFolder(of sessionID: UUID) -> URL? {
+        state.withLock { $0.folders.removeValue(forKey: sessionID) }
     }
 
     private func remove(_ jobID: UUID, of sessionID: UUID) {

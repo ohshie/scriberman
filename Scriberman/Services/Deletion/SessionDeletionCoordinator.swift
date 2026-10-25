@@ -240,6 +240,69 @@ final class SessionDeletionCoordinator {
         return await delete(.imported(session), context: context, undoManager: undoManager)
     }
 
+    /// Deletes an imported session the user confirmed deleting. Which way is decided now, so an
+    /// import that settled while the confirmation was open is held; one still unfinished is
+    /// deleted for good with its folder, with no undo.
+    @discardableResult
+    func deleteAfterConfirmation(
+        _ session: ImportedSession,
+        context: ModelContext,
+        undoManager: UndoManager?
+    ) async -> JobsViewModel.DeletionResult {
+        if Self.canHold(session) {
+            return await delete(.imported(session), context: context, undoManager: undoManager)
+        }
+        let sessionID = session.id
+        return await enqueue(sessionID) { [self] in
+            guard session.modelContext != nil, !session.isDeleted else {
+                logger.notice("Skipped deleting a session that is already deleted.")
+                return .deleted
+            }
+            notifyRemoval(of: sessionID)
+            return await deletePermanently(session, context: context)
+        }.value
+    }
+
+    /// Stops the import's jobs, deletes the record and saves, then removes the folder the import
+    /// reported or its mixdown's folder. A failed import from an earlier run has neither, so its
+    /// folder stays in `imports/`.
+    private func deletePermanently(
+        _ session: ImportedSession,
+        context: ModelContext
+    ) async -> JobsViewModel.DeletionResult {
+        let sessionID = session.id
+        removingSessionIDs.insert(sessionID)
+        defer { removingSessionIDs.remove(sessionID) }
+        await sessionJobs.cancelAndDrain(sessionID)
+
+        let reportedFolder = sessionJobs.takeFolder(of: sessionID)
+        let folder = reportedFolder
+            ?? session.mixdownURL.map { URL(fileURLWithPath: $0).deletingLastPathComponent() }
+        context.delete(session)
+        do {
+            try saveContext(context)
+        } catch {
+            context.rollback()
+            if let reportedFolder {
+                sessionJobs.recordFolder(reportedFolder, of: sessionID)
+            }
+            logger.error("Deleting a session failed to save: \(error.localizedDescription, privacy: .public)")
+            return .saveFailed(error.localizedDescription)
+        }
+
+        guard let folder else {
+            logger.notice("Deleted an imported session with no known folder; anything it left stays in imports.")
+            return .deleted
+        }
+        guard let workspace = await workspaceService.currentWorkspace() else {
+            logger.error("Refusing to remove a session folder with no workspace available.")
+            return .filesLeft(folder)
+        }
+        let isScoped = startAccess(workspace.rootURL)
+        defer { if isScoped { stopAccess(workspace.rootURL) } }
+        return JobsViewModel.removeSessionFolder(folder, in: workspace) ? .deleted : .filesLeft(folder)
+    }
+
     private func delete(
         _ session: HeldSession,
         context: ModelContext,
