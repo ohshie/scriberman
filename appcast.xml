@@ -3,28 +3,25 @@
     <channel>
         <title>Scriberman</title>
         <item>
-            <title>1.1.3</title>
-            <pubDate>Sat, 24 Oct 2026 09:48:55 +0200</pubDate>
-            <sparkle:version>33</sparkle:version>
-            <sparkle:shortVersionString>1.1.3</sparkle:shortVersionString>
+            <title>1.1.4</title>
+            <pubDate>Sun, 25 Oct 2026 13:23:08 +0100</pubDate>
+            <sparkle:version>34</sparkle:version>
+            <sparkle:shortVersionString>1.1.4</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<h2>Scriberman 1.1.3</h2>
+            <description><![CDATA[<h2>Scriberman 1.1.4</h2>
 <h3>What’s new</h3>
 <ul>
-  <li>Read, search, and play passages from the full transcript directly in session details.</li>
-  <li>Undo and redo changes to session titles, tags, and speakers.</li>
-  <li>Access recording, playback, session actions, and Find through menus and keyboard shortcuts.</li>
-  <li>Play and copy transcript passages with keyboard and VoiceOver controls.</li>
-  <li>Hear microphone and app audio together in both ears in new recordings.</li>
+  <li>Restore deleted recordings and completed imports with Undo or from Pending deletions for up to 24 hours, or delete them permanently sooner.</li>
 </ul>
 <h3>Fixes</h3>
 <ul>
-  <li>The Stop button stays visible as the live transcript grows.</li>
-  <li>Failed title saves now show an alert and preserve the previous title.</li>
+  <li>Live transcripts keep scrolling to new text after 100 segments.</li>
+  <li>The recording waveform respects Reduce Motion while continuing to show audio levels.</li>
+  <li>The Delete button is back in the session detail toolbar.</li>
 </ul>
 ]]></description>
-            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.1.3/Scriberman-1.1.3-33-arm64.dmg" length="16868545" type="application/octet-stream" sparkle:edSignature="D1VVdo6lug6nOmTCk1RtC1Xvl380yhgft312j7pS2aoumDoMKDWkg5nMh4SQA3/Y/fF89cb6yeTrgGVGVl10Cg=="/>
+            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.1.4/Scriberman-1.1.4-34-arm64.dmg" length="17021121" type="application/octet-stream" sparkle:edSignature="EsGvsvzv1rBMJWRqNfHxiAtPfjmB3qpwXxfFavGdDEMgK5HF+O8hji9EUsGwE19a7X8SuFBr9QZ4dc004yjZAw=="/>
         </item>
     </channel>
 </rss>
