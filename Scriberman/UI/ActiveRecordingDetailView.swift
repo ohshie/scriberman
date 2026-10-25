@@ -106,7 +106,7 @@ struct ActiveRecordingDetailView: View {
         }
         // A permanent frosted band under the toolbar, as in the transcript detail.
         .scrollEdgeEffectStyle(.hard, for: .top)
-        .onChange(of: viewModel.liveSegments.count) {
+        .onChange(of: viewModel.newestLiveSegmentID) {
             guard !isPointerOverSegments else { return }
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
                 proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)

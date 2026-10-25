@@ -66,6 +66,11 @@ final class NewSessionViewModel {
         return false
     }
     var liveSegments: [TranscriptSegment] = []
+    /// What following the transcript watches. The count stops changing at the 100-segment cap,
+    /// where each new segment replaces the oldest; the newest segment's identity does not.
+    var newestLiveSegmentID: UUID? {
+        liveSegments.last?.id
+    }
     var errorMessage: String?
     /// Set when a recording was stopped because it never started writing audio. The UI observes
     /// this to present the failure; the wording is owned by the view, not by this model.

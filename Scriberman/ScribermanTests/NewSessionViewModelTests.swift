@@ -280,6 +280,28 @@ struct NewSessionViewModelTests {
         #expect(fixture.viewModel.unsavedTranscriptSegmentCount == 2)
     }
 
+    // MARK: - Following the live transcript
+
+    /// At the 100-segment cap a new segment replaces the oldest, so the count stays the same and
+    /// only the newest segment's identity tells the view to follow.
+    @Test
+    func aNewSegmentAtTheCapChangesTheNewestSegment() async throws {
+        let saves = SaveScript(failing: [])
+        let (fixture, transcriber, _) = try await startScriptedRecording(saves: saves)
+        defer { fixture.cleanup() }
+        for index in 1...100 {
+            await transcriber.emit("segment \(index)")
+        }
+        await waitUntil { fixture.viewModel.liveSegments.count == 100 }
+
+        let newest = await transcriber.emit("segment 101")
+        await waitUntil { fixture.viewModel.newestLiveSegmentID == newest }
+
+        #expect(fixture.viewModel.newestLiveSegmentID == newest)
+        #expect(fixture.viewModel.liveSegments.count == 100)
+        _ = await fixture.viewModel.stopRecording(context: fixture.context)
+    }
+
     private func startScriptedRecording(
         saves: SaveScript,
         micAudioURL: String = "/tmp/live-save-test/mic.wav"
