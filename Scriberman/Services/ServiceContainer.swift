@@ -44,7 +44,10 @@ struct ServiceContainer {
             transcriptionService: transcriptionService,
             sessionJobs: sessionJobs
         )
-        let audioImportService = AudioImportService(retranscriptionService: retranscriptionService)
+        let audioImportService = AudioImportService(
+            retranscriptionService: retranscriptionService,
+            sessionJobs: sessionJobs
+        )
         let recordingFinalizer = RecordingFinalizer(
             mixdownCoordinator: RecordingMixdownCoordinator(
                 workspaceService: workspaceService,

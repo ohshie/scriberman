@@ -406,7 +406,11 @@ struct AppShellView: View {
             case .imported(let session) where SessionDeletionCoordinator.canHold(session):
                 result = await appState.sessionDeletion.delete(session, context: modelContext, undoManager: undoManager)
             case .imported(let session):
-                result = await appState.jobsViewModel.deleteImported(session: session, context: modelContext)
+                result = await appState.sessionDeletion.deleteAfterConfirmation(
+                    session,
+                    context: modelContext,
+                    undoManager: undoManager
+                )
             case .pending:
                 return
             }
