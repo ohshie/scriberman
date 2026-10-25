@@ -10,6 +10,7 @@ struct HoldingFolder: Equatable {
     enum HoldingError: LocalizedError {
         case notASessionFolder(URL)
         case originalPathOccupied(URL)
+        case outsideHoldingFolder(URL)
 
         var errorDescription: String? {
             switch self {
@@ -17,6 +18,8 @@ struct HoldingFolder: Equatable {
                 "Refusing to hold a folder outside the workspace's session areas: \(url.path)"
             case .originalPathOccupied(let url):
                 "Something already exists at the session's original path: \(url.path)"
+            case .outsideHoldingFolder(let url):
+                "Refusing to remove a folder outside the workspace's holding folder: \(url.path)"
             }
         }
     }
@@ -58,5 +61,24 @@ struct HoldingFolder: Equatable {
             throw HoldingError.originalPathOccupied(folder)
         }
         try FileManager.default.moveItem(at: heldFolder(for: sessionID), to: folder)
+    }
+
+    /// Deletes the held subfolder for `sessionID` for good. A subfolder that is already gone counts
+    /// as removed.
+    ///
+    /// Refuses when the holding folder resolves to anywhere but the workspace root, such as a
+    /// symbolic link to another folder.
+    func remove(sessionID: UUID) throws {
+        let folder = heldFolder(for: sessionID)
+        let expectedParent = workspace.rootURL.resolvingSymlinksInPath()
+            .appendingPathComponent(Self.name, isDirectory: true)
+        guard url.resolvingSymlinksInPath().standardizedFileURL == expectedParent.standardizedFileURL else {
+            throw HoldingError.outsideHoldingFolder(folder)
+        }
+        do {
+            try FileManager.default.removeItem(at: folder)
+        } catch CocoaError.fileNoSuchFile {
+            // Already gone.
+        }
     }
 }
