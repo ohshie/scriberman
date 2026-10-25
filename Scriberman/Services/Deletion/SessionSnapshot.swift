@@ -17,6 +17,7 @@ struct SessionSnapshot: Codable, Equatable {
 
     enum Session: Codable, Equatable {
         case recording(RecordingSessionRecord)
+        case imported(ImportedSessionRecord)
     }
 
     let session: Session
@@ -29,9 +30,16 @@ struct SessionSnapshot: Codable, Equatable {
         self.deletedAt = deletedAt
     }
 
+    init(imported: ImportedSession, originalFolder: URL, deletedAt: Date) {
+        session = .imported(ImportedSessionRecord(imported))
+        originalFolderPath = originalFolder.path
+        self.deletedAt = deletedAt
+    }
+
     var sessionID: UUID {
         switch session {
         case .recording(let record): record.id
+        case .imported(let record): record.id
         }
     }
 
@@ -212,6 +220,64 @@ struct RecordingSessionRecord: Codable, Equatable {
             segment.audioSourceRawValue = record.audioSourceRawValue
             return segment
         }
+        return session
+    }
+}
+
+/// Every stored property of an `ImportedSession`. Imported sessions have no tags and no transcript
+/// segments.
+struct ImportedSessionRecord: Codable, Equatable {
+    let id: UUID
+    let createdAt: Date
+    let duration: TimeInterval
+    let mixdownURL: String?
+    let title: String
+    let originalFileName: String
+    let originalFormat: String
+    let statusRawValue: String
+    let errorMessage: String?
+    let transcriptData: Data?
+    let retranscriptData: Data?
+    let aiTransformationsData: Data?
+    let searchableText: String?
+
+    init(_ session: ImportedSession) {
+        id = session.id
+        createdAt = session.createdAt
+        duration = session.duration
+        mixdownURL = session.mixdownURL
+        title = session.title
+        originalFileName = session.originalFileName
+        originalFormat = session.originalFormat
+        statusRawValue = session.statusRawValue
+        errorMessage = session.errorMessage
+        transcriptData = session.transcriptData
+        retranscriptData = session.retranscriptData
+        aiTransformationsData = session.aiTransformationsData
+        searchableText = session.searchableText
+    }
+
+    /// Inserts an imported session carrying every stored value of this record into `context`, and
+    /// returns it.
+    func insertImported(into context: ModelContext) -> ImportedSession {
+        let session = ImportedSession(
+            id: id,
+            createdAt: createdAt,
+            duration: duration,
+            mixdownURL: mixdownURL,
+            title: title,
+            originalFileName: originalFileName,
+            originalFormat: originalFormat
+        )
+        // The raw fields, not `status` or the `transcript` setters, which would rewrite
+        // `errorMessage` and recompute `searchableText`.
+        session.statusRawValue = statusRawValue
+        session.errorMessage = errorMessage
+        session.transcriptData = transcriptData
+        session.retranscriptData = retranscriptData
+        session.aiTransformationsData = aiTransformationsData
+        session.searchableText = searchableText
+        context.insert(session)
         return session
     }
 }

@@ -63,10 +63,10 @@ final class SessionDeletionCoordinatorTests {
 
     private var holding: HoldingFolder { HoldingFolder(workspace: workspace) }
 
-    private func makeFolder(named name: String = "Recording A") throws -> URL {
-        let folder = workspace.recordingsURL.appendingPathComponent(name, isDirectory: true)
+    private func makeFolder(_ kind: DeletedSessionKind = .recording, named name: String = "Recording A") throws -> URL {
+        let folder = kind.area(of: workspace).appendingPathComponent(name, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        for file in ["mic.wav", "app.wav", "recording.m4a", "mic.wav.timing", "screen.mov", "transcript.md"] {
+        for file in kind.files {
             try Data("\(name) \(file)".utf8).write(to: folder.appendingPathComponent(file))
         }
         return folder
@@ -89,6 +89,54 @@ final class SessionDeletionCoordinatorTests {
         try ModelContext(container).fetch(FetchDescriptor<RecordingSession>())
     }
 
+    private func makeImported(in folder: URL, title: String = "A") throws -> ImportedSession {
+        let session = ImportedSession(
+            duration: 60,
+            mixdownURL: folder.appendingPathComponent("recording.m4a").path,
+            title: title,
+            originalFileName: "\(title).mp3",
+            originalFormat: "mp3",
+            status: .done
+        )
+        context.insert(session)
+        try context.save()
+        return session
+    }
+
+    private func makeSession(_ kind: DeletedSessionKind, in folder: URL, title: String = "A") throws -> HeldFixture {
+        switch kind {
+        case .recording: .recording(try makeRecording(in: folder, title: title))
+        case .imported: .imported(try makeImported(in: folder, title: title))
+        }
+    }
+
+    /// A settled session of `kind` in a new folder of its area.
+    private func makeSession(_ kind: DeletedSessionKind, named name: String = "Recording A", title: String = "A") throws -> HeldFixture {
+        try makeSession(kind, in: try makeFolder(kind, named: name), title: title)
+    }
+
+    /// The `id`s and titles of every session in the store, of both kinds, seen from a fresh context.
+    private func storedSessions() throws -> [(id: UUID, title: String)] {
+        let fresh = ModelContext(container)
+        return try fresh.fetch(FetchDescriptor<RecordingSession>()).map { ($0.id, $0.title) }
+            + fresh.fetch(FetchDescriptor<ImportedSession>()).map { ($0.id, $0.title) }
+    }
+
+    private func storedIDs() throws -> [UUID] {
+        try storedSessions().map(\.id)
+    }
+
+    private func storedTitles() throws -> Set<String> {
+        Set(try storedSessions().map(\.title))
+    }
+
+    /// The live session with `id` in the test's own context, of either kind.
+    private func liveSession(_ id: UUID) throws -> HeldFixture? {
+        if let session = try RecordingSession.fetch(id: id, in: context) { return .recording(session) }
+        if let session = try ImportedSession.fetch(id: id, in: context) { return .imported(session) }
+        return nil
+    }
+
     private func contents(of folder: URL) throws -> [String: Data] {
         let names = try FileManager.default.contentsOfDirectory(atPath: folder.path)
         return try Dictionary(uniqueKeysWithValues: names.map { name in
@@ -98,6 +146,25 @@ final class SessionDeletionCoordinatorTests {
 
     private func delete(_ session: RecordingSession, with undoManager: UndoManager? = nil) async -> JobsViewModel.DeletionResult {
         await coordinator.delete(session, context: context, undoManager: undoManager ?? self.undoManager)
+    }
+
+    @discardableResult
+    private func delete(_ fixture: HeldFixture, with undoManager: UndoManager? = nil) async -> JobsViewModel.DeletionResult {
+        await delete(fixture, by: coordinator, with: undoManager)
+    }
+
+    @discardableResult
+    private func delete(
+        _ fixture: HeldFixture,
+        by coordinator: SessionDeletionCoordinator,
+        with undoManager: UndoManager? = nil
+    ) async -> JobsViewModel.DeletionResult {
+        switch fixture {
+        case .recording(let session):
+            await coordinator.delete(session, context: context, undoManager: undoManager ?? self.undoManager)
+        case .imported(let session):
+            await coordinator.delete(session, context: context, undoManager: undoManager ?? self.undoManager)
+        }
     }
 
     private func undo(_ undoManager: UndoManager? = nil) async {
@@ -119,20 +186,21 @@ final class SessionDeletionCoordinatorTests {
 
     // MARK: - Delete
 
-    @Test
-    func testDeleteMovesTheFolderIntoHoldingWithASnapshotAndRemovesTheRecord() async throws {
-        let folder = try makeFolder()
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testDeleteMovesTheFolderIntoHoldingWithASnapshotAndRemovesTheRecord(kind: DeletedSessionKind) async throws {
+        let folder = try makeFolder(kind)
         let files = try contents(of: folder)
-        let session = try makeRecording(in: folder)
+        let session = try makeSession(kind, in: folder)
         let id = session.id
 
         let result = await delete(session)
 
         #expect(result == .deleted)
-        #expect(try storedRecordings().isEmpty)
+        #expect(try storedIDs().isEmpty)
         #expect(!FileManager.default.fileExists(atPath: folder.path))
         let held = holding.heldFolder(for: id)
         let snapshot = try SessionSnapshot.read(from: held)
+        #expect(snapshot.sessionID == id)
         #expect(snapshot.originalFolderPath == folder.path)
         #expect(snapshot.deletedAt == deletedAt)
         var heldFiles = try contents(of: held)
@@ -140,9 +208,9 @@ final class SessionDeletionCoordinatorTests {
         #expect(heldFiles == files)
     }
 
-    @Test
-    func testDeleteRegistersUndoNamedDeleteSessionAndAnnounces() async throws {
-        let session = try makeRecording(in: try makeFolder())
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testDeleteRegistersUndoNamedDeleteSessionAndAnnounces(kind: DeletedSessionKind) async throws {
+        let session = try makeSession(kind)
 
         await delete(session)
 
@@ -164,28 +232,28 @@ final class SessionDeletionCoordinatorTests {
     }
 
     /// A session whose folder is already gone must still be deletable.
-    @Test
-    func testDeletingARecordingWhoseFolderIsGoneStillRemovesTheRecordAndCanBeUndone() async throws {
-        let folder = workspace.recordingsURL.appendingPathComponent("Gone", isDirectory: true)
-        let session = try makeRecording(in: folder)
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testDeletingASessionWhoseFolderIsGoneStillRemovesTheRecordAndCanBeUndone(kind: DeletedSessionKind) async throws {
+        let folder = kind.area(of: workspace).appendingPathComponent("Gone", isDirectory: true)
+        let session = try makeSession(kind, in: folder)
         let id = session.id
 
         #expect(await delete(session) == .deleted)
-        #expect(try storedRecordings().isEmpty)
+        #expect(try storedIDs().isEmpty)
         #expect(SessionSnapshot.exists(in: holding.heldFolder(for: id)))
 
         await undo()
 
-        #expect(try storedRecordings().map(\.id) == [id])
+        #expect(try storedIDs() == [id])
     }
 
-    @Test
-    func testRemovalObserversAreToldBeforeTheRecordGoes() async throws {
-        let session = try makeRecording(in: try makeFolder())
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testRemovalObserversAreToldBeforeTheRecordGoes(kind: DeletedSessionKind) async throws {
+        let session = try makeSession(kind)
         let id = session.id
         var told: [(UUID, Int)] = []
         let observation = coordinator.observeRemovals { [unowned self] removedID in
-            told.append((removedID, (try? storedRecordings().count) ?? -1))
+            told.append((removedID, (try? storedSessions().count) ?? -1))
         }
 
         await delete(session)
@@ -195,9 +263,9 @@ final class SessionDeletionCoordinatorTests {
         _ = observation
     }
 
-    @Test
-    func testARemovalObserverThatIsReleasedIsNotTold() async throws {
-        let session = try makeRecording(in: try makeFolder())
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testARemovalObserverThatIsReleasedIsNotTold(kind: DeletedSessionKind) async throws {
+        let session = try makeSession(kind)
         var told = 0
         var observation: SessionDeletionCoordinator.RemovalObservation? = coordinator.observeRemovals { _ in told += 1 }
         _ = observation
@@ -210,71 +278,72 @@ final class SessionDeletionCoordinatorTests {
 
     // MARK: - Delete failures
 
-    @Test
-    func testAFailedSnapshotWriteDeletesNothing() async throws {
-        let folder = try makeFolder()
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testAFailedSnapshotWriteDeletesNothing(kind: DeletedSessionKind) async throws {
+        let folder = try makeFolder(kind)
         let files = try contents(of: folder)
-        let session = try makeRecording(in: folder)
+        let session = try makeSession(kind, in: folder)
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder.path)
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path) }
 
         let result = await delete(session)
 
         #expect(result == .moveFailed)
-        #expect(try storedRecordings().count == 1)
+        #expect(try storedIDs().count == 1)
         #expect(try contents(of: folder) == files)
         #expect(!undoManager.canUndo)
         #expect(announcements.isEmpty)
     }
 
-    @Test
-    func testAFailedMoveDeletesNothingAndRemovesTheSnapshot() async throws {
-        let folder = try makeFolder()
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testAFailedMoveDeletesNothingAndRemovesTheSnapshot(kind: DeletedSessionKind) async throws {
+        let folder = try makeFolder(kind)
         let files = try contents(of: folder)
-        let session = try makeRecording(in: folder)
+        let session = try makeSession(kind, in: folder)
         // A read-only parent: the snapshot can be written into the session folder, but the folder
-        // cannot be moved out of `recordings/`.
-        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: workspace.recordingsURL.path)
-        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: workspace.recordingsURL.path) }
+        // cannot be moved out of its area.
+        let area = kind.area(of: workspace)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: area.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: area.path) }
 
         let result = await delete(session)
 
         #expect(result == .moveFailed)
-        #expect(try storedRecordings().count == 1)
+        #expect(try storedIDs().count == 1)
         #expect(try contents(of: folder) == files)
         #expect(!undoManager.canUndo)
     }
 
-    @Test
-    func testAFolderOutsideTheWorkspaceIsRefusedAndNothingIsDeleted() async throws {
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testAFolderOutsideTheWorkspaceIsRefusedAndNothingIsDeleted(kind: DeletedSessionKind) async throws {
         let outside = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: outside) }
         try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
-        try Data("x".utf8).write(to: outside.appendingPathComponent("mic.wav"))
-        let session = try makeRecording(in: outside)
+        try Data("x".utf8).write(to: outside.appendingPathComponent("recording.m4a"))
+        let session = try makeSession(kind, in: outside)
 
         let result = await delete(session)
 
         #expect(result == .moveFailed)
-        #expect(try storedRecordings().count == 1)
-        #expect(try FileManager.default.contentsOfDirectory(atPath: outside.path) == ["mic.wav"])
+        #expect(try storedIDs().count == 1)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: outside.path) == ["recording.m4a"])
     }
 
-    @Test
-    func testDeleteWithNoWorkspaceDeletesNothing() async throws {
-        let session = try makeRecording(in: try makeFolder())
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testDeleteWithNoWorkspaceDeletesNothing(kind: DeletedSessionKind) async throws {
+        let session = try makeSession(kind)
         workspaceService.currentWorkspaceResult = nil
 
         #expect(await delete(session) == .moveFailed)
-        #expect(try storedRecordings().count == 1)
+        #expect(try storedIDs().count == 1)
     }
 
-    @Test
-    func testAFailedSaveKeepsTheRecordAndMovesTheFolderBack() async throws {
-        let folder = try makeFolder()
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testAFailedSaveKeepsTheRecordAndMovesTheFolderBack(kind: DeletedSessionKind) async throws {
+        let folder = try makeFolder(kind)
         let files = try contents(of: folder)
-        let session = try makeRecording(in: folder)
+        let session = try makeSession(kind, in: folder)
         let id = session.id
         beforeSave = { throw CocoaError(.fileWriteUnknown) }
 
@@ -284,23 +353,24 @@ final class SessionDeletionCoordinatorTests {
             Issue.record("Expected saveFailed, got \(result)")
             return
         }
-        #expect(try storedRecordings().map(\.id) == [id])
-        #expect(try context.fetch(FetchDescriptor<RecordingSession>()).map(\.id) == [id])
+        #expect(try storedIDs() == [id])
+        #expect(try liveSession(id) != nil)
         #expect(try contents(of: folder) == files)
         #expect(!FileManager.default.fileExists(atPath: holding.heldFolder(for: id).path))
         #expect(!undoManager.canUndo)
         #expect(announcements.isEmpty)
     }
 
-    @Test
-    func testAFailedSaveWhoseMoveBackFailsLeavesTheFolderHeldWithItsSnapshot() async throws {
-        let folder = try makeFolder()
-        let session = try makeRecording(in: folder)
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testAFailedSaveWhoseMoveBackFailsLeavesTheFolderHeldWithItsSnapshot(kind: DeletedSessionKind) async throws {
+        let session = try makeSession(kind)
         let id = session.id
-        beforeSave = { [workspace] in
-            try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: workspace.recordingsURL.path)
+        let area = kind.area(of: workspace)
+        beforeSave = {
+            try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: area.path)
             throw CocoaError(.fileWriteUnknown)
         }
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: area.path) }
 
         let result = await delete(session)
 
@@ -308,19 +378,19 @@ final class SessionDeletionCoordinatorTests {
             Issue.record("Expected saveFailed, got \(result)")
             return
         }
-        #expect(try storedRecordings().map(\.id) == [id])
+        #expect(try storedIDs() == [id])
         #expect(SessionSnapshot.exists(in: holding.heldFolder(for: id)))
     }
 
-    @Test
-    func testTheSecurityScopeIsHeldUntilARollbackHasFinished() async throws {
-        let folder = try makeFolder()
-        let session = try makeRecording(in: folder)
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testTheSecurityScopeIsHeldUntilARollbackHasFinished(kind: DeletedSessionKind) async throws {
+        let folder = try makeFolder(kind)
+        let session = try makeSession(kind, in: folder)
         beforeSave = { throw CocoaError(.fileWriteUnknown) }
         var folderWasBackWhenScopeEnded = false
         var snapshotWasGoneWhenScopeEnded = false
         onStopAccess = {
-            folderWasBackWhenScopeEnded = FileManager.default.fileExists(atPath: folder.appendingPathComponent("mic.wav").path)
+            folderWasBackWhenScopeEnded = FileManager.default.fileExists(atPath: folder.appendingPathComponent("recording.m4a").path)
             snapshotWasGoneWhenScopeEnded = !SessionSnapshot.exists(in: folder)
         }
 
@@ -331,11 +401,48 @@ final class SessionDeletionCoordinatorTests {
         #expect(snapshotWasGoneWhenScopeEnded)
     }
 
+    // MARK: - Unfinished imported sessions
+
+    @Test(arguments: [RecordingStatus.converting, .transcribing, .retranscribing])
+    func testAnImportedSessionThatIsStillWorkingIsNotHeld(status: RecordingStatus) async throws {
+        let folder = try makeFolder(.imported)
+        let files = try contents(of: folder)
+        let session = try makeImported(in: folder)
+        session.status = status
+        try context.save()
+
+        #expect(!SessionDeletionCoordinator.canHold(session))
+        #expect(await coordinator.delete(session, context: context, undoManager: undoManager) == .moveFailed)
+        #expect(try storedIDs() == [session.id])
+        #expect(try contents(of: folder) == files)
+        #expect(!undoManager.canUndo)
+    }
+
+    @Test
+    func testAnImportedSessionWithNoMixdownIsNotHeld() async throws {
+        let session = ImportedSession(duration: 0, title: "A", originalFileName: "A.mp3", originalFormat: "mp3", status: .error("boom"))
+        context.insert(session)
+        try context.save()
+
+        #expect(!SessionDeletionCoordinator.canHold(session))
+        #expect(await coordinator.delete(session, context: context, undoManager: undoManager) == .moveFailed)
+        #expect(try storedIDs() == [session.id])
+        #expect(!undoManager.canUndo)
+    }
+
+    @Test(arguments: [RecordingStatus.done, .recorded, .error("boom")])
+    func testAnImportedSessionWithAMixdownThatIsNotWorkingIsHeld(status: RecordingStatus) throws {
+        let session = try makeImported(in: try makeFolder(.imported))
+        session.status = status
+
+        #expect(SessionDeletionCoordinator.canHold(session))
+    }
+
     // MARK: - Undo and redo
 
-    /// Every stored attribute of the two models, with how to tell an original from its restored
-    /// copy. A stored property added to either model fails `testUndoRestoresEveryStoredProperty`
-    /// until it is listed here, and then fails it again until the snapshot carries it.
+    /// Every stored attribute of the three models, with how to tell an original from its restored
+    /// copy. A stored property added to any of them fails `testEveryStoredAttributeIsListedForTheRoundTrip`
+    /// until it is listed here, and then fails the round-trip test until the snapshot carries it.
     private static let recordingAttributes: [String: (RecordingSession, RecordingSession) -> Bool] = [
         "id": same(\.id),
         "createdAt": same(\.createdAt),
@@ -372,6 +479,22 @@ final class SessionDeletionCoordinatorTests {
         "trimEnd": same(\.trimEnd),
     ]
 
+    private static let importedAttributes: [String: (ImportedSession, ImportedSession) -> Bool] = [
+        "id": same(\.id),
+        "createdAt": same(\.createdAt),
+        "duration": same(\.duration),
+        "mixdownURL": same(\.mixdownURL),
+        "title": same(\.title),
+        "originalFileName": same(\.originalFileName),
+        "originalFormat": same(\.originalFormat),
+        "statusRawValue": same(\.statusRawValue),
+        "errorMessage": same(\.errorMessage),
+        "transcriptData": same(\.transcriptData),
+        "retranscriptData": same(\.retranscriptData),
+        "aiTransformationsData": same(\.aiTransformationsData),
+        "searchableText": same(\.searchableText),
+    ]
+
     private static let segmentAttributes: [String: (RecordingTranscriptSegment, RecordingTranscriptSegment) -> Bool] = [
         "id": same(\.id),
         "createdAt": same(\.createdAt),
@@ -396,6 +519,7 @@ final class SessionDeletionCoordinatorTests {
     @Test
     func testEveryStoredAttributeIsListedForTheRoundTrip() {
         #expect(Self.storedAttributeNames(of: "RecordingSession") == Set(Self.recordingAttributes.keys))
+        #expect(Self.storedAttributeNames(of: "ImportedSession") == Set(Self.importedAttributes.keys))
         #expect(Self.storedAttributeNames(of: "RecordingTranscriptSegment") == Set(Self.segmentAttributes.keys))
     }
 
@@ -540,10 +664,86 @@ final class SessionDeletionCoordinatorTests {
         #expect(announcements == ["Session deleted", "Session restored"])
     }
 
+    /// An imported session with every stored attribute set to something other than its default.
+    private func makeFullyPopulatedImported(in folder: URL) throws -> ImportedSession {
+        let session = ImportedSession(
+            createdAt: Date(timeIntervalSinceReferenceDate: 790_000_000.125),
+            duration: 3_600.5,
+            mixdownURL: folder.appendingPathComponent("recording.m4a").path,
+            title: "Interview",
+            originalFileName: "interview.mp3",
+            originalFormat: "mp3",
+            status: .error("boom"),
+            transcriptData: Data("transcript".utf8),
+            retranscriptData: Data("retranscript".utf8),
+            aiTransformationsData: Data("transformations".utf8)
+        )
+        session.searchableText = "searchable"
+        context.insert(session)
+        try context.save()
+        return session
+    }
+
+    private static func copyImportedAttribute(_ name: String, from source: ImportedSession, to copy: ImportedSession) {
+        switch name {
+        case "id": copy.id = source.id
+        case "createdAt": copy.createdAt = source.createdAt
+        case "duration": copy.duration = source.duration
+        case "mixdownURL": copy.mixdownURL = source.mixdownURL
+        case "title": copy.title = source.title
+        case "originalFileName": copy.originalFileName = source.originalFileName
+        case "originalFormat": copy.originalFormat = source.originalFormat
+        case "statusRawValue": copy.statusRawValue = source.statusRawValue
+        case "errorMessage": copy.errorMessage = source.errorMessage
+        case "transcriptData": copy.transcriptData = source.transcriptData
+        case "retranscriptData": copy.retranscriptData = source.retranscriptData
+        case "aiTransformationsData": copy.aiTransformationsData = source.aiTransformationsData
+        case "searchableText": copy.searchableText = source.searchableText
+        default: Issue.record("No copy for stored attribute \(name)")
+        }
+    }
+
     @Test
-    func testUndoRegistersRedoAndRedoDeletesAgain() async throws {
-        let folder = try makeFolder()
-        let session = try makeRecording(in: folder)
+    func testUndoRestoresEveryStoredPropertyAndFileOfAnImportedSession() async throws {
+        let folder = try makeFolder(.imported)
+        let files = try contents(of: folder)
+        let session = try makeFullyPopulatedImported(in: folder)
+        let expected = ImportedSession(duration: 0, title: "", originalFileName: "", originalFormat: "")
+        for (name, _) in Self.importedAttributes {
+            Self.copyImportedAttribute(name, from: session, to: expected)
+        }
+        let id = session.id
+
+        await delete(.imported(session))
+        await undo()
+
+        let fresh = ModelContext(container)
+        let restored = try #require(try fresh.fetch(FetchDescriptor<ImportedSession>()).first { $0.id == id })
+        for (name, isSame) in Self.importedAttributes {
+            #expect(isSame(expected, restored), "\(name) was not restored")
+        }
+        #expect(try fresh.fetch(FetchDescriptor<RecordingSession>()).isEmpty)
+        #expect(try contents(of: folder) == files)
+        #expect(!FileManager.default.fileExists(atPath: holding.heldFolder(for: id).path))
+        #expect(announcements == ["Session deleted", "Session restored"])
+    }
+
+    /// Imported sessions have no tags, so restoring one must not seed the default tag either.
+    @Test
+    func testRestoringAnImportedSessionAddsNoTags() async throws {
+        let session = try makeSession(.imported)
+        await delete(session)
+
+        await undo()
+
+        #expect(try storedIDs() == [session.id])
+        #expect(try ModelContext(container).fetch(FetchDescriptor<RecordingTag>()).isEmpty)
+    }
+
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testUndoRegistersRedoAndRedoDeletesAgain(kind: DeletedSessionKind) async throws {
+        let folder = try makeFolder(kind)
+        let session = try makeSession(kind, in: folder)
         let id = session.id
         await delete(session)
 
@@ -555,7 +755,7 @@ final class SessionDeletionCoordinatorTests {
 
         await redo()
 
-        #expect(try storedRecordings().isEmpty)
+        #expect(try storedIDs().isEmpty)
         #expect(!FileManager.default.fileExists(atPath: folder.path))
         #expect(SessionSnapshot.exists(in: holding.heldFolder(for: id)))
         #expect(undoManager.canUndo)
@@ -564,20 +764,20 @@ final class SessionDeletionCoordinatorTests {
 
         await undo()
 
-        #expect(try storedRecordings().map(\.id) == [id])
+        #expect(try storedIDs() == [id])
     }
 
-    @Test
-    func testRedoResetsTheDeletionTime() async throws {
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testRedoResetsTheDeletionTime(kind: DeletedSessionKind) async throws {
         var clock = deletedAt
         let coordinator = SessionDeletionCoordinator(
             workspaceService: workspaceService,
             now: { clock },
             announce: { _ in }
         )
-        let session = try makeRecording(in: try makeFolder())
+        let session = try makeSession(kind)
         let id = session.id
-        await coordinator.delete(session, context: context, undoManager: undoManager)
+        await delete(session, by: coordinator)
         undoManager.undo()
         await coordinator.waitUntilIdle()
         clock = deletedAt.addingTimeInterval(3_600)
@@ -588,9 +788,9 @@ final class SessionDeletionCoordinatorTests {
         #expect(try SessionSnapshot.read(from: holding.heldFolder(for: id)).deletedAt == clock)
     }
 
-    @Test
-    func testTheEditMenuIsRightAsSoonAsTheUndoHandlerReturns() async throws {
-        let session = try makeRecording(in: try makeFolder())
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testTheEditMenuIsRightAsSoonAsTheUndoHandlerReturns(kind: DeletedSessionKind) async throws {
+        let session = try makeSession(kind)
         await delete(session)
 
         undoManager.undo()
@@ -608,9 +808,9 @@ final class SessionDeletionCoordinatorTests {
         await coordinator.waitUntilIdle()
     }
 
-    @Test
-    func testRedoTellsRemovalObservers() async throws {
-        let session = try makeRecording(in: try makeFolder())
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testRedoTellsRemovalObservers(kind: DeletedSessionKind) async throws {
+        let session = try makeSession(kind)
         let id = session.id
         var told: [UUID] = []
         let observation = coordinator.observeRemovals { told.append($0) }
@@ -657,24 +857,38 @@ final class SessionDeletionCoordinatorTests {
         #expect(restored.tags.map(\.id) == [defaultTag.id])
     }
 
-    @Test
-    func testSeveralDeletesUndoNewestFirst() async throws {
-        let first = try makeRecording(in: try makeFolder(named: "Recording A"), title: "A")
-        let second = try makeRecording(in: try makeFolder(named: "Recording B"), title: "B")
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testSeveralDeletesUndoNewestFirst(kind: DeletedSessionKind) async throws {
+        let first = try makeSession(kind, named: "Recording A", title: "A")
+        let second = try makeSession(kind, named: "Recording B", title: "B")
         await delete(first)
         await delete(second)
 
         await undo()
-        #expect(try storedRecordings().map(\.title) == ["B"])
+        #expect(try storedTitles() == ["B"])
 
         await undo()
-        #expect(Set(try storedRecordings().map(\.title)) == ["A", "B"])
+        #expect(try storedTitles() == ["A", "B"])
     }
 
     @Test
-    func testATagChangeAfterADeleteUndoesBeforeTheDelete() async throws {
+    func testDeletesOfBothKindsUndoNewestFirst() async throws {
+        let recording = try makeSession(.recording, title: "Recorded")
+        let imported = try makeSession(.imported, title: "Imported")
+        await delete(recording)
+        await delete(imported)
+
+        await undo()
+        #expect(try storedTitles() == ["Imported"])
+
+        await undo()
+        #expect(try storedTitles() == ["Recorded", "Imported"])
+    }
+
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testATagChangeAfterADeleteUndoesBeforeTheDelete(kind: DeletedSessionKind) async throws {
         let work = try makeTag("Work")
-        let deleted = try makeRecording(in: try makeFolder(named: "Recording A"), title: "A")
+        let deleted = try makeSession(kind, named: "Deleted", title: "A")
         let other = try makeRecording(in: try makeFolder(named: "Recording B"), title: "B")
         await delete(deleted)
         undoManager.asOneEvent {
@@ -684,11 +898,11 @@ final class SessionDeletionCoordinatorTests {
         await undo()
 
         #expect(!other.tags.contains { $0.id == work.id })
-        #expect(try storedRecordings().map(\.title) == ["B"])
+        #expect(try storedTitles() == ["B"])
 
         await undo()
 
-        #expect(Set(try storedRecordings().map(\.title)) == ["A", "B"])
+        #expect(try storedTitles() == ["A", "B"])
     }
 
     @Test
@@ -739,9 +953,27 @@ final class SessionDeletionCoordinatorTests {
     }
 
     @Test
-    func testAFailedRestoreSaveWhoseMoveBackFailsLeavesTheFolderAtItsPathWithItsSnapshot() async throws {
-        let folder = try makeFolder()
-        let session = try makeRecording(in: folder)
+    func testAFailedRestoreSaveOfAnImportedSessionRollsBackAndMovesTheFolderBackIntoHolding() async throws {
+        let folder = try makeFolder(.imported)
+        let session = try makeSession(.imported, in: folder)
+        let id = session.id
+        await delete(session)
+        beforeSave = { throw CocoaError(.fileWriteUnknown) }
+
+        await undo()
+
+        #expect(try ModelContext(container).fetch(FetchDescriptor<ImportedSession>()).isEmpty)
+        #expect(try context.fetch(FetchDescriptor<ImportedSession>()).isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: folder.path))
+        #expect(SessionSnapshot.exists(in: holding.heldFolder(for: id)))
+        #expect(!undoManager.canRedo)
+        #expect(announcements == ["Session deleted"])
+    }
+
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testAFailedRestoreSaveWhoseMoveBackFailsLeavesTheFolderAtItsPathWithItsSnapshot(kind: DeletedSessionKind) async throws {
+        let folder = try makeFolder(kind)
+        let session = try makeSession(kind, in: folder)
         await delete(session)
         beforeSave = { [holding] in
             try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: holding.url.path)
@@ -750,32 +982,32 @@ final class SessionDeletionCoordinatorTests {
 
         await undo()
 
-        #expect(try storedRecordings().isEmpty)
+        #expect(try storedIDs().isEmpty)
         #expect(SessionSnapshot.exists(in: folder))
     }
 
-    @Test
-    func testRestoreIsRefusedWhenTheOriginalPathIsOccupied() async throws {
-        let folder = try makeFolder()
-        let session = try makeRecording(in: folder)
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testRestoreIsRefusedWhenTheOriginalPathIsOccupied(kind: DeletedSessionKind) async throws {
+        let folder = try makeFolder(kind)
+        let session = try makeSession(kind, in: folder)
         let id = session.id
         await delete(session)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
 
         await undo()
 
-        #expect(try storedRecordings().isEmpty)
+        #expect(try storedIDs().isEmpty)
         #expect(SessionSnapshot.exists(in: holding.heldFolder(for: id)))
         #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path).isEmpty)
         #expect(!undoManager.canRedo)
     }
 
-    @Test
-    func testAFailedRestoreRemovesOnlyItsOwnEntriesAndKeepsTheRestInOrder() async throws {
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testAFailedRestoreRemovesOnlyItsOwnEntriesAndKeepsTheRestInOrder(kind: DeletedSessionKind) async throws {
         final class Target {}
         let first = Target()
         let second = Target()
-        let session = try makeRecording(in: try makeFolder())
+        let session = try makeSession(kind)
         for (target, name) in [(first, "First"), (second, "Second")] {
             undoManager.asOneEvent {
                 undoManager.registerUndo(withTarget: target) { _ in }
@@ -794,10 +1026,10 @@ final class SessionDeletionCoordinatorTests {
         _ = (first, second)
     }
 
-    @Test
-    func testAFailedRedoLeavesTheSessionRestoredAndNoStaleUndo() async throws {
-        let folder = try makeFolder()
-        let session = try makeRecording(in: folder)
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testAFailedRedoLeavesTheSessionRestoredAndNoStaleUndo(kind: DeletedSessionKind) async throws {
+        let folder = try makeFolder(kind)
+        let session = try makeSession(kind, in: folder)
         let id = session.id
         await delete(session)
         await undo()
@@ -805,17 +1037,16 @@ final class SessionDeletionCoordinatorTests {
 
         await redo()
 
-        #expect(try storedRecordings().map(\.id) == [id])
-        #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("mic.wav").path))
+        #expect(try storedIDs() == [id])
+        #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("recording.m4a").path))
         #expect(!undoManager.canUndo)
         #expect(!undoManager.canRedo)
         #expect(announcements == ["Session deleted", "Session restored"])
     }
 
-    @Test
-    func testUndoOfASessionNoLongerHeldInTheActiveWorkspaceDoesNothingAndRemovesItself() async throws {
-        let folder = try makeFolder()
-        let session = try makeRecording(in: folder)
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testUndoOfASessionNoLongerHeldInTheActiveWorkspaceDoesNothingAndRemovesItself(kind: DeletedSessionKind) async throws {
+        let session = try makeSession(kind)
         let id = session.id
         await delete(session)
         let other = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory())
@@ -824,7 +1055,7 @@ final class SessionDeletionCoordinatorTests {
 
         await undo()
 
-        #expect(try storedRecordings().isEmpty)
+        #expect(try storedIDs().isEmpty)
         #expect(SessionSnapshot.exists(in: holding.heldFolder(for: id)))
         #expect(!undoManager.canRedo)
         #expect(!undoManager.canUndo)
@@ -832,13 +1063,13 @@ final class SessionDeletionCoordinatorTests {
 
     // MARK: - Serialization
 
-    @Test
-    func testTwoDeletesOfOneSessionFromTwoWindowsHoldItOnce() async throws {
-        let session = try makeRecording(in: try makeFolder())
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testTwoDeletesOfOneSessionFromTwoWindowsHoldItOnce(kind: DeletedSessionKind) async throws {
+        let session = try makeSession(kind)
         let otherWindow = UndoManager.forTests()
 
-        let first = Task { await self.coordinator.delete(session, context: self.context, undoManager: self.undoManager) }
-        let second = Task { await self.coordinator.delete(session, context: self.context, undoManager: otherWindow) }
+        let first = Task { await self.delete(session) }
+        let second = Task { await self.delete(session, with: otherWindow) }
         let results = [await first.value, await second.value]
 
         #expect(results.filter { $0 == .deleted }.count == 2)
@@ -847,15 +1078,14 @@ final class SessionDeletionCoordinatorTests {
         #expect(announcements == ["Session deleted"])
     }
 
-    @Test
-    func testAStaleRedoInOneWindowCannotDeleteASessionAnotherWindowHolds() async throws {
-        let folder = try makeFolder()
-        let session = try makeRecording(in: folder)
+    @Test(arguments: DeletedSessionKind.allCases)
+    func testAStaleRedoInOneWindowCannotDeleteASessionAnotherWindowHolds(kind: DeletedSessionKind) async throws {
+        let session = try makeSession(kind)
         let id = session.id
         let otherWindow = UndoManager.forTests()
         await delete(session)
         await undo()
-        let restored = try #require(try context.fetch(FetchDescriptor<RecordingSession>()).first)
+        let restored = try #require(try liveSession(id))
         await delete(restored, with: otherWindow)
 
         await redo()
@@ -863,6 +1093,43 @@ final class SessionDeletionCoordinatorTests {
         #expect(!undoManager.canRedo)
         #expect(!undoManager.canUndo)
         await undo(otherWindow)
-        #expect(try storedRecordings().map(\.id) == [id])
+        #expect(try storedIDs() == [id])
+    }
+}
+
+/// The two kinds of session a delete holds: every delete, undo, redo and rollback case runs for
+/// both.
+enum DeletedSessionKind: String, CaseIterable, CustomTestStringConvertible, Sendable {
+    case recording
+    case imported
+
+    var testDescription: String { rawValue }
+
+    /// Where sessions of this kind keep their folders.
+    func area(of workspace: Workspace) -> URL {
+        switch self {
+        case .recording: workspace.recordingsURL
+        case .imported: workspace.importsURL
+        }
+    }
+
+    var files: [String] {
+        switch self {
+        case .recording: ["mic.wav", "app.wav", "recording.m4a", "mic.wav.timing", "screen.mov", "transcript.md"]
+        case .imported: ["recording.m4a", "transcript.md"]
+        }
+    }
+}
+
+/// A session a test made, of either kind.
+enum HeldFixture {
+    case recording(RecordingSession)
+    case imported(ImportedSession)
+
+    var id: UUID {
+        switch self {
+        case .recording(let session): session.id
+        case .imported(let session): session.id
+        }
     }
 }

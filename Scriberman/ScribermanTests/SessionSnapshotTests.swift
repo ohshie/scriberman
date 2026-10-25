@@ -38,6 +38,26 @@ struct SessionSnapshotTests {
     }
 
     @Test
+    func testAnImportedSessionSnapshotReadsBackEqual() throws {
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let session = ImportedSession(
+            duration: 12,
+            mixdownURL: folder.appendingPathComponent("recording.m4a").path,
+            title: "A",
+            originalFileName: "a.mp3",
+            originalFormat: "mp3",
+            status: .done
+        )
+        context.insert(session)
+        let snapshot = SessionSnapshot(imported: session, originalFolder: folder, deletedAt: .now)
+
+        try snapshot.write(into: folder)
+
+        #expect(try SessionSnapshot.read(from: folder) == snapshot)
+        #expect(snapshot.sessionID == session.id)
+    }
+
+    @Test
     func testReadingAFolderWithNoSnapshotThrows() {
         defer { try? FileManager.default.removeItem(at: folder) }
         #expect(throws: (any Error).self) { try SessionSnapshot.read(from: folder) }
