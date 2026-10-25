@@ -35,6 +35,24 @@ struct SessionSnapshot: Codable, Equatable {
         }
     }
 
+    var title: String {
+        switch session {
+        case .recording(let record): record.title
+        }
+    }
+
+    var createdAt: Date {
+        switch session {
+        case .recording(let record): record.createdAt
+        }
+    }
+
+    var duration: TimeInterval {
+        switch session {
+        case .recording(let record): record.duration
+        }
+    }
+
     static func url(in folder: URL) -> URL {
         folder.appendingPathComponent(fileName, isDirectory: false)
     }

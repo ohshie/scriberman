@@ -38,6 +38,12 @@ struct AppShellView: View {
     @State private var removalObservation: SessionDeletionCoordinator.RemovalObservation?
     /// A Session menu command waiting for the session's detail view to carry it out.
     @State private var detailCommandRequest: DetailCommandRequest?
+    /// This window's Pending deletions view: the held sessions and whether the view is open.
+    @State private var pendingDeletions: PendingDeletionsViewModel
+
+    init(sessionDeletion: SessionDeletionCoordinator) {
+        _pendingDeletions = State(initialValue: PendingDeletionsViewModel(coordinator: sessionDeletion))
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -56,7 +62,9 @@ struct AppShellView: View {
                 searchFocusRequest: searchFocusRequest,
                 onSearchEscape: { isSessionListFocused = true },
                 onOpenSearchResult: { item in openSearchResult(item) },
-                onDeleteSelection: commandAvailability.isEnabled(.delete) ? { requestDeletion() } : nil
+                onDeleteSelection: commandAvailability.isEnabled(.delete) ? { requestDeletion() } : nil,
+                hasPendingDeletions: pendingDeletions.isEntryEnabled,
+                onShowPendingDeletions: { showPendingDeletions() }
             )
             .focused($isSessionListFocused)
             .navigationSplitViewColumnWidth(min: 380, ideal: 460)
@@ -78,6 +86,13 @@ struct AppShellView: View {
                         }
                     )
                 }
+                .navigationSplitViewColumnWidth(min: 560, ideal: 860)
+            } else if pendingDeletions.isOpen {
+                PendingDeletionsView(
+                    viewModel: pendingDeletions,
+                    onRevert: { row in revert(row) },
+                    onRemoveNow: { row in removeNow(row) }
+                )
                 .navigationSplitViewColumnWidth(min: 560, ideal: 860)
             } else {
                 ContentUnavailableView(
@@ -173,6 +188,10 @@ struct AppShellView: View {
         }
 
         .onChange(of: selectedSession) { oldValue, newValue in
+            // Selecting a session closes Pending deletions.
+            if newValue != nil {
+                pendingDeletions.close()
+            }
             guard oldValue?.id != newValue?.id else {
                 return
             }
@@ -195,6 +214,12 @@ struct AppShellView: View {
         // session it names reached this window's query.
         .onAppear { showRequestedSession() }
         .onAppear { observeRemovals() }
+        .task(id: PendingDeletionsRefreshKey(
+            revision: appState.sessionDeletion.holdingChanges.revision,
+            workspace: appState.workspace
+        )) {
+            await pendingDeletions.refresh()
+        }
         .onChange(of: appState.sessionRequest) { showRequestedSession() }
         .onChange(of: controlActiveState) { showRequestedSession() }
         .onChange(of: recordingSessions.map(\.id)) { showRequestedSession() }
@@ -401,6 +426,39 @@ struct AppShellView: View {
             audioPlayerViewModel.stop()
             selectedSession = nil
         }
+    }
+
+    /// Opens Pending deletions in the detail area. The list has no selection while it is open.
+    private func showPendingDeletions() {
+        selectedSession = nil
+        pendingDeletions.open()
+    }
+
+    /// Restores a held session and selects it, which closes Pending deletions.
+    private func revert(_ row: PendingDeletionsViewModel.Row) {
+        Task {
+            guard let sessionID = await pendingDeletions.revert(row, context: modelContext) else { return }
+            selectedSession = storedSessionItem(id: sessionID)
+        }
+    }
+
+    /// Removes a held session for good, once the user has confirmed.
+    private func removeNow(_ row: PendingDeletionsViewModel.Row) {
+        Task {
+            if case .folderLeft(let folder) = await pendingDeletions.removeNow(row) {
+                storeFailureAlert = .filesLeft(folder.path)
+            }
+        }
+    }
+
+    private func storedSessionItem(id: UUID) -> JobsViewModel.SessionListItem? {
+        if let session = try? RecordingSession.fetch(id: id, in: modelContext) {
+            return .recording(session)
+        }
+        if let session = try? ImportedSession.fetch(id: id, in: modelContext) {
+            return .imported(session)
+        }
+        return nil
     }
 
     private func dismissStoreFailureAlert() {
@@ -771,6 +829,13 @@ struct AppShellView: View {
             }
         }
     }
+}
+
+/// What Pending deletions is read again for: any operation on a held session, and a workspace
+/// change.
+private struct PendingDeletionsRefreshKey: Equatable {
+    let revision: Int
+    let workspace: Workspace?
 }
 
 /// The failures where the store and the disk could disagree, as the user is told about them.

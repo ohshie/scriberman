@@ -43,6 +43,22 @@ final class SessionDeletionCoordinator {
         weak var undoManager: UndoManager?
     }
 
+    /// Changes after every operation on a held session, so a view listing them knows to read the
+    /// holding folder again.
+    @Observable
+    final class HoldingChanges {
+        fileprivate(set) var revision = 0
+    }
+
+    /// What removing a held session now did.
+    enum RemovalResult: Equatable {
+        case removed
+        /// No workspace is active, so nothing was removed.
+        case notHeld
+        /// The held folder could not be removed; it is still on disk at this path.
+        case folderLeft(URL)
+    }
+
     private struct WeakObservation {
         weak var observation: RemovalObservation?
     }
@@ -60,6 +76,7 @@ final class SessionDeletionCoordinator {
     /// The last operation queued for each session, which the next one waits for.
     private var operations: [UUID: (token: UUID, tail: Task<Void, Never>)] = [:]
     private var removalObservations: [WeakObservation] = []
+    let holdingChanges = HoldingChanges()
 
     init(
         workspaceService: WorkspaceServiceProtocol,
@@ -305,6 +322,64 @@ final class SessionDeletionCoordinator {
         undoManager.setActionName(UndoActionName.deleteSession)
     }
 
+    // MARK: - Pending deletions
+
+    /// The snapshots of the sessions held in the active workspace, read from its holding folder, so
+    /// they include sessions deleted in an earlier run.
+    func heldSessions() async -> [SessionSnapshot] {
+        guard let workspace = await workspaceService.currentWorkspace() else { return [] }
+        let isScoped = startAccess(workspace.rootURL)
+        defer { if isScoped { stopAccess(workspace.rootURL) } }
+        return HoldingFolder(workspace: workspace).heldSnapshots()
+    }
+
+    /// Restores a held session of the active workspace and removes its undo entry from whichever
+    /// window registered it. Works for a session deleted in an earlier run, which has no entry.
+    /// Returns whether it worked.
+    func restoreHeld(_ sessionID: UUID, context: ModelContext) async -> Bool {
+        await enqueue(sessionID) { [self] in
+            let registered = holds[sessionID]
+            let target = registered?.target ?? DeletionUndoTarget(sessionID: sessionID)
+            if registered == nil, let workspace = await workspaceService.currentWorkspace() {
+                holds[sessionID] = Hold(workspace: workspace, target: target, undoManager: nil)
+            }
+            guard await restore(target, context: context) else {
+                if registered == nil, holds[sessionID]?.target === target {
+                    holds[sessionID] = nil
+                }
+                return false
+            }
+            registered?.undoManager?.removeAllActions(withTarget: target)
+            announce(Self.restoredAnnouncement)
+            return true
+        }.value
+    }
+
+    /// Removes a held session of the active workspace for good and removes its undo entry from
+    /// whichever window registered it.
+    func removeHeld(_ sessionID: UUID) async -> RemovalResult {
+        await enqueue(sessionID) { [self] in
+            guard let workspace = await workspaceService.currentWorkspace() else {
+                logger.notice("Skipped removing a held session with no workspace available.")
+                return .notHeld
+            }
+            if let hold = holds.removeValue(forKey: sessionID) {
+                hold.undoManager?.removeAllActions(withTarget: hold.target)
+            }
+            let isScoped = startAccess(workspace.rootURL)
+            defer { if isScoped { stopAccess(workspace.rootURL) } }
+            let holding = HoldingFolder(workspace: workspace)
+            do {
+                try holding.remove(sessionID: sessionID)
+                return .removed
+            } catch {
+                let folder = holding.heldFolder(for: sessionID)
+                logger.error("Could not remove a held session folder \(folder.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                return .folderLeft(folder)
+            }
+        }.value
+    }
+
     // MARK: - Helpers
 
     /// Queues `operation` behind every operation already queued for `sessionID`. Queued at once,
@@ -325,6 +400,7 @@ final class SessionDeletionCoordinator {
             if self?.operations[sessionID]?.token == token {
                 self?.operations[sessionID] = nil
             }
+            self?.holdingChanges.revision += 1
         }
         operations[sessionID] = (token, tail)
         return task

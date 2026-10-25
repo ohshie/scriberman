@@ -59,4 +59,28 @@ struct HoldingFolder: Equatable {
         }
         try FileManager.default.moveItem(at: heldFolder(for: sessionID), to: folder)
     }
+
+    /// The snapshots of every held session, in no particular order. A subfolder without a readable
+    /// snapshot, or whose snapshot names another session, is left out.
+    func heldSnapshots() -> [SessionSnapshot] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []
+        return names.compactMap { name in
+            guard let sessionID = UUID(uuidString: name),
+                  let snapshot = try? SessionSnapshot.read(from: heldFolder(for: sessionID)),
+                  snapshot.sessionID == sessionID else {
+                return nil
+            }
+            return snapshot
+        }
+    }
+
+    /// Removes the held subfolder for `sessionID` for good. One that is already gone counts as
+    /// removed.
+    func remove(sessionID: UUID) throws {
+        do {
+            try FileManager.default.removeItem(at: heldFolder(for: sessionID))
+        } catch CocoaError.fileNoSuchFile {
+            // Already gone.
+        }
+    }
 }
