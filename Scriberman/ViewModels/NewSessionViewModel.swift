@@ -452,7 +452,7 @@ final class NewSessionViewModel {
                 errorMessage = fallbackMessage
             }
 
-            recordingStartedAt = .now
+            recordingStartedAt = clock()
             activeRecordingSessionID = recordingSessionID
             unsavedSegmentIDs = []
             unsavedTranscriptSegmentCount = 0
@@ -820,8 +820,9 @@ final class NewSessionViewModel {
                 let levels = await recordingService.audioLevels()
                 micAudioLevel = levels.mic
                 appAudioLevel = levels.app
-                let startedAt = recordingStartedAt ?? .now
-                let duration = Date().timeIntervalSince(startedAt)
+                let now = clock()
+                let startedAt = recordingStartedAt ?? now
+                let duration = now.timeIntervalSince(startedAt)
                 state = .recording(duration: duration, level: max(levels.mic, levels.app))
 
                 await evaluateIdlePrompt(recordingStartedAt: startedAt)
@@ -831,6 +832,11 @@ final class NewSessionViewModel {
             }
         }
     }
+
+    /// Supplies the recording start time and the time the monitor computes elapsed time from.
+    /// Overridable so tests can move time without waiting real seconds. Idle prompt, capture
+    /// health and snooze timing read `Date()` themselves.
+    var clock: @MainActor () -> Date = { Date() }
 
     // MARK: - Capture health
 

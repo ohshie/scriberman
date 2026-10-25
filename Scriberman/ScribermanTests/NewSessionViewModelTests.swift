@@ -394,6 +394,32 @@ struct NewSessionViewModelTests {
     }
 
     @Test
+    func testRecordingElapsedTimeFollowsInjectedClock() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.permissionService.micStatus = .granted
+        fixture.recordingService.isRecordingOverride = true
+        var now = Date(timeIntervalSinceReferenceDate: 1_000)
+        fixture.viewModel.clock = { now }
+
+        await fixture.viewModel.startRecording(title: "Session", context: fixture.context)
+        now = now.addingTimeInterval(90)
+
+        await waitUntil(timeout: .seconds(3)) {
+            if case .recording(let duration, _) = fixture.viewModel.state { return duration == 90 }
+            return false
+        }
+        guard case .recording(let duration, _) = fixture.viewModel.state else {
+            Issue.record("Expected recording state, got \(fixture.viewModel.state)")
+            return
+        }
+        #expect(duration == 90)
+
+        fixture.viewModel.reset()
+    }
+
+    @Test
     func testAppLevelStaysZeroWithoutAppCapture() async {
         let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
