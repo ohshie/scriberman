@@ -27,6 +27,8 @@ struct TranscriptDetailView: View {
     let isRawMarkdownShown: Bool
     let onCopy: () -> Void
     let onExport: () -> Void
+    /// Asks the window to confirm and delete the session; `nil` while it cannot be deleted.
+    let onDelete: (() -> Void)?
     /// Restores a trimmed recording to its pre-trim state; `nil` for sessions that cannot be trimmed.
     let onRestoreOriginal: (() async throws -> Void)?
     let onOpenTransformation: ((UUID) -> Void)?
@@ -58,11 +60,13 @@ struct TranscriptDetailView: View {
         autoScrollEnabled: Binding<Bool>,
         transcript: Transcript?,
         store: SpeakerEmbeddingStore? = nil,
+        sessionJobs: SessionJobs,
         searchSeed: TranscriptSearchSeed? = nil,
         findRequest: Int = 0,
         isRawMarkdownShown: Bool = false,
         onCopy: @escaping () -> Void,
         onExport: @escaping () -> Void,
+        onDelete: (() -> Void)? = nil,
         onRestoreOriginal: (() async throws -> Void)? = nil,
         onOpenTransformation: ((UUID) -> Void)?,
         onTitleNotSaved: @escaping () -> Void,
@@ -77,6 +81,7 @@ struct TranscriptDetailView: View {
         self.isRawMarkdownShown = isRawMarkdownShown
         self.onCopy = onCopy
         self.onExport = onExport
+        self.onDelete = onDelete
         self.onRestoreOriginal = onRestoreOriginal
         self.onOpenTransformation = onOpenTransformation
         self.onTitleNotSaved = onTitleNotSaved
@@ -86,7 +91,8 @@ struct TranscriptDetailView: View {
             session: session,
             aiProviderService: aiProviderService,
             store: store,
-            transcript: transcript
+            transcript: transcript,
+            sessionJobs: sessionJobs
         ))
     }
 
@@ -159,8 +165,8 @@ struct TranscriptDetailView: View {
         // A permanent frosted band under the toolbar, as in Photos. With the automatic style the
         // band appeared only under the pointer, so scrolled text showed through the toolbar.
         .scrollEdgeEffectStyle(.hard, for: .top)
-        // Grouped by what each acts on, apart from the window's New Session. Reprocess, Restore
-        // Original and Delete are in the Session menu.
+        // Grouped by what each acts on, apart from the window's New Session. Reprocess and Restore
+        // Original are in the Session menu.
         .toolbar {
             ToolbarSpacer(.fixed, placement: .primaryAction)
 
@@ -210,6 +216,18 @@ struct TranscriptDetailView: View {
                     }
                     .help("Tags")
                 }
+            }
+
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    onDelete?()
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .help("Delete")
+                .disabled(onDelete == nil)
             }
         }
         .restoreOriginalConfirmation(isPresented: $showingRestoreConfirmation) {

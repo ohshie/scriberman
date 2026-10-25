@@ -21,18 +21,21 @@ actor RecordingMixdownCoordinator: RecordingMixdownCoordinating {
     private let modelContainer: ModelContainer
     private let mixdownService: AudioMixdownService
     private let fileManager: FileManager
+    private let sessionJobs: SessionJobs
     private let logger = Logger(subsystem: "Scriberman", category: "RecordingMixdownCoordinator")
 
     init(
         workspaceService: WorkspaceServiceProtocol,
         modelContainer: ModelContainer,
         mixdownService: AudioMixdownService = AudioMixdownService(),
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        sessionJobs: SessionJobs = SessionJobs()
     ) {
         self.workspaceService = workspaceService
         self.modelContainer = modelContainer
         self.mixdownService = mixdownService
         self.fileManager = fileManager
+        self.sessionJobs = sessionJobs
     }
 
     func runMixdown(
@@ -44,6 +47,37 @@ actor RecordingMixdownCoordinator: RecordingMixdownCoordinating {
         appStartHostTime: HostNanoseconds?,
         timelineMixdown: Bool
     ) async -> Bool {
+        // In a task of its own, so a delete of the session cancels it and waits for it.
+        await sessionJobs.run(sessionID) { generation in
+            await self.mixdown(
+                sessionID: sessionID,
+                micURL: micURL,
+                appURL: appURL,
+                mixdownURL: mixdownURL,
+                micStartHostTime: micStartHostTime,
+                appStartHostTime: appStartHostTime,
+                timelineMixdown: timelineMixdown,
+                generation: generation
+            )
+        }
+    }
+
+    /// Writes the mixdown and saves its location, unless the session is deleted first. The mix
+    /// itself cannot be interrupted, so a delete waits it out.
+    private func mixdown(
+        sessionID: UUID,
+        micURL: URL,
+        appURL: URL?,
+        mixdownURL: URL,
+        micStartHostTime: HostNanoseconds,
+        appStartHostTime: HostNanoseconds?,
+        timelineMixdown: Bool,
+        generation: SessionJobs.Generation
+    ) async -> Bool {
+        guard sessionJobs.mayWrite(generation) else {
+            logger.notice("Mixdown for session \(sessionID, privacy: .public) not started: the session was deleted.")
+            return false
+        }
         var scopedWorkspaceRoot: URL?
         var didStartScopedAccess = false
         if let workspace = await workspaceService.currentWorkspace(),
@@ -94,6 +128,10 @@ actor RecordingMixdownCoordinator: RecordingMixdownCoordinating {
         )
         guard RecordingSourceFiles.isUsableMixdown(at: mixdownURL) else {
             logger.error("Mixdown output for session \(sessionID, privacy: .public) is unreadable or empty; not saving it.")
+            return false
+        }
+        guard sessionJobs.mayWrite(generation) else {
+            logger.notice("Mixdown for session \(sessionID, privacy: .public) not saved: the session was deleted.")
             return false
         }
 

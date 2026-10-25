@@ -10,7 +10,7 @@ import SwiftData
 final class NewSessionViewModel {
     enum State {
         case idle
-        case recording(duration: TimeInterval, level: Float)
+        case recording
     }
 
     private let workspaceService: WorkspaceServiceProtocol
@@ -52,9 +52,13 @@ final class NewSessionViewModel {
 
     var state: State = .idle
     // Separate wave inputs (design D4): the mic wave must not bounce when
-    // only app audio is loud, so views get each source's level individually.
-    private(set) var micAudioLevel: Float = 0
-    private(set) var appAudioLevel: Float = 0
+    // only app audio is loud, so the wave gets each source's level individually.
+    /// The levels sit outside observation: the wave reads them on each frame it draws,
+    /// so a level change invalidates no view.
+    @ObservationIgnored let meterLevels = MeterLevelBox()
+    /// Whole seconds since the current recording started. Kept apart from `state` and published
+    /// only when the second changes, so the monitor's 50 ms ticks reach the timer and nothing else.
+    private(set) var elapsedTime: TimeInterval = 0
     var isIdle: Bool {
         if case .idle = state {
             return true
@@ -63,6 +67,11 @@ final class NewSessionViewModel {
         return false
     }
     var liveSegments: [TranscriptSegment] = []
+    /// What following the transcript watches. The count stops changing at the 100-segment cap,
+    /// where each new segment replaces the oldest; the newest segment's identity does not.
+    var newestLiveSegmentID: UUID? {
+        liveSegments.last?.id
+    }
     var errorMessage: String?
     /// Set when a recording was stopped because it never started writing audio. The UI observes
     /// this to present the failure; the wording is owned by the view, not by this model.
@@ -263,8 +272,8 @@ final class NewSessionViewModel {
         recordingStartedAt = nil
         activeRecordingSessionID = nil
         errorMessage = nil
-        micAudioLevel = 0
-        appAudioLevel = 0
+        meterLevels.mic = 0
+        meterLevels.app = 0
         state = .idle
         dismissIdlePrompt()
         isIdlePromptApplicable = false
@@ -452,11 +461,12 @@ final class NewSessionViewModel {
                 errorMessage = fallbackMessage
             }
 
-            recordingStartedAt = .now
+            recordingStartedAt = clock()
             activeRecordingSessionID = recordingSessionID
             unsavedSegmentIDs = []
             unsavedTranscriptSegmentCount = 0
-            state = .recording(duration: 0, level: 0)
+            elapsedTime = 0
+            state = .recording
             liveSegments = []
             // The idle prompt only applies to mic + app sessions.
             isIdlePromptApplicable = selectedAppProcessID != nil
@@ -770,8 +780,8 @@ final class NewSessionViewModel {
         recordingMonitorTask = nil
         activeRecordingSessionID = nil
         recordingStartedAt = nil
-        micAudioLevel = 0
-        appAudioLevel = 0
+        meterLevels.mic = 0
+        meterLevels.app = 0
         dismissIdlePrompt()
         isIdlePromptApplicable = false
         idlePromptMachine = IdlePromptStateMachine()
@@ -818,11 +828,14 @@ final class NewSessionViewModel {
                 }
 
                 let levels = await recordingService.audioLevels()
-                micAudioLevel = levels.mic
-                appAudioLevel = levels.app
-                let startedAt = recordingStartedAt ?? .now
-                let duration = Date().timeIntervalSince(startedAt)
-                state = .recording(duration: duration, level: max(levels.mic, levels.app))
+                meterLevels.mic = levels.mic
+                meterLevels.app = levels.app
+                let now = clock()
+                let startedAt = recordingStartedAt ?? now
+                let wholeSeconds = now.timeIntervalSince(startedAt).rounded(.down)
+                if wholeSeconds != elapsedTime {
+                    elapsedTime = wholeSeconds
+                }
 
                 await evaluateIdlePrompt(recordingStartedAt: startedAt)
                 await evaluateCaptureHealth(workspace: workspace, context: context)
@@ -831,6 +844,11 @@ final class NewSessionViewModel {
             }
         }
     }
+
+    /// Supplies the recording start time and the time the monitor computes elapsed time from.
+    /// Overridable so tests can move time without waiting real seconds. Idle prompt, capture
+    /// health and snooze timing read `Date()` themselves.
+    var clock: @MainActor () -> Date = { Date() }
 
     // MARK: - Capture health
 

@@ -409,7 +409,7 @@ final class AppStateTests {
         )
 
         appState.selectPendingSession()
-        appState.newSessionViewModel.state = .recording(duration: 10, level: 0)
+        appState.newSessionViewModel.state = .recording
         appState.discardPendingSession()
 
         #expect(appState.pendingSession == nil)
@@ -557,7 +557,7 @@ final class AppStateTests {
         )
         let url = URL(fileURLWithPath: "/tmp/candidate")
         #expect(appState.isWorkspaceChangeAllowed)
-        appState.newSessionViewModel.state = .recording(duration: 1, level: 0)
+        appState.newSessionViewModel.state = .recording
         #expect(!appState.isWorkspaceChangeAllowed)
         await appState.selectWorkspace(url: url)
         appState.newSessionViewModel.state = .idle
@@ -584,6 +584,138 @@ final class AppStateTests {
         await assertEventuallyTrue("Expected busy state to clear after workspace failure") {
             appState.isWorkspaceChangeAllowed
         }
+    }
+
+    // MARK: - Deletion sweep
+
+    /// A workspace holding a stored session's folder with a snapshot: a delete that crashed before
+    /// its save, which the sweep moves back.
+    private func makeWorkspaceWithUncommittedHold() throws -> (Workspace, URL) {
+        let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true))
+        let folder = workspace.recordingsURL.appendingPathComponent("Session", isDirectory: true)
+        let session = RecordingSession(
+            duration: 60,
+            micAudioURL: folder.appendingPathComponent("mic.wav").path,
+            title: "A",
+            status: .done
+        )
+        modelContainer.mainContext.insert(session)
+        try modelContainer.mainContext.save()
+        let held = HoldingFolder(workspace: workspace).heldFolder(for: session.id)
+        try FileManager.default.createDirectory(at: held, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: workspace.recordingsURL, withIntermediateDirectories: true)
+        try Data("audio".utf8).write(to: held.appendingPathComponent("mic.wav"))
+        try SessionSnapshot(recording: session, originalFolder: folder, deletedAt: .now).write(into: held)
+        return (workspace, folder)
+    }
+
+    private func makeDeletionCoordinator(
+        sessionJobs: SessionJobs = SessionJobs(),
+        workspace: Workspace? = nil
+    ) -> SessionDeletionCoordinator {
+        let workspaceService = MockWorkspaceService()
+        workspaceService.currentWorkspaceResult = workspace
+        return SessionDeletionCoordinator(
+            workspaceService: workspaceService,
+            announce: { _ in },
+            sessionJobs: sessionJobs
+        )
+    }
+
+    @Test
+    func testSelectingAWorkspaceRunsTheDeletionSweepForIt() async throws {
+        let (workspace, folder) = try makeWorkspaceWithUncommittedHold()
+        defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
+        let coordinator = makeDeletionCoordinator(workspace: workspace)
+        let appState = AppState(
+            services: makeServiceContainer(permissionService: MockPermissionService()),
+            setWorkspaceHandler: { _ in workspace },
+            sessionDeletion: coordinator,
+            modelContext: modelContainer.mainContext
+        )
+        let revision = coordinator.holdingChanges.revision
+
+        await appState.selectWorkspace(url: workspace.rootURL)
+
+        #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("mic.wav").path))
+        #expect(!SessionSnapshot.exists(in: folder))
+        #expect(coordinator.holdingChanges.revision > revision)
+    }
+
+    @Test
+    func testAFailedWorkspaceSelectionRunsNoSweep() async throws {
+        let (workspace, folder) = try makeWorkspaceWithUncommittedHold()
+        defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
+        let appState = AppState(
+            services: makeServiceContainer(permissionService: MockPermissionService()),
+            setWorkspaceHandler: { _ in throw WorkspaceError.failedToCreateBookmark },
+            sessionDeletion: makeDeletionCoordinator(workspace: workspace),
+            modelContext: modelContainer.mainContext
+        )
+
+        await appState.selectWorkspace(url: workspace.rootURL)
+
+        #expect(!FileManager.default.fileExists(atPath: folder.path))
+    }
+
+    @Test
+    func testLaunchRunsTheDeletionSweepBeforeBootstrapReturns() async throws {
+        let (workspace, folder) = try makeWorkspaceWithUncommittedHold()
+        defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
+        let appState = AppState(
+            services: makeServiceContainer(permissionService: MockPermissionService()),
+            restoreWorkspaceHandler: { workspace },
+            sessionDeletion: makeDeletionCoordinator(workspace: workspace),
+            modelContext: modelContainer.mainContext
+        )
+
+        await appState.bootstrapWorkspace()
+
+        #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("mic.wav").path))
+        #expect(!SessionSnapshot.exists(in: folder))
+    }
+
+    @Test
+    func testWorkspaceChangeIsRefusedWhileADeletionRuns() async throws {
+        let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true))
+        defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
+        let folder = workspace.recordingsURL.appendingPathComponent("Session", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let session = RecordingSession(
+            duration: 60,
+            micAudioURL: folder.appendingPathComponent("mic.wav").path,
+            title: "A",
+            status: .done
+        )
+        modelContainer.mainContext.insert(session)
+        try modelContainer.mainContext.save()
+        let sessionJobs = SessionJobs()
+        let gate = TestJobGate()
+        let job = Task { await gate.wait() }
+        sessionJobs.track(job, as: sessionJobs.generation(of: session.id))
+        var selections = 0
+        let coordinator = makeDeletionCoordinator(sessionJobs: sessionJobs, workspace: workspace)
+        let appState = AppState(
+            services: makeServiceContainer(permissionService: MockPermissionService()),
+            setWorkspaceHandler: { selections += 1; return Workspace(rootURL: $0) },
+            sessionDeletion: coordinator,
+            modelContext: modelContainer.mainContext
+        )
+        #expect(appState.isWorkspaceChangeAllowed)
+
+        let deletion = Task {
+            await coordinator.delete(session, context: modelContainer.mainContext, undoManager: nil)
+        }
+        await assertEventuallyTrue("Expected the delete to be in progress") { !appState.isWorkspaceChangeAllowed }
+        await appState.selectWorkspace(url: URL(fileURLWithPath: "/tmp/candidate"))
+        #expect(selections == 0)
+
+        await gate.open()
+        _ = await deletion.value
+        await coordinator.waitUntilIdle()
+        #expect(appState.isWorkspaceChangeAllowed)
     }
 
     // MARK: - Calendar suggestions
@@ -682,7 +814,7 @@ final class AppStateTests {
     @Test
     func calendarStepWaitsForActiveCapture() async {
         let appState = await makeCalendarStepAppState(defaults: makeCalendarDefaults())
-        appState.newSessionViewModel.state = .recording(duration: 0, level: 0)
+        appState.newSessionViewModel.state = .recording
         #expect(appState.requiredOnboardingStep == nil)
         appState.newSessionViewModel.state = .idle
         #expect(appState.requiredOnboardingStep == .calendar)
@@ -741,7 +873,7 @@ final class AppStateTests {
     @Test
     func preparingDuringCaptureChangesNothing() async {
         let (appState, _, id) = await makeSuggestingAppState()
-        appState.newSessionViewModel.state = .recording(duration: 0, level: 0)
+        appState.newSessionViewModel.state = .recording
         appState.calendarSuggestions.setCaptureActive(true)
 
         #expect(await appState.prepareCalendarSession(id) == .unavailable)
@@ -789,7 +921,7 @@ final class AppStateTests {
         #expect(appState.pendingSession?.title == replacementTitle)
 
         let currentDraftID = appState.pendingSession!.id
-        appState.newSessionViewModel.state = .recording(duration: 0, level: 0)
+        appState.newSessionViewModel.state = .recording
         #expect(await appState.confirmCalendarTitleReplacement(id, draftID: currentDraftID) == .unavailable)
         #expect(appState.pendingSession?.title == replacementTitle)
         #expect(!appState.newSessionViewModel.isIdle)
@@ -813,7 +945,7 @@ final class AppStateTests {
         let (appState, _, _) = await makeSuggestingAppState()
         appState.selectPendingSession()
         let draft = appState.pendingSession
-        appState.newSessionViewModel.state = .recording(duration: 12, level: 0)
+        appState.newSessionViewModel.state = .recording
 
         await appState.calendarSuggestions.setEnabled(false)
 
@@ -896,7 +1028,8 @@ final class AppStateTests {
                 recordingFinalizer: RecordingFinalizer(
                     mixdownCoordinator: RecordingMixdownCoordinator(workspaceService: workspaceService, modelContainer: modelContainer),
                     screenVideoMuxer: ScreenVideoMuxer(workspaceService: workspaceService, modelContainer: modelContainer)
-                )
+                ),
+                sessionJobs: SessionJobs()
             )
         )
     }

@@ -17,7 +17,8 @@ struct ScribermanApp: App {
     }()
 
     @State private var appState = AppState(
-        services: ServiceContainer.live(modelContainer: ScribermanApp.appModelContainer)
+        services: ServiceContainer.live(modelContainer: ScribermanApp.appModelContainer),
+        modelContext: ScribermanApp.appModelContainer.mainContext
     )
     private let modelContainer = ScribermanApp.appModelContainer
 

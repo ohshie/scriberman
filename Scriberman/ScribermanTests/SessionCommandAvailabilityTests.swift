@@ -13,6 +13,7 @@ struct SessionCommandAvailabilityTests {
         var isTranscriptShown = false
         var hasLoadedAudio = false
         var hasFindTarget = true
+        var isSelectionInActiveWorkspace = true
         let enabled: Set<Command>
 
         var testDescription: String { name }
@@ -23,7 +24,8 @@ struct SessionCommandAvailabilityTests {
                 isRecordingRunning: isRecordingRunning,
                 isTranscriptShown: isTranscriptShown,
                 hasLoadedAudio: hasLoadedAudio,
-                hasFindTarget: hasFindTarget
+                hasFindTarget: hasFindTarget,
+                isSelectionInActiveWorkspace: isSelectionInActiveWorkspace
             )
         }
     }
@@ -169,6 +171,29 @@ struct SessionCommandAvailabilityTests {
         }
     }
 
+    /// A session of a workspace that is not active cannot be deleted; everything else it allows is
+    /// unchanged.
+    @Test(arguments: rows)
+    func deleteIsDisabledOutsideTheActiveWorkspace(_ row: Row) {
+        var outside = row
+        outside.isSelectionInActiveWorkspace = false
+        #expect(outside.availability.enabledCommands == row.enabled.subtracting([.delete]))
+    }
+
+    @Test
+    func finishedSessionOfAnotherWorkspaceKeepsEveryCommandButDelete() {
+        let row = Row(
+            name: "finished recording of another workspace",
+            selection: .recording(.done, isTrimmed: false),
+            isTranscriptShown: true,
+            hasLoadedAudio: true,
+            isSelectionInActiveWorkspace: false,
+            enabled: [.newSession, .importFile, .startRecording, .find, .playPause,
+                      .reprocess, .copyTranscript, .export, .rawMarkdown, .tags, .transform, .trim]
+        )
+        #expect(row.availability.enabledCommands == row.enabled)
+    }
+
     @Test
     func noFocusedMainWindowDisablesEveryCommand() {
         let availability = SessionCommandAvailability.noMainWindow
@@ -197,6 +222,7 @@ struct SessionMenuTests {
         var isRecordingRunning = false
         var isTranscriptShown = false
         var hasLoadedAudio = false
+        var isSelectionInActiveWorkspace = true
         /// The Session menu items enabled for this selection.
         let enabled: Set<Command>
 
@@ -208,7 +234,8 @@ struct SessionMenuTests {
                 isRecordingRunning: isRecordingRunning,
                 isTranscriptShown: isTranscriptShown,
                 hasLoadedAudio: hasLoadedAudio,
-                hasFindTarget: true
+                hasFindTarget: true,
+                isSelectionInActiveWorkspace: isSelectionInActiveWorkspace
             )
         }
     }
@@ -254,6 +281,20 @@ struct SessionMenuTests {
             isTranscriptShown: true,
             hasLoadedAudio: true,
             enabled: [.reprocess, .copyTranscript, .export, .transform, .delete]
+        ),
+        Case(
+            name: "done, another workspace",
+            selection: .recording(.done, isTrimmed: false),
+            isTranscriptShown: true,
+            hasLoadedAudio: true,
+            isSelectionInActiveWorkspace: false,
+            enabled: [.reprocess, .copyTranscript, .export, .tags, .transform, .trim]
+        ),
+        Case(
+            name: "imported, converting, another workspace",
+            selection: .imported(.converting),
+            isSelectionInActiveWorkspace: false,
+            enabled: []
         ),
     ]
 
