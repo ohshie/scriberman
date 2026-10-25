@@ -896,7 +896,8 @@ final class AppStateTests {
                 recordingFinalizer: RecordingFinalizer(
                     mixdownCoordinator: RecordingMixdownCoordinator(workspaceService: workspaceService, modelContainer: modelContainer),
                     screenVideoMuxer: ScreenVideoMuxer(workspaceService: workspaceService, modelContainer: modelContainer)
-                )
+                ),
+                sessionJobs: SessionJobs()
             )
         )
     }
