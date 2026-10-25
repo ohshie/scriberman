@@ -638,7 +638,10 @@ extension TranscriptDetailViewModel {
             let wasStored = Self.isStored(session)
             // The handler holds the view model, as for speaker edits.
             undoManager.registerUndo(withTarget: self) { [weak undoManager] _ in
-                guard !(wasStored && !Self.isStored(self.session)) else { return }
+                guard !(wasStored && !Self.isStored(self.session)) else {
+                    Self.logger.notice("Skipped undoing a rename: the session was deleted since.")
+                    return
+                }
                 if case .saveFailed(let message) = self.commitTitle(previousTitle, context: context, undoManager: undoManager) {
                     Self.logger.error("Saving an undone title failed: \(message, privacy: .public)")
                 }
@@ -677,4 +680,5 @@ enum UndoActionName {
     static let mergeSpeaker = "Speaker Merge"
     static let reassignSpeaker = "Passage Speaker"
     static let resetSpeaker = "Speaker Reset"
+    static let deleteSession = "Delete Session"
 }
