@@ -20,7 +20,9 @@ struct JobsView: View {
     var onOpenSearchResult: (JobsViewModel.SessionListItem) -> Void = { _ in }
     /// Called when Delete is pressed in the list; `nil` while the selection cannot be deleted.
     var onDeleteSelection: (() -> Void)? = nil
-
+    /// Whether the active workspace holds deleted sessions; the "deleted" button is inactive when not.
+    var hasPendingDeletions: Bool = false
+    var onShowPendingDeletions: () -> Void = {}
 
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \RecordingTag.createdAt) private var allTags: [RecordingTag]
@@ -113,14 +115,22 @@ struct JobsView: View {
     ///
     /// Under it rather than in the search row: it summarises what is above it, and the search row
     /// already carries the two controls that cause it to change.
+    ///
+    /// The "deleted" button opposite the count opens Pending deletions. It is always there, so its
+    /// place does not move, and inactive while nothing is held.
     private var listCount: some View {
-        Text(JobsViewModel.listCountText(shown: items.count, total: totalSessionCount))
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
-            .overlay(alignment: .top) { Divider() }
+        HStack(spacing: 8) {
+            Text(JobsViewModel.listCountText(shown: items.count, total: totalSessionCount))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Button("deleted", action: onShowPendingDeletions)
+                .buttonStyle(.borderless)
+                .disabled(!hasPendingDeletions)
+        }
+        .font(.caption)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .overlay(alignment: .top) { Divider() }
     }
 
     /// The search field, with the tag filter beside it.

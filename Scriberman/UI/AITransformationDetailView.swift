@@ -13,11 +13,16 @@ struct AITransformationDetailView: View {
     init(
         session: any TranscribableSession,
         aiProviderService: AIProviderService,
+        sessionJobs: SessionJobs,
         selectedTransformationID: Binding<UUID?>
     ) {
         self.session = session
         self._selectedTransformationID = selectedTransformationID
-        _viewModel = State(initialValue: TranscriptDetailViewModel(session: session, aiProviderService: aiProviderService))
+        _viewModel = State(initialValue: TranscriptDetailViewModel(
+            session: session,
+            aiProviderService: aiProviderService,
+            sessionJobs: sessionJobs
+        ))
     }
 
     var body: some View {

@@ -7,6 +7,46 @@ import os
 
 struct TranscriptionPassRunnerTests {
     @Test
+    func aCancelledPassFinishesTheChunkInTheModelAndStopsBeforeTheNext() async throws {
+        let gate = JobGate()
+        let chunkCalls = OSAllocatedUnfairLock(initialState: 0)
+        let diarizeCalled = OSAllocatedUnfairLock(initialState: false)
+        let runner = TranscriptionPassRunner(
+            segmentSpeech: { _ in
+                [
+                    TranscriptionPassRunner.SpeechSegment(startTime: 0, endTime: 1),
+                    TranscriptionPassRunner.SpeechSegment(startTime: 1, endTime: 2),
+                    TranscriptionPassRunner.SpeechSegment(startTime: 2, endTime: 3),
+                ]
+            },
+            makePassEngines: { _ in
+                TranscriptionPassRunner.PassEngines(
+                    transcribeChunk: { _, _ in
+                        chunkCalls.withLock { $0 += 1 }
+                        await gate.wait()
+                        return TranscriptionPassRunner.PassASRResult(text: "hello", tokenTimings: [])
+                    },
+                    diarize: { _ in
+                        diarizeCalled.withLock { $0 = true }
+                        return TranscriptionPassRunner.PassDiarizationResult(segments: [], speakerDatabase: nil)
+                    }
+                )
+            }
+        )
+        let workspace = try makeWorkspace()
+        let samples = Array(repeating: Float(0.1), count: 48_000)
+        let pass = Task { try await runner.run(samples: samples, source: .mic, workspace: workspace) }
+        await gate.untilWaiting()
+
+        pass.cancel()
+        await gate.open()
+
+        await #expect(throws: CancellationError.self) { try await pass.value }
+        #expect(chunkCalls.withLock { $0 } == 1)
+        #expect(!diarizeCalled.withLock { $0 })
+    }
+
+    @Test
     func runReturnsEmptyWhenVADProducesNoSpeech() async throws {
         let engineCreated = OSAllocatedUnfairLock(initialState: false)
         let runner = TranscriptionPassRunner(

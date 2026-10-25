@@ -33,6 +33,7 @@ actor RecordingFinalizer: RecordingFinalizing {
     private let mixdownCoordinator: any RecordingMixdownCoordinating
     private let screenVideoMuxer: any ScreenVideoMuxing
     private let retireSources: RetireSources
+    private let sessionJobs: SessionJobs
     private let logger = Logger(subsystem: "Scriberman", category: "RecordingFinalizer")
 
     private var jobs: [UUID: Task<Void, Never>] = [:]
@@ -43,11 +44,13 @@ actor RecordingFinalizer: RecordingFinalizing {
     init(
         mixdownCoordinator: any RecordingMixdownCoordinating,
         screenVideoMuxer: any ScreenVideoMuxing,
-        retireSources: @escaping RetireSources = { try RecordingSourceFiles.retire(micURL: $0, appURL: $1) }
+        retireSources: @escaping RetireSources = { try RecordingSourceFiles.retire(micURL: $0, appURL: $1) },
+        sessionJobs: SessionJobs = SessionJobs()
     ) {
         self.mixdownCoordinator = mixdownCoordinator
         self.screenVideoMuxer = screenVideoMuxer
         self.retireSources = retireSources
+        self.sessionJobs = sessionJobs
     }
 
     nonisolated var hasJobs: Bool {
@@ -59,16 +62,19 @@ actor RecordingFinalizer: RecordingFinalizing {
     }
 
     /// Starts the job and returns without waiting for it. A second job for the same session
-    /// runs after the first.
+    /// runs after the first. A delete of the session cancels the job and waits for it.
     func schedule(_ job: RecordingFinalizationJob) {
         let previous = jobs[job.sessionID]
         let sessionID = job.sessionID
+        let generation = sessionJobs.generation(of: sessionID)
         activeSessions.withLock { _ = $0.insert(sessionID) }
-        jobs[sessionID] = Task { [weak self] in
+        let task = Task { [weak self] in
             await previous?.value
-            await self?.run(job)
+            await self?.run(job, generation: generation)
             await self?.finish(sessionID: sessionID)
         }
+        jobs[sessionID] = task
+        sessionJobs.track(task, as: generation)
     }
 
     func waitForAll(timeout: Duration) async -> Bool {
@@ -83,7 +89,11 @@ actor RecordingFinalizer: RecordingFinalizing {
         }
     }
 
-    private func run(_ job: RecordingFinalizationJob) async {
+    private func run(_ job: RecordingFinalizationJob, generation: SessionJobs.Generation) async {
+        guard sessionJobs.mayWrite(generation) else {
+            logger.notice("Stopped finalizing session \(job.sessionID, privacy: .public): it was deleted.")
+            return
+        }
         let committed = await mixdownCoordinator.runMixdown(
             sessionID: job.sessionID,
             micURL: job.micURL,
@@ -95,12 +105,16 @@ actor RecordingFinalizer: RecordingFinalizing {
         )
 
         // Runs after the mixdown on both paths, so the legacy mux still finds the raw inputs.
-        if let screenMux = job.screenMux {
+        if let screenMux = job.screenMux, sessionJobs.mayWrite(generation) {
             await screenVideoMuxer.runMux(request: screenMux)
         }
 
         guard committed else {
             logger.notice("Keeping raw inputs for session \(job.sessionID, privacy: .public): mixdown was not committed.")
+            return
+        }
+        guard sessionJobs.mayWrite(generation) else {
+            logger.notice("Keeping raw inputs for session \(job.sessionID, privacy: .public): it was deleted.")
             return
         }
         do {

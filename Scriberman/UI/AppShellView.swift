@@ -9,6 +9,7 @@ struct AppShellView: View {
     @Environment(AIProviderService.self) private var aiProviderService
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.controlActiveState) private var controlActiveState
+    @Environment(\.undoManager) private var undoManager
     @Query(sort: \RecordingSession.createdAt, order: .reverse) private var recordingSessions: [RecordingSession]
     @Query(sort: \ImportedSession.createdAt, order: .reverse) private var importedSessions: [ImportedSession]
     @State private var selectedSession: JobsViewModel.SessionListItem?
@@ -30,30 +31,46 @@ struct AppShellView: View {
     @State private var transcriptFindRequest = 0
     @State private var textEditingObserver = TextEditingObserver()
     @FocusState private var isSessionListFocused: Bool
-    /// The session the delete confirmation is asking about. The toolbar, the Session menu and the
-    /// Delete key all ask through this one confirmation.
+    /// The unfinished imported session the delete confirmation is asking about. A recording or a
+    /// settled imported session is deleted without asking, because Undo brings it back.
     @State private var sessionPendingDeletion: JobsViewModel.SessionListItem?
+    /// Keeps this window told when a session starts leaving the store, from any window.
+    @State private var removalObservation: SessionDeletionCoordinator.RemovalObservation?
     /// A Session menu command waiting for the session's detail view to carry it out.
     @State private var detailCommandRequest: DetailCommandRequest?
+    /// This window's Pending deletions view: the held sessions and whether the view is open.
+    @State private var pendingDeletions: PendingDeletionsViewModel
+
+    init(sessionDeletion: SessionDeletionCoordinator) {
+        _pendingDeletions = State(initialValue: PendingDeletionsViewModel(coordinator: sessionDeletion))
+    }
+
+    /// The recordings in the store, less any being deleted: a delete waits for the session's jobs
+    /// to stop before its record goes, and the session leaves the list at once.
+    private var listedRecordingSessions: [RecordingSession] {
+        recordingSessions.filter { !appState.sessionDeletion.isRemoving($0.id) }
+    }
 
     var body: some View {
         NavigationSplitView {
             JobsView(
                 viewModel: appState.jobsViewModel,
                 items: appState.jobsViewModel.sessionItems(
-                    recordingSessions: recordingSessions,
+                    recordingSessions: listedRecordingSessions,
                     importedSessions: importedSessions,
                     preserving: selectedSession
                 ),
                 pendingSession: appState.pendingSession,
-                totalSessionCount: recordingSessions.count + importedSessions.count,
+                totalSessionCount: listedRecordingSessions.count + importedSessions.count,
                 isNewSessionIdle: appState.newSessionViewModel.isIdle,
                 selection: $selectedSession,
                 onDiscardPendingSession: { appState.discardPendingSession() },
                 searchFocusRequest: searchFocusRequest,
                 onSearchEscape: { isSessionListFocused = true },
                 onOpenSearchResult: { item in openSearchResult(item) },
-                onDeleteSelection: commandAvailability.isEnabled(.delete) ? { requestDeletion() } : nil
+                onDeleteSelection: commandAvailability.isEnabled(.delete) ? { requestDeletion() } : nil,
+                hasPendingDeletions: pendingDeletions.isEntryEnabled,
+                onShowPendingDeletions: { showPendingDeletions() }
             )
             .focused($isSessionListFocused)
             .navigationSplitViewColumnWidth(min: 380, ideal: 460)
@@ -75,6 +92,13 @@ struct AppShellView: View {
                         }
                     )
                 }
+                .navigationSplitViewColumnWidth(min: 560, ideal: 860)
+            } else if pendingDeletions.isOpen {
+                PendingDeletionsView(
+                    viewModel: pendingDeletions,
+                    onRevert: { row in revert(row) },
+                    onRemoveNow: { row in removeNow(row) }
+                )
                 .navigationSplitViewColumnWidth(min: 560, ideal: 860)
             } else {
                 ContentUnavailableView(
@@ -170,6 +194,10 @@ struct AppShellView: View {
         }
 
         .onChange(of: selectedSession) { oldValue, newValue in
+            // Selecting a session closes Pending deletions.
+            if newValue != nil {
+                pendingDeletions.close()
+            }
             guard oldValue?.id != newValue?.id else {
                 return
             }
@@ -191,6 +219,13 @@ struct AppShellView: View {
         // moment the request may have become showable: it arrived, this window became key, or the
         // session it names reached this window's query.
         .onAppear { showRequestedSession() }
+        .onAppear { observeRemovals() }
+        .task(id: PendingDeletionsRefreshKey(
+            revision: appState.sessionDeletion.holdingChanges.revision,
+            workspace: appState.workspace
+        )) {
+            await pendingDeletions.refresh()
+        }
         .onChange(of: appState.sessionRequest) { showRequestedSession() }
         .onChange(of: controlActiveState) { showRequestedSession() }
         .onChange(of: recordingSessions.map(\.id)) { showRequestedSession() }
@@ -294,6 +329,7 @@ struct AppShellView: View {
             autoScrollEnabled: $transcriptAutoScrollEnabled,
             transcript: session.displayedTranscript,
             store: appState.backgroundServices.speakerEmbeddingStore,
+            sessionJobs: appState.backgroundServices.sessionJobs,
             searchSeed: detailNavigation.searchSeed,
             findRequest: transcriptFindRequest,
             isRawMarkdownShown: isRawMarkdownShown,
@@ -303,6 +339,7 @@ struct AppShellView: View {
             onExport: {
                 exportTranscript(for: session)
             },
+            onDelete: commandAvailability.isEnabled(.delete) ? { requestDeletion() } : nil,
             onRestoreOriginal: onRestoreOriginal,
             onOpenTransformation: { transformationID in
                 selectedTransformationID = transformationID
@@ -322,6 +359,7 @@ struct AppShellView: View {
                 AITransformationDetailView(
                     session: session,
                     aiProviderService: aiProviderService,
+                    sessionJobs: appState.backgroundServices.sessionJobs,
                     selectedTransformationID: $selectedTransformationID
                 )
                 .toolbar {
@@ -340,13 +378,22 @@ struct AppShellView: View {
 
     @Environment(\.modelContext) private var modelContext
 
-    /// Asks the delete confirmation about the selected session.
+    /// Deletes the selected session, or asks the delete confirmation about the selected imported
+    /// session when it is unfinished, because that delete is permanent.
     private func requestDeletion() {
-        guard commandAvailability.isEnabled(.delete) else { return }
-        sessionPendingDeletion = selectedSession
+        guard commandAvailability.isEnabled(.delete), let selectedSession else { return }
+        switch selectedSession {
+        case .recording:
+            delete(selectedSession)
+        case .imported(let session) where SessionDeletionCoordinator.canHold(session):
+            delete(selectedSession)
+        case .imported, .pending:
+            sessionPendingDeletion = selectedSession
+        }
     }
 
-    /// Deletes a session the user confirmed.
+    /// Deletes a session: a recording or a settled imported session into holding, with undo; an
+    /// unfinished imported session for good.
     private func delete(_ item: JobsViewModel.SessionListItem) {
         if selectedSession?.id == item.id {
             selectedSession = nil
@@ -355,9 +402,15 @@ struct AppShellView: View {
             let result: JobsViewModel.DeletionResult
             switch item {
             case .recording(let session):
-                result = await appState.jobsViewModel.delete(session: session, context: modelContext)
+                result = await appState.sessionDeletion.delete(session, context: modelContext, undoManager: undoManager)
+            case .imported(let session) where SessionDeletionCoordinator.canHold(session):
+                result = await appState.sessionDeletion.delete(session, context: modelContext, undoManager: undoManager)
             case .imported(let session):
-                result = await appState.jobsViewModel.deleteImported(session: session, context: modelContext)
+                result = await appState.sessionDeletion.deleteAfterConfirmation(
+                    session,
+                    context: modelContext,
+                    undoManager: undoManager
+                )
             case .pending:
                 return
             }
@@ -365,7 +418,8 @@ struct AppShellView: View {
         }
     }
 
-    /// Reports a deletion. A failed save leaves the session in place, so its row is selected again.
+    /// Reports a deletion. A failed save or move leaves the session in place, so its row is selected
+    /// again.
     private func handleDeletion(_ result: JobsViewModel.DeletionResult, of item: JobsViewModel.SessionListItem?) {
         switch result {
         case .deleted:
@@ -373,9 +427,62 @@ struct AppShellView: View {
         case .saveFailed(let reason):
             selectedSession = item
             storeFailureAlert = .deletionFailed(reason)
+        case .moveFailed:
+            selectedSession = item
+            storeFailureAlert = .folderNotMoved
         case .filesLeft(let folder):
             storeFailureAlert = .filesLeft(folder.path)
         }
+    }
+
+    /// Drops the selection, and with it playback, when the selected session starts leaving the
+    /// store — deleted or redone from this window or another.
+    private func observeRemovals() {
+        guard removalObservation == nil else { return }
+        removalObservation = appState.sessionDeletion.observeRemovals { sessionID in
+            let selectedID: UUID?
+            switch selectedSession {
+            case .recording(let session): selectedID = session.id
+            case .imported(let session): selectedID = session.id
+            case .pending, .none: selectedID = nil
+            }
+            guard selectedID == sessionID else { return }
+            audioPlayerViewModel.stop()
+            selectedSession = nil
+        }
+    }
+
+    /// Opens Pending deletions in the detail area. The list has no selection while it is open.
+    private func showPendingDeletions() {
+        selectedSession = nil
+        pendingDeletions.open()
+    }
+
+    /// Restores a held session and selects it, which closes Pending deletions.
+    private func revert(_ row: PendingDeletionsViewModel.Row) {
+        Task {
+            guard let sessionID = await pendingDeletions.revert(row, context: modelContext) else { return }
+            selectedSession = storedSessionItem(id: sessionID)
+        }
+    }
+
+    /// Removes a held session for good, once the user has confirmed.
+    private func removeNow(_ row: PendingDeletionsViewModel.Row) {
+        Task {
+            if case .folderLeft(let folder) = await pendingDeletions.removeNow(row) {
+                storeFailureAlert = .filesLeft(folder.path)
+            }
+        }
+    }
+
+    private func storedSessionItem(id: UUID) -> JobsViewModel.SessionListItem? {
+        if let session = try? RecordingSession.fetch(id: id, in: modelContext) {
+            return .recording(session)
+        }
+        if let session = try? ImportedSession.fetch(id: id, in: modelContext) {
+            return .imported(session)
+        }
+        return nil
     }
 
     private func dismissStoreFailureAlert() {
@@ -546,8 +653,26 @@ struct AppShellView: View {
             isTranscriptShown: isTranscriptShown,
             hasLoadedAudio: audioPlayerViewModel.isReady,
             // The session search field is always in the window, so Find always has a target.
-            hasFindTarget: true
+            hasFindTarget: true,
+            isSelectionInActiveWorkspace: isSelectionInActiveWorkspace
         )
+    }
+
+    /// The selected session's folder is in the active workspace. A session with no folder yet has
+    /// nothing outside it.
+    private var isSelectionInActiveWorkspace: Bool {
+        let folder: URL?
+        switch selectedSession {
+        case .recording(let session):
+            folder = URL(fileURLWithPath: session.micAudioURL).deletingLastPathComponent()
+        case .imported(let session):
+            folder = session.mixdownURL.map { URL(fileURLWithPath: $0).deletingLastPathComponent() }
+        case .pending, .none:
+            folder = nil
+        }
+        guard let folder else { return true }
+        guard let workspace = appState.workspace else { return false }
+        return JobsViewModel.isRemovableSessionFolder(folder, in: workspace)
     }
 
     /// Hands a command to the session's detail view, which shows its confirmation and result. From
@@ -730,9 +855,17 @@ struct AppShellView: View {
     }
 }
 
+/// What Pending deletions is read again for: any operation on a held session, and a workspace
+/// change.
+private struct PendingDeletionsRefreshKey: Equatable {
+    let revision: Int
+    let workspace: Workspace?
+}
+
 /// The failures where the store and the disk could disagree, as the user is told about them.
 private enum StoreFailureAlert: Equatable {
     case deletionFailed(String)
+    case folderNotMoved
     case filesLeft(String)
     case importFailed([String])
     case transcriptNotSaved(Int)
@@ -740,7 +873,7 @@ private enum StoreFailureAlert: Equatable {
 
     var title: String {
         switch self {
-        case .deletionFailed: "Deletion Failed"
+        case .deletionFailed, .folderNotMoved: "Deletion Failed"
         case .filesLeft: "Files Left on Disk"
         case .importFailed: "Import Failed"
         case .transcriptNotSaved: "Transcript Not Fully Saved"
@@ -752,6 +885,8 @@ private enum StoreFailureAlert: Equatable {
         switch self {
         case .deletionFailed(let reason):
             "Scriberman could not save the change, so nothing was deleted. \(reason)"
+        case .folderNotMoved:
+            "Scriberman could not move the session folder, so the session was not deleted."
         case .filesLeft(let path):
             "The session was deleted, but its folder could not be removed: \(path)"
         case .importFailed(let fileNames):

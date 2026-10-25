@@ -459,7 +459,7 @@ struct TranscriptDetailViewModelTests {
         return session
     }
 
-    private static func makeResponse(text: String) throws -> ResponseObject {
+    static func makeResponse(text: String) throws -> ResponseObject {
         let payload = """
         {
           "created_at": 123,
