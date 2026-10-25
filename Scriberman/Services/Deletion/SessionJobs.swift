@@ -13,6 +13,8 @@ final class SessionJobs: Sendable {
     struct Generation: Hashable, Sendable {
         let sessionID: UUID
         fileprivate let value: Int
+        /// Captured while a delete of the session was under way, so never current.
+        fileprivate let isDuringDelete: Bool
     }
 
     private struct Job: Sendable {
@@ -25,6 +27,13 @@ final class SessionJobs: Sendable {
         var jobs: [UUID: [UUID: Job]] = [:]
         var draining: Set<UUID> = []
         var folders: [UUID: URL] = [:]
+        var deleting: Set<UUID> = []
+
+        func isCurrent(_ generation: Generation) -> Bool {
+            !generation.isDuringDelete
+                && !deleting.contains(generation.sessionID)
+                && generations[generation.sessionID, default: 0] == generation.value
+        }
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -32,15 +41,21 @@ final class SessionJobs: Sendable {
     init() {}
 
     func generation(of sessionID: UUID) -> Generation {
-        state.withLock { Generation(sessionID: sessionID, value: $0.generations[sessionID, default: 0]) }
+        state.withLock { state in
+            Generation(
+                sessionID: sessionID,
+                value: state.generations[sessionID, default: 0],
+                isDuringDelete: state.deleting.contains(sessionID)
+            )
+        }
     }
 
     func isCurrent(_ generation: Generation) -> Bool {
-        state.withLock { $0.generations[generation.sessionID, default: 0] == generation.value }
+        state.withLock { $0.isCurrent(generation) }
     }
 
     /// Whether a job of `generation` may still write: its session has not been deleted since the
-    /// job started, and the task it runs in has not been cancelled.
+    /// job started, no delete of it is under way, and the task it runs in has not been cancelled.
     func mayWrite(_ generation: Generation) -> Bool {
         !Task.isCancelled && isCurrent(generation)
     }
@@ -54,11 +69,12 @@ final class SessionJobs: Sendable {
         let job = Job(cancel: { task.cancel() }, wait: { _ = await task.result })
         let isStale = state.withLock { state in
             let isDraining = state.draining.contains(sessionID)
+            let isCurrent = state.isCurrent(generation)
             // While draining, the delete waits for it too.
-            if isDraining || state.generations[sessionID, default: 0] == generation.value {
+            if isDraining || isCurrent {
                 state.jobs[sessionID, default: [:]][jobID] = job
             }
-            return isDraining || state.generations[sessionID, default: 0] != generation.value
+            return isDraining || !isCurrent
         }
         if isStale {
             task.cancel()
@@ -106,6 +122,20 @@ final class SessionJobs: Sendable {
             }
         }
         state.withLock { _ = $0.draining.remove(sessionID) }
+    }
+
+    /// Starts a delete of the session: until `finishDeleting`, no generation of it is current, so
+    /// a job that starts meanwhile, such as a sweep that fetched the record before it went, writes
+    /// nothing. Then stops its jobs as `cancelAndDrain` does.
+    func startDeleting(_ sessionID: UUID) async {
+        state.withLock { _ = $0.deleting.insert(sessionID) }
+        await cancelAndDrain(sessionID)
+    }
+
+    /// Ends the delete `startDeleting` began, whether it deleted the record or rolled back. A
+    /// generation captured after this is current again.
+    func finishDeleting(_ sessionID: UUID) {
+        state.withLock { _ = $0.deleting.remove(sessionID) }
     }
 
     /// Records the folder a job created for a session whose record does not name it yet, such as

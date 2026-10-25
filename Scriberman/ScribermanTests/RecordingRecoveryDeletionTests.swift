@@ -288,6 +288,83 @@ final class RecordingRecoveryDeletionTests {
         #expect(restored.status == .recorded)
     }
 
+    // MARK: - Fetched while the delete is under way
+
+    /// A coordinator under the test's jobs that runs `sweep` to the end, on the main actor's
+    /// behalf, once the delete has stopped the session's jobs and before it moves the folder.
+    private func makeCoordinator(
+        sweepingWith recovery: RecordingRecoveryService,
+        saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() }
+    ) -> SessionDeletionCoordinator {
+        let hasSwept = OSAllocatedUnfairLock(initialState: false)
+        return SessionDeletionCoordinator(
+            workspaceService: workspaceService,
+            saveContext: saveContext,
+            announce: { _ in },
+            startAccess: { _ in
+                guard hasSwept.withLock({ swept in defer { swept = true }; return !swept }) else { return false }
+                let done = DispatchSemaphore(value: 0)
+                Task.detached {
+                    await recovery.sweepIncompleteSessions()
+                    done.signal()
+                }
+                done.wait()
+                return false
+            },
+            stopAccess: { _ in },
+            sessionJobs: jobs
+        )
+    }
+
+    @Test
+    func testRecoveryFetchingDuringADeleteWritesNothing() async throws {
+        let session = try makeRecordingAwaitingMixdown("Fetched")
+        let sessionID = session.id
+        let mixdowns = OSAllocatedUnfairLock(initialState: 0)
+        let recovery = makeRecovery(performMixdown: { _, _, outputURL, _ in
+            mixdowns.withLock { $0 += 1 }
+            try Data("mixdown".utf8).write(to: outputURL)
+        })
+        let coordinator = makeCoordinator(sweepingWith: recovery)
+
+        #expect(await coordinator.delete(session, context: context, undoManager: undoManager) == .deleted)
+
+        #expect(mixdowns.withLock { $0 } == 0)
+        #expect(try stored(sessionID) == nil)
+        #expect(try heldSnapshot(of: session).mixdownURL == nil)
+        #expect(!FileManager.default.fileExists(atPath: heldFolder(of: session).appendingPathComponent("recording.m4a").path))
+    }
+
+    @Test
+    func testARecordingWhoseDeleteRolledBackIsRecoverable() async throws {
+        let session = try makeRecordingAwaitingMixdown("Rolled back")
+        let sessionID = session.id
+        let mixdowns = OSAllocatedUnfairLock(initialState: 0)
+        let recovery = makeRecovery(performMixdown: { _, _, outputURL, _ in
+            mixdowns.withLock { $0 += 1 }
+            try Data("mixdown".utf8).write(to: outputURL)
+        })
+        let coordinator = makeCoordinator(
+            sweepingWith: recovery,
+            saveContext: { _ in throw CocoaError(.fileWriteUnknown) }
+        )
+
+        let result = await coordinator.delete(session, context: context, undoManager: undoManager)
+        guard case .saveFailed = result else {
+            Issue.record("Expected saveFailed, got \(result)")
+            return
+        }
+        #expect(mixdowns.withLock { $0 } == 0)
+        #expect(try stored(sessionID)?.mixdownURL == nil)
+
+        await recovery.sweepIncompleteSessions()
+
+        #expect(mixdowns.withLock { $0 } == 1)
+        let recovered = try #require(try stored(sessionID))
+        #expect(recovered.mixdownURL == folder(of: session).appendingPathComponent("recording.m4a").path)
+        #expect(recovered.status == .recorded)
+    }
+
     // MARK: - Deleted while recovery works on another session
 
     @Test

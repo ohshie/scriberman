@@ -21,6 +21,33 @@ struct SessionJobsTests {
     }
 
     @Test
+    func noGenerationIsCurrentWhileADeleteIsUnderWay() async {
+        let before = jobs.generation(of: sessionID)
+
+        await jobs.startDeleting(sessionID)
+        let during = jobs.generation(of: sessionID)
+
+        #expect(!jobs.mayWrite(before))
+        #expect(!jobs.mayWrite(during))
+
+        jobs.finishDeleting(sessionID)
+
+        #expect(!jobs.mayWrite(during))
+        #expect(jobs.mayWrite(jobs.generation(of: sessionID)))
+    }
+
+    @Test
+    func aTaskTrackedWhileADeleteIsUnderWayIsCancelled() async {
+        await jobs.startDeleting(sessionID)
+        let task = Task { try? await Task.sleep(for: .seconds(60)) }
+
+        jobs.track(task, as: jobs.generation(of: sessionID))
+
+        #expect(task.isCancelled)
+        jobs.finishDeleting(sessionID)
+    }
+
+    @Test
     func aDeleteLeavesOtherSessionsGenerationsAlone() async {
         let other = jobs.generation(of: UUID())
 

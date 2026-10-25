@@ -273,7 +273,8 @@ final class SessionDeletionCoordinator {
         let sessionID = session.id
         removingSessionIDs.insert(sessionID)
         defer { removingSessionIDs.remove(sessionID) }
-        await sessionJobs.cancelAndDrain(sessionID)
+        defer { sessionJobs.finishDeleting(sessionID) }
+        await sessionJobs.startDeleting(sessionID)
 
         let reportedFolder = sessionJobs.takeFolder(of: sessionID)
         let folder = reportedFolder
@@ -342,7 +343,8 @@ final class SessionDeletionCoordinator {
         // Off the list at once; nothing moves until every job of the session has stopped.
         removingSessionIDs.insert(sessionID)
         defer { removingSessionIDs.remove(sessionID) }
-        await sessionJobs.cancelAndDrain(sessionID)
+        defer { sessionJobs.finishDeleting(sessionID) }
+        await sessionJobs.startDeleting(sessionID)
 
         guard let workspace = await workspaceService.currentWorkspace() else {
             logger.error("Refusing to delete a session with no workspace available.")
