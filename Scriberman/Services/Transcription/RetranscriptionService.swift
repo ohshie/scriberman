@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import SwiftData
 
 actor RetranscriptionService {
@@ -12,14 +13,17 @@ actor RetranscriptionService {
     private let prepareModelsHandler: PrepareModels
     private let transcribePassFromSamplesHandler: TranscribePassFromSamples
     private let saveContext: SaveContext
+    private let sessionJobs: SessionJobs
     private let transcriptAligner = TranscriptAligner()
+    private let logger = Logger(subsystem: "Scriberman", category: "RetranscriptionService")
 
     init(
         transcriptionService: TranscriptionService,
         extractSamples: ExtractSamples? = nil,
         prepareModelsHandler: PrepareModels? = nil,
         transcribePassFromSamplesHandler: TranscribePassFromSamples? = nil,
-        saveContext: SaveContext? = nil
+        saveContext: SaveContext? = nil,
+        sessionJobs: SessionJobs = SessionJobs()
     ) {
         self.transcriptionService = transcriptionService
         self.extractSamples = extractSamples ?? { url in
@@ -40,6 +44,7 @@ actor RetranscriptionService {
         self.saveContext = saveContext ?? { context in
             try context.save()
         }
+        self.sessionJobs = sessionJobs
     }
 
     func retranscribe(
@@ -48,8 +53,33 @@ actor RetranscriptionService {
         workspace: Workspace,
         pipelineSettings: LiveTranscriptionPipelineSettings = .defaults
     ) async {
+        // In a task of its own, so a delete of the session cancels it and waits for it.
+        await sessionJobs.run(sessionID) { generation in
+            await self.retranscribe(
+                sessionID: sessionID,
+                modelContainer: modelContainer,
+                workspace: workspace,
+                pipelineSettings: pipelineSettings,
+                generation: generation
+            )
+        }
+    }
+
+    /// Saves a new transcript pass, unless the session is deleted first. Cancellation stops the
+    /// passes between chunks; the sample extraction and each model call are waited out.
+    private func retranscribe(
+        sessionID: UUID,
+        modelContainer: ModelContainer,
+        workspace: Workspace,
+        pipelineSettings: LiveTranscriptionPipelineSettings,
+        generation: SessionJobs.Generation
+    ) async {
+        guard sessionJobs.mayWrite(generation) else {
+            logger.notice("Retranscription for session \(sessionID, privacy: .public) not started: the session was deleted.")
+            return
+        }
         let context = ModelContext(modelContainer)
-        
+
         var session: (any TranscribableSession)?
 
         if let recording = try? RecordingSession.fetch(id: sessionID, in: context) {
@@ -79,6 +109,7 @@ actor RetranscriptionService {
         do {
             let mixdownURL = URL(fileURLWithPath: mixdownPath)
             let extracted = try extractSamples(mixdownURL)
+            try Task.checkCancellation()
             try await prepareModelsHandler(workspace)
 
             let sharedEngines = await transcriptionService.makeSharedPassEngines()
@@ -110,6 +141,10 @@ actor RetranscriptionService {
             if extracted.app == nil, (session as? RecordingSession)?.appAudioURL != nil {
                 retranscript.isSinglePassOfMixedAudio = true
             }
+            guard sessionJobs.mayWrite(generation) else {
+                logger.notice("Retranscript for session \(sessionID, privacy: .public) not saved: the session was deleted.")
+                return
+            }
             session.retranscript = retranscript
             session.status = .done
             try? saveContext(context)
@@ -117,6 +152,10 @@ actor RetranscriptionService {
                 rewriteTranscriptMarkdown(for: recording)
             }
         } catch {
+            guard sessionJobs.mayWrite(generation) else {
+                logger.notice("Retranscription for session \(sessionID, privacy: .public) stopped: the session was deleted.")
+                return
+            }
             session.status = .error(error.localizedDescription)
             try? saveContext(context)
         }

@@ -190,8 +190,12 @@ struct TagService {
         guard let undoManager else { return }
         // The handler holds the session: the undo manager does not retain its target.
         undoManager.registerUndo(withTarget: session) { [weak undoManager] _ in
-            // A session deleted since is left alone.
-            guard session.modelContext != nil, !session.isDeleted else { return }
+            // A session deleted since is left alone. One restored since is a new object, so this
+            // entry stays inert for it too.
+            guard session.modelContext != nil, !session.isDeleted else {
+                logger.notice("Skipped undoing a tag change: the session was deleted since.")
+                return
+            }
             do {
                 try restoreTags(tags, of: session, in: context, undoManager: undoManager)
             } catch {

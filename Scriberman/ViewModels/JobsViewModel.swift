@@ -98,6 +98,8 @@ final class JobsViewModel {
     private let markdownRenderer: MarkdownRenderer
     private let savePanelPresenter: @MainActor (_ suggestedName: String) async -> URL?
     private let saveContext: @MainActor (ModelContext) throws -> Void
+    /// The sessions' background jobs: a delete cancels a transcription or reprocess and waits for it.
+    private let sessionJobs: SessionJobs
     private let logger = Logger(subsystem: "Scriberman", category: "JobsViewModel")
 
     // Injected post-init by AppState (same pattern as NewSessionViewModel);
@@ -116,7 +118,8 @@ final class JobsViewModel {
         transcriptExportService: TranscriptExportService = TranscriptExportService(),
         markdownRenderer: MarkdownRenderer = MarkdownRenderer(),
         savePanelPresenter: @escaping @MainActor (_ suggestedName: String) async -> URL? = JobsViewModel.defaultSavePanelPresenter(suggestedName:),
-        saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() }
+        saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() },
+        sessionJobs: SessionJobs = SessionJobs()
     ) {
         self.workspaceService = workspaceService
         self.transcriptionService = transcriptionService
@@ -126,6 +129,7 @@ final class JobsViewModel {
         self.markdownRenderer = markdownRenderer
         self.savePanelPresenter = savePanelPresenter
         self.saveContext = saveContext
+        self.sessionJobs = sessionJobs
     }
 
     func refresh() async {
@@ -454,8 +458,9 @@ final class JobsViewModel {
         let sessionID = session.id
         let modelContainer = context.container
         let pipelineSettings = currentPipelineSettings
+        let generation = sessionJobs.generation(of: sessionID)
 
-        Task {
+        let task = Task {
             do {
                 let workspace = try await workspaceService.requireAuthorizedWorkspace()
                 let transcript = try await transcriptionService.transcribe(
@@ -464,23 +469,26 @@ final class JobsViewModel {
                     workspace: workspace,
                     pipelineSettings: pipelineSettings
                 )
-                
-                // Update session on MainActor since JobsViewModel is @MainActor
-                // and session is a SwiftData model.
-                // We need to fetch it again or use the one we have if it's safe.
-                // Since we are in a @MainActor Task, we can use the original session if it's still valid.
-                
+                guard sessionJobs.mayWrite(generation) else {
+                    logger.notice("Transcript for session \(sessionID, privacy: .public) not saved: the session was deleted.")
+                    return
+                }
                 session.transcript = transcript
                 session.status = .done
                 session.errorMessage = nil
                 try? context.save()
             } catch {
+                guard sessionJobs.mayWrite(generation) else {
+                    logger.notice("Transcription for session \(sessionID, privacy: .public) stopped: the session was deleted.")
+                    return
+                }
                 logger.error("Transcription failed for session \(session.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 session.status = .error(error.localizedDescription)
                 session.errorMessage = error.localizedDescription
                 try? context.save()
             }
         }
+        sessionJobs.track(task, as: generation)
     }
 
     func retry(session: RecordingSession, context: ModelContext) {
@@ -491,27 +499,14 @@ final class JobsViewModel {
 
     /// What a deletion did, for the view to report.
     enum DeletionResult: Equatable {
-        /// The record and its folder are gone.
+        /// The record is gone, and its folder is held or removed.
         case deleted
-        /// Saving the store failed. The record and its folder are both untouched.
+        /// Saving the store failed. The record and its folder are both where they were.
         case saveFailed(String)
+        /// The session folder could not be moved into holding, so nothing was deleted.
+        case moveFailed
         /// The record is gone but its folder could not be removed.
         case filesLeft(URL)
-    }
-
-    /// Deletes a recording and everything it produced.
-    ///
-    /// The whole folder goes, not a list of known file names. That list has grown twice already —
-    /// `.timing` sidecars, then trim backups — and each addition would have leaked silently until
-    /// somebody remembered to extend it. Removing the container has no such failure mode.
-    ///
-    /// The store changes first and the disk second, so a record never points at deleted media. The
-    /// record is deleted even when the folder cannot be, so a session never becomes undeletable
-    /// because of something wrong with its path; the result then carries the folder left behind.
-    @discardableResult
-    func delete(session: RecordingSession, context: ModelContext) async -> DeletionResult {
-        let folder = URL(fileURLWithPath: session.micAudioURL).deletingLastPathComponent()
-        return await deleteRecord(session, folder: folder, context: context)
     }
 
     /// Deletes `model` from the store, then removes `folder`.
@@ -544,7 +539,13 @@ final class JobsViewModel {
             logger.error("Refusing to remove a session folder with no workspace available.")
             return false
         }
-        guard Self.isRemovableSessionFolder(folder, in: workspace) else {
+        return Self.removeSessionFolder(folder, in: workspace)
+    }
+
+    /// Removes `folder` if it is a session folder of `workspace`, and returns whether it is gone.
+    nonisolated static func removeSessionFolder(_ folder: URL, in workspace: Workspace) -> Bool {
+        let logger = Logger(subsystem: "Scriberman", category: "JobsViewModel")
+        guard isRemovableSessionFolder(folder, in: workspace) else {
             logger.error(
                 "Refusing to remove a session folder outside the workspace: \(folder.path, privacy: .public)"
             )
@@ -573,7 +574,7 @@ final class JobsViewModel {
     ///
     /// The area roots themselves are excluded: `recordings/` is never a session folder, and
     /// removing it would take every session with it.
-    static func isRemovableSessionFolder(_ folder: URL, in workspace: Workspace) -> Bool {
+    nonisolated static func isRemovableSessionFolder(_ folder: URL, in workspace: Workspace) -> Bool {
         let resolved = folder.standardizedFileURL.resolvingSymlinksInPath()
         return [workspace.recordingsURL, workspace.importsURL].contains { root in
             let resolvedRoot = root.standardizedFileURL.resolvingSymlinksInPath()
@@ -662,9 +663,10 @@ final class JobsViewModel {
         let sessionID = session.id
         let modelContainer = context.container
         let pipelineSettings = currentPipelineSettings
+        let generation = sessionJobs.generation(of: sessionID)
 
         activeRetranscriptions += 1
-        Task {
+        let task = Task {
             defer { activeRetranscriptions -= 1 }
             do {
                 let workspace = try await workspaceService.requireAuthorizedWorkspace()
@@ -675,11 +677,14 @@ final class JobsViewModel {
                     pipelineSettings: pipelineSettings
                 )
             } catch {
+                guard sessionJobs.mayWrite(generation) else { return }
                 session.status = .error(error.localizedDescription)
                 session.errorMessage = error.localizedDescription
                 try? context.save()
             }
         }
+        // Tracked from the start, so a delete before the retranscription begins cancels it too.
+        sessionJobs.track(task, as: generation)
     }
 
     /// A session's transcript as text, for anything that takes it out of the app.

@@ -30,6 +30,7 @@ actor AudioImportService {
     private let mixToMonoM4A: MixToMonoM4A
     private let retranscribe: Retranscribe
     private let saveContext: SaveContext
+    private let sessionJobs: SessionJobs
 
     init(
         retranscriptionService: RetranscriptionService,
@@ -41,7 +42,8 @@ actor AudioImportService {
         writeMonoAAC: WriteMonoAAC? = nil,
         mixToMonoM4A: MixToMonoM4A? = nil,
         retranscribe: Retranscribe? = nil,
-        saveContext: SaveContext? = nil
+        saveContext: SaveContext? = nil,
+        sessionJobs: SessionJobs = SessionJobs()
     ) {
         let mixdownService = AudioMixdownService()
         self.probeAudio = probeAudio ?? { url in
@@ -77,6 +79,7 @@ actor AudioImportService {
         self.saveContext = saveContext ?? { context in
             try context.save()
         }
+        self.sessionJobs = sessionJobs
     }
 
     /// Imports `url` as a new session.
@@ -84,6 +87,9 @@ actor AudioImportService {
     /// Throws only when the session itself cannot be saved: conversion does not start, since its
     /// progress and result would belong to a record the store never took. Every later failure is
     /// recorded on the session as its error status instead.
+    ///
+    /// Everything after that first save is one job of the session: a delete cancels it, waits for
+    /// it, and it writes nothing afterwards.
     func importAudio(
         from url: URL,
         workspace: Workspace,
@@ -113,7 +119,9 @@ actor AudioImportService {
             originalFormat: fallbackFormat,
             status: .converting
         )
-        
+        // Before the record is saved, so a delete as soon as it is listed moves the generation on.
+        let generation = sessionJobs.generation(of: session.id)
+
         context.insert(session)
         do {
             try saveContext(context)
@@ -121,10 +129,39 @@ actor AudioImportService {
             throw AudioImportError.couldNotRecord(error.localizedDescription)
         }
 
+        let job = Task {
+            await convertAndTranscribe(
+                session,
+                from: url,
+                context: context,
+                workspace: workspace,
+                modelContainer: modelContainer,
+                pipelineSettings: pipelineSettings,
+                generation: generation
+            )
+        }
+        sessionJobs.track(job, as: generation)
+        await withTaskCancellationHandler {
+            await job.value
+        } onCancel: {
+            job.cancel()
+        }
+    }
+
+    private func convertAndTranscribe(
+        _ session: ImportedSession,
+        from url: URL,
+        context: ModelContext,
+        workspace: Workspace,
+        modelContainer: ModelContainer,
+        pipelineSettings: LiveTranscriptionPipelineSettings,
+        generation: SessionJobs.Generation
+    ) async {
         let sessionID = session.id
 
         do {
             let probe = try await probeAudio(url)
+            guard sessionJobs.mayWrite(generation) else { return }
             session.title = probe.title
             session.originalFileName = probe.originalFileName
             session.originalFormat = probe.originalFormat
@@ -136,7 +173,10 @@ actor AudioImportService {
                 createdAt: session.createdAt,
                 workspace: workspace
             )
+            guard sessionJobs.mayWrite(generation) else { return }
             try createDirectory(importFolderURL)
+            // The record names the folder only once conversion sets the mixdown.
+            sessionJobs.recordFolder(importFolderURL, of: sessionID)
 
             let outputURL = importFolderURL.appendingPathComponent("recording.m4a")
             do {
@@ -146,21 +186,24 @@ actor AudioImportService {
                 // rate are converted first; written unconverted they would play at the wrong speed.
                 let outputSamples = try AudioResampler(targetSampleRate: AudioMixdownService.outputSampleRate)
                     .resample(monoSamples, from: decoded.sampleRate)
+                guard sessionJobs.mayWrite(generation) else { return }
                 try await writeMonoAAC(outputSamples, outputURL)
             } catch {
-                if shouldFallbackToMixdownService(for: error) {
+                if sessionJobs.mayWrite(generation), shouldFallbackToMixdownService(for: error) {
                     try await mixToMonoM4A(url, outputURL)
                 } else {
                     throw error
                 }
             }
 
+            guard sessionJobs.mayWrite(generation) else { return }
             session.mixdownURL = outputURL.path
             session.status = .transcribing
             try? saveContext(context)
 
             await retranscribe(sessionID, modelContainer, workspace, pipelineSettings)
         } catch {
+            guard sessionJobs.mayWrite(generation) else { return }
             session.status = .error(error.localizedDescription)
             try? saveContext(context)
         }

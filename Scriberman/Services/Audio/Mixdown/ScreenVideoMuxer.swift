@@ -55,21 +55,37 @@ actor ScreenVideoMuxer: ScreenVideoMuxing {
     private let modelContainer: ModelContainer
     private let exporter: ScreenVideoExporting
     private let fileManager: FileManager
+    private let sessionJobs: SessionJobs
     private let logger = Logger(subsystem: "Scriberman", category: "ScreenVideoMuxer")
 
     init(
         workspaceService: WorkspaceServiceProtocol,
         modelContainer: ModelContainer,
         exporter: ScreenVideoExporting = AVFoundationScreenVideoExporter(),
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        sessionJobs: SessionJobs = SessionJobs()
     ) {
         self.workspaceService = workspaceService
         self.modelContainer = modelContainer
         self.exporter = exporter
         self.fileManager = fileManager
+        self.sessionJobs = sessionJobs
     }
 
     func runMux(request: ScreenVideoMuxRequest) async {
+        // In a task of its own, so a delete of the session cancels it and waits for it.
+        await sessionJobs.run(request.sessionID) { generation in
+            await self.mux(request: request, generation: generation)
+        }
+    }
+
+    /// Exports the screen video, saves its location and removes the temporary video, unless the
+    /// session is deleted first.
+    private func mux(request: ScreenVideoMuxRequest, generation: SessionJobs.Generation) async {
+        guard sessionJobs.mayWrite(generation) else {
+            logger.notice("Screen video mux for session \(request.sessionID, privacy: .public) not started: the session was deleted.")
+            return
+        }
         var scopedWorkspaceRoot: URL?
         var didStartScopedAccess = false
         if let workspace = await workspaceService.currentWorkspace(),
@@ -87,12 +103,24 @@ actor ScreenVideoMuxer: ScreenVideoMuxing {
         do {
             plan = buildPlan(request: request)
             try await exporter.export(plan: plan)
+            guard sessionJobs.mayWrite(generation) else {
+                logger.notice("Screen video mux for session \(request.sessionID, privacy: .public) not saved: the session was deleted.")
+                return
+            }
             try await persistScreenVideoURL(
                 sessionID: request.sessionID,
                 screenVideoURL: request.screenVideoURL
             )
+            guard sessionJobs.mayWrite(generation) else {
+                logger.notice("Keeping screen-tmp.mov for session \(request.sessionID, privacy: .public): the session was deleted.")
+                return
+            }
             cleanupTemporaryVideo(at: request.screenTmpURL)
         } catch {
+            guard sessionJobs.mayWrite(generation) else {
+                logger.notice("Screen video mux for session \(request.sessionID, privacy: .public) stopped: the session was deleted.")
+                return
+            }
             // screen-tmp.mov is the only input a retry can use, so it stays (design D3).
             logger.error("Screen video mux failed for session \(request.sessionID, privacy: .public); keeping screen-tmp.mov: \(error.localizedDescription, privacy: .public)")
             recordMuxFailure(sessionID: request.sessionID)
@@ -276,6 +304,7 @@ private struct AVFoundationScreenVideoExporter: ScreenVideoExporting {
             )
         }
 
+        try Task.checkCancellation()
         if FileManager.default.fileExists(atPath: request.screenVideoURL.path) {
             try FileManager.default.removeItem(at: request.screenVideoURL)
         }
@@ -291,7 +320,14 @@ private struct AVFoundationScreenVideoExporter: ScreenVideoExporting {
         exportSession.outputFileType = .mov
         exportSession.shouldOptimizeForNetworkUse = false
 
-        try await exportSession.performExport()
+        // Cancelling the task cancels the export, which then ends `.cancelled` and throws.
+        // `cancelExport` may be called from any thread.
+        nonisolated(unsafe) let cancellableSession = exportSession
+        try await withTaskCancellationHandler {
+            try await cancellableSession.performExport()
+        } onCancel: {
+            cancellableSession.cancelExport()
+        }
 
         if exportSession.status != .completed {
             throw exportSession.error ?? RecordingError.failedToStart("Screen video export did not complete.")
