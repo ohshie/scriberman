@@ -46,18 +46,21 @@ struct SessionSnapshot: Codable, Equatable {
     var title: String {
         switch session {
         case .recording(let record): record.title
+        case .imported(let record): record.title
         }
     }
 
     var createdAt: Date {
         switch session {
         case .recording(let record): record.createdAt
+        case .imported(let record): record.createdAt
         }
     }
 
     var duration: TimeInterval {
         switch session {
         case .recording(let record): record.duration
+        case .imported(let record): record.duration
         }
     }
 
