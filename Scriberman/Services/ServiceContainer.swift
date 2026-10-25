@@ -39,9 +39,12 @@ struct ServiceContainer {
         let speakerEmbeddingStore = SpeakerEmbeddingStore(modelContainer: modelContainer)
         let workspaceService = WorkspaceService(bookmarkStore: bookmarkStore)
         let transcriptionService = TranscriptionService(speakerEmbeddingStore: speakerEmbeddingStore)
-        let retranscriptionService = RetranscriptionService(transcriptionService: transcriptionService)
-        let audioImportService = AudioImportService(retranscriptionService: retranscriptionService)
         let sessionJobs = SessionJobs()
+        let retranscriptionService = RetranscriptionService(
+            transcriptionService: transcriptionService,
+            sessionJobs: sessionJobs
+        )
+        let audioImportService = AudioImportService(retranscriptionService: retranscriptionService)
         let recordingFinalizer = RecordingFinalizer(
             mixdownCoordinator: RecordingMixdownCoordinator(
                 workspaceService: workspaceService,

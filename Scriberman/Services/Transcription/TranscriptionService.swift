@@ -122,6 +122,7 @@ actor TranscriptionService: TranscriptionServiceProtocol {
         } catch {
             throw TranscriptionError.failedToTranscribe("M4A extraction failed - \(error.localizedDescription)")
         }
+        try Task.checkCancellation()
 
         let sharedEngines = makeSharedPassEngines()
         async let micResult = transcribePassFromSamples(

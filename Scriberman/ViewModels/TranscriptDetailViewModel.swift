@@ -11,6 +11,8 @@ final class TranscriptDetailViewModel {
     private let store: SpeakerEmbeddingStore?
     private let markdownRenderer = MarkdownRenderer()
     private let saveContext: @MainActor (ModelContext) throws -> Void
+    /// The sessions' background jobs: a delete cancels a transformation and waits for it.
+    private let sessionJobs: SessionJobs
 
     let session: any TranscribableSession
 
@@ -49,7 +51,8 @@ final class TranscriptDetailViewModel {
         promptStore: AIPromptStore = AIPromptStore(),
         store: SpeakerEmbeddingStore? = nil,
         transcript: Transcript? = nil,
-        saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() }
+        saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() },
+        sessionJobs: SessionJobs = SessionJobs()
     ) {
         self.session = session
         self.aiProviderService = aiProviderService
@@ -58,6 +61,7 @@ final class TranscriptDetailViewModel {
         self.shownTranscript = transcript
         self.blocks = transcript.map(TranscriptGrouper.makeBlocks(from:)) ?? []
         self.saveContext = saveContext
+        self.sessionJobs = sessionJobs
     }
 
     var displayedTranscript: Transcript? {
@@ -216,8 +220,26 @@ final class TranscriptDetailViewModel {
         runningTransformationSessionIDs.insert(sessionID)
         defer { runningTransformationSessionIDs.remove(sessionID) }
 
+        // The request runs in a task of its own, so a delete of the session cancels it and waits
+        // for it.
+        let generation = sessionJobs.generation(of: sessionID)
+        let aiProviderService = aiProviderService
+        let outcome = await sessionJobs.run(sessionID) { _ in
+            do {
+                return Result<AITransformationResult, any Error>.success(
+                    try await aiProviderService.performTransformation(request)
+                )
+            } catch {
+                return .failure(error)
+            }
+        }
+        guard sessionJobs.mayWrite(generation) else {
+            Self.logger.notice("Transformation for session \(sessionID, privacy: .public) not saved: the session was deleted.")
+            return
+        }
+
         do {
-            let result = try await aiProviderService.performTransformation(request)
+            let result = try outcome.get()
 
             let transformation = AITransformation(
                 promptName: result.promptName,

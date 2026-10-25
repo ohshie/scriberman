@@ -177,6 +177,8 @@ struct TranscriptionPassRunner: @unchecked Sendable {
         var globalTokenTimings: [TokenTiming] = []
         var allASRTexts: [String] = []
         for speechSegment in speechSegments {
+            // A cancelled pass stops between chunks; the chunk in the model is waited out.
+            try Task.checkCancellation()
             let startIndex = max(0, Int(speechSegment.startTime * 16_000.0))
             let endIndex = min(samples.count, max(startIndex + 1, Int(speechSegment.endTime * 16_000.0)))
             guard startIndex < endIndex else {
@@ -222,6 +224,7 @@ struct TranscriptionPassRunner: @unchecked Sendable {
 
         let fullASRText = allASRTexts.joined(separator: " ")
 
+        try Task.checkCancellation()
         let diarizationResult: PassDiarizationResult
         do {
             diarizationResult = try await passEngines.diarize(samples)
@@ -238,6 +241,7 @@ struct TranscriptionPassRunner: @unchecked Sendable {
                 end: Double($0.endTimeSeconds)
             )
         }
+        try Task.checkCancellation()
         let voiceprints: [String: [Float]]
         do {
             voiceprints = try await passEngines.extractVoiceprints(samples, speakerRanges).mapValues(\.embedding)
@@ -245,6 +249,7 @@ struct TranscriptionPassRunner: @unchecked Sendable {
             throw TranscriptionError.failedToTranscribe("\(passName) pass: voiceprint extraction failed - \(error.localizedDescription)")
         }
 
+        try Task.checkCancellation()
         let speakerMapping = try await matchSpeakers(voiceprints: voiceprints)
         // The app channel's IDs carry an `app:` prefix so they never collide with the mic's.
         func finalSpeakerId(for baseId: String) -> String {

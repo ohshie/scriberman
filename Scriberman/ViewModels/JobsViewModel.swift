@@ -98,6 +98,8 @@ final class JobsViewModel {
     private let markdownRenderer: MarkdownRenderer
     private let savePanelPresenter: @MainActor (_ suggestedName: String) async -> URL?
     private let saveContext: @MainActor (ModelContext) throws -> Void
+    /// The sessions' background jobs: a delete cancels a transcription or reprocess and waits for it.
+    private let sessionJobs: SessionJobs
     private let logger = Logger(subsystem: "Scriberman", category: "JobsViewModel")
 
     // Injected post-init by AppState (same pattern as NewSessionViewModel);
@@ -116,7 +118,8 @@ final class JobsViewModel {
         transcriptExportService: TranscriptExportService = TranscriptExportService(),
         markdownRenderer: MarkdownRenderer = MarkdownRenderer(),
         savePanelPresenter: @escaping @MainActor (_ suggestedName: String) async -> URL? = JobsViewModel.defaultSavePanelPresenter(suggestedName:),
-        saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() }
+        saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() },
+        sessionJobs: SessionJobs = SessionJobs()
     ) {
         self.workspaceService = workspaceService
         self.transcriptionService = transcriptionService
@@ -126,6 +129,7 @@ final class JobsViewModel {
         self.markdownRenderer = markdownRenderer
         self.savePanelPresenter = savePanelPresenter
         self.saveContext = saveContext
+        self.sessionJobs = sessionJobs
     }
 
     func refresh() async {
@@ -454,8 +458,9 @@ final class JobsViewModel {
         let sessionID = session.id
         let modelContainer = context.container
         let pipelineSettings = currentPipelineSettings
+        let generation = sessionJobs.generation(of: sessionID)
 
-        Task {
+        let task = Task {
             do {
                 let workspace = try await workspaceService.requireAuthorizedWorkspace()
                 let transcript = try await transcriptionService.transcribe(
@@ -464,23 +469,26 @@ final class JobsViewModel {
                     workspace: workspace,
                     pipelineSettings: pipelineSettings
                 )
-                
-                // Update session on MainActor since JobsViewModel is @MainActor
-                // and session is a SwiftData model.
-                // We need to fetch it again or use the one we have if it's safe.
-                // Since we are in a @MainActor Task, we can use the original session if it's still valid.
-                
+                guard sessionJobs.mayWrite(generation) else {
+                    logger.notice("Transcript for session \(sessionID, privacy: .public) not saved: the session was deleted.")
+                    return
+                }
                 session.transcript = transcript
                 session.status = .done
                 session.errorMessage = nil
                 try? context.save()
             } catch {
+                guard sessionJobs.mayWrite(generation) else {
+                    logger.notice("Transcription for session \(sessionID, privacy: .public) stopped: the session was deleted.")
+                    return
+                }
                 logger.error("Transcription failed for session \(session.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 session.status = .error(error.localizedDescription)
                 session.errorMessage = error.localizedDescription
                 try? context.save()
             }
         }
+        sessionJobs.track(task, as: generation)
     }
 
     func retry(session: RecordingSession, context: ModelContext) {
@@ -649,9 +657,10 @@ final class JobsViewModel {
         let sessionID = session.id
         let modelContainer = context.container
         let pipelineSettings = currentPipelineSettings
+        let generation = sessionJobs.generation(of: sessionID)
 
         activeRetranscriptions += 1
-        Task {
+        let task = Task {
             defer { activeRetranscriptions -= 1 }
             do {
                 let workspace = try await workspaceService.requireAuthorizedWorkspace()
@@ -662,11 +671,14 @@ final class JobsViewModel {
                     pipelineSettings: pipelineSettings
                 )
             } catch {
+                guard sessionJobs.mayWrite(generation) else { return }
                 session.status = .error(error.localizedDescription)
                 session.errorMessage = error.localizedDescription
                 try? context.save()
             }
         }
+        // Tracked from the start, so a delete before the retranscription begins cancels it too.
+        sessionJobs.track(task, as: generation)
     }
 
     /// A session's transcript as text, for anything that takes it out of the app.
