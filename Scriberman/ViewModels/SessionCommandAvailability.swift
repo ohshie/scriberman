@@ -50,7 +50,8 @@ struct SessionCommandAvailability: Equatable {
         isRecordingRunning: Bool,
         isTranscriptShown: Bool,
         hasLoadedAudio: Bool,
-        hasFindTarget: Bool
+        hasFindTarget: Bool,
+        isSelectionInActiveWorkspace: Bool
     ) {
         var commands: Set<Command> = [.importFile]
         commands.insert(isRecordingRunning ? .stopRecording : .startRecording)
@@ -86,7 +87,11 @@ struct SessionCommandAvailability: Equatable {
         }
 
         if let status, status != .recording {
-            commands.insert(.delete)
+            // The list shows sessions of every workspace, but only the active one's folders can be
+            // removed.
+            if isSelectionInActiveWorkspace {
+                commands.insert(.delete)
+            }
             if hasLoadedAudio {
                 commands.insert(.playPause)
                 if Self.isSettled(status) {

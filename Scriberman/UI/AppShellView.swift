@@ -303,6 +303,7 @@ struct AppShellView: View {
             onExport: {
                 exportTranscript(for: session)
             },
+            onDelete: commandAvailability.isEnabled(.delete) ? { requestDeletion() } : nil,
             onRestoreOriginal: onRestoreOriginal,
             onOpenTransformation: { transformationID in
                 selectedTransformationID = transformationID
@@ -546,8 +547,26 @@ struct AppShellView: View {
             isTranscriptShown: isTranscriptShown,
             hasLoadedAudio: audioPlayerViewModel.isReady,
             // The session search field is always in the window, so Find always has a target.
-            hasFindTarget: true
+            hasFindTarget: true,
+            isSelectionInActiveWorkspace: isSelectionInActiveWorkspace
         )
+    }
+
+    /// The selected session's folder is in the active workspace. A session with no folder yet has
+    /// nothing outside it.
+    private var isSelectionInActiveWorkspace: Bool {
+        let folder: URL?
+        switch selectedSession {
+        case .recording(let session):
+            folder = URL(fileURLWithPath: session.micAudioURL).deletingLastPathComponent()
+        case .imported(let session):
+            folder = session.mixdownURL.map { URL(fileURLWithPath: $0).deletingLastPathComponent() }
+        case .pending, .none:
+            folder = nil
+        }
+        guard let folder else { return true }
+        guard let workspace = appState.workspace else { return false }
+        return JobsViewModel.isRemovableSessionFolder(folder, in: workspace)
     }
 
     /// Hands a command to the session's detail view, which shows its confirmation and result. From

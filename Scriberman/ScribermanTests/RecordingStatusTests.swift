@@ -475,8 +475,8 @@ struct RecordingStatusTests {
         #expect(shell.contains("Button(\"Delete\", role: .destructive) {\n                delete(item)"))
     }
 
-    /// The detail toolbar groups Copy and Export, Transform, and Tags with fixed spacers. Reprocess,
-    /// Restore Original and Delete are reached through the Session menu instead.
+    /// The detail toolbar groups Copy and Export, Transform, Tags, and Delete with fixed spacers.
+    /// Reprocess and Restore Original are reached through the Session menu instead.
     @Test(.tags(.sourceLint))
     func testTheDetailToolbarKeepsOnlyTheGroupedActions() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -484,11 +484,11 @@ struct RecordingStatusTests {
             contentsOf: testsDirectory.appendingPathComponent("../UI/TranscriptDetailView.swift"),
             encoding: .utf8
         )
-        #expect(detail.components(separatedBy: "ToolbarSpacer(.fixed, placement: .primaryAction)").count - 1 == 3)
+        #expect(detail.components(separatedBy: "ToolbarSpacer(.fixed, placement: .primaryAction)").count - 1 == 4)
         #expect(detail.contains("Label(\"Export\", systemImage: \"square.and.arrow.up\")"))
         #expect(!detail.contains("Label(\"Reprocess\""))
         #expect(!detail.contains("Label(\"Restore Original\""))
-        #expect(!detail.contains("Label(\"Delete\""))
+        #expect(detail.contains("Label(\"Delete\", systemImage: \"trash\")"))
         #expect(!detail.contains("role: .destructive"))
     }
 
