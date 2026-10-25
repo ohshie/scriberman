@@ -12,7 +12,7 @@ struct ContentView: View {
                 OnboardingView()
                     .frame(width: 560, height: 500)
             } else {
-                AppShellView()
+                AppShellView(sessionDeletion: appState.sessionDeletion)
             }
         }
         .onAppear {
