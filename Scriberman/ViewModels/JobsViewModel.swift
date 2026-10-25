@@ -491,27 +491,14 @@ final class JobsViewModel {
 
     /// What a deletion did, for the view to report.
     enum DeletionResult: Equatable {
-        /// The record and its folder are gone.
+        /// The record is gone, and its folder is held or removed.
         case deleted
-        /// Saving the store failed. The record and its folder are both untouched.
+        /// Saving the store failed. The record and its folder are both where they were.
         case saveFailed(String)
+        /// The session folder could not be moved into holding, so nothing was deleted.
+        case moveFailed
         /// The record is gone but its folder could not be removed.
         case filesLeft(URL)
-    }
-
-    /// Deletes a recording and everything it produced.
-    ///
-    /// The whole folder goes, not a list of known file names. That list has grown twice already —
-    /// `.timing` sidecars, then trim backups — and each addition would have leaked silently until
-    /// somebody remembered to extend it. Removing the container has no such failure mode.
-    ///
-    /// The store changes first and the disk second, so a record never points at deleted media. The
-    /// record is deleted even when the folder cannot be, so a session never becomes undeletable
-    /// because of something wrong with its path; the result then carries the folder left behind.
-    @discardableResult
-    func delete(session: RecordingSession, context: ModelContext) async -> DeletionResult {
-        let folder = URL(fileURLWithPath: session.micAudioURL).deletingLastPathComponent()
-        return await deleteRecord(session, folder: folder, context: context)
     }
 
     /// Deletes `model` from the store, then removes `folder`.
@@ -573,7 +560,7 @@ final class JobsViewModel {
     ///
     /// The area roots themselves are excluded: `recordings/` is never a session folder, and
     /// removing it would take every session with it.
-    static func isRemovableSessionFolder(_ folder: URL, in workspace: Workspace) -> Bool {
+    nonisolated static func isRemovableSessionFolder(_ folder: URL, in workspace: Workspace) -> Bool {
         let resolved = folder.standardizedFileURL.resolvingSymlinksInPath()
         return [workspace.recordingsURL, workspace.importsURL].contains { root in
             let resolvedRoot = root.standardizedFileURL.resolvingSymlinksInPath()

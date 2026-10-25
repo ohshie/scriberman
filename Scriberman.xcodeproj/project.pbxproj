@@ -87,6 +87,9 @@
 		7B2D1F6C1C3A5B0D9E4F6007 /* SessionTagLineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D1F6C1C3A5B0D9E4F6008 /* SessionTagLineView.swift */; };
 		7B2D1F6C1C3A5B0D9E4F6001 /* RecordingTag.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D1F6C1C3A5B0D9E4F6002 /* RecordingTag.swift */; };
 		7B2D1F6C1C3A5B0D9E4F6003 /* TagService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D1F6C1C3A5B0D9E4F6004 /* TagService.swift */; };
+		5E1D0C0A0000000000000006 /* SessionDeletionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1D0C0A0000000000000007 /* SessionDeletionCoordinator.swift */; };
+		5E1D0C0A0000000000000004 /* HoldingFolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1D0C0A0000000000000005 /* HoldingFolder.swift */; };
+		5E1D0C0A0000000000000002 /* SessionSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1D0C0A0000000000000003 /* SessionSnapshot.swift */; };
 		2CA0383F7E7C454EA53D43AC /* TranscriptRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBB20D2843924ADBAD0D4D25 /* TranscriptRowView.swift */; };
 		9B693FF53CA84B20B9CF2510 /* NativeSearchField.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2A28D94B39347CB97062D11 /* NativeSearchField.swift */; };
 		D250B80EF8534B979CFDB1FF /* SpeakerPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71C9878777924FCDAE9968D5 /* SpeakerPalette.swift */; };
@@ -105,6 +108,8 @@
 		2AA47A0946D44C36A800F089 /* MicStreamOutputHandlerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02FCFEC2A20E4BCF831D1E82 /* MicStreamOutputHandlerTests.swift */; };
 		0607AD184257468A97649CB4 /* UnifiedCaptureSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F896E5FC33E5481598E55D2F /* UnifiedCaptureSessionTests.swift */; };
 		7B2D1F6C1C3A5B0D9E4F6005 /* TagServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D1F6C1C3A5B0D9E4F6006 /* TagServiceTests.swift */; };
+		5E1D0C0A000000000000000A /* SessionDeletionCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1D0C0A000000000000000B /* SessionDeletionCoordinatorTests.swift */; };
+		5E1D0C0A0000000000000008 /* SessionSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1D0C0A0000000000000009 /* SessionSnapshotTests.swift */; };
 		7A1C0E5B1B2F4A0C8D3E5F09 /* CaptureAccountingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1C0E5B1B2F4A0C8D3E5F0A /* CaptureAccountingTests.swift */; };
 		7A1C0E5B1B2F4A0C8D3E5F07 /* CaptureRestartContinuityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1C0E5B1B2F4A0C8D3E5F08 /* CaptureRestartContinuityTests.swift */; };
 		7A1C0E5B1B2F4A0C8D3E5F05 /* CaptureHealthMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1C0E5B1B2F4A0C8D3E5F06 /* CaptureHealthMonitorTests.swift */; };
@@ -404,6 +409,9 @@
 		7B2D1F6C1C3A5B0D9E4F6008 /* SessionTagLineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/SessionTagLineView.swift"; sourceTree = SOURCE_ROOT; };
 		7B2D1F6C1C3A5B0D9E4F6002 /* RecordingTag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Domain/RecordingTag.swift"; sourceTree = SOURCE_ROOT; };
 		7B2D1F6C1C3A5B0D9E4F6004 /* TagService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Tags/TagService.swift"; sourceTree = SOURCE_ROOT; };
+		5E1D0C0A0000000000000007 /* SessionDeletionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Deletion/SessionDeletionCoordinator.swift"; sourceTree = SOURCE_ROOT; };
+		5E1D0C0A0000000000000005 /* HoldingFolder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Deletion/HoldingFolder.swift"; sourceTree = SOURCE_ROOT; };
+		5E1D0C0A0000000000000003 /* SessionSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Deletion/SessionSnapshot.swift"; sourceTree = SOURCE_ROOT; };
 		EBB20D2843924ADBAD0D4D25 /* TranscriptRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/TranscriptRowView.swift"; sourceTree = SOURCE_ROOT; };
 		F2A28D94B39347CB97062D11 /* NativeSearchField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/NativeSearchField.swift"; sourceTree = SOURCE_ROOT; };
 		71C9878777924FCDAE9968D5 /* SpeakerPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Helpers/SpeakerPalette.swift"; sourceTree = SOURCE_ROOT; };
@@ -422,6 +430,8 @@
 		02FCFEC2A20E4BCF831D1E82 /* MicStreamOutputHandlerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/MicStreamOutputHandlerTests.swift"; sourceTree = SOURCE_ROOT; };
 		F896E5FC33E5481598E55D2F /* UnifiedCaptureSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/UnifiedCaptureSessionTests.swift"; sourceTree = SOURCE_ROOT; };
 		7B2D1F6C1C3A5B0D9E4F6006 /* TagServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/TagServiceTests.swift"; sourceTree = SOURCE_ROOT; };
+		5E1D0C0A000000000000000B /* SessionDeletionCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/SessionDeletionCoordinatorTests.swift"; sourceTree = SOURCE_ROOT; };
+		5E1D0C0A0000000000000009 /* SessionSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/SessionSnapshotTests.swift"; sourceTree = SOURCE_ROOT; };
 		7A1C0E5B1B2F4A0C8D3E5F0A /* CaptureAccountingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/CaptureAccountingTests.swift"; sourceTree = SOURCE_ROOT; };
 		7A1C0E5B1B2F4A0C8D3E5F08 /* CaptureRestartContinuityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/CaptureRestartContinuityTests.swift"; sourceTree = SOURCE_ROOT; };
 		7A1C0E5B1B2F4A0C8D3E5F06 /* CaptureHealthMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/CaptureHealthMonitorTests.swift"; sourceTree = SOURCE_ROOT; };
@@ -718,6 +728,8 @@
 				02FCFEC2A20E4BCF831D1E82 /* MicStreamOutputHandlerTests.swift */,
 				F896E5FC33E5481598E55D2F /* UnifiedCaptureSessionTests.swift */,
 				7B2D1F6C1C3A5B0D9E4F6006 /* TagServiceTests.swift */,
+				5E1D0C0A000000000000000B /* SessionDeletionCoordinatorTests.swift */,
+				5E1D0C0A0000000000000009 /* SessionSnapshotTests.swift */,
 				7A1C0E5B1B2F4A0C8D3E5F0A /* CaptureAccountingTests.swift */,
 				7A1C0E5B1B2F4A0C8D3E5F08 /* CaptureRestartContinuityTests.swift */,
 				7A1C0E5B1B2F4A0C8D3E5F06 /* CaptureHealthMonitorTests.swift */,
@@ -972,6 +984,9 @@
 				7B2D1F6C1C3A5B0D9E4F6008 /* SessionTagLineView.swift */,
 				7B2D1F6C1C3A5B0D9E4F6002 /* RecordingTag.swift */,
 				7B2D1F6C1C3A5B0D9E4F6004 /* TagService.swift */,
+				5E1D0C0A0000000000000007 /* SessionDeletionCoordinator.swift */,
+				5E1D0C0A0000000000000005 /* HoldingFolder.swift */,
+				5E1D0C0A0000000000000003 /* SessionSnapshot.swift */,
 				EBB20D2843924ADBAD0D4D25 /* TranscriptRowView.swift */,
 				F2A28D94B39347CB97062D11 /* NativeSearchField.swift */,
 				71C9878777924FCDAE9968D5 /* SpeakerPalette.swift */,
@@ -1415,6 +1430,9 @@
 				7B2D1F6C1C3A5B0D9E4F6007 /* SessionTagLineView.swift in Sources */,
 				7B2D1F6C1C3A5B0D9E4F6001 /* RecordingTag.swift in Sources */,
 				7B2D1F6C1C3A5B0D9E4F6003 /* TagService.swift in Sources */,
+				5E1D0C0A0000000000000006 /* SessionDeletionCoordinator.swift in Sources */,
+				5E1D0C0A0000000000000004 /* HoldingFolder.swift in Sources */,
+				5E1D0C0A0000000000000002 /* SessionSnapshot.swift in Sources */,
 				2CA0383F7E7C454EA53D43AC /* TranscriptRowView.swift in Sources */,
 				9B693FF53CA84B20B9CF2510 /* NativeSearchField.swift in Sources */,
 				D250B80EF8534B979CFDB1FF /* SpeakerPalette.swift in Sources */,
@@ -1593,6 +1611,8 @@
 				2AA47A0946D44C36A800F089 /* MicStreamOutputHandlerTests.swift in Sources */,
 				0607AD184257468A97649CB4 /* UnifiedCaptureSessionTests.swift in Sources */,
 				7B2D1F6C1C3A5B0D9E4F6005 /* TagServiceTests.swift in Sources */,
+				5E1D0C0A000000000000000A /* SessionDeletionCoordinatorTests.swift in Sources */,
+				5E1D0C0A0000000000000008 /* SessionSnapshotTests.swift in Sources */,
 				7A1C0E5B1B2F4A0C8D3E5F09 /* CaptureAccountingTests.swift in Sources */,
 				7A1C0E5B1B2F4A0C8D3E5F07 /* CaptureRestartContinuityTests.swift in Sources */,
 				7A1C0E5B1B2F4A0C8D3E5F05 /* CaptureHealthMonitorTests.swift in Sources */,

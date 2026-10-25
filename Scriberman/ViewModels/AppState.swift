@@ -19,6 +19,8 @@ final class AppState {
     let permissionService: PermissionServiceProtocol
     let newSessionViewModel: NewSessionViewModel
     let jobsViewModel: JobsViewModel
+    /// Every window's deletes and restores, run one session at a time.
+    let sessionDeletion: SessionDeletionCoordinator
     let settingsViewModel: SettingsViewModel
     let updateService: UpdateService
     let menuBarSettings: MenuBarSettings
@@ -140,6 +142,7 @@ final class AppState {
             audioImportService: services.background.audioImportService,
             transcriptExportService: services.main.transcriptExportService
         )
+        self.sessionDeletion = SessionDeletionCoordinator(workspaceService: services.background.workspaceService)
         self.settingsViewModel = SettingsViewModel(
             workspaceService: services.background.workspaceService,
             modelInstallService: services.background.modelInstallService,

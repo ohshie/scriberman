@@ -9,6 +9,7 @@ struct AppShellView: View {
     @Environment(AIProviderService.self) private var aiProviderService
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.controlActiveState) private var controlActiveState
+    @Environment(\.undoManager) private var undoManager
     @Query(sort: \RecordingSession.createdAt, order: .reverse) private var recordingSessions: [RecordingSession]
     @Query(sort: \ImportedSession.createdAt, order: .reverse) private var importedSessions: [ImportedSession]
     @State private var selectedSession: JobsViewModel.SessionListItem?
@@ -30,9 +31,11 @@ struct AppShellView: View {
     @State private var transcriptFindRequest = 0
     @State private var textEditingObserver = TextEditingObserver()
     @FocusState private var isSessionListFocused: Bool
-    /// The session the delete confirmation is asking about. The toolbar, the Session menu and the
-    /// Delete key all ask through this one confirmation.
+    /// The imported session the delete confirmation is asking about. A recording is deleted without
+    /// asking, because Undo brings it back.
     @State private var sessionPendingDeletion: JobsViewModel.SessionListItem?
+    /// Keeps this window told when a session starts leaving the store, from any window.
+    @State private var removalObservation: SessionDeletionCoordinator.RemovalObservation?
     /// A Session menu command waiting for the session's detail view to carry it out.
     @State private var detailCommandRequest: DetailCommandRequest?
 
@@ -191,6 +194,7 @@ struct AppShellView: View {
         // moment the request may have become showable: it arrived, this window became key, or the
         // session it names reached this window's query.
         .onAppear { showRequestedSession() }
+        .onAppear { observeRemovals() }
         .onChange(of: appState.sessionRequest) { showRequestedSession() }
         .onChange(of: controlActiveState) { showRequestedSession() }
         .onChange(of: recordingSessions.map(\.id)) { showRequestedSession() }
@@ -340,13 +344,18 @@ struct AppShellView: View {
 
     @Environment(\.modelContext) private var modelContext
 
-    /// Asks the delete confirmation about the selected session.
+    /// Deletes the selected recording, or asks the delete confirmation about the selected imported
+    /// session.
     private func requestDeletion() {
         guard commandAvailability.isEnabled(.delete) else { return }
-        sessionPendingDeletion = selectedSession
+        if case .recording = selectedSession, let selectedSession {
+            delete(selectedSession)
+        } else {
+            sessionPendingDeletion = selectedSession
+        }
     }
 
-    /// Deletes a session the user confirmed.
+    /// Deletes a session: a recording into holding, with undo; an imported session for good.
     private func delete(_ item: JobsViewModel.SessionListItem) {
         if selectedSession?.id == item.id {
             selectedSession = nil
@@ -355,7 +364,7 @@ struct AppShellView: View {
             let result: JobsViewModel.DeletionResult
             switch item {
             case .recording(let session):
-                result = await appState.jobsViewModel.delete(session: session, context: modelContext)
+                result = await appState.sessionDeletion.delete(session, context: modelContext, undoManager: undoManager)
             case .imported(let session):
                 result = await appState.jobsViewModel.deleteImported(session: session, context: modelContext)
             case .pending:
@@ -365,7 +374,8 @@ struct AppShellView: View {
         }
     }
 
-    /// Reports a deletion. A failed save leaves the session in place, so its row is selected again.
+    /// Reports a deletion. A failed save or move leaves the session in place, so its row is selected
+    /// again.
     private func handleDeletion(_ result: JobsViewModel.DeletionResult, of item: JobsViewModel.SessionListItem?) {
         switch result {
         case .deleted:
@@ -373,8 +383,22 @@ struct AppShellView: View {
         case .saveFailed(let reason):
             selectedSession = item
             storeFailureAlert = .deletionFailed(reason)
+        case .moveFailed:
+            selectedSession = item
+            storeFailureAlert = .folderNotMoved
         case .filesLeft(let folder):
             storeFailureAlert = .filesLeft(folder.path)
+        }
+    }
+
+    /// Drops the selection, and with it playback, when the selected recording starts leaving the
+    /// store — deleted or redone from this window or another.
+    private func observeRemovals() {
+        guard removalObservation == nil else { return }
+        removalObservation = appState.sessionDeletion.observeRemovals { sessionID in
+            guard case .recording(let session) = selectedSession, session.id == sessionID else { return }
+            audioPlayerViewModel.stop()
+            selectedSession = nil
         }
     }
 
@@ -733,6 +757,7 @@ struct AppShellView: View {
 /// The failures where the store and the disk could disagree, as the user is told about them.
 private enum StoreFailureAlert: Equatable {
     case deletionFailed(String)
+    case folderNotMoved
     case filesLeft(String)
     case importFailed([String])
     case transcriptNotSaved(Int)
@@ -740,7 +765,7 @@ private enum StoreFailureAlert: Equatable {
 
     var title: String {
         switch self {
-        case .deletionFailed: "Deletion Failed"
+        case .deletionFailed, .folderNotMoved: "Deletion Failed"
         case .filesLeft: "Files Left on Disk"
         case .importFailed: "Import Failed"
         case .transcriptNotSaved: "Transcript Not Fully Saved"
@@ -752,6 +777,8 @@ private enum StoreFailureAlert: Equatable {
         switch self {
         case .deletionFailed(let reason):
             "Scriberman could not save the change, so nothing was deleted. \(reason)"
+        case .folderNotMoved:
+            "Scriberman could not move the session folder, so the session was not deleted."
         case .filesLeft(let path):
             "The session was deleted, but its folder could not be removed: \(path)"
         case .importFailed(let fileNames):
