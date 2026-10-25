@@ -3,8 +3,9 @@ import SwiftUI
 struct FlowingWaveView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    let level: Float
-    var appLevel: Float = 0
+    /// Read on each drawn frame. The levels change outside observation, so the timeline drives
+    /// every redraw.
+    let levelBox: MeterLevelBox
     let showAppWave: Bool
     let isRecording: Bool
 
@@ -40,7 +41,9 @@ struct FlowingWaveView: View {
     private static let appWaveColor = Color(red: 0.85, green: 0.35, blue: 0.19)
 
     var body: some View {
-        TimelineView(.animation(paused: reduceMotion)) { timelineContext in
+        // With Reduce Motion the wave has no phase motion or breathing but still follows the
+        // levels, so the timeline keeps running at a low rate instead of pausing.
+        TimelineView(.animation(minimumInterval: reduceMotion ? 0.1 : nil)) { timelineContext in
             Canvas { graphicsContext, size in
                 guard size.width > 0, size.height > 0 else {
                     return
@@ -49,8 +52,8 @@ struct FlowingWaveView: View {
                 let now = timelineContext.date.timeIntervalSinceReferenceDate
                 let deltaTime = smoothing.consumeDelta(now: now)
 
-                let micTarget = isRecording ? WaveBallistics.perceptualLevel(fromRMS: level) : 0
-                let appTarget = isRecording ? WaveBallistics.perceptualLevel(fromRMS: appLevel) : 0
+                let micTarget = isRecording ? WaveBallistics.perceptualLevel(fromRMS: levelBox.mic) : 0
+                let appTarget = isRecording ? WaveBallistics.perceptualLevel(fromRMS: levelBox.app) : 0
                 let mic = CGFloat(reduceMotion ? micTarget : smoothing.mic.step(target: micTarget, deltaTime: deltaTime))
                 let app = CGFloat(reduceMotion ? appTarget : smoothing.app.step(target: appTarget, deltaTime: deltaTime))
 
@@ -150,6 +153,13 @@ struct FlowingWaveView: View {
         let component3 = 0.3 * sin((2.5 * Double.pi * ratio) + (0.7 * phase))
         return (component1 + component2 + component3) / 1.7
     }
+}
+
+/// Latest audio levels, written by the recording monitor and read by the wave's Canvas. A plain
+/// reference type so writes reach the drawing without SwiftUI invalidation.
+final class MeterLevelBox {
+    var mic: Float = 0
+    var app: Float = 0
 }
 
 // Reference type so the Canvas draw closure can advance smoothing state

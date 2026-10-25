@@ -173,15 +173,14 @@ struct ActiveRecordingDetailView: View {
     }
 }
 
-/// The wave meter. Its own view so the levels, written on every monitor pass, are read here and
-/// not in the recording view's body, which holds the live transcript.
+/// The wave meter. It hands the level box to the wave, which reads the levels when it draws, so
+/// the monitor's writes on every pass invalidate no view.
 private struct RecordingMeterView: View {
     let viewModel: NewSessionViewModel
 
     var body: some View {
         FlowingWaveView(
-            level: viewModel.micAudioLevel,
-            appLevel: viewModel.appAudioLevel,
+            levelBox: viewModel.meterLevels,
             showAppWave: viewModel.recordAppAudio,
             isRecording: true
         )
