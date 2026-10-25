@@ -10,7 +10,7 @@ import SwiftData
 final class NewSessionViewModel {
     enum State {
         case idle
-        case recording(duration: TimeInterval, level: Float)
+        case recording
     }
 
     private let workspaceService: WorkspaceServiceProtocol
@@ -55,6 +55,9 @@ final class NewSessionViewModel {
     // only app audio is loud, so views get each source's level individually.
     private(set) var micAudioLevel: Float = 0
     private(set) var appAudioLevel: Float = 0
+    /// Whole seconds since the current recording started. Kept apart from `state` and published
+    /// only when the second changes, so the monitor's 50 ms ticks reach the timer and nothing else.
+    private(set) var elapsedTime: TimeInterval = 0
     var isIdle: Bool {
         if case .idle = state {
             return true
@@ -456,7 +459,8 @@ final class NewSessionViewModel {
             activeRecordingSessionID = recordingSessionID
             unsavedSegmentIDs = []
             unsavedTranscriptSegmentCount = 0
-            state = .recording(duration: 0, level: 0)
+            elapsedTime = 0
+            state = .recording
             liveSegments = []
             // The idle prompt only applies to mic + app sessions.
             isIdlePromptApplicable = selectedAppProcessID != nil
@@ -822,8 +826,10 @@ final class NewSessionViewModel {
                 appAudioLevel = levels.app
                 let now = clock()
                 let startedAt = recordingStartedAt ?? now
-                let duration = now.timeIntervalSince(startedAt)
-                state = .recording(duration: duration, level: max(levels.mic, levels.app))
+                let wholeSeconds = now.timeIntervalSince(startedAt).rounded(.down)
+                if wholeSeconds != elapsedTime {
+                    elapsedTime = wholeSeconds
+                }
 
                 await evaluateIdlePrompt(recordingStartedAt: startedAt)
                 await evaluateCaptureHealth(workspace: workspace, context: context)

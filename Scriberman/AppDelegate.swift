@@ -300,8 +300,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             appState.audioDeviceService.refreshDevices()
             appState.appAudioService.refreshRunningApps()
             addIdleItems(to: menu)
-        case let .recording(duration, _):
-            addRecordingItems(to: menu, duration: duration)
+        case .recording:
+            addRecordingItems(to: menu, duration: appState.newSessionViewModel.elapsedTime)
         }
     }
 

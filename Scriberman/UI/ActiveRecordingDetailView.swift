@@ -135,8 +135,8 @@ struct ActiveRecordingDetailView: View {
     }
 
     private var currentDuration: TimeInterval {
-        if case let .recording(duration, _) = viewModel.state {
-            return duration
+        if case .recording = viewModel.state {
+            return viewModel.elapsedTime
         }
 
         return session.duration
