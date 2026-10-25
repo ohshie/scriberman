@@ -1,6 +1,7 @@
 import CoreAudio
 import Foundation
 import Observation
+import SwiftData
 
 enum OnboardingStep: Int, CaseIterable {
     case screenRecording
@@ -37,6 +38,8 @@ final class AppState {
     private var isChangingWorkspace = false
     private let prepareDictationHandler: ((Workspace) async -> Void)?
     private let registerHotkeyHandler: (() -> Void)?
+    /// The store the deletion sweep checks held sessions against.
+    @ObservationIgnored private let modelContext: ModelContext?
 
     let dictationService: DictationService
     let hotkeyRegistrar = HotkeyRegistrar()
@@ -110,10 +113,13 @@ final class AppState {
         restoreWorkspaceHandler: (() async throws -> Workspace)? = nil,
         setWorkspaceHandler: ((URL) async throws -> Workspace)? = nil,
         prepareDictationHandler: ((Workspace) async -> Void)? = nil,
-        registerHotkeyHandler: (() -> Void)? = nil
+        registerHotkeyHandler: (() -> Void)? = nil,
+        sessionDeletion: SessionDeletionCoordinator? = nil,
+        modelContext: ModelContext? = nil
     ) {
         self.prepareDictationHandler = prepareDictationHandler
         self.registerHotkeyHandler = registerHotkeyHandler
+        self.modelContext = modelContext
         self.mainServices = services.main
         self.backgroundServices = services.background
         self.permissionService = services.main.permissionService
@@ -142,7 +148,7 @@ final class AppState {
             audioImportService: services.background.audioImportService,
             transcriptExportService: services.main.transcriptExportService
         )
-        self.sessionDeletion = SessionDeletionCoordinator(
+        self.sessionDeletion = sessionDeletion ?? SessionDeletionCoordinator(
             workspaceService: services.background.workspaceService,
             sessionJobs: services.background.sessionJobs
         )
@@ -319,7 +325,9 @@ final class AppState {
 
         await settingsViewModel.refresh()
 
-        if workspace != nil {
+        if let workspace {
+            // Before recovery, which must never see a session a crash left half deleted.
+            await activateDeletion(in: workspace)
             let recovery = backgroundServices.recoveryService
             Task { await recovery.sweepIncompleteSessions() }
         }
@@ -367,7 +375,8 @@ final class AppState {
     var isWorkspaceChangeAllowed: Bool {
         guard !isChangingWorkspace, newSessionViewModel.isIdle,
               dictationService.state == .idle || dictationService.state == .prewarming,
-              !jobsViewModel.isImporting, !jobsViewModel.isRetranscribing else { return false }
+              !jobsViewModel.isImporting, !jobsViewModel.isRetranscribing,
+              !sessionDeletion.hasOperationInProgress else { return false }
         switch settingsViewModel.bundlePhase {
         case .downloading, .warmingUp: return false
         default: return true
@@ -408,9 +417,19 @@ final class AppState {
             workspaceErrorMessage = error.localizedDescription
             return
         }
+        if let workspace {
+            await activateDeletion(in: workspace)
+        }
 
         await settingsViewModel.refresh()
         applyReadiness()
+    }
+
+    /// Reconciles and expires `workspace`'s held sessions and runs their expiry from now on. The
+    /// coordinator's revision change refreshes the Pending deletions entry point.
+    private func activateDeletion(in workspace: Workspace) async {
+        guard let modelContext else { return }
+        await sessionDeletion.activate(workspace, context: modelContext)
     }
 
     func verifyWorkspaceForWrite() async -> Bool {

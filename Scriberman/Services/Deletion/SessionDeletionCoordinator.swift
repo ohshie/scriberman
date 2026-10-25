@@ -570,6 +570,49 @@ final class SessionDeletionCoordinator {
         hold.undoManager?.removeAllActions(withTarget: hold.target)
     }
 
+    // MARK: - Workspace activation
+
+    /// Whether a delete, restore or removal is queued or running, during which the workspace's
+    /// security scope must stay available.
+    var hasOperationInProgress: Bool {
+        !operations.isEmpty
+    }
+
+    /// Makes `workspace` the one whose held sessions expire: stops every running expiry timer, runs
+    /// the sweep, and starts a timer for each held session it leaves. Called at launch and after
+    /// every workspace switch, so held sessions of another workspace wait until it is active again.
+    func activate(_ workspace: Workspace, context: ModelContext) async {
+        expiryTimers.removeAll()
+        let isScoped = startAccess(workspace.rootURL)
+        defer { if isScoped { stopAccess(workspace.rootURL) } }
+
+        let result = HeldSessionSweep(
+            workspace: workspace,
+            context: context,
+            now: now(),
+            holdDuration: Self.holdDuration
+        ).run()
+
+        for sessionID in result.removed + result.notDeleted {
+            if let hold = holds.removeValue(forKey: sessionID) {
+                hold.undoManager?.removeAllActions(withTarget: hold.target)
+            }
+        }
+        for snapshot in result.held {
+            let sessionID = snapshot.sessionID
+            // A session deleted in this run keeps its undo entry.
+            if holds[sessionID]?.workspace != workspace {
+                holds[sessionID] = Hold(
+                    workspace: workspace,
+                    target: DeletionUndoTarget(sessionID: sessionID),
+                    undoManager: nil
+                )
+            }
+            scheduleExpiry(at: snapshot.deletedAt.addingTimeInterval(Self.holdDuration), sessionID: sessionID)
+        }
+        holdingChanges.revision += 1
+    }
+
     // MARK: - Helpers
 
     /// Queues `operation` behind every operation already queued for `sessionID`. Queued at once,

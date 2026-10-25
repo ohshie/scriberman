@@ -114,6 +114,8 @@
 		4D0400000000000000000003 /* PendingDeletionsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0400000000000000000004 /* PendingDeletionsViewModel.swift */; };
 		4D0400000000000000000005 /* PendingDeletionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0400000000000000000006 /* PendingDeletionsView.swift */; };
 		5E1D0C0500000000000000E1 /* SessionExpiryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1D0C0500000000000000E2 /* SessionExpiryTests.swift */; };
+		5E1D0C0600000000000000E1 /* HeldSessionSweepTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1D0C0600000000000000E2 /* HeldSessionSweepTests.swift */; };
+		5E1D0C0600000000000000A1 /* HeldSessionSweep.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1D0C0600000000000000A2 /* HeldSessionSweep.swift */; };
 		5E1D0C0A0000000000000008 /* SessionSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1D0C0A0000000000000009 /* SessionSnapshotTests.swift */; };
 		7A07C0DE0000000000000005 /* RecordingPipelineDeletionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A07C0DE0000000000000006 /* RecordingPipelineDeletionTests.swift */; };
 		7A07C0DE0000000000000003 /* SessionJobsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A07C0DE0000000000000004 /* SessionJobsTests.swift */; };
@@ -443,6 +445,8 @@
 		4D0400000000000000000004 /* PendingDeletionsViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PendingDeletionsViewModel.swift; sourceTree = "<group>"; };
 		4D0400000000000000000006 /* PendingDeletionsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PendingDeletionsView.swift; sourceTree = "<group>"; };
 		5E1D0C0500000000000000E2 /* SessionExpiryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/SessionExpiryTests.swift"; sourceTree = SOURCE_ROOT; };
+		5E1D0C0600000000000000E2 /* HeldSessionSweepTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/HeldSessionSweepTests.swift"; sourceTree = SOURCE_ROOT; };
+		5E1D0C0600000000000000A2 /* HeldSessionSweep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Deletion/HeldSessionSweep.swift"; sourceTree = SOURCE_ROOT; };
 		5E1D0C0A0000000000000009 /* SessionSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/SessionSnapshotTests.swift"; sourceTree = SOURCE_ROOT; };
 		7A07C0DE0000000000000006 /* RecordingPipelineDeletionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/RecordingPipelineDeletionTests.swift"; sourceTree = SOURCE_ROOT; };
 		7A07C0DE0000000000000004 /* SessionJobsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/SessionJobsTests.swift"; sourceTree = SOURCE_ROOT; };
@@ -745,6 +749,7 @@
 				5E1D0C0A000000000000000B /* SessionDeletionCoordinatorTests.swift */,
 				4D0400000000000000000002 /* PendingDeletionsViewModelTests.swift */,
 				5E1D0C0500000000000000E2 /* SessionExpiryTests.swift */,
+				5E1D0C0600000000000000E2 /* HeldSessionSweepTests.swift */,
 				5E1D0C0A0000000000000009 /* SessionSnapshotTests.swift */,
 				7A07C0DE0000000000000006 /* RecordingPipelineDeletionTests.swift */,
 				7A07C0DE0000000000000004 /* SessionJobsTests.swift */,
@@ -1006,6 +1011,7 @@
 				7B2D1F6C1C3A5B0D9E4F6004 /* TagService.swift */,
 				5E1D0C0A0000000000000007 /* SessionDeletionCoordinator.swift */,
 				5E1D0C0A0000000000000005 /* HoldingFolder.swift */,
+				5E1D0C0600000000000000A2 /* HeldSessionSweep.swift */,
 				5E1D0C0A0000000000000003 /* SessionSnapshot.swift */,
 				7A07C0DE0000000000000002 /* SessionJobs.swift */,
 				EBB20D2843924ADBAD0D4D25 /* TranscriptRowView.swift */,
@@ -1453,6 +1459,7 @@
 				7B2D1F6C1C3A5B0D9E4F6003 /* TagService.swift in Sources */,
 				5E1D0C0A0000000000000006 /* SessionDeletionCoordinator.swift in Sources */,
 				5E1D0C0A0000000000000004 /* HoldingFolder.swift in Sources */,
+				5E1D0C0600000000000000A1 /* HeldSessionSweep.swift in Sources */,
 				5E1D0C0A0000000000000002 /* SessionSnapshot.swift in Sources */,
 				7A07C0DE0000000000000001 /* SessionJobs.swift in Sources */,
 				2CA0383F7E7C454EA53D43AC /* TranscriptRowView.swift in Sources */,
@@ -1638,6 +1645,7 @@
 				5E1D0C0A000000000000000A /* SessionDeletionCoordinatorTests.swift in Sources */,
 				4D0400000000000000000001 /* PendingDeletionsViewModelTests.swift in Sources */,
 				5E1D0C0500000000000000E1 /* SessionExpiryTests.swift in Sources */,
+				5E1D0C0600000000000000E1 /* HeldSessionSweepTests.swift in Sources */,
 				5E1D0C0A0000000000000008 /* SessionSnapshotTests.swift in Sources */,
 				7A07C0DE0000000000000005 /* RecordingPipelineDeletionTests.swift in Sources */,
 				7A07C0DE0000000000000003 /* SessionJobsTests.swift in Sources */,
