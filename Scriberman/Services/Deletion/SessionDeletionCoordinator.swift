@@ -47,6 +47,58 @@ final class SessionDeletionCoordinator {
         weak var observation: RemovalObservation?
     }
 
+    /// A session a delete can hold: a recording, or a settled imported session.
+    private enum HeldSession {
+        case recording(RecordingSession)
+        case imported(ImportedSession)
+
+        static func fetch(id: UUID, in context: ModelContext) throws -> HeldSession? {
+            if let session = try RecordingSession.fetch(id: id, in: context) { return .recording(session) }
+            if let session = try ImportedSession.fetch(id: id, in: context) { return .imported(session) }
+            return nil
+        }
+
+        var id: UUID {
+            switch self {
+            case .recording(let session): session.id
+            case .imported(let session): session.id
+            }
+        }
+
+        var isInStore: Bool {
+            switch self {
+            case .recording(let session): session.modelContext != nil && !session.isDeleted
+            case .imported(let session): session.modelContext != nil && !session.isDeleted
+            }
+        }
+
+        /// The session's folder, or `nil` for an imported session with no mixdown.
+        var folder: URL? {
+            switch self {
+            case .recording(let session):
+                URL(fileURLWithPath: session.micAudioURL).deletingLastPathComponent()
+            case .imported(let session):
+                session.mixdownURL.map { URL(fileURLWithPath: $0).deletingLastPathComponent() }
+            }
+        }
+
+        func snapshot(originalFolder: URL, deletedAt: Date) -> SessionSnapshot {
+            switch self {
+            case .recording(let session):
+                SessionSnapshot(recording: session, originalFolder: originalFolder, deletedAt: deletedAt)
+            case .imported(let session):
+                SessionSnapshot(imported: session, originalFolder: originalFolder, deletedAt: deletedAt)
+            }
+        }
+
+        func delete(from context: ModelContext) {
+            switch self {
+            case .recording(let session): context.delete(session)
+            case .imported(let session): context.delete(session)
+            }
+        }
+    }
+
     private let workspaceService: WorkspaceServiceProtocol
     private let tagService: TagService
     private let saveContext: @MainActor (ModelContext) throws -> Void
@@ -101,6 +153,17 @@ final class SessionDeletionCoordinator {
 
     // MARK: - Delete
 
+    /// Whether deleting `session` holds it. An imported session that is still converting or
+    /// transcribing, or has no mixdown (an import that has not finished or that failed), is deleted
+    /// for good instead.
+    static func canHold(_ session: ImportedSession) -> Bool {
+        guard session.mixdownURL != nil else { return false }
+        switch session.status {
+        case .converting, .transcribing, .retranscribing: return false
+        default: return true
+        }
+    }
+
     /// Holds `session` and deletes its record, then registers undo with `undoManager`.
     @discardableResult
     func delete(
@@ -108,10 +171,33 @@ final class SessionDeletionCoordinator {
         context: ModelContext,
         undoManager: UndoManager?
     ) async -> JobsViewModel.DeletionResult {
+        await delete(.recording(session), context: context, undoManager: undoManager)
+    }
+
+    /// Holds a settled imported session and deletes its record, then registers undo with
+    /// `undoManager`. Refuses one that `canHold` rejects, deleting nothing.
+    @discardableResult
+    func delete(
+        _ session: ImportedSession,
+        context: ModelContext,
+        undoManager: UndoManager?
+    ) async -> JobsViewModel.DeletionResult {
+        guard Self.canHold(session) else {
+            logger.error("Refusing to hold an imported session that has not finished importing or transcribing.")
+            return .moveFailed
+        }
+        return await delete(.imported(session), context: context, undoManager: undoManager)
+    }
+
+    private func delete(
+        _ session: HeldSession,
+        context: ModelContext,
+        undoManager: UndoManager?
+    ) async -> JobsViewModel.DeletionResult {
         let sessionID = session.id
         return await enqueue(sessionID) { [self] in
             // A second window's delete of the same session, queued behind the first.
-            guard session.modelContext != nil, !session.isDeleted else {
+            guard session.isInStore else {
                 logger.notice("Skipped deleting a session that is already deleted.")
                 return .deleted
             }
@@ -133,7 +219,7 @@ final class SessionDeletionCoordinator {
     /// Snapshot, move into holding, delete the record and save, rolling back what was done when a
     /// step fails. Returns the workspace the session is held in when it worked.
     private func hold(
-        _ session: RecordingSession,
+        _ session: HeldSession,
         context: ModelContext
     ) async -> (JobsViewModel.DeletionResult, Workspace?) {
         guard let workspace = await workspaceService.currentWorkspace() else {
@@ -144,7 +230,10 @@ final class SessionDeletionCoordinator {
         defer { if isScoped { stopAccess(workspace.rootURL) } }
 
         let sessionID = session.id
-        let folder = URL(fileURLWithPath: session.micAudioURL).deletingLastPathComponent()
+        guard let folder = session.folder else {
+            logger.error("Refusing to hold a session with no folder.")
+            return (.moveFailed, nil)
+        }
         guard JobsViewModel.isRemovableSessionFolder(folder, in: workspace) else {
             logger.error("Refusing to delete a session whose folder is outside the workspace: \(folder.path, privacy: .public)")
             return (.moveFailed, nil)
@@ -152,7 +241,7 @@ final class SessionDeletionCoordinator {
         let holding = HoldingFolder(workspace: workspace)
 
         do {
-            try SessionSnapshot(recording: session, originalFolder: folder, deletedAt: now()).write(into: folder)
+            try session.snapshot(originalFolder: folder, deletedAt: now()).write(into: folder)
             try holding.hold(folder, sessionID: sessionID)
         } catch {
             logger.error("Could not hold session folder \(folder.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
@@ -160,7 +249,7 @@ final class SessionDeletionCoordinator {
             return (.moveFailed, nil)
         }
 
-        context.delete(session)
+        session.delete(from: context)
         do {
             try saveContext(context)
         } catch {
@@ -204,16 +293,18 @@ final class SessionDeletionCoordinator {
             logger.error("Could not read the snapshot of a held session: \(error.localizedDescription, privacy: .public)")
             return false
         }
-        guard case .recording(let record) = snapshot.session else { return false }
         let folder = URL(fileURLWithPath: snapshot.originalFolderPath)
 
-        // Before anything is inserted: seeding the default tag saves the context.
-        let tags: [RecordingTag]
-        do {
-            tags = try restorableTags(record.tagIDs, in: context)
-        } catch {
-            logger.error("Could not look up a restored session's tags: \(error.localizedDescription, privacy: .public)")
-            return false
+        // Before anything is inserted: seeding the default tag saves the context. Imported sessions
+        // have no tags.
+        var tags: [RecordingTag] = []
+        if case .recording(let record) = snapshot.session {
+            do {
+                tags = try restorableTags(record.tagIDs, in: context)
+            } catch {
+                logger.error("Could not look up a restored session's tags: \(error.localizedDescription, privacy: .public)")
+                return false
+            }
         }
 
         do {
@@ -223,8 +314,12 @@ final class SessionDeletionCoordinator {
             return false
         }
 
-        let session = record.insertRecording(into: context)
-        session.tags = tags
+        switch snapshot.session {
+        case .recording(let record):
+            record.insertRecording(into: context).tags = tags
+        case .imported(let record):
+            _ = record.insertImported(into: context)
+        }
         do {
             try saveContext(context)
         } catch {
@@ -286,7 +381,7 @@ final class SessionDeletionCoordinator {
             self.registerUndo(of: target, context: context, undoManager: undoManager)
             let sessionID = target.sessionID
             self.enqueue(sessionID) {
-                guard let session = try? RecordingSession.fetch(id: sessionID, in: context) else {
+                guard let session = try? HeldSession.fetch(id: sessionID, in: context) else {
                     undoManager.removeAllActions(withTarget: target)
                     self.logger.notice("Skipped redoing a delete: the session is not in the store.")
                     return

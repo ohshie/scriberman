@@ -31,8 +31,8 @@ struct AppShellView: View {
     @State private var transcriptFindRequest = 0
     @State private var textEditingObserver = TextEditingObserver()
     @FocusState private var isSessionListFocused: Bool
-    /// The imported session the delete confirmation is asking about. A recording is deleted without
-    /// asking, because Undo brings it back.
+    /// The unfinished imported session the delete confirmation is asking about. A recording or a
+    /// settled imported session is deleted without asking, because Undo brings it back.
     @State private var sessionPendingDeletion: JobsViewModel.SessionListItem?
     /// Keeps this window told when a session starts leaving the store, from any window.
     @State private var removalObservation: SessionDeletionCoordinator.RemovalObservation?
@@ -345,18 +345,22 @@ struct AppShellView: View {
 
     @Environment(\.modelContext) private var modelContext
 
-    /// Deletes the selected recording, or asks the delete confirmation about the selected imported
-    /// session.
+    /// Deletes the selected session, or asks the delete confirmation about the selected imported
+    /// session when it is unfinished, because that delete is permanent.
     private func requestDeletion() {
-        guard commandAvailability.isEnabled(.delete) else { return }
-        if case .recording = selectedSession, let selectedSession {
+        guard commandAvailability.isEnabled(.delete), let selectedSession else { return }
+        switch selectedSession {
+        case .recording:
             delete(selectedSession)
-        } else {
+        case .imported(let session) where SessionDeletionCoordinator.canHold(session):
+            delete(selectedSession)
+        case .imported, .pending:
             sessionPendingDeletion = selectedSession
         }
     }
 
-    /// Deletes a session: a recording into holding, with undo; an imported session for good.
+    /// Deletes a session: a recording or a settled imported session into holding, with undo; an
+    /// unfinished imported session for good.
     private func delete(_ item: JobsViewModel.SessionListItem) {
         if selectedSession?.id == item.id {
             selectedSession = nil
@@ -365,6 +369,8 @@ struct AppShellView: View {
             let result: JobsViewModel.DeletionResult
             switch item {
             case .recording(let session):
+                result = await appState.sessionDeletion.delete(session, context: modelContext, undoManager: undoManager)
+            case .imported(let session) where SessionDeletionCoordinator.canHold(session):
                 result = await appState.sessionDeletion.delete(session, context: modelContext, undoManager: undoManager)
             case .imported(let session):
                 result = await appState.jobsViewModel.deleteImported(session: session, context: modelContext)
@@ -392,12 +398,18 @@ struct AppShellView: View {
         }
     }
 
-    /// Drops the selection, and with it playback, when the selected recording starts leaving the
+    /// Drops the selection, and with it playback, when the selected session starts leaving the
     /// store — deleted or redone from this window or another.
     private func observeRemovals() {
         guard removalObservation == nil else { return }
         removalObservation = appState.sessionDeletion.observeRemovals { sessionID in
-            guard case .recording(let session) = selectedSession, session.id == sessionID else { return }
+            let selectedID: UUID?
+            switch selectedSession {
+            case .recording(let session): selectedID = session.id
+            case .imported(let session): selectedID = session.id
+            case .pending, .none: selectedID = nil
+            }
+            guard selectedID == sessionID else { return }
             audioPlayerViewModel.stop()
             selectedSession = nil
         }
