@@ -53,7 +53,7 @@ final class NewSessionViewModel {
     var state: State = .idle
     // Separate wave inputs (design D4): the mic wave must not bounce when
     // only app audio is loud, so the wave gets each source's level individually.
-    /// The levels sit outside observation: the wave's Canvas reads them on each frame it draws,
+    /// The levels sit outside observation: the wave reads them on each frame it draws,
     /// so a level change invalidates no view.
     @ObservationIgnored let meterLevels = MeterLevelBox()
     /// Whole seconds since the current recording started. Kept apart from `state` and published

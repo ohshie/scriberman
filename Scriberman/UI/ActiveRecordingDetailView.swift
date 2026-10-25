@@ -179,11 +179,7 @@ private struct RecordingMeterView: View {
     let viewModel: NewSessionViewModel
 
     var body: some View {
-        FlowingWaveView(
-            levelBox: viewModel.meterLevels,
-            showAppWave: viewModel.recordAppAudio,
-            isRecording: true
-        )
+        FlowingWaveView(levelBox: viewModel.meterLevels, showAppWave: viewModel.recordAppAudio)
     }
 }
 
