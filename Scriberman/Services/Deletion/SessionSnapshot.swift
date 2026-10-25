@@ -198,6 +198,12 @@ struct RecordingSessionRecord: Codable, Equatable {
         switch session.status {
         case .converting where FileManager.default.fileExists(atPath: session.micAudioURL):
             RecordingStatus.recorded.persistedValue
+        case .transcribing:
+            RecordingStatus.recorded.persistedValue
+        case .retranscribing where session.transcriptData != nil || session.retranscriptData != nil:
+            RecordingStatus.done.persistedValue
+        case .retranscribing:
+            RecordingStatus.recorded.persistedValue
         default:
             session.statusRawValue
         }

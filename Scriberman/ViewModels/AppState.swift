@@ -140,7 +140,8 @@ final class AppState {
             transcriptionService: services.background.transcriptionService,
             retranscriptionService: services.background.retranscriptionService,
             audioImportService: services.background.audioImportService,
-            transcriptExportService: services.main.transcriptExportService
+            transcriptExportService: services.main.transcriptExportService,
+            sessionJobs: services.background.sessionJobs
         )
         self.sessionDeletion = SessionDeletionCoordinator(
             workspaceService: services.background.workspaceService,

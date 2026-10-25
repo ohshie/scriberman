@@ -60,6 +60,7 @@ struct TranscriptDetailView: View {
         autoScrollEnabled: Binding<Bool>,
         transcript: Transcript?,
         store: SpeakerEmbeddingStore? = nil,
+        sessionJobs: SessionJobs,
         searchSeed: TranscriptSearchSeed? = nil,
         findRequest: Int = 0,
         isRawMarkdownShown: Bool = false,
@@ -90,7 +91,8 @@ struct TranscriptDetailView: View {
             session: session,
             aiProviderService: aiProviderService,
             store: store,
-            transcript: transcript
+            transcript: transcript,
+            sessionJobs: sessionJobs
         ))
     }
 
