@@ -142,7 +142,10 @@ final class AppState {
             audioImportService: services.background.audioImportService,
             transcriptExportService: services.main.transcriptExportService
         )
-        self.sessionDeletion = SessionDeletionCoordinator(workspaceService: services.background.workspaceService)
+        self.sessionDeletion = SessionDeletionCoordinator(
+            workspaceService: services.background.workspaceService,
+            sessionJobs: services.background.sessionJobs
+        )
         self.settingsViewModel = SettingsViewModel(
             workspaceService: services.background.workspaceService,
             modelInstallService: services.background.modelInstallService,

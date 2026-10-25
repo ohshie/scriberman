@@ -25,6 +25,7 @@ struct BackgroundServiceContainer: Sendable {
     let speakerEmbeddingStore: SpeakerEmbeddingStore
     let recoveryService: RecordingRecoveryService
     let recordingFinalizer: RecordingFinalizer
+    let sessionJobs: SessionJobs
 }
 
 struct ServiceContainer {
@@ -40,9 +41,19 @@ struct ServiceContainer {
         let transcriptionService = TranscriptionService(speakerEmbeddingStore: speakerEmbeddingStore)
         let retranscriptionService = RetranscriptionService(transcriptionService: transcriptionService)
         let audioImportService = AudioImportService(retranscriptionService: retranscriptionService)
+        let sessionJobs = SessionJobs()
         let recordingFinalizer = RecordingFinalizer(
-            mixdownCoordinator: RecordingMixdownCoordinator(workspaceService: workspaceService, modelContainer: modelContainer),
-            screenVideoMuxer: ScreenVideoMuxer(workspaceService: workspaceService, modelContainer: modelContainer)
+            mixdownCoordinator: RecordingMixdownCoordinator(
+                workspaceService: workspaceService,
+                modelContainer: modelContainer,
+                sessionJobs: sessionJobs
+            ),
+            screenVideoMuxer: ScreenVideoMuxer(
+                workspaceService: workspaceService,
+                modelContainer: modelContainer,
+                sessionJobs: sessionJobs
+            ),
+            sessionJobs: sessionJobs
         )
         let appAudioSettings = AppAudioSettings()
 
@@ -80,7 +91,8 @@ struct ServiceContainer {
                     modelContainer: modelContainer,
                     isFinalizing: { recordingFinalizer.isFinalizing(sessionID: $0) }
                 ),
-                recordingFinalizer: recordingFinalizer
+                recordingFinalizer: recordingFinalizer,
+                sessionJobs: sessionJobs
             )
         )
     }

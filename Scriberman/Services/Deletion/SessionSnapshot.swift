@@ -152,7 +152,7 @@ struct RecordingSessionRecord: Codable, Equatable {
         mixdownURL = session.mixdownURL
         title = session.title
         capturedAppName = session.capturedAppName
-        statusRawValue = session.statusRawValue
+        statusRawValue = Self.heldStatusRawValue(of: session)
         errorMessage = session.errorMessage
         screenCaptureWarning = session.screenCaptureWarning
         appAudioMissing = session.appAudioMissing
@@ -188,6 +188,18 @@ struct RecordingSessionRecord: Codable, Equatable {
                 audioSourceRawValue: segment.audioSourceRawValue,
                 isFinal: segment.isFinal
             )
+        }
+    }
+
+    /// The status a held recording is stored with: one the user can act on once it is restored,
+    /// since a delete stops whatever job the status names. This is the one stored value that does
+    /// not round-trip exactly.
+    private static func heldStatusRawValue(of session: RecordingSession) -> String {
+        switch session.status {
+        case .converting where FileManager.default.fileExists(atPath: session.micAudioURL):
+            RecordingStatus.recorded.persistedValue
+        default:
+            session.statusRawValue
         }
     }
 

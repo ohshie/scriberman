@@ -45,17 +45,23 @@ struct AppShellView: View {
         _pendingDeletions = State(initialValue: PendingDeletionsViewModel(coordinator: sessionDeletion))
     }
 
+    /// The recordings in the store, less any being deleted: a delete waits for the session's jobs
+    /// to stop before its record goes, and the session leaves the list at once.
+    private var listedRecordingSessions: [RecordingSession] {
+        recordingSessions.filter { !appState.sessionDeletion.isRemoving($0.id) }
+    }
+
     var body: some View {
         NavigationSplitView {
             JobsView(
                 viewModel: appState.jobsViewModel,
                 items: appState.jobsViewModel.sessionItems(
-                    recordingSessions: recordingSessions,
+                    recordingSessions: listedRecordingSessions,
                     importedSessions: importedSessions,
                     preserving: selectedSession
                 ),
                 pendingSession: appState.pendingSession,
-                totalSessionCount: recordingSessions.count + importedSessions.count,
+                totalSessionCount: listedRecordingSessions.count + importedSessions.count,
                 isNewSessionIdle: appState.newSessionViewModel.isIdle,
                 selection: $selectedSession,
                 onDiscardPendingSession: { appState.discardPendingSession() },

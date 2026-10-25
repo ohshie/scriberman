@@ -1,6 +1,7 @@
 import Accessibility
 import Combine
 import Foundation
+import Observation
 import OSLog
 import SwiftData
 
@@ -14,6 +15,7 @@ import SwiftData
 /// folder, moves the folder into the workspace's holding folder and deletes the record. Undo moves
 /// the folder back and inserts a record built from the snapshot.
 @MainActor
+@Observable
 final class SessionDeletionCoordinator {
     static let deletedAnnouncement = "Session deleted"
     static let restoredAnnouncement = "Session restored"
@@ -126,6 +128,8 @@ final class SessionDeletionCoordinator {
     private let startAccess: @MainActor (URL) -> Bool
     private let stopAccess: @MainActor (URL) -> Void
     private let scheduleExpiry: @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> AnyCancellable
+    /// The session's background jobs, which a delete cancels and waits for before anything moves.
+    let sessionJobs: SessionJobs
     private let logger = Logger(subsystem: "Scriberman", category: "SessionDeletion")
 
     private var holds: [UUID: Hold] = [:]
@@ -135,6 +139,8 @@ final class SessionDeletionCoordinator {
     let holdingChanges = HoldingChanges()
     /// The pending expiry of each session this run holds. Replacing one cancels it.
     private var expiryTimers: [UUID: AnyCancellable] = [:]
+    /// Sessions on their way out: off the list from the start of a delete, while their jobs stop.
+    private var removingSessionIDs: Set<UUID> = []
 
     init(
         workspaceService: WorkspaceServiceProtocol,
@@ -145,7 +151,8 @@ final class SessionDeletionCoordinator {
         startAccess: @escaping @MainActor (URL) -> Bool = { $0.startAccessingSecurityScopedResource() },
         stopAccess: @escaping @MainActor (URL) -> Void = { $0.stopAccessingSecurityScopedResource() },
         scheduleExpiry: @escaping @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> AnyCancellable
-            = SessionDeletionCoordinator.schedule
+            = SessionDeletionCoordinator.schedule,
+        sessionJobs: SessionJobs = SessionJobs()
     ) {
         self.workspaceService = workspaceService
         self.tagService = tagService
@@ -155,6 +162,13 @@ final class SessionDeletionCoordinator {
         self.startAccess = startAccess
         self.stopAccess = stopAccess
         self.scheduleExpiry = scheduleExpiry
+        self.sessionJobs = sessionJobs
+    }
+
+    /// Whether `sessionID` is being deleted: off the list while its jobs stop, before its record
+    /// goes.
+    func isRemoving(_ sessionID: UUID) -> Bool {
+        removingSessionIDs.contains(sessionID)
     }
 
     static func postAnnouncement(_ text: String) {
@@ -254,12 +268,19 @@ final class SessionDeletionCoordinator {
         }.value
     }
 
-    /// Snapshot, move into holding, delete the record and save, rolling back what was done when a
-    /// step fails. Returns the workspace the session is held in when it worked.
+    /// Stop the session's jobs, then snapshot, move into holding, delete the record and save,
+    /// rolling back what was done when a step fails. Returns the workspace the session is held in
+    /// when it worked.
     private func hold(
         _ session: HeldSession,
         context: ModelContext
     ) async -> (JobsViewModel.DeletionResult, Workspace?) {
+        let sessionID = session.id
+        // Off the list at once; nothing moves until every job of the session has stopped.
+        removingSessionIDs.insert(sessionID)
+        defer { removingSessionIDs.remove(sessionID) }
+        await sessionJobs.cancelAndDrain(sessionID)
+
         guard let workspace = await workspaceService.currentWorkspace() else {
             logger.error("Refusing to delete a session with no workspace available.")
             return (.moveFailed, nil)
@@ -267,7 +288,6 @@ final class SessionDeletionCoordinator {
         let isScoped = startAccess(workspace.rootURL)
         defer { if isScoped { stopAccess(workspace.rootURL) } }
 
-        let sessionID = session.id
         guard let folder = session.folder else {
             logger.error("Refusing to hold a session with no folder.")
             return (.moveFailed, nil)
