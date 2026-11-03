@@ -376,6 +376,25 @@ struct TranscriptionPassRunnerTests {
     }
 
     @Test
+    func productionPassEnginesBuildTheOfflineDiarizerWithExclusiveSegments() async throws {
+        let receivedConfigs = OSAllocatedUnfairLock(initialState: [OfflineDiarizerConfig]())
+        let makePassEngines = TranscriptionPassRunner.defaultMakePassEngines(
+            modelPathResolver: ModelPathResolver(),
+            makeOfflineDiarizerManager: { config in
+                receivedConfigs.withLock { $0.append(config) }
+                return OfflineDiarizerManager(config: config)
+            }
+        )
+
+        // No models are installed in the workspace, so loading throws after the manager is built.
+        _ = try? await makePassEngines(try makeWorkspace())
+
+        let configs = receivedConfigs.withLock { $0 }
+        #expect(configs.count == 1)
+        #expect(configs.first?.postProcessing.exclusiveSegments == true)
+    }
+
+    @Test
     func confidenceGateDiscardsLowConfidenceSegments() async throws {
         var settings = LiveTranscriptionPipelineSettings.defaults
         settings.asrConfidenceGate = 0.5
