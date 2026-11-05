@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import Testing
 @testable import Scriberman
 
@@ -16,6 +17,13 @@ final class ExtensionAPIFixture {
     /// When set, the prompts route waits on this before it answers, to stand for a suspension.
     var promptsGate: (@MainActor () async -> Void)?
     let peer = ExtensionAPIPeer(endpoint: nil)
+    /// The sessions the sessions routes read.
+    lazy var sessionContainer: ModelContainer = try! ModelContainer(
+        for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self, RecordingTag.self,
+        configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+    )
+    lazy var sessionContext = ModelContext(sessionContainer)
+    var renderTranscript: @MainActor (any TranscribableSession) -> String? = { _ in nil }
 
     lazy var store = ExtensionAPIPairingStore(defaults: defaults, keychain: keychain)
     lazy var handler: ExtensionAPIHandler = {
@@ -28,7 +36,11 @@ final class ExtensionAPIFixture {
             loadPrompts: { [unowned self] in
                 await promptsGate?()
                 return prompts
-            }
+            },
+            sessions: ExtensionAPISessionCatalog(
+                context: sessionContext,
+                renderTranscript: { [unowned self] in renderTranscript($0) }
+            )
         )
         handler.pairingPresenter = presenter
         return handler

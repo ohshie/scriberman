@@ -17,7 +17,8 @@ struct ExtensionAPIHandlerTests {
                 keychain: MockKeychainStore()
             ),
             callerVerifier: FakeCallerVerifier(),
-            loadPrompts: { [] }
+            loadPrompts: { [] },
+            sessions: ExtensionAPISessionCatalog(context: nil, renderTranscript: { _ in nil })
         )
     }
 
