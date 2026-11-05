@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import Testing
 @testable import Scriberman
 
@@ -16,6 +17,17 @@ final class ExtensionAPIFixture {
     /// When set, the prompts route waits on this before it answers, to stand for a suspension.
     var promptsGate: (@MainActor () async -> Void)?
     let peer = ExtensionAPIPeer(endpoint: nil)
+    let aiService = MockAIProviderService()
+    let sessionJobs = SessionJobs()
+    lazy var container = try! ModelContainer(
+        for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+        configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+    )
+    lazy var runner = AITransformationRunner(
+        aiProviderService: aiService,
+        promptStore: AIPromptStore(defaults: defaults),
+        sessionJobs: sessionJobs
+    )
 
     lazy var store = ExtensionAPIPairingStore(defaults: defaults, keychain: keychain)
     lazy var handler: ExtensionAPIHandler = {
@@ -28,7 +40,9 @@ final class ExtensionAPIFixture {
             loadPrompts: { [unowned self] in
                 await promptsGate?()
                 return prompts
-            }
+            },
+            modelContext: container.mainContext,
+            transformationRunner: runner
         )
         handler.pairingPresenter = presenter
         return handler

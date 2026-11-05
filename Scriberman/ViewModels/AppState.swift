@@ -130,11 +130,12 @@ final class AppState {
         self.mainServices = services.main
         self.backgroundServices = services.background
         self.permissionService = services.main.permissionService
-        self.aiTransformationRunner = AITransformationRunner(
+        let aiTransformationRunner = AITransformationRunner(
             aiProviderService: services.main.aiProviderService,
             promptStore: AIPromptStore(),
             sessionJobs: services.background.sessionJobs
         )
+        self.aiTransformationRunner = aiTransformationRunner
         let developerSettings = DeveloperSettings()
         self.developerSettings = developerSettings
         self.updateService = updateService ?? .live(developerSettings: developerSettings)
@@ -197,7 +198,9 @@ final class AppState {
                 port: { extensionAPISettings.port },
                 pairingStore: ExtensionAPIPairingStore(keychain: LiveKeychainStore()),
                 callerVerifier: AlwaysAllowCallerVerifier(),
-                loadPrompts: { AIPromptStore().loadPrompts() }
+                loadPrompts: { AIPromptStore().loadPrompts() },
+                modelContext: modelContext,
+                transformationRunner: aiTransformationRunner
             )
         )
         self.captureCoordinator = CaptureCoordinator(
