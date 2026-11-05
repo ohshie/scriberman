@@ -71,14 +71,27 @@ final class ExtensionAPIRecording {
     }
 
     func start(body: Data) async -> HTTPResponse {
-        let choice: CaptureChoice
         switch makeChoice(from: body) {
-        case .success(let made):
-            choice = made
+        case .success(let choice):
+            return await start(choice)
         case .failure(let refusal):
             return refusal.response
         }
-        return started(await coordinator.start(choice, origin: .api, context: context))
+    }
+
+    /// True while no recording is starting, running or stopping.
+    var isIdle: Bool {
+        coordinator.phase == .idle
+    }
+
+    /// Starts `choice` through the capture coordinator. `onStarted` runs once capture has started,
+    /// before the response is made.
+    func start(_ choice: CaptureChoice, onStarted: () -> Void = {}) async -> HTTPResponse {
+        let result = await coordinator.start(choice, origin: .api, context: context)
+        if case .success = result {
+            onStarted()
+        }
+        return started(result)
     }
 
     func stop() async -> HTTPResponse {
@@ -100,7 +113,7 @@ final class ExtensionAPIRecording {
         let tagIds: [String]?
     }
 
-    private struct Refusal: Error {
+    struct Refusal: Error {
         let response: HTTPResponse
 
         init(_ code: ExtensionAPIErrorCode, status: Int = 400) {
@@ -110,7 +123,7 @@ final class ExtensionAPIRecording {
 
     /// The capture choice a start body asks for, checked against what Scriberman lists now and
     /// against the tag rules, so an invalid choice is refused before any capture begins.
-    private func makeChoice(from body: Data) -> Result<CaptureChoice, Refusal> {
+    func makeChoice(from body: Data) -> Result<CaptureChoice, Refusal> {
         guard let request = try? JSONDecoder().decode(StartRequest.self, from: body) else {
             return .failure(Refusal(.invalidRequest))
         }
