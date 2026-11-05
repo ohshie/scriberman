@@ -206,6 +206,7 @@ struct HTTPResponse: Equatable, Sendable {
         case 408: "Request Timeout"
         case 409: "Conflict"
         case 413: "Content Too Large"
+        case 415: "Unsupported Media Type"
         case 500: "Internal Server Error"
         case 503: "Service Unavailable"
         case 507: "Insufficient Storage"

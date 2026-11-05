@@ -617,6 +617,53 @@ final class JobsViewModel {
         return failedImportURLs
     }
 
+    /// Imports one file and returns the new session's id once the session is saved. Conversion
+    /// and transcription go on after it returns; `conversionEnded` is called once conversion has
+    /// finished or failed, since conversion reads `url`.
+    func importAudioFile(
+        at url: URL,
+        context: ModelContext,
+        conversionEnded: @escaping @Sendable () -> Void
+    ) async throws(SingleAudioImportError) -> UUID {
+        guard Self.isAudioURL(url) else {
+            throw .notAudio
+        }
+        let workspace: Workspace
+        do {
+            workspace = try await workspaceService.requireAuthorizedWorkspace()
+        } catch {
+            logger.error("Import skipped because workspace is unavailable: \(error.localizedDescription, privacy: .public)")
+            throw .workspaceUnavailable
+        }
+
+        let modelContainer = context.container
+        let pipelineSettings = currentPipelineSettings
+        let service = audioImportService
+        let logger = logger
+        activeImports += 1
+        let outcome: Result<UUID, SingleAudioImportError> = await withCheckedContinuation { continuation in
+            let reply = SingleImportReply(continuation)
+            // Not a child task: conversion and transcription carry on after this returns.
+            Task {
+                defer { self.activeImports -= 1 }
+                do {
+                    try await service.importAudio(
+                        from: url,
+                        workspace: workspace,
+                        modelContainer: modelContainer,
+                        pipelineSettings: pipelineSettings,
+                        onRecorded: { reply.send(.success($0)) },
+                        onConversionEnded: conversionEnded
+                    )
+                } catch {
+                    logger.error("Import of \(url.lastPathComponent, privacy: .public) could not be recorded: \(error.localizedDescription, privacy: .public)")
+                    reply.send(.failure(.notRecorded))
+                }
+            }
+        }
+        return try outcome.get()
+    }
+
     func retryImported(session: ImportedSession, context: ModelContext) {
         guard session.mixdownURL != nil else {
             return
@@ -735,11 +782,43 @@ final class JobsViewModel {
            contentType.conforms(to: .audio) {
             return true
         }
+        return isAudioFileName(url.lastPathComponent)
+    }
 
-        let ext = url.pathExtension.lowercased()
+    /// Whether a file of this name is taken for audio by its extension.
+    nonisolated static func isAudioFileName(_ name: String) -> Bool {
+        let ext = (name as NSString).pathExtension.lowercased()
         guard !ext.isEmpty, let type = UTType(filenameExtension: ext) else {
             return false
         }
         return type.conforms(to: .audio)
     }
+}
+
+/// Passes the first outcome of a single-file import to the waiting caller; later ones are dropped.
+private final class SingleImportReply: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Result<UUID, SingleAudioImportError>, Never>?
+
+    init(_ continuation: CheckedContinuation<Result<UUID, SingleAudioImportError>, Never>) {
+        self.continuation = continuation
+    }
+
+    func send(_ outcome: Result<UUID, SingleAudioImportError>) {
+        let pending = lock.withLock {
+            defer { continuation = nil }
+            return continuation
+        }
+        pending?.resume(returning: outcome)
+    }
+}
+
+/// Why a single-file import did not produce a session.
+enum SingleAudioImportError: Error, Equatable, Sendable {
+    /// The file is not an audio file.
+    case notAudio
+    /// No authorized workspace to import into.
+    case workspaceUnavailable
+    /// The new session could not be saved.
+    case notRecorded
 }

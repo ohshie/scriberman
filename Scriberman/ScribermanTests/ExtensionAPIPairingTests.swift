@@ -16,6 +16,23 @@ final class ExtensionAPIFixture {
     /// When set, the prompts route waits on this before it answers, to stand for a suspension.
     var promptsGate: (@MainActor () async -> Void)?
     let peer = ExtensionAPIPeer(endpoint: nil)
+    /// Where imports are staged; removed with the fixture.
+    let stagingRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ExtensionAPIFixture-\(UUID().uuidString)", isDirectory: true)
+    /// Free space the import checks see; nil stands for a volume that can't be read.
+    var availableDiskSpace: Int64? = 1 << 40
+    /// Stands for the app's single-file import.
+    var importer: @MainActor (URL, @escaping @Sendable () -> Void) async throws(SingleAudioImportError) -> UUID = { _, _ in UUID() }
+    /// When set, creates the staged directory in place of the system's unique one.
+    var makeStagingDirectory: ((URL) throws -> URL)?
+
+    init() {
+        try? FileManager.default.createDirectory(at: stagingRoot, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: stagingRoot)
+    }
 
     lazy var store = ExtensionAPIPairingStore(defaults: defaults, keychain: keychain)
     lazy var handler: ExtensionAPIHandler = {
@@ -28,6 +45,14 @@ final class ExtensionAPIFixture {
             loadPrompts: { [unowned self] in
                 await promptsGate?()
                 return prompts
+            },
+            importAudioFile: { [unowned self] url, conversionEnded throws(SingleAudioImportError) in
+                try await importer(url, conversionEnded)
+            },
+            stagingDirectory: stagingRoot,
+            availableDiskSpace: { [unowned self] in availableDiskSpace },
+            makeStagingDirectory: { [unowned self] root in
+                try makeStagingDirectory?(root) ?? ExtensionAPIStagedUpload.makeUniqueDirectory(in: root)
             }
         )
         handler.pairingPresenter = presenter
@@ -90,6 +115,10 @@ final class ExtensionAPIFixture {
             return response
         case .admitted:
             return await handler.handle(head, body: body, peer: peer)
+        case .admittedToFile(let upload):
+            upload.write(body)
+            upload.finishWriting()
+            return await handler.handleUpload(head, upload: upload, peer: peer)
         }
     }
 

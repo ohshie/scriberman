@@ -197,7 +197,11 @@ final class AppState {
                 port: { extensionAPISettings.port },
                 pairingStore: ExtensionAPIPairingStore(keychain: LiveKeychainStore()),
                 callerVerifier: AlwaysAllowCallerVerifier(),
-                loadPrompts: { AIPromptStore().loadPrompts() }
+                loadPrompts: { AIPromptStore().loadPrompts() },
+                importAudioFile: { [jobsViewModel = self.jobsViewModel] url, conversionEnded throws(SingleAudioImportError) in
+                    guard let modelContext else { throw .workspaceUnavailable }
+                    return try await jobsViewModel.importAudioFile(at: url, context: modelContext, conversionEnded: conversionEnded)
+                }
             )
         )
         self.captureCoordinator = CaptureCoordinator(

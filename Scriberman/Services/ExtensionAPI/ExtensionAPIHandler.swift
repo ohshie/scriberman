@@ -39,6 +39,9 @@ enum ExtensionAPIErrorCode: String, Sendable, CaseIterable {
 enum ExtensionAPIAdmission: Equatable, Sendable {
     /// Read at most `bodyLimit` bytes of body, then call `handle`.
     case admitted(bodyLimit: Int)
+    /// Write the body to this staged file, then call `handleUpload`. The listener discards the
+    /// upload if the request ends before that.
+    case admittedToFile(ExtensionAPIStagedUpload)
     /// Send this response without reading the body, and close.
     case refused(HTTPResponse)
 }
@@ -49,8 +52,17 @@ protocol ExtensionAPIRequestHandling: Sendable {
     func admit(_ head: HTTPRequestHead, peer: ExtensionAPIPeer) async -> ExtensionAPIAdmission
     /// Runs the route. The listener cancels the calling task when the client disconnects.
     func handle(_ head: HTTPRequestHead, body: Data, peer: ExtensionAPIPeer) async -> HTTPResponse
+    /// Runs a route whose body was staged to a file. The handler owns `upload` from here on.
+    func handleUpload(_ head: HTTPRequestHead, upload: ExtensionAPIStagedUpload, peer: ExtensionAPIPeer) async -> HTTPResponse
     /// Called when the API stops listening, so held requests end.
     func apiDidStop() async
+}
+
+extension ExtensionAPIRequestHandling {
+    func handleUpload(_ head: HTTPRequestHead, upload: ExtensionAPIStagedUpload, peer: ExtensionAPIPeer) async -> HTTPResponse {
+        upload.discard()
+        return ExtensionAPIHandler.error(.notFoundRoute, status: 404)
+    }
 }
 
 /// Takes a parsed request and returns a response. `admit` runs every check that needs only the
@@ -73,6 +85,14 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
     private let now: @MainActor () -> Date
     private let waitForPairingExpiry: @MainActor () async -> Void
     private let loadPrompts: @MainActor () async -> [AIPrompt]
+    private let importAudioFile: ImportAudioFile
+    private let stagingDirectory: URL
+    private let availableDiskSpace: @MainActor () -> Int64?
+    private let makeStagingDirectory: @MainActor (URL) throws -> URL
+
+    /// Imports one staged file and returns the new session's id. It calls the closure it is given
+    /// once the session's conversion has finished or failed.
+    typealias ImportAudioFile = @MainActor (URL, @escaping @Sendable () -> Void) async throws(SingleAudioImportError) -> UUID
 
     /// Nonces seen per client, with the time each was seen.
     private var seenNonces: [String: Date] = [:]
@@ -97,7 +117,11 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         callerVerifier: any ExtensionAPICallerVerifier,
         now: @escaping @MainActor () -> Date = { Date() },
         waitForPairingExpiry: @escaping @MainActor () async -> Void = { try? await Task.sleep(for: .seconds(120)) },
-        loadPrompts: @escaping @MainActor () async -> [AIPrompt]
+        loadPrompts: @escaping @MainActor () async -> [AIPrompt],
+        importAudioFile: @escaping ImportAudioFile = { _, _ throws(SingleAudioImportError) in throw .workspaceUnavailable },
+        stagingDirectory: URL = FileManager.default.temporaryDirectory,
+        availableDiskSpace: (@MainActor () -> Int64?)? = nil,
+        makeStagingDirectory: @escaping @MainActor (URL) throws -> URL = { try ExtensionAPIStagedUpload.makeUniqueDirectory(in: $0) }
     ) {
         self.port = port
         self.pairingStore = pairingStore
@@ -105,6 +129,13 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         self.now = now
         self.waitForPairingExpiry = waitForPairingExpiry
         self.loadPrompts = loadPrompts
+        self.importAudioFile = importAudioFile
+        self.stagingDirectory = stagingDirectory
+        self.availableDiskSpace = availableDiskSpace ?? {
+            let values = try? stagingDirectory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            return values?.volumeAvailableCapacityForImportantUsage
+        }
+        self.makeStagingDirectory = makeStagingDirectory
     }
 
     func admit(_ head: HTTPRequestHead, peer: ExtensionAPIPeer) async -> ExtensionAPIAdmission {
@@ -152,6 +183,14 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
             let response = Self.error(.payloadTooLarge, status: 413)
             return .refused(signing?.sign(response) ?? response)
         }
+        if route == .imports {
+            switch stageImport(head) {
+            case .success(let upload):
+                return .admittedToFile(upload)
+            case .failure(let refusal):
+                return .refused(signing!.sign(refusal.response))
+            }
+        }
         return .admitted(bodyLimit: limit)
     }
 
@@ -171,6 +210,41 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
             return signing.sign(Self.error(.badSignature, status: 401))
         }
         return signing.sign(await respond(to: route, signing: signing))
+    }
+
+    func handleUpload(_ head: HTTPRequestHead, upload: ExtensionAPIStagedUpload, peer: ExtensionAPIPeer) async -> HTTPResponse {
+        // The client may have been revoked while the body arrived.
+        guard let signing = signingOfAdmittedRequest(head) else {
+            upload.discard()
+            return Self.error(.unauthorized, status: 401)
+        }
+        guard upload.bodySHA256 == signing.bodyHash else {
+            upload.discard()
+            return signing.sign(Self.error(.badSignature, status: 401))
+        }
+        guard !upload.writeFailed else {
+            upload.discard()
+            return signing.sign(Self.error(.insufficientDiskSpace, status: 507))
+        }
+        guard !Task.isCancelled else {
+            // The client is gone; nothing is sent.
+            upload.discard()
+            return Self.error(.invalidRequest, status: 400)
+        }
+        do {
+            let sessionID = try await importAudioFile(upload.fileURL) { upload.discard() }
+            return signing.sign(Self.json(ImportResponse(sessionId: "imported:\(sessionID.uuidString)"), status: 202))
+        } catch {
+            upload.discard()
+            switch error {
+            case .notAudio:
+                return signing.sign(Self.error(.notAudio, status: 415))
+            case .workspaceUnavailable:
+                return signing.sign(Self.error(.workspaceUnavailable, status: 503))
+            case .notRecorded:
+                return signing.sign(Self.error(.importNotRecorded, status: 500))
+            }
+        }
     }
 
     func apiDidStop() async {
@@ -195,6 +269,51 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
             // Each remaining route arrives with its own ticket.
             return Self.error(.notFoundRoute, status: 404)
         }
+    }
+
+    // MARK: - Imports
+
+    static let fileNameHeader = "X-Scriberman-File-Name"
+
+    private struct ImportResponse: Encodable {
+        let sessionId: String
+    }
+
+    private struct Refusal: Error {
+        let response: HTTPResponse
+    }
+
+    /// The checks an import needs before its body is read, then the staged file it is written to.
+    private func stageImport(_ head: HTTPRequestHead) -> Result<ExtensionAPIStagedUpload, Refusal> {
+        // The staged upload plus the converted audio.
+        guard let available = availableDiskSpace(), available >= 2 * Int64(head.contentLength) else {
+            return .failure(Refusal(response: Self.error(.insufficientDiskSpace, status: 507)))
+        }
+        let names = head.values(for: Self.fileNameHeader)
+        guard names.count == 1, let name = Self.validatedFileName(names[0]) else {
+            return .failure(Refusal(response: Self.error(.invalidFileName, status: 400)))
+        }
+        guard JobsViewModel.isAudioFileName(name) else {
+            return .failure(Refusal(response: Self.error(.notAudio, status: 415)))
+        }
+        do {
+            let directory = try makeStagingDirectory(stagingDirectory)
+            return .success(try ExtensionAPIStagedUpload(directory: directory, name: name))
+        } catch {
+            return .failure(Refusal(response: Self.error(.insufficientDiskSpace, status: 507)))
+        }
+    }
+
+    /// The decoded file name, or nil when it can't name a single file of its own.
+    nonisolated static func validatedFileName(_ header: String) -> String? {
+        guard let name = header.removingPercentEncoding,
+              !name.isEmpty, name != ".", name != "..",
+              !name.contains("/"), !name.contains("\0"),
+              name.utf8.count <= 255
+        else {
+            return nil
+        }
+        return name
     }
 
     private struct PromptList: Encodable {
