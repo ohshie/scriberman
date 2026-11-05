@@ -325,10 +325,23 @@ struct TranscriptionPassRunner: @unchecked Sendable {
         return speakerMapping
     }
 
-    static func defaultMakePassEngines(modelPathResolver: ModelPathResolver) -> MakePassEngines {
+    /// FluidAudio's default offline diarizer config with exclusive segments pinned, so
+    /// `TranscriptAligner` keeps receiving one speaker at a time per channel.
+    static let offlineDiarizerConfig: OfflineDiarizerConfig = {
+        var config = OfflineDiarizerConfig.default
+        config.postProcessing.exclusiveSegments = true
+        return config
+    }()
+
+    typealias MakeOfflineDiarizerManager = @Sendable (OfflineDiarizerConfig) -> OfflineDiarizerManager
+
+    static func defaultMakePassEngines(
+        modelPathResolver: ModelPathResolver,
+        makeOfflineDiarizerManager: @escaping MakeOfflineDiarizerManager = { OfflineDiarizerManager(config: $0) }
+    ) -> MakePassEngines {
         { workspace in
             let asrManager = AsrManager(config: .default)
-            let offlineDiarizerManager = OfflineDiarizerManager(config: .default)
+            let offlineDiarizerManager = makeOfflineDiarizerManager(offlineDiarizerConfig)
 
             let asrModelDirectory = try modelPathResolver.modelDirectory(for: .asrParakeetUltra, in: workspace)
             let asrModels = try await AsrModels.load(

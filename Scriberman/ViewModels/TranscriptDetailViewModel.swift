@@ -11,8 +11,8 @@ final class TranscriptDetailViewModel {
     private let store: SpeakerEmbeddingStore?
     private let markdownRenderer = MarkdownRenderer()
     private let saveContext: @MainActor (ModelContext) throws -> Void
-    /// The sessions' background jobs: a delete cancels a transformation and waits for it.
-    private let sessionJobs: SessionJobs
+    /// The app's one runner, so a session runs one transformation at a time across every window.
+    private let aiTransformationRunner: AITransformationRunner
 
     let session: any TranscribableSession
 
@@ -38,11 +38,8 @@ final class TranscriptDetailViewModel {
     var selectedTransformationID: UUID?
     var transformationErrorMessage: String?
 
-    /// Sessions with a transformation in flight. A second run for one of them is rejected.
-    private(set) var runningTransformationSessionIDs: Set<UUID> = []
-
     var isRunningTransformation: Bool {
-        runningTransformationSessionIDs.isEmpty == false
+        aiTransformationRunner.isRunning(session.id)
     }
 
     init(
@@ -52,7 +49,7 @@ final class TranscriptDetailViewModel {
         store: SpeakerEmbeddingStore? = nil,
         transcript: Transcript? = nil,
         saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() },
-        sessionJobs: SessionJobs = SessionJobs()
+        aiTransformationRunner: AITransformationRunner? = nil
     ) {
         self.session = session
         self.aiProviderService = aiProviderService
@@ -61,7 +58,11 @@ final class TranscriptDetailViewModel {
         self.shownTranscript = transcript
         self.blocks = transcript.map(TranscriptGrouper.makeBlocks(from:)) ?? []
         self.saveContext = saveContext
-        self.sessionJobs = sessionJobs
+        self.aiTransformationRunner = aiTransformationRunner ?? AITransformationRunner(
+            aiProviderService: aiProviderService,
+            promptStore: promptStore,
+            sessionJobs: SessionJobs()
+        )
     }
 
     var displayedTranscript: Transcript? {
@@ -197,63 +198,21 @@ final class TranscriptDetailViewModel {
             return
         }
 
-        let request = AITransformationRequest(
-            transcript: finalTranscriptText,
-            systemPrompt: selectedPrompt.content,
-            promptName: selectedPrompt.name,
-            modelID: aiProviderService.selectedModelID ?? ""
-        )
-        await runTransformation(request, session: session, promptID: selectedPrompt.id)
-    }
-
-    func runTransformation(
-        _ request: AITransformationRequest,
-        session: any TranscribableSession,
-        promptID: UUID?
-    ) async {
-        let sessionID = session.id
-        guard runningTransformationSessionIDs.contains(sessionID) == false else {
-            return
-        }
-
-        transformationErrorMessage = nil
-        runningTransformationSessionIDs.insert(sessionID)
-        defer { runningTransformationSessionIDs.remove(sessionID) }
-
-        // The request runs in a task of its own, so a delete of the session cancels it and waits
-        // for it.
-        let generation = sessionJobs.generation(of: sessionID)
-        let aiProviderService = aiProviderService
-        let outcome = await sessionJobs.run(sessionID) { _ in
-            do {
-                return Result<AITransformationResult, any Error>.success(
-                    try await aiProviderService.performTransformation(request)
-                )
-            } catch {
-                return .failure(error)
-            }
-        }
-        guard sessionJobs.mayWrite(generation) else {
-            Self.logger.notice("Transformation for session \(sessionID, privacy: .public) not saved: the session was deleted.")
-            return
-        }
-
+        let operationID: UUID
         do {
-            let result = try outcome.get()
-
-            let transformation = AITransformation(
-                promptName: result.promptName,
-                modelID: result.modelID,
-                resultText: result.text
-            )
-
-            var history = session.aiTransformations
-            history.append(transformation)
-            session.aiTransformations = history
-            selectedTransformationID = transformation.id
-            promptStore.setLastUsedPromptID(promptID)
+            operationID = try aiTransformationRunner.start(prompt: selectedPrompt, on: session)
         } catch {
-            transformationErrorMessage = error.localizedDescription
+            return
+        }
+        transformationErrorMessage = nil
+
+        switch await aiTransformationRunner.completion(of: operationID) {
+        case .succeeded(let transformationID):
+            selectedTransformationID = transformationID
+        case .failed(let failure):
+            transformationErrorMessage = failure.message
+        case .running, nil:
+            break
         }
     }
 

@@ -264,11 +264,28 @@ struct AppShellView: View {
     }
 
     private func sessionItem(for request: AppState.SessionRequest) -> JobsViewModel.SessionListItem? {
+        Self.sessionItem(
+            for: request,
+            pendingSession: appState.pendingSession,
+            recordingSessions: recordingSessions,
+            importedSessions: importedSessions
+        )
+    }
+
+    /// The list item a session request selects, or nil when that session is not in the list yet.
+    static func sessionItem(
+        for request: AppState.SessionRequest,
+        pendingSession: PendingSession?,
+        recordingSessions: [RecordingSession],
+        importedSessions: [ImportedSession]
+    ) -> JobsViewModel.SessionListItem? {
         switch request {
         case .pending:
-            return appState.pendingSession.map { .pending($0) }
+            return pendingSession.map { .pending($0) }
         case .recording(let sessionID):
             return recordingSessions.first { $0.id == sessionID }.map { .recording($0) }
+        case .imported(let sessionID):
+            return importedSessions.first { $0.id == sessionID }.map { .imported($0) }
         }
     }
 
@@ -279,6 +296,7 @@ struct AppShellView: View {
             if let pendingSession = appState.pendingSession, pendingSession.id == pendingItem.id {
                 NewSessionPanelView(
                     viewModel: appState.newSessionViewModel,
+                    coordinator: appState.captureCoordinator,
                     pendingSession: Binding(
                         get: { appState.pendingSession ?? pendingSession },
                         set: { appState.pendingSession = $0 }
@@ -303,6 +321,7 @@ struct AppShellView: View {
                 ActiveRecordingDetailView(
                     session: session,
                     viewModel: appState.newSessionViewModel,
+                    coordinator: appState.captureCoordinator,
                     modelContext: modelContext,
                     onTitleNotSaved: { storeFailureAlert = .titleNotSaved }
                 )
@@ -329,7 +348,7 @@ struct AppShellView: View {
             autoScrollEnabled: $transcriptAutoScrollEnabled,
             transcript: session.displayedTranscript,
             store: appState.backgroundServices.speakerEmbeddingStore,
-            sessionJobs: appState.backgroundServices.sessionJobs,
+            aiTransformationRunner: appState.aiTransformationRunner,
             searchSeed: detailNavigation.searchSeed,
             findRequest: transcriptFindRequest,
             isRawMarkdownShown: isRawMarkdownShown,
@@ -359,7 +378,7 @@ struct AppShellView: View {
                 AITransformationDetailView(
                     session: session,
                     aiProviderService: aiProviderService,
-                    sessionJobs: appState.backgroundServices.sessionJobs,
+                    aiTransformationRunner: appState.aiTransformationRunner,
                     selectedTransformationID: $selectedTransformationID
                 )
                 .toolbar {
@@ -693,16 +712,21 @@ struct AppShellView: View {
         }
 
         Task {
-            if let session = await viewModel.startRecording(title: pendingSession.title, context: modelContext) {
+            let result = await appState.captureCoordinator.start(
+                viewModel.windowChoice(title: pendingSession.title),
+                origin: .window,
+                context: modelContext
+            )
+            if case .success(let started) = result {
                 appState.discardPendingSession()
-                selectedSession = .recording(session)
+                selectedSession = .recording(started.session)
             }
         }
     }
 
     private func stopRecording() {
         Task {
-            _ = await appState.newSessionViewModel.stopRecording(context: modelContext)
+            _ = await appState.captureCoordinator.stop(context: modelContext)
         }
     }
 
@@ -801,10 +825,8 @@ struct AppShellView: View {
 
     private func exportTranscript(for session: any TranscribableSession) {
         Task { @MainActor in
-            do {
-                try await appState.jobsViewModel.exportTranscript(for: session)
-            } catch {
-                studyActionErrorMessage = error.localizedDescription
+            if case .failed(let message) = await appState.jobsViewModel.exportTranscript(for: session) {
+                studyActionErrorMessage = message
             }
         }
     }

@@ -629,7 +629,7 @@ final class JobsViewModelTests {
         session.transcript = makeTranscript()
 
         let copied = try #require(exportViewModel.renderedTranscript(for: session))
-        try await exportViewModel.exportTranscript(for: session)
+        #expect(await exportViewModel.exportTranscript(for: session) == .saved)
         let written = try String(contentsOf: outputURL, encoding: .utf8)
 
         #expect(copied == written)
@@ -661,7 +661,7 @@ final class JobsViewModelTests {
         let session = makeSession(status: RecordingStatus.done)
         session.transcript = makeTranscript()
 
-        try await exportViewModel.exportTranscript(for: session)
+        #expect(await exportViewModel.exportTranscript(for: session) == .saved)
 
         let content = try String(contentsOf: outputURL, encoding: .utf8)
         #expect(content.hasPrefix("# Session"))
@@ -687,13 +687,13 @@ final class JobsViewModelTests {
         let session = makeSession(status: RecordingStatus.done)
         session.transcript = makeTranscript()
 
-        try await exportViewModel.exportTranscript(for: session)
+        #expect(await exportViewModel.exportTranscript(for: session) == .cancelled)
 
         #expect(!(FileManager.default.fileExists(atPath: outputURL.path)))
     }
 
     @Test
-    func testExportTranscriptThrowsWhenTranscriptUnavailable() async {
+    func testExportTranscriptFailsWhenTranscriptUnavailable() async {
         let exportViewModel = JobsViewModel(
             workspaceService: workspaceService,
             transcriptionService: transcriptionService,
@@ -705,14 +705,10 @@ final class JobsViewModelTests {
 
         let session = makeSession(status: RecordingStatus.done)
 
-        do {
-            try await exportViewModel.exportTranscript(for: session)
-            Issue.record("Expected transcriptUnavailable error")
-        } catch let error as TranscriptExportError {
-            #expect(error == .transcriptUnavailable)
-        } catch {
-            Issue.record("Unexpected error: \(error)")
-        }
+        #expect(
+            await exportViewModel.exportTranscript(for: session)
+                == .failed(TranscriptExportError.transcriptUnavailable.localizedDescription)
+        )
     }
 
     // MARK: - Search

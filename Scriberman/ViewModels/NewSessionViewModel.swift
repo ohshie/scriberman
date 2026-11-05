@@ -23,7 +23,8 @@ final class NewSessionViewModel {
     private var stopTask: Task<UUID?, Never>?
     private let liveTranscriptionService: any LiveTranscribing
     private var recordingMonitorTask: Task<Void, Never>?
-    private var recordingStartedAt: Date?
+    /// When the current recording started, or nil while idle.
+    private(set) var recordingStartedAt: Date?
 
     // MARK: - Idle session prompt
 
@@ -361,8 +362,26 @@ final class NewSessionViewModel {
         appAudioService.refreshRunningApps()
     }
 
+    /// The window's current selections as one capture choice.
+    func windowChoice(title: String) -> CaptureChoice {
+        CaptureChoice(
+            title: title,
+            microphone: selectedDevice,
+            app: recordAppAudio ? selectedApp : nil,
+            displayID: effectiveCaptureDisplayID
+        )
+    }
+
+    /// Starts a recording from the window's current selections.
     @discardableResult
     func startRecording(title: String, context: ModelContext) async -> RecordingSession? {
+        await startRecording(windowChoice(title: title), context: context)?.session
+    }
+
+    /// Starts a recording of `choice`. Reads no selection from the window, so a caller's choice
+    /// cannot be changed by another caller's selections.
+    @discardableResult
+    func startRecording(_ choice: CaptureChoice, context: ModelContext) async -> CaptureStart? {
         guard liveRecordingSession == nil, stopTask == nil else { return nil }
         recordingMonitorTask?.cancel()
         recordingMonitorTask = nil
@@ -373,18 +392,23 @@ final class NewSessionViewModel {
 
         do {
             let workspace = try await workspaceService.requireAuthorizedWorkspace()
+            let windowSelectionBeforeRefresh = appAudioService.selectedApp
             appAudioService.refreshRunningApps()
 
             var selectedCapturedAppName: String?
             var selectedAppProcessID: pid_t?
-            let captureDisplayID = effectiveCaptureDisplayID
+            let captureDisplayID = choice.displayID
+            let selectedApp = resolvedApp(for: choice.app, windowSelectionBeforeRefresh: windowSelectionBeforeRefresh)
+            let selectedDevice = choice.microphone
 
-            if recordAppAudio, let selectedApp {
+            if let selectedApp {
                 selectedCapturedAppName = selectedApp.name
                 selectedAppProcessID = selectedApp.pid
             }
 
             let selectedMicDeviceID = selectedDevice?.id
+            var capturedApp = selectedApp
+            var capturedMicrophone = selectedDevice
             var startError: Error?
             var recordingSessionID: UUID?
             var fallbackMessage: String?
@@ -396,7 +420,7 @@ final class NewSessionViewModel {
                     captureDisplayID: captureDisplayID,
                     capturedAppName: selectedCapturedAppName,
                     appProcessID: selectedAppProcessID,
-                    title: title
+                    title: choice.title
                 )
             } catch {
                 startError = error
@@ -412,9 +436,10 @@ final class NewSessionViewModel {
                         captureDisplayID: captureDisplayID,
                         capturedAppName: nil,
                         appProcessID: nil,
-                        title: title
+                        title: choice.title
                     )
                     startError = nil
+                    capturedApp = nil
                 } catch {
                     startError = error
                 }
@@ -428,9 +453,11 @@ final class NewSessionViewModel {
                         captureDisplayID: captureDisplayID,
                         capturedAppName: nil,
                         appProcessID: nil,
-                        title: title
+                        title: choice.title
                     )
                     startError = nil
+                    capturedApp = nil
+                    capturedMicrophone = nil
                     if fallbackMessage == nil {
                         fallbackMessage = "Selected microphone unavailable. Falling back to system default microphone."
                     }
@@ -489,13 +516,22 @@ final class NewSessionViewModel {
             )
 
             let session = try? RecordingSession.fetch(id: recordingSessionID, in: context)
-            
+            let isScreenCaptured = captureDisplayID != nil ? await recordingService.isScreenCaptureActive() : false
+
             if let liveRecordingSession {
                 connectLiveRecordingSession(liveRecordingSession, workspace: workspace, context: context)
             }
 
             startRecordingMonitor(workspace: workspace, context: context)
-            return session
+            guard let session else { return nil }
+            return CaptureStart(
+                session: session,
+                capture: CaptureSources(
+                    microphoneUID: capturedMicrophone?.uid,
+                    appBundleID: capturedApp?.bundleID,
+                    displayID: isScreenCaptured ? captureDisplayID : nil
+                )
+            )
         } catch {
             errorMessage = error.localizedDescription
             state = .idle
@@ -510,6 +546,13 @@ final class NewSessionViewModel {
         app: CapturedApp?,
         context: ModelContext
     ) async -> RecordingSession? {
+        applySelections(micDeviceUID: micDeviceUID, app: app)
+        return await startRecording(title: title, context: context)
+    }
+
+    /// Sets the window's selections to `micDeviceUID` and `app`, with no screen, as the menu-bar
+    /// quick start does before it records them.
+    func applySelections(micDeviceUID: String?, app: CapturedApp?) {
         audioDeviceService.refreshDevices()
         appAudioService.refreshRunningApps()
 
@@ -522,8 +565,19 @@ final class NewSessionViewModel {
         selectedApp = app
         recordAppAudio = app != nil
         recordScreen = false
+    }
 
-        return await startRecording(title: title, context: context)
+    /// The app to capture for `chosen`, after the running-apps refresh at start.
+    ///
+    /// When `chosen` is the window's selection from before the refresh, the window's selection as
+    /// the refresh left it is used, as window starts always did. Otherwise the running entry with
+    /// the same bundle id is used, so its process id is current.
+    private func resolvedApp(for chosen: CapturedApp?, windowSelectionBeforeRefresh: CapturedApp?) -> CapturedApp? {
+        guard let chosen else { return nil }
+        if chosen.bundleID == windowSelectionBeforeRefresh?.bundleID {
+            return appAudioService.selectedApp
+        }
+        return appAudioService.runningApps.first(where: { $0.bundleID == chosen.bundleID }) ?? chosen
     }
 
     func stopRecording(context: ModelContext) async -> RecordingSession? {
