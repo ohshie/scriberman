@@ -33,6 +33,8 @@ enum ExtensionAPIErrorCode: String, Sendable, CaseIterable {
     case notAudio = "not_audio"
     case invalidFileName = "invalid_file_name"
     case importNotRecorded = "import_not_recorded"
+    /// Capture did not start for a reason the readiness check does not cover.
+    case captureFailed = "capture_failed"
 }
 
 /// What `admit` decided from the head alone.
@@ -66,6 +68,8 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
 
     /// Shows pairing requests. Without one, pairing is denied.
     weak var pairingPresenter: (any ExtensionAPIPairingPresenter)?
+    /// Status, capture options, start and stop. Without it those routes answer `not_found_route`.
+    var recording: ExtensionAPIRecording?
 
     private let port: @MainActor () -> Int
     private let pairingStore: ExtensionAPIPairingStore
@@ -170,7 +174,7 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         guard ExtensionAPISigning.sha256Hex(body) == signing.bodyHash else {
             return signing.sign(Self.error(.badSignature, status: 401))
         }
-        return signing.sign(await respond(to: route, signing: signing))
+        return signing.sign(await respond(to: route, body: body, signing: signing))
     }
 
     func apiDidStop() async {
@@ -185,16 +189,37 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
 
     // MARK: - Routes
 
-    private func respond(to route: ExtensionAPIRoute, signing: RequestSigning) async -> HTTPResponse {
+    private func respond(to route: ExtensionAPIRoute, body: Data, signing: RequestSigning) async -> HTTPResponse {
         switch route {
         case .prompts:
             let prompts = await loadPrompts()
             if let revoked = revocationResponse(for: signing) { return revoked }
             return Self.json(PromptList(prompts: prompts.map { .init(id: $0.id.uuidString, name: $0.name) }))
+        case .status, .captureOptions, .quickStart, .startRecording, .stopRecording:
+            guard let recording else { return Self.error(.notFoundRoute, status: 404) }
+            return await respond(to: route, recording: recording, body: body, signing: signing)
         default:
             // Each remaining route arrives with its own ticket.
             return Self.error(.notFoundRoute, status: 404)
         }
+    }
+
+    private func respond(
+        to route: ExtensionAPIRoute,
+        recording: ExtensionAPIRecording,
+        body: Data,
+        signing: RequestSigning
+    ) async -> HTTPResponse {
+        let response: HTTPResponse
+        switch route {
+        case .status: response = recording.status()
+        case .captureOptions: response = await recording.captureOptions()
+        case .quickStart: response = await recording.quickStart()
+        case .startRecording: response = await recording.start(body: body)
+        case .stopRecording: response = await recording.stop()
+        default: return Self.error(.notFoundRoute, status: 404)
+        }
+        return revocationResponse(for: signing) ?? response
     }
 
     private struct PromptList: Encodable {
