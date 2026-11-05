@@ -87,6 +87,8 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
     var recording: ExtensionAPIRecording?
     /// Calendar suggestions and starting from one. Without it those routes answer `not_found_route`.
     var calendar: ExtensionAPICalendar?
+    /// Open, export and reveal. Without it those routes answer `not_found_route`.
+    var sessionActions: ExtensionAPISessionActions?
 
     private let port: @MainActor () -> Int
     private let pairingStore: ExtensionAPIPairingStore
@@ -304,6 +306,14 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
             return await runTransformation(sessionID: route.idSegment(in: head.path), body: body, signing: signing)
         case .operation:
             return operation(route.idSegment(in: head.path))
+        case .openSession, .exportSession, .revealSession:
+            guard let sessionActions else { return Self.error(.notFoundRoute, status: 404) }
+            guard let id = Self.sessionID(inPath: head.path) else { return Self.error(.invalidRequest, status: 400) }
+            switch route {
+            case .openSession: return openSession(id, actions: sessionActions)
+            case .exportSession: return await exportSession(id, actions: sessionActions, signing: signing)
+            default: return await revealSession(id, actions: sessionActions, signing: signing)
+            }
         default:
             // Each remaining route arrives with its own ticket.
             return Self.error(.notFoundRoute, status: 404)
@@ -513,11 +523,81 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         }
     }
 
+    // MARK: - Open, export, reveal
+
+    private struct ExportResponse: Encodable {
+        let outcome: String
+    }
+
+    private func openSession(_ id: ExtensionAPISessionID, actions: ExtensionAPISessionActions) -> HTTPResponse {
+        guard session(id) != nil else { return Self.error(.notFound, status: 404) }
+        switch id.kind {
+        case .recording: actions.requestSession(.recording(id.uuid))
+        case .imported: actions.requestSession(.imported(id.uuid))
+        }
+        actions.showWindow()
+        return Self.json([String: String]())
+    }
+
+    private func exportSession(
+        _ id: ExtensionAPISessionID,
+        actions: ExtensionAPISessionActions,
+        signing: RequestSigning
+    ) async -> HTTPResponse {
+        guard let session = session(id) else { return Self.error(.notFound, status: 404) }
+        guard session.displayedTranscript != nil else { return Self.error(.noTranscript, status: 409) }
+        actions.showWindow()
+        let outcome = await actions.export(session) { [weak self] in
+            self?.revocationResponse(for: signing) == nil
+        }
+        if let revoked = revocationResponse(for: signing) { return revoked }
+        switch outcome {
+        case .saved: return Self.json(ExportResponse(outcome: "saved"))
+        case .cancelled: return Self.json(ExportResponse(outcome: "cancelled"))
+        case .failed: return Self.json(ExportResponse(outcome: "failed"))
+        case .sessionDeleted: return Self.error(.notFound, status: 404)
+        case .writeRefused: return Self.error(.unauthorized, status: 401)
+        }
+    }
+
+    private func revealSession(
+        _ id: ExtensionAPISessionID,
+        actions: ExtensionAPISessionActions,
+        signing: RequestSigning
+    ) async -> HTTPResponse {
+        let workspace: Workspace
+        do {
+            workspace = try await actions.authorizedWorkspace()
+        } catch {
+            if let revoked = revocationResponse(for: signing) { return revoked }
+            return Self.error(.workspaceUnavailable, status: 503)
+        }
+        if let revoked = revocationResponse(for: signing) { return revoked }
+        // Looked up after the suspension, so a session deleted meanwhile is not found.
+        guard let session = session(id),
+              let folder = ExtensionAPISessionActions.folder(of: session),
+              JobsViewModel.isRemovableSessionFolder(folder, in: workspace)
+        else {
+            return Self.error(.notFound, status: 404)
+        }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            return Self.error(.notFound, status: 404)
+        }
+        actions.revealInFinder(folder)
+        return Self.json([String: String]())
+    }
+
     // MARK: - Sessions
 
     /// The session a kind-qualified id (`recording:<uuid>` or `imported:<uuid>`) names, or nil.
     private func session(withID id: String) -> (any TranscribableSession)? {
-        guard let modelContext, let parsed = ExtensionAPISessionID(pathSegment: id) else { return nil }
+        ExtensionAPISessionID(pathSegment: id).flatMap(session)
+    }
+
+    /// The session `parsed` names, or nil.
+    private func session(_ parsed: ExtensionAPISessionID) -> (any TranscribableSession)? {
+        guard let modelContext else { return nil }
         let uuid = parsed.uuid
         switch parsed.kind {
         case .recording:

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftData
 
@@ -183,5 +184,44 @@ final class ExtensionAPISessionCatalog {
     /// ISO 8601 with time zone.
     private static func formatDate(_ date: Date) -> String {
         date.ISO8601Format()
+    }
+}
+
+/// What the open, export and reveal routes do in the app.
+@MainActor
+struct ExtensionAPISessionActions {
+    /// Exports a session's transcript through the save panel. Nothing is written unless the
+    /// closure it is given returns true once the panel closes.
+    typealias Export = @MainActor (any TranscribableSession, _ mayWrite: @escaping @MainActor () -> Bool) async -> JobsViewModel.ExportOutcome
+
+    let requestSession: @MainActor (AppState.SessionRequest) -> Void
+    /// Brings Scriberman's main window forward.
+    let showWindow: @MainActor () -> Void
+    let export: Export
+    let authorizedWorkspace: @MainActor () async throws(WorkspaceError) -> Workspace
+    let revealInFinder: @MainActor (URL) -> Void
+
+    init(
+        requestSession: @escaping @MainActor (AppState.SessionRequest) -> Void,
+        showWindow: @escaping @MainActor () -> Void,
+        export: @escaping Export,
+        authorizedWorkspace: @escaping @MainActor () async throws(WorkspaceError) -> Workspace,
+        revealInFinder: @escaping @MainActor (URL) -> Void = { NSWorkspace.shared.activateFileViewerSelecting([$0]) }
+    ) {
+        self.requestSession = requestSession
+        self.showWindow = showWindow
+        self.export = export
+        self.authorizedWorkspace = authorizedWorkspace
+        self.revealInFinder = revealInFinder
+    }
+
+    /// The folder holding a session's files, or nil when it has none.
+    static func folder(of session: any TranscribableSession) -> URL? {
+        switch session {
+        case let recording as RecordingSession:
+            URL(fileURLWithPath: recording.micAudioURL).deletingLastPathComponent()
+        default:
+            session.mixdownURL.map { URL(fileURLWithPath: $0).deletingLastPathComponent() }
+        }
     }
 }
