@@ -322,9 +322,16 @@ final class CalendarSuggestionController {
     /// Re-queries and returns the suggestion only if it is still current and capture is idle.
     /// A suggestion that is no longer eligible has been removed by the refresh.
     func validatedSuggestion(_ id: CalendarOccurrenceID) async -> CalendarMeetingSuggestion? {
+        await validatedSuggestion { $0.id == id }
+    }
+
+    /// Re-queries and returns the first current suggestion that matches, only if capture is idle.
+    func validatedSuggestion(
+        where matches: (CalendarMeetingSuggestion) -> Bool
+    ) async -> CalendarMeetingSuggestion? {
         await refresh()
         guard !isCaptureActive, preferences.isEnabled else { return nil }
-        return suggestions.first { $0.id == id }
+        return suggestions.first(where: matches)
     }
 
     func dismiss(_ id: CalendarOccurrenceID) {
@@ -333,6 +340,13 @@ final class CalendarSuggestionController {
 
     func markPrepared(_ id: CalendarOccurrenceID) {
         markHandled(id)
+    }
+
+    /// Marks a suggestion handled once a recording started from it, even if a refresh dropped it
+    /// while capture was starting.
+    func markStarted(_ suggestion: CalendarMeetingSuggestion) {
+        preferences.markHandled(suggestion.id, expiresAt: suggestion.windowEnd)
+        suggestions.removeAll { $0.id == suggestion.id }
     }
 
     private func markHandled(_ id: CalendarOccurrenceID) {

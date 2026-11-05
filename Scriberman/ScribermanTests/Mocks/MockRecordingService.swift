@@ -1,6 +1,7 @@
 import CoreAudio
 import CoreGraphics
 import Foundation
+import SwiftData
 @testable import Scriberman
 
 final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable {
@@ -15,6 +16,16 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
     var pendingError: RecordingError?
 
     var liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation?
+
+    /// When set, a successful start saves a recording session to this container, as the real
+    /// service does, and returns its id instead of `startReturns`. Stop then returns that id
+    /// unless `stopReturns` is set.
+    var persistsSessionsIn: ModelContainer?
+    private var persistedSessionID: UUID?
+    /// When set, what `isScreenCaptureActive()` answers. Otherwise it answers whether the last
+    /// successful start asked for a display.
+    var screenCaptureActiveOverride: Bool?
+    private var lastStartCapturedDisplay = false
 
     func isRecording() async -> Bool {
         isRecordingOverride
@@ -109,13 +120,34 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
             throw startShouldThrow
         }
         self.liveAudioContinuation = liveAudioContinuation
-        return startReturns
+        lastStartCapturedDisplay = captureDisplayID != nil
+        guard let persistsSessionsIn else {
+            return startReturns
+        }
+        let context = ModelContext(persistsSessionsIn)
+        let session = RecordingSession(
+            duration: 0,
+            micAudioURL: "/tmp/mock-mic.wav",
+            appAudioURL: appProcessID != nil ? "/tmp/mock-app.wav" : nil,
+            title: title ?? "",
+            capturedAppName: capturedAppName,
+            status: .recording
+        )
+        context.insert(session)
+        try? context.save()
+        persistedSessionID = session.id
+        return session.id
     }
 
     func stopRecording() async -> UUID? {
         liveAudioContinuation?.finish()
         liveAudioContinuation = nil
-        return stopReturns
+        defer { persistedSessionID = nil }
+        return stopReturns ?? persistedSessionID
+    }
+
+    func isScreenCaptureActive() async -> Bool {
+        screenCaptureActiveOverride ?? lastStartCapturedDisplay
     }
 
     func consumePendingError() async -> RecordingError? {

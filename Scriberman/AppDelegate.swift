@@ -416,25 +416,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             return
         }
 
-        if appState.pendingSession != nil {
-            appState.discardPendingSession()
-        }
-        appState.appAudioService.refreshRunningApps()
-
-        let selectedMic = appState.menuBarSettings.lastUsedMicUID
-        let selectedApp = appState.appAudioService.runningApps.first {
-            $0.bundleID == appState.menuBarSettings.lastUsedAppBundleID
-        }
-        let title = appState.pendingSession?.title ?? "Untitled Session"
-
         Task {
-            if let session = await appState.newSessionViewModel.startRecording(
-                title: title,
-                micDeviceUID: selectedMic,
-                app: selectedApp,
-                context: modelContext
-            ) {
-                appState.requestSession(.recording(session.id))
+            if case .success(let started) = await appState.captureCoordinator.quickStart(origin: .menuBar, context: modelContext) {
+                appState.requestSession(.recording(started.session.id))
             }
         }
     }
@@ -452,7 +436,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
 
         Task {
-            if let session = await appState.newSessionViewModel.stopRecording(context: modelContext) {
+            if let session = await appState.captureCoordinator.stop(context: modelContext) {
                 appState.requestSession(.recording(session.id))
             }
         }
@@ -668,7 +652,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
         viewModel.onIdlePromptStopRequested = { [weak self] in
             guard let self, let modelContext else { return }
-            _ = await self.appState?.newSessionViewModel.stopRecording(context: modelContext)
+            _ = await self.appState?.captureCoordinator.stop(context: modelContext)
         }
 
         viewModel.onRecordingStartFailurePresentationChanged = { [weak self] isVisible in
@@ -706,6 +690,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             return
         }
 
-        _ = await appState.newSessionViewModel.stopRecording(context: modelContext)
+        _ = await appState.captureCoordinator.stop(context: modelContext)
     }
 }

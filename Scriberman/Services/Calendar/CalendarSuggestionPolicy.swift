@@ -5,6 +5,8 @@ struct CalendarMeetingSuggestion: Identifiable, Hashable, Sendable {
     let occurrenceID: CalendarOccurrenceID
     let title: String
     let start: Date
+    /// When the meeting is scheduled to end.
+    let end: Date
     /// When the suggestion window closes.
     let windowEnd: Date
 
@@ -61,6 +63,7 @@ enum CalendarSuggestionPolicy {
                     occurrenceID: $0.occurrenceID,
                     title: $0.title,
                     start: $0.start,
+                    end: $0.end,
                     windowEnd: windowEnd(of: $0)
                 )
             }

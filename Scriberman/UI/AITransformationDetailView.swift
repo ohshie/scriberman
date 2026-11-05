@@ -13,7 +13,7 @@ struct AITransformationDetailView: View {
     init(
         session: any TranscribableSession,
         aiProviderService: AIProviderService,
-        sessionJobs: SessionJobs,
+        aiTransformationRunner: AITransformationRunner,
         selectedTransformationID: Binding<UUID?>
     ) {
         self.session = session
@@ -21,7 +21,7 @@ struct AITransformationDetailView: View {
         _viewModel = State(initialValue: TranscriptDetailViewModel(
             session: session,
             aiProviderService: aiProviderService,
-            sessionJobs: sessionJobs
+            aiTransformationRunner: aiTransformationRunner
         ))
     }
 

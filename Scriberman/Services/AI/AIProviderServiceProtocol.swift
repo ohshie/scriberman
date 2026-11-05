@@ -16,7 +16,7 @@ struct AITransformationResult: Equatable {
 }
 
 @MainActor
-protocol AIProviderServiceProtocol: AnyObject {
+protocol AIProviderServiceProtocol: AnyObject, Sendable {
     var isEnabled: Bool { get set }
     var isConfigured: Bool { get }
     var selectedProvider: AIProvider { get set }

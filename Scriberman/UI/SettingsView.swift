@@ -92,6 +92,8 @@ struct SettingsView: View {
 
                     CalendarSettingsSection(controller: appState.calendarSuggestions)
 
+                    ExtensionAPISettingsSection(model: appState.extensionAPISettingsViewModel)
+
                     Section("Updates") {
                         LabeledContent("Current version") {
                             Text(updateService.currentVersionText)
