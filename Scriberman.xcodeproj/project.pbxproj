@@ -19,12 +19,16 @@
 		FF81092B480848FCE9A1FC02 /* ExtensionAPIPairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 852626576EFD5A7B33B6E8F2 /* ExtensionAPIPairing.swift */; };
 		FE8B2D3787E419FB0178EBE8 /* ExtensionAPIRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = 464E1955BEE4C1665CF905F0 /* ExtensionAPIRecording.swift */; };
 		7C3A1E5D9B2F4A6C8E0D1F28 /* ExtensionAPICalendar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C3A1E5D9B2F4A6C8E0D1F27 /* ExtensionAPICalendar.swift */; };
+		C98D8D101C3CAFDC2A3EA93C /* ExtensionAPIPairingPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD29F2A996EE734CDF815F8E /* ExtensionAPIPairingPanelController.swift */; };
+		F70CF5E4B3F27888A4870A61 /* ExtensionAPIPairingPrompter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6402824CE3DB5E3365C1A86F /* ExtensionAPIPairingPrompter.swift */; };
+		4FC2B16031A32CD1EE943452 /* ExtensionAPIStrings.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6817D0AF77AC3FE68BD0847 /* ExtensionAPIStrings.swift */; };
 		EBF32D86DD987B33CDE0C1AE /* ExtensionAPIHandlerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAF32D86DD987B33CDE0C1AE /* ExtensionAPIHandlerTests.swift */; };
 		ABCD8C3EA12F54D91720C465 /* ExtensionAPISigningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47853546E65B370B6F341FB5 /* ExtensionAPISigningTests.swift */; };
 		B11C0A7E5F2D4E8A9C3B6D01 /* ExtensionAPITransformationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11C0A7E5F2D4E8A9C3B6D02 /* ExtensionAPITransformationTests.swift */; };
 		88415C43AD082030758F88BC /* ExtensionAPIPairingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82EC96768D2F61C76577939E /* ExtensionAPIPairingTests.swift */; };
 		0FAA5B0A57D373EBF816007F /* ExtensionAPIRecordingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEE2D968AE3D3631993305C4 /* ExtensionAPIRecordingTests.swift */; };
 		7C3A1E5D9B2F4A6C8E0D1F2A /* ExtensionAPICalendarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C3A1E5D9B2F4A6C8E0D1F29 /* ExtensionAPICalendarTests.swift */; };
+		1FB3C328373FAF208146E160 /* ExtensionAPISettingsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BC4E0E5AF28FE253DFC6124 /* ExtensionAPISettingsUITests.swift */; };
 		26222CC1321B2AC5DAC03A5A /* ExtensionAPISessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 249B468EA5D87F4CED9E3BC1 /* ExtensionAPISessions.swift */; };
 		A7E04957D18B99A9A63908F4 /* SessionFilteringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2297D7E9ADA81BA6EB5B0B05 /* SessionFilteringTests.swift */; };
 		9D15705A3D10FA32EA942A16 /* ExtensionAPISessionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 147C94BCC8AF2A5ADB80A6C4 /* ExtensionAPISessionsTests.swift */; };
@@ -36,6 +40,8 @@
 		EBFFD63E47E74BAD5A4C6BF5 /* HTTPFraming.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAFFD63E47E74BAD5A4C6BF5 /* HTTPFraming.swift */; };
 		EB7FB68D963585024757E2D6 /* HTTPFramingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA7FB68D963585024757E2D6 /* HTTPFramingTests.swift */; };
 		9E81C76C8C9B81DA6CA78608 /* CalendarSuggestionPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04C4982D4A91E2B28FA4D2E8 /* CalendarSuggestionPanelView.swift */; };
+		AFFBA512D7B701A7E44B4C8D /* ExtensionAPISettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B73351A91E45371440040D70 /* ExtensionAPISettingsSection.swift */; };
+		42AE86D83B29D5621A500035 /* ExtensionAPIPairingPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACB747D533D13F0A8F657D99 /* ExtensionAPIPairingPanelView.swift */; };
 		501253F24BF1C1D4D7E39B88 /* CalendarSuggestionPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = EED4653DA418BC121BF9026D /* CalendarSuggestionPanelController.swift */; };
 		5BC079418194DC96FF453974 /* CalendarSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8968B1CB856C12E41157B277 /* CalendarSettingsSection.swift */; };
 		32F6A158BEDD81B5E612A268 /* CalendarOnboardingStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E101697E9C929741E8CA121 /* CalendarOnboardingStep.swift */; };
@@ -70,6 +76,7 @@
 		2FDE1F7065F222E3906F5122 /* JobsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8762704F4A827AAB342E6E05 /* JobsView.swift */; };
 		31CC6B70226AACEB762BCDAB /* TrimEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6D3426D4147C8FFE524865F /* TrimEditorView.swift */; };
 		32B148C17ADF330AB64F25B9 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B5AC231318E9580ADB309B /* AppState.swift */; };
+		8702AE30238052890D85A49F /* ExtensionAPISettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F813A106916AA8FD7C252B /* ExtensionAPISettingsViewModel.swift */; };
 		3428B3A8DAFDF0891C460E3C /* ModelGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6128A7DC3799D329B8DB2FE /* ModelGroup.swift */; };
 		44ADED04585E9F8E56D01C89 /* TrimEditorViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FED291965DF01F960DDF520 /* TrimEditorViewModel.swift */; };
 		4540437FF944A6BA6E754CE5 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ADAB55B66952EE3BC6D9B2E /* ContentView.swift */; };
@@ -400,12 +407,16 @@
 		852626576EFD5A7B33B6E8F2 /* ExtensionAPIPairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPIPairing.swift"; sourceTree = SOURCE_ROOT; };
 		464E1955BEE4C1665CF905F0 /* ExtensionAPIRecording.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPIRecording.swift"; sourceTree = SOURCE_ROOT; };
 		7C3A1E5D9B2F4A6C8E0D1F27 /* ExtensionAPICalendar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPICalendar.swift"; sourceTree = SOURCE_ROOT; };
+		BD29F2A996EE734CDF815F8E /* ExtensionAPIPairingPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPIPairingPanelController.swift"; sourceTree = SOURCE_ROOT; };
+		6402824CE3DB5E3365C1A86F /* ExtensionAPIPairingPrompter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPIPairingPrompter.swift"; sourceTree = SOURCE_ROOT; };
+		F6817D0AF77AC3FE68BD0847 /* ExtensionAPIStrings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPIStrings.swift"; sourceTree = SOURCE_ROOT; };
 		EAF32D86DD987B33CDE0C1AE /* ExtensionAPIHandlerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPIHandlerTests.swift"; sourceTree = SOURCE_ROOT; };
 		47853546E65B370B6F341FB5 /* ExtensionAPISigningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPISigningTests.swift"; sourceTree = SOURCE_ROOT; };
 		B11C0A7E5F2D4E8A9C3B6D02 /* ExtensionAPITransformationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPITransformationTests.swift"; sourceTree = SOURCE_ROOT; };
 		82EC96768D2F61C76577939E /* ExtensionAPIPairingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPIPairingTests.swift"; sourceTree = SOURCE_ROOT; };
 		CEE2D968AE3D3631993305C4 /* ExtensionAPIRecordingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPIRecordingTests.swift"; sourceTree = SOURCE_ROOT; };
 		7C3A1E5D9B2F4A6C8E0D1F29 /* ExtensionAPICalendarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPICalendarTests.swift"; sourceTree = SOURCE_ROOT; };
+		3BC4E0E5AF28FE253DFC6124 /* ExtensionAPISettingsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPISettingsUITests.swift"; sourceTree = SOURCE_ROOT; };
 		249B468EA5D87F4CED9E3BC1 /* ExtensionAPISessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPISessions.swift"; sourceTree = SOURCE_ROOT; };
 		2297D7E9ADA81BA6EB5B0B05 /* SessionFilteringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/SessionFilteringTests.swift"; sourceTree = SOURCE_ROOT; };
 		147C94BCC8AF2A5ADB80A6C4 /* ExtensionAPISessionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPISessionsTests.swift"; sourceTree = SOURCE_ROOT; };
@@ -417,6 +428,8 @@
 		EAFFD63E47E74BAD5A4C6BF5 /* HTTPFraming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/HTTPFraming.swift"; sourceTree = SOURCE_ROOT; };
 		EA7FB68D963585024757E2D6 /* HTTPFramingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/HTTPFramingTests.swift"; sourceTree = SOURCE_ROOT; };
 		04C4982D4A91E2B28FA4D2E8 /* CalendarSuggestionPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/CalendarSuggestionPanelView.swift"; sourceTree = SOURCE_ROOT; };
+		B73351A91E45371440040D70 /* ExtensionAPISettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/ExtensionAPISettingsSection.swift"; sourceTree = SOURCE_ROOT; };
+		ACB747D533D13F0A8F657D99 /* ExtensionAPIPairingPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/ExtensionAPIPairingPanelView.swift"; sourceTree = SOURCE_ROOT; };
 		EED4653DA418BC121BF9026D /* CalendarSuggestionPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Calendar/CalendarSuggestionPanelController.swift"; sourceTree = SOURCE_ROOT; };
 		8968B1CB856C12E41157B277 /* CalendarSettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/CalendarSettingsSection.swift"; sourceTree = SOURCE_ROOT; };
 		3E101697E9C929741E8CA121 /* CalendarOnboardingStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/Onboarding/CalendarOnboardingStep.swift"; sourceTree = SOURCE_ROOT; };
@@ -664,6 +677,7 @@
 		7B92B3F0C81C97B847246777 /* ModelInstallService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelInstallService.swift; sourceTree = "<group>"; };
 		7DFBA039128F2B74BE4BB578 /* Workspace.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Workspace.swift; sourceTree = "<group>"; };
 		82B5AC231318E9580ADB309B /* AppState.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		A9F813A106916AA8FD7C252B /* ExtensionAPISettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ViewModels/ExtensionAPISettingsViewModel.swift"; sourceTree = SOURCE_ROOT; };
 		8762704F4A827AAB342E6E05 /* JobsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JobsView.swift; sourceTree = "<group>"; };
 		8A2AEE3DB783526C01DF1552 /* TranscriptionServiceProtocol.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TranscriptionServiceProtocol.swift; sourceTree = "<group>"; };
 		8E2E0F5F51DABC96146DE26B /* RecordingStatusTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RecordingStatusTests.swift; sourceTree = "<group>"; };
@@ -813,6 +827,7 @@
 				82EC96768D2F61C76577939E /* ExtensionAPIPairingTests.swift */,
 				CEE2D968AE3D3631993305C4 /* ExtensionAPIRecordingTests.swift */,
 				7C3A1E5D9B2F4A6C8E0D1F29 /* ExtensionAPICalendarTests.swift */,
+				3BC4E0E5AF28FE253DFC6124 /* ExtensionAPISettingsUITests.swift */,
 				2297D7E9ADA81BA6EB5B0B05 /* SessionFilteringTests.swift */,
 				147C94BCC8AF2A5ADB80A6C4 /* ExtensionAPISessionsTests.swift */,
 				A09C0E5D1B2A4C8F9E000002 /* ExtensionAPISessionActionsTests.swift */,
@@ -974,6 +989,7 @@
 				D37A11C0D37A11C0D37A1102 /* DetailNavigation.swift */,
 				A8F3DE0F4D65F9DD94E5DEFC /* SettingsViewModel.swift */,
 				82B5AC231318E9580ADB309B /* AppState.swift */,
+				A9F813A106916AA8FD7C252B /* ExtensionAPISettingsViewModel.swift */,
 				79BE35242F7E6EF700DB542F /* TranscriptDetailViewModel.swift */,
 				79BE35262F7E71F200DB542F /* PromptManagementViewModel.swift */,
 				79BE35362F7EA76800DB542F /* AudioPlayerViewModel.swift */,
@@ -997,6 +1013,8 @@
 			isa = PBXGroup;
 			children = (
 				04C4982D4A91E2B28FA4D2E8 /* CalendarSuggestionPanelView.swift */,
+				B73351A91E45371440040D70 /* ExtensionAPISettingsSection.swift */,
+				ACB747D533D13F0A8F657D99 /* ExtensionAPIPairingPanelView.swift */,
 				8968B1CB856C12E41157B277 /* CalendarSettingsSection.swift */,
 				8762704F4A827AAB342E6E05 /* JobsView.swift */,
 				4D0400000000000000000006 /* PendingDeletionsView.swift */,
@@ -1259,6 +1277,9 @@
 				852626576EFD5A7B33B6E8F2 /* ExtensionAPIPairing.swift */,
 				464E1955BEE4C1665CF905F0 /* ExtensionAPIRecording.swift */,
 				7C3A1E5D9B2F4A6C8E0D1F27 /* ExtensionAPICalendar.swift */,
+				BD29F2A996EE734CDF815F8E /* ExtensionAPIPairingPanelController.swift */,
+				6402824CE3DB5E3365C1A86F /* ExtensionAPIPairingPrompter.swift */,
+				F6817D0AF77AC3FE68BD0847 /* ExtensionAPIStrings.swift */,
 				249B468EA5D87F4CED9E3BC1 /* ExtensionAPISessions.swift */,
 				EADDA03D8D6B2A0B0A8C3790 /* ExtensionAPIListener.swift */,
 				EAE50E7BA3FA78B4AE99D237 /* ExtensionAPIService.swift */,
@@ -1519,6 +1540,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				9E81C76C8C9B81DA6CA78608 /* CalendarSuggestionPanelView.swift in Sources */,
+				AFFBA512D7B701A7E44B4C8D /* ExtensionAPISettingsSection.swift in Sources */,
+				42AE86D83B29D5621A500035 /* ExtensionAPIPairingPanelView.swift in Sources */,
 				501253F24BF1C1D4D7E39B88 /* CalendarSuggestionPanelController.swift in Sources */,
 				5BC079418194DC96FF453974 /* CalendarSettingsSection.swift in Sources */,
 				32F6A158BEDD81B5E612A268 /* CalendarOnboardingStep.swift in Sources */,
@@ -1555,6 +1578,9 @@
 				FF81092B480848FCE9A1FC02 /* ExtensionAPIPairing.swift in Sources */,
 				FE8B2D3787E419FB0178EBE8 /* ExtensionAPIRecording.swift in Sources */,
 				7C3A1E5D9B2F4A6C8E0D1F28 /* ExtensionAPICalendar.swift in Sources */,
+				C98D8D101C3CAFDC2A3EA93C /* ExtensionAPIPairingPanelController.swift in Sources */,
+				F70CF5E4B3F27888A4870A61 /* ExtensionAPIPairingPrompter.swift in Sources */,
+				4FC2B16031A32CD1EE943452 /* ExtensionAPIStrings.swift in Sources */,
 				26222CC1321B2AC5DAC03A5A /* ExtensionAPISessions.swift in Sources */,
 				EBDDA03D8D6B2A0B0A8C3790 /* ExtensionAPIListener.swift in Sources */,
 				EBE50E7BA3FA78B4AE99D237 /* ExtensionAPIService.swift in Sources */,
@@ -1661,6 +1687,7 @@
 				79E005D42F76741900D3EAD9 /* CapturedApp.swift in Sources */,
 				7910095D2F7855EB00225294 /* TranscribableSession.swift in Sources */,
 				32B148C17ADF330AB64F25B9 /* AppState.swift in Sources */,
+				8702AE30238052890D85A49F /* ExtensionAPISettingsViewModel.swift in Sources */,
 				798732772F7D985400570A03 /* TranscriptionPassRunner.swift in Sources */,
 				79E005D22F7673EF00D3EAD9 /* AudioInputDevice.swift in Sources */,
 				2FDE1F7065F222E3906F5122 /* JobsView.swift in Sources */,
@@ -1760,6 +1787,7 @@
 				88415C43AD082030758F88BC /* ExtensionAPIPairingTests.swift in Sources */,
 				0FAA5B0A57D373EBF816007F /* ExtensionAPIRecordingTests.swift in Sources */,
 				7C3A1E5D9B2F4A6C8E0D1F2A /* ExtensionAPICalendarTests.swift in Sources */,
+				1FB3C328373FAF208146E160 /* ExtensionAPISettingsUITests.swift in Sources */,
 				A7E04957D18B99A9A63908F4 /* SessionFilteringTests.swift in Sources */,
 				9D15705A3D10FA32EA942A16 /* ExtensionAPISessionsTests.swift in Sources */,
 				A09C0E5D1B2A4C8F9E000001 /* ExtensionAPISessionActionsTests.swift in Sources */,
