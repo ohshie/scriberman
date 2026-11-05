@@ -36,6 +36,8 @@ enum ExtensionAPIErrorCode: String, Sendable, CaseIterable {
     case importNotRecorded = "import_not_recorded"
     /// Capture did not start for a reason the readiness check does not cover.
     case captureFailed = "capture_failed"
+    /// The store refused a change; nothing was changed.
+    case saveFailed = "save_failed"
 }
 
 /// What `admit` decided from the head alone.
@@ -289,7 +291,7 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
             let prompts = await loadPrompts()
             if let revoked = revocationResponse(for: signing) { return revoked }
             return Self.json(PromptList(prompts: prompts.map { .init(id: $0.id.uuidString, name: $0.name) }))
-        case .status, .captureOptions, .quickStart, .startRecording, .stopRecording:
+        case .status, .captureOptions, .quickStart, .startRecording, .stopRecording, .updateCurrentRecording:
             guard let recording else { return Self.error(.notFoundRoute, status: 404) }
             return await respond(to: route, recording: recording, body: body, signing: signing)
         case .runTransformation:
@@ -315,6 +317,7 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         case .quickStart: response = await recording.quickStart()
         case .startRecording: response = await recording.start(body: body)
         case .stopRecording: response = await recording.stop()
+        case .updateCurrentRecording: response = recording.updateCurrent(body: body)
         default: return Self.error(.notFoundRoute, status: 404)
         }
         return revocationResponse(for: signing) ?? response

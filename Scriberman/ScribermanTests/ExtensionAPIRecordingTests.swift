@@ -36,7 +36,10 @@ struct ExtensionAPIRecordingTests {
         private let suiteName = "ExtensionAPIRecordingTests-\(UUID().uuidString)"
         private(set) var signer: ExtensionAPITestSigner!
 
-        init(transcriber: any LiveTranscribing = IdleLiveTranscriber()) throws {
+        init(
+            transcriber: any LiveTranscribing = IdleLiveTranscriber(),
+            saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() }
+        ) throws {
             permissionService.micStatus = .granted
             permissionService.screenRecordingStatus = .granted
             let userDefaults = try #require(UserDefaults(suiteName: suiteName))
@@ -83,7 +86,8 @@ struct ExtensionAPIRecordingTests {
                 permissionService: permissionService,
                 menuBarSettings: menuBarSettings,
                 context: context,
-                requestSession: { [unowned self] in requestedSessions.append($0) }
+                requestSession: { [unowned self] in requestedSessions.append($0) },
+                saveContext: saveContext
             )
         }
 
@@ -597,6 +601,297 @@ struct ExtensionAPIRecordingTests {
 
         #expect(response.status == 401)
         #expect(errorCode(response) == "unauthorized")
+    }
+
+    // MARK: - Rename and tag the current recording
+
+    struct UpdateBody: Decodable {
+        let session: SessionBody
+    }
+
+    private struct SaveFailure: Error {}
+
+    /// Starts a recording with `title` and `tags` and returns the session the start reported.
+    private func startRecording(
+        _ fixture: Fixture,
+        title: String = "Standup",
+        tags: [RecordingTag] = []
+    ) async throws -> SessionBody {
+        let list = tags.map { "\"\($0.id.uuidString)\"" }.joined(separator: ", ")
+        let response = await fixture.send("POST", "/v1/recordings", json: #"{"title": "\#(title)", "tagIds": [\#(list)]}"#)
+        try #require(response.status == 200)
+        return try decode(StartBody.self, response).session
+    }
+
+    /// The session with the API id `id`, as a fresh context sees it.
+    private func persisted(_ fixture: Fixture, _ id: String) throws -> RecordingSession? {
+        try fixture.persistedSessions().first { "recording:\($0.id.uuidString)" == id }
+    }
+
+    /// Ids of the tags a stored session carries, the default tag included.
+    private func tagIDs(_ session: RecordingSession?) -> Set<UUID> {
+        Set(session?.tags.map(\.id) ?? [])
+    }
+
+    /// Admits a signed PATCH of the current recording and returns a closure that sends its body,
+    /// so a test can act between the head and the body.
+    private func admitUpdate(_ fixture: Fixture, json: String) async throws -> () async -> HTTPResponse {
+        let body = Data(json.utf8)
+        let target = "/v1/recordings/current"
+        let headers = fixture.signer.headers(method: "PATCH", target: target, body: body, timestamp: fixture.api.now)
+        let head = fixture.api.head("PATCH", target, headers: headers, contentLength: body.count)
+        let admission = await fixture.api.handler.admit(head, peer: fixture.api.peer)
+        guard case .admitted = admission else {
+            Issue.record("PATCH was not admitted: \(admission)")
+            throw SaveFailure()
+        }
+        let handler = fixture.api.handler
+        let peer = fixture.api.peer
+        return { await handler.handle(head, body: body, peer: peer) }
+    }
+
+    @Test
+    func renameAloneSavesTheTitleAndKeepsTheTags() async throws {
+        let fixture = try Fixture()
+        try await fixture.pair()
+        let work = try fixture.tag("Work")
+        let started = try await startRecording(fixture, tags: [work])
+
+        let response = await fixture.send("PATCH", "/v1/recordings/current", json: #"{"title": "Planning"}"#)
+
+        #expect(response.status == 200)
+        let body = try decode(UpdateBody.self, response)
+        #expect(body.session.id == started.id)
+        #expect(body.session.title == "Planning")
+        #expect(body.session.tags == [TagBody(id: work.id.uuidString, name: "Work")])
+        let stored = try persisted(fixture, started.id)
+        #expect(stored?.title == "Planning")
+        #expect(tagIDs(stored) == [work.id])
+    }
+
+    @Test
+    func tagAloneAddsTheTagInPlaceOfTheDefaultAndKeepsTheTitle() async throws {
+        let fixture = try Fixture()
+        try await fixture.pair()
+        _ = try fixture.tag("Untagged", isDefault: true)
+        let work = try fixture.tag("Work")
+        let started = try await startRecording(fixture)
+
+        let response = await fixture.send(
+            "PATCH", "/v1/recordings/current", json: #"{"tagIds": ["\#(work.id.uuidString)"]}"#
+        )
+
+        #expect(response.status == 200)
+        #expect(try decode(UpdateBody.self, response).session.tags == [TagBody(id: work.id.uuidString, name: "Work")])
+        let stored = try persisted(fixture, started.id)
+        #expect(stored?.title == "Standup")
+        #expect(tagIDs(stored) == [work.id])
+    }
+
+    @Test
+    func renameAndTagTogetherApplyBoth() async throws {
+        let fixture = try Fixture()
+        try await fixture.pair()
+        let work = try fixture.tag("Work")
+        let ops = try fixture.tag("Ops")
+        let started = try await startRecording(fixture, tags: [work])
+
+        let response = await fixture.send(
+            "PATCH", "/v1/recordings/current",
+            json: #"{"title": "Incident review", "tagIds": ["\#(ops.id.uuidString)"]}"#
+        )
+
+        #expect(response.status == 200)
+        let body = try decode(UpdateBody.self, response)
+        #expect(body.session.title == "Incident review")
+        #expect(Set(body.session.tags) == [
+            TagBody(id: work.id.uuidString, name: "Work"),
+            TagBody(id: ops.id.uuidString, name: "Ops"),
+        ])
+        let stored = try persisted(fixture, started.id)
+        #expect(stored?.title == "Incident review")
+        #expect(tagIDs(stored) == [work.id, ops.id])
+    }
+
+    @Test
+    func statusShowsTheRenamedSession() async throws {
+        let fixture = try Fixture()
+        try await fixture.pair()
+        _ = try await startRecording(fixture)
+
+        _ = await fixture.send("PATCH", "/v1/recordings/current", json: #"{"title": "Planning"}"#)
+        let status = try decode(StatusBody.self, await fixture.send("GET", "/v1/status"))
+
+        #expect(status.session?.title == "Planning")
+    }
+
+    @Test
+    func anAlreadyAssignedTagIsIgnored() async throws {
+        let fixture = try Fixture()
+        try await fixture.pair()
+        let tags = try (1...3).map { try fixture.tag("Tag \($0)") }
+        let started = try await startRecording(fixture, tags: tags)
+
+        let response = await fixture.send(
+            "PATCH", "/v1/recordings/current",
+            json: #"{"title": "Planning", "tagIds": ["\#(tags[0].id.uuidString)", "\#(tags[0].id.uuidString)"]}"#
+        )
+
+        #expect(response.status == 200)
+        let stored = try persisted(fixture, started.id)
+        #expect(stored?.title == "Planning")
+        #expect(tagIDs(stored) == Set(tags.map(\.id)))
+    }
+
+    enum TagRefusal: String, CaseIterable, Sendable {
+        case unknown = "unknown_tag"
+        case notAssignable = "tag_not_assignable"
+        case tooMany = "too_many_tags"
+    }
+
+    @Test(arguments: TagRefusal.allCases)
+    func aRefusedTagLeavesTitleAndTagsUnchanged(refusal: TagRefusal) async throws {
+        let fixture = try Fixture()
+        try await fixture.pair()
+        let untagged = try fixture.tag("Untagged", isDefault: true)
+        let first = try fixture.tag("First")
+        let second = try fixture.tag("Second")
+        let third = try fixture.tag("Third")
+        let fourth = try fixture.tag("Fourth")
+        let started = try await startRecording(fixture, tags: [first, second])
+        let requested: [String] = switch refusal {
+        case .unknown: [third.id.uuidString, UUID().uuidString]
+        case .notAssignable: [third.id.uuidString, untagged.id.uuidString]
+        case .tooMany: [third.id.uuidString, fourth.id.uuidString]
+        }
+        let list = requested.map { "\"\($0)\"" }.joined(separator: ", ")
+
+        let response = await fixture.send(
+            "PATCH", "/v1/recordings/current", json: #"{"title": "Planning", "tagIds": [\#(list)]}"#
+        )
+
+        #expect(response.status == 400)
+        #expect(errorCode(response) == refusal.rawValue)
+        let stored = try persisted(fixture, started.id)
+        #expect(stored?.title == "Standup")
+        #expect(tagIDs(stored) == [first.id, second.id])
+        let status = try decode(StatusBody.self, await fixture.send("GET", "/v1/status"))
+        #expect(status.session == started)
+    }
+
+    @Test(arguments: [
+        "",
+        "not json",
+        "{}",
+        #"{"title": "   "}"#,
+        #"{"title": 4}"#,
+        #"{"tagIds": ["not-a-uuid"]}"#,
+    ])
+    func anInvalidUpdateIsRefused(json: String) async throws {
+        let fixture = try Fixture()
+        try await fixture.pair()
+        let started = try await startRecording(fixture)
+
+        let response = await fixture.send("PATCH", "/v1/recordings/current", json: json)
+
+        #expect(response.status == 400)
+        #expect(errorCode(response) == "invalid_request")
+        #expect(try persisted(fixture, started.id)?.title == "Standup")
+    }
+
+    @Test
+    func anUpdateWhileIdleIsRefused() async throws {
+        let fixture = try Fixture()
+        try await fixture.pair()
+
+        let response = await fixture.send("PATCH", "/v1/recordings/current", json: #"{"title": "Planning"}"#)
+
+        #expect(response.status == 409)
+        #expect(errorCode(response) == "not_recording")
+    }
+
+    @Test
+    func anUpdateWhileStoppingIsRefused() async throws {
+        let transcriber = GatedStopLiveTranscriber()
+        let fixture = try Fixture(transcriber: transcriber)
+        try await fixture.pair()
+        let started = try await startRecording(fixture)
+        await transcriber.waitUntilStarted()
+        let stop = Task { await fixture.coordinator.stop(context: fixture.context)?.id }
+        await transcriber.waitUntilStopping()
+
+        let response = await fixture.send("PATCH", "/v1/recordings/current", json: #"{"title": "Planning"}"#)
+        await transcriber.releaseStop()
+        _ = await stop.value
+
+        #expect(response.status == 409)
+        #expect(errorCode(response) == "not_recording")
+        #expect(try persisted(fixture, started.id)?.title == "Standup")
+    }
+
+    @Test
+    func aSessionDeletedDuringTheRequestIsNotFoundAndNothingIsWritten() async throws {
+        let fixture = try Fixture()
+        try await fixture.pair()
+        let work = try fixture.tag("Work")
+        let started = try await startRecording(fixture)
+        let send = try await admitUpdate(fixture, json: #"{"title": "Planning", "tagIds": ["\#(work.id.uuidString)"]}"#)
+
+        let session = try #require(fixture.context.fetch(FetchDescriptor<RecordingSession>()).first)
+        fixture.context.delete(session)
+        try fixture.context.save()
+        let response = await send()
+
+        #expect(response.status == 404)
+        #expect(errorCode(response) == "not_found")
+        #expect(try persisted(fixture, started.id) == nil)
+        #expect(try fixture.persistedSessions().isEmpty)
+    }
+
+    @Test
+    func aClientRevokedDuringTheRequestGetsUnauthorizedAndNothingIsWritten() async throws {
+        let fixture = try Fixture()
+        try await fixture.pair()
+        let work = try fixture.tag("Work")
+        let started = try await startRecording(fixture)
+        let before = tagIDs(try persisted(fixture, started.id))
+        let send = try await admitUpdate(fixture, json: #"{"title": "Planning", "tagIds": ["\#(work.id.uuidString)"]}"#)
+
+        fixture.api.store.revoke(fixture.signer.clientID)
+        let response = await send()
+
+        #expect(response.status == 401)
+        #expect(errorCode(response) == "unauthorized")
+        let stored = try persisted(fixture, started.id)
+        #expect(stored?.title == "Standup")
+        #expect(tagIDs(stored) == before)
+    }
+
+    @Test
+    func aFailedSaveRollsBackTitleAndTags() async throws {
+        var failSaves = false
+        let fixture = try Fixture(saveContext: { context in
+            if failSaves { throw SaveFailure() }
+            try context.save()
+        })
+        try await fixture.pair()
+        let work = try fixture.tag("Work")
+        let started = try await startRecording(fixture)
+        let before = tagIDs(try persisted(fixture, started.id))
+        failSaves = true
+
+        let response = await fixture.send(
+            "PATCH", "/v1/recordings/current",
+            json: #"{"title": "Planning", "tagIds": ["\#(work.id.uuidString)"]}"#
+        )
+
+        #expect(response.status == 500)
+        #expect(errorCode(response) == "save_failed")
+        let stored = try persisted(fixture, started.id)
+        #expect(stored?.title == "Standup")
+        #expect(tagIDs(stored) == before)
+        let status = try decode(StatusBody.self, await fixture.send("GET", "/v1/status"))
+        #expect(status.session == started)
     }
 }
 

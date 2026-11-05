@@ -15,6 +15,7 @@ final class ExtensionAPIRecording {
     private let menuBarSettings: MenuBarSettings
     private let context: ModelContext
     private let requestSession: @MainActor (AppState.SessionRequest) -> Void
+    private let saveContext: @MainActor (ModelContext) throws -> Void
     private let tagService = TagService()
 
     init(
@@ -25,7 +26,8 @@ final class ExtensionAPIRecording {
         permissionService: PermissionServiceProtocol,
         menuBarSettings: MenuBarSettings,
         context: ModelContext,
-        requestSession: @escaping @MainActor (AppState.SessionRequest) -> Void
+        requestSession: @escaping @MainActor (AppState.SessionRequest) -> Void,
+        saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() }
     ) {
         self.coordinator = coordinator
         self.audioDeviceService = audioDeviceService
@@ -35,6 +37,7 @@ final class ExtensionAPIRecording {
         self.menuBarSettings = menuBarSettings
         self.context = context
         self.requestSession = requestSession
+        self.saveContext = saveContext
     }
 
     // MARK: - Routes
@@ -87,6 +90,63 @@ final class ExtensionAPIRecording {
         }
         requestSession(.recording(session.id))
         return ExtensionAPIHandler.json(StopBody(session: SessionBody(session)))
+    }
+
+    // MARK: - Update
+
+    private struct UpdateRequest: Decodable {
+        let title: String?
+        let tagIds: [String]?
+    }
+
+    /// `PATCH /v1/recordings/current`: renames the session being recorded and adds tags to it, all
+    /// or nothing. Every tag is checked before anything changes; title and tags are saved together
+    /// through the recording view's title path, which leaves `transcript.md` to the stop, and a
+    /// failed save is rolled back. Not registered with undo.
+    func updateCurrent(body: Data) -> HTTPResponse {
+        guard let request = try? JSONDecoder().decode(UpdateRequest.self, from: body),
+              request.title != nil || request.tagIds != nil
+        else {
+            return ExtensionAPIHandler.error(.invalidRequest, status: 400)
+        }
+        if let title = request.title, title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return ExtensionAPIHandler.error(.invalidRequest, status: 400)
+        }
+        guard coordinator.phase == .recording, let current = coordinator.current else {
+            return ExtensionAPIHandler.error(.notRecording, status: 409)
+        }
+        // Fetched now, so a session deleted since the request began is not found.
+        guard let session = try? RecordingSession.fetch(id: current.id, in: context) else {
+            return ExtensionAPIHandler.error(.notFound, status: 404)
+        }
+
+        let realTags = session.tags.filter { !$0.isDefault }
+        let tagIDs: [UUID]
+        switch validatedTags(request.tagIds ?? [], alongside: realTags.map(\.id)) {
+        case .success(let ids):
+            tagIDs = ids
+        case .failure(let refusal):
+            return refusal.response
+        }
+        let added = tagIDs.filter { id in !realTags.contains { $0.id == id } }
+        if !added.isEmpty {
+            let newTags = added.compactMap { id in
+                try? context.fetch(FetchDescriptor<RecordingTag>(predicate: #Predicate { $0.id == id })).first
+            }
+            // As `TagService.assign` does, a chosen tag displaces the default.
+            session.tags = realTags + newTags
+        }
+
+        let result = TranscriptDetailViewModel.saveTitle(
+            request.title ?? session.title,
+            of: session,
+            context: context,
+            saveContext: saveContext
+        )
+        guard result == .saved else {
+            return ExtensionAPIHandler.error(.saveFailed, status: 500)
+        }
+        return ExtensionAPIHandler.json(UpdateBody(session: SessionBody(session)))
     }
 
     // MARK: - Start
@@ -161,7 +221,9 @@ final class ExtensionAPIRecording {
         ))
     }
 
-    private func validatedTags(_ texts: [String]) -> Result<[UUID], Refusal> {
+    /// The distinct tag ids `texts` names, each an existing assignable tag, refused when together
+    /// with `existing` they come to more than a recording may carry.
+    private func validatedTags(_ texts: [String], alongside existing: [UUID] = []) -> Result<[UUID], Refusal> {
         var ids: [UUID] = []
         for text in texts {
             guard let id = UUID(uuidString: text) else {
@@ -180,7 +242,7 @@ final class ExtensionAPIRecording {
                 return .failure(Refusal(.tagNotAssignable))
             }
         }
-        guard ids.count <= TagService.maximumTagsPerRecording else {
+        guard Set(existing).union(ids).count <= TagService.maximumTagsPerRecording else {
             return .failure(Refusal(.tooManyTags))
         }
         return .success(ids)
@@ -292,6 +354,10 @@ final class ExtensionAPIRecording {
     }
 
     private struct StopBody: Encodable {
+        let session: SessionBody
+    }
+
+    private struct UpdateBody: Encodable {
         let session: SessionBody
     }
 
