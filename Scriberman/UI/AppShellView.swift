@@ -331,7 +331,7 @@ struct AppShellView: View {
             autoScrollEnabled: $transcriptAutoScrollEnabled,
             transcript: session.displayedTranscript,
             store: appState.backgroundServices.speakerEmbeddingStore,
-            sessionJobs: appState.backgroundServices.sessionJobs,
+            aiTransformationRunner: appState.aiTransformationRunner,
             searchSeed: detailNavigation.searchSeed,
             findRequest: transcriptFindRequest,
             isRawMarkdownShown: isRawMarkdownShown,
@@ -361,7 +361,7 @@ struct AppShellView: View {
                 AITransformationDetailView(
                     session: session,
                     aiProviderService: aiProviderService,
-                    sessionJobs: appState.backgroundServices.sessionJobs,
+                    aiTransformationRunner: appState.aiTransformationRunner,
                     selectedTransformationID: $selectedTransformationID
                 )
                 .toolbar {

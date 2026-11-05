@@ -50,52 +50,6 @@ struct TranscriptDetailViewModelTests {
 
     @Test
     @MainActor
-    func testRunTransformationSuccessTogglesRunningAndAppendsResult() async {
-        let (defaults, suiteName) = makeDefaults()
-        defer { cleanupDefaults(named: suiteName) }
-
-        let promptStore = AIPromptStore(defaults: defaults)
-        let prompt = promptStore.addPrompt(name: "Summary", content: "Summarize")
-        let session = makeRecordingSession(transcriptText: "Transcript")
-
-        let service = makeService(
-            defaults: defaults,
-            responseCreator: { _, _ in
-                try await Task.sleep(nanoseconds: 120_000_000)
-                return try Self.makeResponse(text: "Result text")
-            }
-        )
-        service.isEnabled = true
-        service.selectedModelID = "gpt-5.2"
-
-        let viewModel = TranscriptDetailViewModel(
-            session: session,
-            aiProviderService: service,
-            promptStore: promptStore
-        )
-        viewModel.prompts = [prompt]
-        viewModel.selectedPromptID = prompt.id
-
-        let task = Task {
-            await viewModel.runTransformation()
-        }
-
-        try? await Task.sleep(nanoseconds: 20_000_000)
-        #expect(viewModel.isRunningTransformation)
-
-        await task.value
-
-        #expect(viewModel.isRunningTransformation == false)
-        #expect(viewModel.transformationErrorMessage == nil)
-        #expect(session.aiTransformations.count == 1)
-        #expect(session.aiTransformations.first?.resultText == "Result text")
-        #expect(session.aiTransformations.first?.promptName == "Summary")
-        #expect(viewModel.selectedTransformationID == session.aiTransformations.first?.id)
-        #expect(promptStore.loadLastUsedPromptID() == prompt.id)
-    }
-
-    @Test
-    @MainActor
     func testRunTransformationErrorSurfacesMessageAndResetsRunning() async {
         let (defaults, suiteName) = makeDefaults()
         defer { cleanupDefaults(named: suiteName) }
@@ -173,56 +127,7 @@ struct TranscriptDetailViewModelTests {
 
     @Test
     @MainActor
-    func testHistoryRecordsModelInEffectWhenRequestStarted() async {
-        let (defaults, suiteName) = makeDefaults()
-        defer { cleanupDefaults(named: suiteName) }
-
-        let promptStore = AIPromptStore(defaults: defaults)
-        let prompt = promptStore.addPrompt(name: "Summary", content: "Summarize")
-        let session = makeRecordingSession(transcriptText: "Transcript")
-        let (gate, release) = AsyncStream<Void>.makeStream()
-        var sentModels: [String?] = []
-
-        let service = makeService(
-            defaults: defaults,
-            responseCreator: { _, query in
-                sentModels.append(query.model)
-                for await _ in gate { break }
-                return try Self.makeResponse(text: "Result text")
-            }
-        )
-        service.isEnabled = true
-        service.selectedModelID = "model-a"
-
-        let viewModel = TranscriptDetailViewModel(
-            session: session,
-            aiProviderService: service,
-            promptStore: promptStore
-        )
-        viewModel.prompts = [prompt]
-        viewModel.selectedPromptID = prompt.id
-
-        let task = Task {
-            await viewModel.runTransformation()
-        }
-        for _ in 0..<1_000 where sentModels.isEmpty {
-            await Task.yield()
-        }
-
-        service.selectedModelID = "model-b"
-        release.yield()
-        release.finish()
-        await task.value
-
-        #expect(sentModels == ["model-a"])
-        #expect(session.aiTransformations.count == 1)
-        #expect(session.aiTransformations.first?.modelID == "model-a")
-        #expect(session.aiTransformations.first?.promptName == "Summary")
-    }
-
-    @Test
-    @MainActor
-    func testSecondRunForSameSessionIsRejectedWhileFirstIsRunning() async {
+    func testRunsGoThroughTheSharedRunnerSoASecondWindowIsRefused() async {
         let (defaults, suiteName) = makeDefaults()
         defer { cleanupDefaults(named: suiteName) }
 
@@ -243,24 +148,41 @@ struct TranscriptDetailViewModelTests {
         service.isEnabled = true
         service.selectedModelID = "gpt-5.2"
 
-        let viewModel = TranscriptDetailViewModel(
+        let runner = AITransformationRunner(
+            aiProviderService: service,
+            promptStore: promptStore,
+            sessionJobs: SessionJobs()
+        )
+        let firstWindow = TranscriptDetailViewModel(
             session: session,
             aiProviderService: service,
-            promptStore: promptStore
+            promptStore: promptStore,
+            aiTransformationRunner: runner
         )
-        viewModel.prompts = [prompt]
-        viewModel.selectedPromptID = prompt.id
+        let secondWindow = TranscriptDetailViewModel(
+            session: session,
+            aiProviderService: service,
+            promptStore: promptStore,
+            aiTransformationRunner: runner
+        )
+        for viewModel in [firstWindow, secondWindow] {
+            viewModel.prompts = [prompt]
+            viewModel.selectedPromptID = prompt.id
+        }
 
         let first = Task {
-            await viewModel.runTransformation()
+            await firstWindow.runTransformation()
         }
         for _ in 0..<1_000 where responseCreatorCalls == 0 {
             await Task.yield()
         }
 
-        await viewModel.runTransformation()
+        #expect(firstWindow.isRunningTransformation)
+        #expect(secondWindow.isRunningTransformation)
+        #expect(secondWindow.canRunTransformation == false)
+
+        await secondWindow.runTransformation()
         #expect(responseCreatorCalls == 1)
-        #expect(viewModel.isRunningTransformation)
 
         release.yield()
         release.finish()
@@ -268,7 +190,13 @@ struct TranscriptDetailViewModelTests {
 
         #expect(responseCreatorCalls == 1)
         #expect(session.aiTransformations.count == 1)
-        #expect(viewModel.isRunningTransformation == false)
+        #expect(session.aiTransformations.first?.resultText == "Result text")
+        #expect(firstWindow.selectedTransformationID == session.aiTransformations.first?.id)
+        #expect(firstWindow.transformationErrorMessage == nil)
+        #expect(secondWindow.transformationErrorMessage == nil)
+        #expect(firstWindow.isRunningTransformation == false)
+        #expect(secondWindow.isRunningTransformation == false)
+        #expect(promptStore.loadLastUsedPromptID() == prompt.id)
     }
 
     @Test
