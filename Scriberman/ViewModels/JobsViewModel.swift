@@ -189,39 +189,26 @@ final class JobsViewModel {
         }
 
         let combined = (recordingItems + importedItems).sorted { $0.createdAt > $1.createdAt }
-        return applyingSearchQuery(to: applyingTagFilter(to: combined))
+        return SessionFiltering.filter(combined, query: activeSearchQuery, tagIDs: effectiveTagIDs(in: combined))
     }
 
-    /// Narrows the list to recordings carrying any of the selected tags.
+    /// The selected tags that some recording in `items` carries.
     ///
-    /// Union rather than intersection: intersecting two tags over a personal archive returns almost
-    /// nothing, which would make multi-selection useless.
+    /// Only tags some recording actually carries can filter. A tag that lost its last recording
+    /// has no chip any more, so leaving it in the selection would filter the list to nothing
+    /// with no visible way to undo it. Ignoring it instead makes the selection self-healing.
     ///
-    /// While a filter is active, imported and pending sessions drop out. They carry no tags, so
-    /// they cannot match — and showing them anyway would mean a filtered list still contains rows
-    /// the filter says nothing about.
-    ///
-    /// Applied here, after the selection-preserving branch above, so filtering the selected item
-    /// out wins over keeping it visible.
-    private func applyingTagFilter(to items: [SessionListItem]) -> [SessionListItem] {
-        guard !selectedTagIDs.isEmpty else { return items }
-
-        // Only tags some recording actually carries can filter. A tag that lost its last recording
-        // has no chip any more, so leaving it in the selection would filter the list to nothing
-        // with no visible way to undo it. Ignoring it instead makes the selection self-healing.
+    /// Computed over the list after the selection-preserving branch above, so filtering the
+    /// selected item out wins over keeping it visible.
+    private func effectiveTagIDs(in items: [SessionListItem]) -> Set<UUID> {
+        guard !selectedTagIDs.isEmpty else { return [] }
         var present: Set<UUID> = []
         for item in items {
             if case .recording(let session) = item {
                 for tag in session.tags { present.insert(tag.id) }
             }
         }
-        let effective = selectedTagIDs.intersection(present)
-        guard !effective.isEmpty else { return items }
-
-        return items.filter { item in
-            guard case .recording(let session) = item else { return false }
-            return session.tags.contains { effective.contains($0.id) }
-        }
+        return selectedTagIDs.intersection(present)
     }
 
     /// What the search field holds. Empty, or nothing but whitespace, means no search.
@@ -233,55 +220,12 @@ final class JobsViewModel {
     /// The query with its surrounding whitespace removed, or `nil` when there is nothing to search
     /// for. Every search path goes through this, so "    " and "" behave identically.
     var activeSearchQuery: String? {
-        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        SessionFiltering.activeQuery(searchQuery)
     }
 
-    /// Narrows the list to sessions whose title or transcript contains the query.
-    ///
-    /// Applied after the tag filter, which is what makes the two AND: tags narrow the set, the
-    /// query searches within it.
-    ///
-    /// A query that matches nothing yields an empty list. It deliberately does not fall back to
-    /// showing everything — a list that ignores the query looks like a search that found the whole
-    /// library.
-    ///
-    /// Matching is `localizedStandardContains`, which is case- and diacritic-insensitive, the same
-    /// comparison the in-transcript find bar uses. A pending session drops out while a query is
-    /// active: it has no transcript and no title of its own yet, so it cannot match, and leaving it
-    /// in would put a row in the results the query says nothing about.
-    private func applyingSearchQuery(to items: [SessionListItem]) -> [SessionListItem] {
-        guard let query = activeSearchQuery else { return items }
-        return items.filter { Self.matches(query: query, item: $0) != nil }
-    }
-
-    /// How an item matched a query, or `nil` when it did not.
-    ///
-    /// A session can match on both; the transcript wins, because that is the match a snippet can be
-    /// built from.
+    /// How an item matched a query, or `nil` when it did not. See `SessionFiltering.matches`.
     static func matches(query: String, item: SessionListItem) -> SessionSearchMatchKind? {
-        switch item {
-        case .pending:
-            return nil
-        case .recording(let session):
-            return matches(query: query, title: session.title, searchableText: session.searchableText)
-        case .imported(let session):
-            return matches(query: query, title: session.title, searchableText: session.searchableText)
-        }
-    }
-
-    private static func matches(
-        query: String,
-        title: String,
-        searchableText: String?
-    ) -> SessionSearchMatchKind? {
-        if searchableText?.localizedStandardContains(query) == true {
-            return .transcript
-        }
-        if title.localizedStandardContains(query) {
-            return .title
-        }
-        return nil
+        SessionFiltering.matches(query: query, item: item)
     }
 
     /// Where the query matched inside each transcript result, keyed by list item id.

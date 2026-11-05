@@ -77,6 +77,7 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
     private let now: @MainActor () -> Date
     private let waitForPairingExpiry: @MainActor () async -> Void
     private let loadPrompts: @MainActor () async -> [AIPrompt]
+    private let sessions: ExtensionAPISessionCatalog
 
     /// Nonces seen per client, with the time each was seen.
     private var seenNonces: [String: Date] = [:]
@@ -101,7 +102,8 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         callerVerifier: any ExtensionAPICallerVerifier,
         now: @escaping @MainActor () -> Date = { Date() },
         waitForPairingExpiry: @escaping @MainActor () async -> Void = { try? await Task.sleep(for: .seconds(120)) },
-        loadPrompts: @escaping @MainActor () async -> [AIPrompt]
+        loadPrompts: @escaping @MainActor () async -> [AIPrompt],
+        sessions: ExtensionAPISessionCatalog
     ) {
         self.port = port
         self.pairingStore = pairingStore
@@ -109,6 +111,7 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         self.now = now
         self.waitForPairingExpiry = waitForPairingExpiry
         self.loadPrompts = loadPrompts
+        self.sessions = sessions
     }
 
     func admit(_ head: HTTPRequestHead, peer: ExtensionAPIPeer) async -> ExtensionAPIAdmission {
@@ -174,7 +177,7 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         guard ExtensionAPISigning.sha256Hex(body) == signing.bodyHash else {
             return signing.sign(Self.error(.badSignature, status: 401))
         }
-        return signing.sign(await respond(to: route, body: body, signing: signing))
+        return signing.sign(await respond(to: route, body: body, signing: signing, head: head))
     }
 
     func apiDidStop() async {
@@ -189,8 +192,17 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
 
     // MARK: - Routes
 
-    private func respond(to route: ExtensionAPIRoute, body: Data, signing: RequestSigning) async -> HTTPResponse {
+    private func respond(to route: ExtensionAPIRoute, body: Data, signing: RequestSigning, head: HTTPRequestHead) async -> HTTPResponse {
         switch route {
+        case .sessions:
+            return listSessions(target: head.target)
+        case .latestSession:
+            guard let detail = sessions.latest() else { return Self.error(.notFound, status: 404) }
+            return Self.json(detail)
+        case .session:
+            guard let id = Self.sessionID(inPath: head.path) else { return Self.error(.invalidRequest, status: 400) }
+            guard let detail = sessions.detail(id) else { return Self.error(.notFound, status: 404) }
+            return Self.json(detail)
         case .prompts:
             let prompts = await loadPrompts()
             if let revoked = revocationResponse(for: signing) { return revoked }
@@ -220,6 +232,55 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         default: return Self.error(.notFoundRoute, status: 404)
         }
         return revocationResponse(for: signing) ?? response
+    }
+
+    private struct SessionList: Encodable {
+        let sessions: [ExtensionAPISessionRow]
+    }
+
+    static let defaultSessionLimit = 50
+    static let maximumSessionLimit = 200
+
+    /// `GET /v1/sessions`: `q`, `tag`, `limit` and `offset`, each at most once.
+    private func listSessions(target: String) -> HTTPResponse {
+        let invalid = Self.error(.invalidRequest, status: 400)
+        guard let components = URLComponents(string: target) else { return invalid }
+        var values: [String: String] = [:]
+        for item in components.queryItems ?? [] {
+            guard values[item.name] == nil else { return invalid }
+            values[item.name] = item.value ?? ""
+        }
+
+        var tagID: UUID?
+        if let tag = values["tag"] {
+            guard let parsed = UUID(uuidString: tag) else { return invalid }
+            tagID = parsed
+        }
+        var limit = Self.defaultSessionLimit
+        if let text = values["limit"] {
+            guard let parsed = Self.nonNegativeInteger(text), (1...Self.maximumSessionLimit).contains(parsed) else {
+                return invalid
+            }
+            limit = parsed
+        }
+        var offset = 0
+        if let text = values["offset"] {
+            guard let parsed = Self.nonNegativeInteger(text) else { return invalid }
+            offset = parsed
+        }
+        return Self.json(SessionList(sessions: sessions.sessions(query: values["q"], tagID: tagID, limit: limit, offset: offset)))
+    }
+
+    private static func nonNegativeInteger(_ text: String) -> Int? {
+        guard !text.isEmpty, text.utf8.allSatisfy({ (48...57).contains($0) }) else { return nil }
+        return Int(text)
+    }
+
+    /// The id segment of `/v1/sessions/{id}...`.
+    private static func sessionID(inPath path: String) -> ExtensionAPISessionID? {
+        let segments = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard segments.count > 3 else { return nil }
+        return ExtensionAPISessionID(pathSegment: String(segments[3]))
     }
 
     private struct PromptList: Encodable {

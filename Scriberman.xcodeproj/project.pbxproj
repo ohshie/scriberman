@@ -20,6 +20,9 @@
 		ABCD8C3EA12F54D91720C465 /* ExtensionAPISigningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47853546E65B370B6F341FB5 /* ExtensionAPISigningTests.swift */; };
 		88415C43AD082030758F88BC /* ExtensionAPIPairingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82EC96768D2F61C76577939E /* ExtensionAPIPairingTests.swift */; };
 		0FAA5B0A57D373EBF816007F /* ExtensionAPIRecordingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEE2D968AE3D3631993305C4 /* ExtensionAPIRecordingTests.swift */; };
+		26222CC1321B2AC5DAC03A5A /* ExtensionAPISessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 249B468EA5D87F4CED9E3BC1 /* ExtensionAPISessions.swift */; };
+		A7E04957D18B99A9A63908F4 /* SessionFilteringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2297D7E9ADA81BA6EB5B0B05 /* SessionFilteringTests.swift */; };
+		9D15705A3D10FA32EA942A16 /* ExtensionAPISessionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 147C94BCC8AF2A5ADB80A6C4 /* ExtensionAPISessionsTests.swift */; };
 		EB6470DC68383B678408A521 /* ExtensionAPISettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA6470DC68383B678408A521 /* ExtensionAPISettings.swift */; };
 		EB3D0056F5052EF946C25262 /* ExtensionAPISettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA3D0056F5052EF946C25262 /* ExtensionAPISettingsTests.swift */; };
 		EBFFD63E47E74BAD5A4C6BF5 /* HTTPFraming.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAFFD63E47E74BAD5A4C6BF5 /* HTTPFraming.swift */; };
@@ -281,6 +284,7 @@
 		86767BA4F9AF6E4E30782B9E /* MockRecordingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDB34ACA26BE9E4D8CC45D74 /* MockRecordingService.swift */; };
 		8875A7B9DB44C4468FE50F93 /* ServiceContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADD6117B43940D993554EB33 /* ServiceContainer.swift */; };
 		89EB4800C21A7DBD573FE1B2 /* JobsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4F2C579DEA6DCCA2A080BC3 /* JobsViewModel.swift */; };
+		9A583E50E1311ABB934AEAB7 /* SessionFiltering.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1FA3D6FB89B1FDC300246E2 /* SessionFiltering.swift */; };
 		B7C1A0E2F3D4456789AB0C03 /* SessionCommandAvailability.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7C1A0E2F3D4456789AB0C04 /* SessionCommandAvailability.swift */; };
 		D37A11C0D37A11C0D37A1101 /* DetailNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D37A11C0D37A11C0D37A1102 /* DetailNavigation.swift */; };
 		D37A11C0D37A11C0D37A1103 /* DetailNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D37A11C0D37A11C0D37A1104 /* DetailNavigationTests.swift */; };
@@ -389,6 +393,9 @@
 		47853546E65B370B6F341FB5 /* ExtensionAPISigningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPISigningTests.swift"; sourceTree = SOURCE_ROOT; };
 		82EC96768D2F61C76577939E /* ExtensionAPIPairingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPIPairingTests.swift"; sourceTree = SOURCE_ROOT; };
 		CEE2D968AE3D3631993305C4 /* ExtensionAPIRecordingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPIRecordingTests.swift"; sourceTree = SOURCE_ROOT; };
+		249B468EA5D87F4CED9E3BC1 /* ExtensionAPISessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPISessions.swift"; sourceTree = SOURCE_ROOT; };
+		2297D7E9ADA81BA6EB5B0B05 /* SessionFilteringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/SessionFilteringTests.swift"; sourceTree = SOURCE_ROOT; };
+		147C94BCC8AF2A5ADB80A6C4 /* ExtensionAPISessionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPISessionsTests.swift"; sourceTree = SOURCE_ROOT; };
 		EA6470DC68383B678408A521 /* ExtensionAPISettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPISettings.swift"; sourceTree = SOURCE_ROOT; };
 		EA3D0056F5052EF946C25262 /* ExtensionAPISettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPISettingsTests.swift"; sourceTree = SOURCE_ROOT; };
 		EAFFD63E47E74BAD5A4C6BF5 /* HTTPFraming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/HTTPFraming.swift"; sourceTree = SOURCE_ROOT; };
@@ -689,6 +696,7 @@
 		463BF1078BEDB83199A47BE3 /* MockScreenCaptureService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MockScreenCaptureService.swift; sourceTree = "<group>"; };
 		AB83548471615C8E71B7B7CB /* MockAppAudioService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MockAppAudioService.swift; sourceTree = "<group>"; };
 		C4F2C579DEA6DCCA2A080BC3 /* JobsViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JobsViewModel.swift; sourceTree = "<group>"; };
+		D1FA3D6FB89B1FDC300246E2 /* SessionFiltering.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionFiltering.swift; sourceTree = "<group>"; };
 		B7C1A0E2F3D4456789AB0C04 /* SessionCommandAvailability.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionCommandAvailability.swift; sourceTree = "<group>"; };
 		D37A11C0D37A11C0D37A1102 /* DetailNavigation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DetailNavigation.swift; sourceTree = "<group>"; };
 		D37A11C0D37A11C0D37A1104 /* DetailNavigationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DetailNavigationTests.swift; sourceTree = "<group>"; };
@@ -787,6 +795,8 @@
 				47853546E65B370B6F341FB5 /* ExtensionAPISigningTests.swift */,
 				82EC96768D2F61C76577939E /* ExtensionAPIPairingTests.swift */,
 				CEE2D968AE3D3631993305C4 /* ExtensionAPIRecordingTests.swift */,
+				2297D7E9ADA81BA6EB5B0B05 /* SessionFilteringTests.swift */,
+				147C94BCC8AF2A5ADB80A6C4 /* ExtensionAPISessionsTests.swift */,
 				EA0F7CDC6EE8CF8B0F0D1946 /* ExtensionAPIListenerTests.swift */,
 				EAFC51BBE885552D4607C8BA /* ExtensionAPIServiceTests.swift */,
 				AA10A1000000000000000004 /* AITransformationRunnerTests.swift */,
@@ -937,6 +947,7 @@
 				B1B2C3D4E5F60718293A4B5D /* NewSessionViewModel.swift */,
 				D454F23B8446BE382EB33B3B /* CaptureCoordinator.swift */,
 				C4F2C579DEA6DCCA2A080BC3 /* JobsViewModel.swift */,
+				D1FA3D6FB89B1FDC300246E2 /* SessionFiltering.swift */,
 				4D0400000000000000000004 /* PendingDeletionsViewModel.swift */,
 				B7C1A0E2F3D4456789AB0C04 /* SessionCommandAvailability.swift */,
 				D37A11C0D37A11C0D37A1102 /* DetailNavigation.swift */,
@@ -1224,6 +1235,7 @@
 				16202986B8043F6391A92D2D /* ExtensionAPICallerVerifier.swift */,
 				852626576EFD5A7B33B6E8F2 /* ExtensionAPIPairing.swift */,
 				464E1955BEE4C1665CF905F0 /* ExtensionAPIRecording.swift */,
+				249B468EA5D87F4CED9E3BC1 /* ExtensionAPISessions.swift */,
 				EADDA03D8D6B2A0B0A8C3790 /* ExtensionAPIListener.swift */,
 				EAE50E7BA3FA78B4AE99D237 /* ExtensionAPIService.swift */,
 				B22B22B22B22B22B22B22B22 /* KeychainStore.swift */,
@@ -1516,6 +1528,7 @@
 				526EBC7A9200D29B7BED4A67 /* ExtensionAPICallerVerifier.swift in Sources */,
 				FF81092B480848FCE9A1FC02 /* ExtensionAPIPairing.swift in Sources */,
 				FE8B2D3787E419FB0178EBE8 /* ExtensionAPIRecording.swift in Sources */,
+				26222CC1321B2AC5DAC03A5A /* ExtensionAPISessions.swift in Sources */,
 				EBDDA03D8D6B2A0B0A8C3790 /* ExtensionAPIListener.swift in Sources */,
 				EBE50E7BA3FA78B4AE99D237 /* ExtensionAPIService.swift in Sources */,
 				A22A22A22A22A22A22A22A22 /* KeychainStore.swift in Sources */,
@@ -1612,6 +1625,7 @@
 				79E005D62F76756000D3EAD9 /* AudioDeviceService.swift in Sources */,
 				792751DE2F92CD9A0004BAF0 /* RecordingTranscriptSegment.swift in Sources */,
 				89EB4800C21A7DBD573FE1B2 /* JobsViewModel.swift in Sources */,
+				9A583E50E1311ABB934AEAB7 /* SessionFiltering.swift in Sources */,
 				4D0400000000000000000003 /* PendingDeletionsViewModel.swift in Sources */,
 				B7C1A0E2F3D4456789AB0C03 /* SessionCommandAvailability.swift in Sources */,
 				D37A11C0D37A11C0D37A1101 /* DetailNavigation.swift in Sources */,
@@ -1717,6 +1731,8 @@
 				ABCD8C3EA12F54D91720C465 /* ExtensionAPISigningTests.swift in Sources */,
 				88415C43AD082030758F88BC /* ExtensionAPIPairingTests.swift in Sources */,
 				0FAA5B0A57D373EBF816007F /* ExtensionAPIRecordingTests.swift in Sources */,
+				A7E04957D18B99A9A63908F4 /* SessionFilteringTests.swift in Sources */,
+				9D15705A3D10FA32EA942A16 /* ExtensionAPISessionsTests.swift in Sources */,
 				EB0F7CDC6EE8CF8B0F0D1946 /* ExtensionAPIListenerTests.swift in Sources */,
 				EBFC51BBE885552D4607C8BA /* ExtensionAPIServiceTests.swift in Sources */,
 				AA10A1000000000000000003 /* AITransformationRunnerTests.swift in Sources */,

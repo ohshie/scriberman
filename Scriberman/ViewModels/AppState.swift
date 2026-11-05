@@ -153,7 +153,7 @@ final class AppState {
             permissionService: services.main.permissionService,
             speakerEmbeddingStore: services.background.speakerEmbeddingStore
         )
-        self.jobsViewModel = JobsViewModel(
+        let jobsViewModel = JobsViewModel(
             workspaceService: services.background.workspaceService,
             transcriptionService: services.background.transcriptionService,
             retranscriptionService: services.background.retranscriptionService,
@@ -161,6 +161,7 @@ final class AppState {
             transcriptExportService: services.main.transcriptExportService,
             sessionJobs: services.background.sessionJobs
         )
+        self.jobsViewModel = jobsViewModel
         self.sessionDeletion = sessionDeletion ?? SessionDeletionCoordinator(
             workspaceService: services.background.workspaceService,
             sessionJobs: services.background.sessionJobs
@@ -195,7 +196,11 @@ final class AppState {
             port: { extensionAPISettings.port },
             pairingStore: ExtensionAPIPairingStore(keychain: LiveKeychainStore()),
             callerVerifier: AlwaysAllowCallerVerifier(),
-            loadPrompts: { AIPromptStore().loadPrompts() }
+            loadPrompts: { AIPromptStore().loadPrompts() },
+            sessions: ExtensionAPISessionCatalog(
+                context: modelContext,
+                renderTranscript: { jobsViewModel.renderedTranscript(for: $0) }
+            )
         )
         self.extensionAPI = ExtensionAPIService(
             settings: extensionAPISettings,
