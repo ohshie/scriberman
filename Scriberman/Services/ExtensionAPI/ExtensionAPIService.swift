@@ -66,6 +66,8 @@ final class ExtensionAPIService {
     /// Stops listening at once and stops following the settings. For quit and tests.
     func stopNow() {
         isFollowingSettings = false
+        let handler = handler
+        Task { await handler.apiDidStop() }
         listener?.stop()
         listener = nil
         appliedConfiguration = nil
@@ -94,6 +96,9 @@ final class ExtensionAPIService {
         }
         appliedConfiguration = wanted
 
+        if listener != nil {
+            await handler.apiDidStop()
+        }
         listener?.stop()
         listener = nil
         state = .stopped

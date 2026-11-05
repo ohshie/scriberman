@@ -4,6 +4,9 @@ import Security
 protocol KeychainStore {
     func save(key: String, value: String) throws
     func read(key: String) -> String?
+    /// The stored value, or nil when there is none. Throws when the Keychain could not be read,
+    /// so a failure is not mistaken for a missing item.
+    func readIfPresent(key: String) throws -> String?
     func delete(key: String) throws
 }
 
@@ -99,6 +102,10 @@ struct LiveKeychainStore: KeychainStore {
     }
 
     func read(key: String) -> String? {
+        (try? readIfPresent(key: key)) ?? nil
+    }
+
+    func readIfPresent(key: String) throws -> String? {
         let variants = queryVariants(for: key)
         var dataProtectionItemMissing = false
         for (index, baseQuery) in variants.enumerated() {
@@ -110,7 +117,7 @@ struct LiveKeychainStore: KeychainStore {
             let status = security.copyMatching(query as CFDictionary, &result)
             if status == errSecSuccess {
                 guard let data = result as? Data, let value = String(data: data, encoding: .utf8) else {
-                    return nil
+                    throw KeychainStoreError.invalidData
                 }
                 if index == 0 {
                     // Retry cleanup if an earlier migration could not remove the legacy copy.
@@ -132,7 +139,7 @@ struct LiveKeychainStore: KeychainStore {
             if status == errSecItemNotFound || shouldFallback(status: status, variantIndex: index) {
                 continue
             }
-            return nil
+            throw KeychainStoreError.unexpectedStatus(status)
         }
 
         return nil

@@ -186,7 +186,12 @@ final class AppState {
         self.extensionAPISettings = extensionAPISettings
         self.extensionAPI = ExtensionAPIService(
             settings: extensionAPISettings,
-            handler: ExtensionAPIHandler(port: { extensionAPISettings.port })
+            handler: ExtensionAPIHandler(
+                port: { extensionAPISettings.port },
+                pairingStore: ExtensionAPIPairingStore(keychain: LiveKeychainStore()),
+                callerVerifier: AlwaysAllowCallerVerifier(),
+                loadPrompts: { AIPromptStore().loadPrompts() }
+            )
         )
         self.captureCoordinator = CaptureCoordinator(
             viewModel: newSessionViewModel,
