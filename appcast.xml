@@ -3,25 +3,21 @@
     <channel>
         <title>Scriberman</title>
         <item>
-            <title>1.1.4</title>
-            <pubDate>Sun, 25 Oct 2026 13:23:08 +0100</pubDate>
-            <sparkle:version>34</sparkle:version>
-            <sparkle:shortVersionString>1.1.4</sparkle:shortVersionString>
+            <title>1.1.5</title>
+            <pubDate>Thu, 05 Nov 2026 23:26:39 +0100</pubDate>
+            <sparkle:version>35</sparkle:version>
+            <sparkle:shortVersionString>1.1.5</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<h2>Scriberman 1.1.4</h2>
+            <description><![CDATA[<h2>Scriberman 1.1.5</h2>
 <h3>What’s new</h3>
 <ul>
-  <li>Restore deleted recordings and completed imports with Undo or from Pending deletions for up to 24 hours, or delete them permanently sooner.</li>
-</ul>
-<h3>Fixes</h3>
-<ul>
-  <li>Live transcripts keep scrolling to new text after 100 segments.</li>
-  <li>The recording waveform respects Reduce Motion while continuing to show audio levels.</li>
-  <li>The Delete button is back in the session detail toolbar.</li>
+  <li>Connect Tinycast and similar apps on your Mac to control recordings, including starting from calendar suggestions.</li>
+  <li>Use connected apps to import audio, search sessions, read transcripts, export transcripts, and run saved AI prompts.</li>
+  <li>Approve app connections and remove their access in Settings.</li>
 </ul>
 ]]></description>
-            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.1.4/Scriberman-1.1.4-34-arm64.dmg" length="17021121" type="application/octet-stream" sparkle:edSignature="EsGvsvzv1rBMJWRqNfHxiAtPfjmB3qpwXxfFavGdDEMgK5HF+O8hji9EUsGwE19a7X8SuFBr9QZ4dc004yjZAw=="/>
+            <enclosure url="https://github.com/ohshie/scriberman/releases/download/v1.1.5/Scriberman-1.1.5-35-arm64.dmg" length="17888649" type="application/octet-stream" sparkle:edSignature="XY61EksffoFZdBVPRLorx6pED9sIpdRYb4Bl3PgiQIaByiFf/iaZoiN9U2XJX1ODPNpSaLB2paJGvd+SDNrQCg=="/>
         </item>
     </channel>
 </rss>
