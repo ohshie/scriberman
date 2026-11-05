@@ -4,8 +4,20 @@ import Testing
 @testable import Scriberman
 
 private struct EchoHandler: ExtensionAPIRequestHandling {
-    func admit(_ head: HTTPRequestHead) async -> ExtensionAPIAdmission { .admitted(bodyLimit: 1024) }
-    func handle(_ head: HTTPRequestHead, body: Data) async -> HTTPResponse { HTTPResponse(status: 200) }
+    func admit(_ head: HTTPRequestHead, peer: ExtensionAPIPeer) async -> ExtensionAPIAdmission { .admitted(bodyLimit: 1024) }
+    func handle(_ head: HTTPRequestHead, body: Data, peer: ExtensionAPIPeer) async -> HTTPResponse { HTTPResponse(status: 200) }
+    func apiDidStop() async {}
+}
+
+/// Counts `apiDidStop` calls.
+private final class StopCountingHandler: ExtensionAPIRequestHandling, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _stops = 0
+    var stops: Int { lock.withLock { _stops } }
+
+    func admit(_ head: HTTPRequestHead, peer: ExtensionAPIPeer) async -> ExtensionAPIAdmission { .admitted(bodyLimit: 1024) }
+    func handle(_ head: HTTPRequestHead, body: Data, peer: ExtensionAPIPeer) async -> HTTPResponse { HTTPResponse(status: 200) }
+    func apiDidStop() async { lock.withLock { _stops += 1 } }
 }
 
 @MainActor
@@ -158,5 +170,21 @@ struct ExtensionAPIServiceTests {
             }
             try await Task.sleep(for: .milliseconds(20))
         }
+    }
+
+    @Test("Turning the API off tells the handler, so a held pairing ends")
+    func turningOffTellsHandler() async throws {
+        let settings = makeSettings()
+        try settings.setPort(try await freePort())
+        settings.isEnabled = true
+        let handler = StopCountingHandler()
+        let service = ExtensionAPIService(settings: settings, handler: handler)
+        await service.apply()
+        #expect(handler.stops == 0)
+
+        settings.isEnabled = false
+        await service.apply()
+        #expect(handler.stops == 1)
+        #expect(service.state == .stopped)
     }
 }

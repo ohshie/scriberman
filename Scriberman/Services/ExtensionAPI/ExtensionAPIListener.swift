@@ -137,6 +137,12 @@ private final class ExtensionAPIConnection: @unchecked Sendable {
     private var body = Data()
     private var timer: DispatchWorkItem?
     private var isFinished = false
+    /// The running `handle` call, cancelled when the connection ends before it answers.
+    private var handleTask: Task<Void, Never>?
+
+    private var peer: ExtensionAPIPeer {
+        ExtensionAPIPeer(endpoint: connection.endpoint)
+    }
 
     init(
         connection: NWConnection,
@@ -176,6 +182,8 @@ private final class ExtensionAPIConnection: @unchecked Sendable {
         guard !isFinished else { return }
         isFinished = true
         timer?.cancel()
+        handleTask?.cancel()
+        handleTask = nil
         onFinish(self)
     }
 
@@ -234,8 +242,9 @@ private final class ExtensionAPIConnection: @unchecked Sendable {
     /// Asks the handler about the head, then resumes with the body bytes that arrived with it.
     private func admit(_ head: HTTPRequestHead, pending: [HTTPRequestFramer.Event]) {
         let handler = handler
+        let peer = peer
         Task { [weak self] in
-            let admission = await handler.admit(head)
+            let admission = await handler.admit(head, peer: peer)
             self?.queue.async {
                 guard let self, !self.isFinished else { return }
                 switch admission {
@@ -276,11 +285,26 @@ private final class ExtensionAPIConnection: @unchecked Sendable {
 
     private func handle(_ head: HTTPRequestHead, body: Data) {
         let handler = handler
-        Task { [weak self] in
-            let response = await handler.handle(head, body: body)
+        let peer = peer
+        handleTask = Task { [weak self] in
+            let response = await handler.handle(head, body: body, peer: peer)
             self?.queue.async {
                 guard let self, !self.isFinished else { return }
                 self.respond(response)
+            }
+        }
+        watchForDisconnect()
+    }
+
+    /// While the handler works, a close from the client (or any byte after the request) ends the
+    /// connection, which cancels the handler's task.
+    private func watchForDisconnect() {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { [weak self] data, _, isComplete, error in
+            guard let self, !self.isFinished else { return }
+            if isComplete || error != nil || !(data?.isEmpty ?? true) {
+                self.close()
+            } else {
+                self.watchForDisconnect()
             }
         }
     }

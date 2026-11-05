@@ -1073,6 +1073,10 @@ private final class InMemoryKeychainStore: KeychainStore {
         storage[key]
     }
 
+    func readIfPresent(key: String) throws -> String? {
+        storage[key]
+    }
+
     func delete(key: String) throws {
         storage.removeValue(forKey: key)
     }

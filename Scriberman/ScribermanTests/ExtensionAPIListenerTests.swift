@@ -101,13 +101,52 @@ func listeningAddresses(port: UInt16) -> [String] {
 }
 
 private struct StubHandler: ExtensionAPIRequestHandling {
-    func admit(_ head: HTTPRequestHead) async -> ExtensionAPIAdmission {
+    func admit(_ head: HTTPRequestHead, peer: ExtensionAPIPeer) async -> ExtensionAPIAdmission {
         head.path == "/refuse" ? .refused(HTTPResponse(status: 403)) : .admitted(bodyLimit: 1024)
     }
 
-    func handle(_ head: HTTPRequestHead, body: Data) async -> HTTPResponse {
+    func handle(_ head: HTTPRequestHead, body: Data, peer: ExtensionAPIPeer) async -> HTTPResponse {
         HTTPResponse(status: 200, body: body)
     }
+    func apiDidStop() async {}
+}
+
+/// Holds `handle` open until its task is cancelled, and records what it saw.
+private final class HoldingHandler: ExtensionAPIRequestHandling, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _handleStarted = false
+    private var _handleCancelled = false
+    private var _admitPeer: ExtensionAPIPeer?
+
+    var handleStarted: Bool { lock.withLock { _handleStarted } }
+    var handleCancelled: Bool { lock.withLock { _handleCancelled } }
+    var admitPeer: ExtensionAPIPeer? { lock.withLock { _admitPeer } }
+
+    func admit(_ head: HTTPRequestHead, peer: ExtensionAPIPeer) async -> ExtensionAPIAdmission {
+        lock.withLock { _admitPeer = peer }
+        return .admitted(bodyLimit: 1024)
+    }
+
+    func handle(_ head: HTTPRequestHead, body: Data, peer: ExtensionAPIPeer) async -> HTTPResponse {
+        lock.withLock { _handleStarted = true }
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        lock.withLock { _handleCancelled = true }
+        return HTTPResponse(status: 200)
+    }
+
+    func apiDidStop() async {}
+}
+
+/// Polls `condition` for up to `seconds`.
+private func eventually(_ seconds: TimeInterval = 5, _ condition: () -> Bool) async -> Bool {
+    let deadline = Date().addingTimeInterval(seconds)
+    while Date() < deadline {
+        if condition() { return true }
+        try? await Task.sleep(for: .milliseconds(10))
+    }
+    return condition()
 }
 
 @Suite(.serialized)
@@ -278,5 +317,49 @@ struct ExtensionAPIListenerTests {
         #expect(throws: (any Error).self) {
             _ = try LoopbackClient(port: port)
         }
+    }
+
+    @Test("A client that disconnects while its request is handled cancels the handler's task")
+    func disconnectCancelsHandle() async throws {
+        let handler = HoldingHandler()
+        let listener = ExtensionAPIListener(handler: handler)
+        let port = try await listener.start(port: 0)
+        defer { listener.stop() }
+        var client: LoopbackClient? = try LoopbackClient(port: port)
+        client?.send("POST /pair HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\n\r\n{}")
+        #expect(await eventually { handler.handleStarted })
+        #expect(!handler.handleCancelled)
+
+        client = nil
+        #expect(await eventually { handler.handleCancelled })
+    }
+
+    @Test("Stopping the listener cancels a request being handled")
+    func stopCancelsHandle() async throws {
+        let handler = HoldingHandler()
+        let listener = ExtensionAPIListener(handler: handler)
+        let port = try await listener.start(port: 0)
+        let client = try LoopbackClient(port: port)
+        client.send("POST /pair HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\n\r\n{}")
+        #expect(await eventually { handler.handleStarted })
+
+        listener.stop()
+        #expect(await eventually { handler.handleCancelled })
+    }
+
+    @Test("The handler receives the connection's remote endpoint as the peer")
+    func peerPassed() async throws {
+        let handler = HoldingHandler()
+        let listener = ExtensionAPIListener(handler: handler)
+        let port = try await listener.start(port: 0)
+        defer { listener.stop() }
+        let client = try LoopbackClient(port: port)
+        client.send("POST /pair HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\n\r\n{}")
+        #expect(await eventually { handler.admitPeer != nil })
+        guard case .hostPort(let host, _) = handler.admitPeer?.endpoint else {
+            Issue.record("peer endpoint is \(String(describing: handler.admitPeer?.endpoint))")
+            return
+        }
+        #expect("\(host)" == "127.0.0.1")
     }
 }
