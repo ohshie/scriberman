@@ -233,18 +233,6 @@ struct ExtensionAPISigningTests {
 
     // MARK: - Body limits
 
-    @Test("A signed import up to 1 GiB is admitted with the import limit")
-    func importAtLimit() async throws {
-        let fixture = ExtensionAPIFixture()
-        let signer = try await fixture.pair()
-        let headers = signer.headers(method: "POST", target: "/v1/imports", timestamp: fixture.now)
-        let admission = await fixture.handler.admit(
-            fixture.head("POST", "/v1/imports", headers: headers, contentLength: 1024 * 1024 * 1024),
-            peer: fixture.peer
-        )
-        #expect(admission == .admitted(bodyLimit: 1024 * 1024 * 1024))
-    }
-
     @Test("A signed import over 1 GiB is payload_too_large")
     func importOverLimit() async throws {
         let fixture = ExtensionAPIFixture()

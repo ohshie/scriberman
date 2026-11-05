@@ -200,7 +200,11 @@ final class AppState {
             sessions: ExtensionAPISessionCatalog(
                 context: modelContext,
                 renderTranscript: { jobsViewModel.renderedTranscript(for: $0) }
-            )
+            ),
+            importAudioFile: { [jobsViewModel = self.jobsViewModel] url, conversionEnded throws(SingleAudioImportError) in
+                guard let modelContext else { throw .workspaceUnavailable }
+                return try await jobsViewModel.importAudioFile(at: url, context: modelContext, conversionEnded: conversionEnded)
+            }
         )
         self.extensionAPI = ExtensionAPIService(
             settings: extensionAPISettings,

@@ -135,6 +135,9 @@ private final class ExtensionAPIConnection: @unchecked Sendable {
     private var framer = HTTPRequestFramer()
     private var head: HTTPRequestHead?
     private var body = Data()
+    /// Where an import body goes instead of `body`. Discarded if the connection ends before it is
+    /// handed to the handler.
+    private var upload: ExtensionAPIStagedUpload?
     private var timer: DispatchWorkItem?
     private var isFinished = false
     /// The running `handle` call, cancelled when the connection ends before it answers.
@@ -184,6 +187,8 @@ private final class ExtensionAPIConnection: @unchecked Sendable {
         timer?.cancel()
         handleTask?.cancel()
         handleTask = nil
+        upload?.discard()
+        upload = nil
         onFinish(self)
     }
 
@@ -245,8 +250,15 @@ private final class ExtensionAPIConnection: @unchecked Sendable {
         let peer = peer
         Task { [weak self] in
             let admission = await handler.admit(head, peer: peer)
-            self?.queue.async {
-                guard let self, !self.isFinished else { return }
+            guard let self else {
+                if case .admittedToFile(let upload) = admission { upload.discard() }
+                return
+            }
+            self.queue.async {
+                guard !self.isFinished else {
+                    if case .admittedToFile(let upload) = admission { upload.discard() }
+                    return
+                }
                 switch admission {
                 case .refused(let response):
                     self.respond(response)
@@ -255,16 +267,24 @@ private final class ExtensionAPIConnection: @unchecked Sendable {
                         self.respond(ExtensionAPIHandler.error(.payloadTooLarge, status: 413))
                         return
                     }
-                    self.arm(self.limits.bodyGap)
-                    if self.accept(pending) {
-                        self.receive()
-                    }
+                    self.readBody(pending)
+                case .admittedToFile(let upload):
+                    self.upload = upload
+                    self.readBody(pending)
                 }
             }
         }
     }
 
-    /// Collects body events. Returns whether to keep reading.
+    private func readBody(_ pending: [HTTPRequestFramer.Event]) {
+        arm(limits.bodyGap)
+        if accept(pending) {
+            receive()
+        }
+    }
+
+    /// Collects body events, into the staged upload when there is one. Returns whether to keep
+    /// reading.
     private func accept(_ events: [HTTPRequestFramer.Event]) -> Bool {
         guard let head else { return true }
         for event in events {
@@ -272,11 +292,21 @@ private final class ExtensionAPIConnection: @unchecked Sendable {
             case .head:
                 break
             case .body(let chunk):
-                body.append(chunk)
+                if let upload {
+                    upload.write(chunk)
+                } else {
+                    body.append(chunk)
+                }
                 arm(limits.bodyGap)
             case .end:
                 timer?.cancel()
-                handle(head, body: body)
+                if let upload {
+                    self.upload = nil
+                    upload.finishWriting()
+                    handleUpload(head, upload: upload)
+                } else {
+                    handle(head, body: body)
+                }
                 return false
             }
         }
@@ -288,6 +318,19 @@ private final class ExtensionAPIConnection: @unchecked Sendable {
         let peer = peer
         handleTask = Task { [weak self] in
             let response = await handler.handle(head, body: body, peer: peer)
+            self?.queue.async {
+                guard let self, !self.isFinished else { return }
+                self.respond(response)
+            }
+        }
+        watchForDisconnect()
+    }
+
+    private func handleUpload(_ head: HTTPRequestHead, upload: ExtensionAPIStagedUpload) {
+        let handler = handler
+        let peer = peer
+        handleTask = Task { [weak self] in
+            let response = await handler.handleUpload(head, upload: upload, peer: peer)
             self?.queue.async {
                 guard let self, !self.isFinished else { return }
                 self.respond(response)
