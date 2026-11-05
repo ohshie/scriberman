@@ -436,7 +436,7 @@ private struct StartOutcome: Sendable {
 }
 
 /// A live transcriber whose stop waits to be released, so a test can act while a stop is under way.
-private actor GatedStopLiveTranscriber: LiveTranscribing {
+actor GatedStopLiveTranscriber: LiveTranscribing {
     private var results: AsyncStream<TranscriptSegment>.Continuation?
     private var startWaiter: CheckedContinuation<Void, Never>?
     private var stopWaiter: CheckedContinuation<Void, Never>?
@@ -473,7 +473,7 @@ private actor GatedStopLiveTranscriber: LiveTranscribing {
 }
 
 /// A live transcriber that does nothing, so a test's recording never loads models.
-private actor IdleLiveTranscriber: LiveTranscribing {
+actor IdleLiveTranscriber: LiveTranscribing {
     private var results: AsyncStream<TranscriptSegment>.Continuation?
 
     func prepare(workspace: Workspace, config: LiveTranscriptionPipelineSettings) async {}

@@ -63,6 +63,8 @@ final class CaptureCoordinator {
         let title: String
         let startedAt: Date
         let tagIDs: [UUID]
+        /// What is actually being captured, after any fallback.
+        let capture: CaptureSources
     }
 
     /// The title of a menu-bar quick start.
@@ -205,7 +207,8 @@ final class CaptureCoordinator {
             id: started.session.id,
             title: started.session.title,
             startedAt: viewModel.recordingStartedAt ?? started.session.createdAt,
-            tagIDs: tagIDs
+            tagIDs: tagIDs,
+            capture: started.capture
         )
         return .success(started)
     }

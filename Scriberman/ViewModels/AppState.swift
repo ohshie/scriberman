@@ -191,14 +191,15 @@ final class AppState {
         )
         let extensionAPISettings = ExtensionAPISettings()
         self.extensionAPISettings = extensionAPISettings
+        let extensionAPIHandler = ExtensionAPIHandler(
+            port: { extensionAPISettings.port },
+            pairingStore: ExtensionAPIPairingStore(keychain: LiveKeychainStore()),
+            callerVerifier: AlwaysAllowCallerVerifier(),
+            loadPrompts: { AIPromptStore().loadPrompts() }
+        )
         self.extensionAPI = ExtensionAPIService(
             settings: extensionAPISettings,
-            handler: ExtensionAPIHandler(
-                port: { extensionAPISettings.port },
-                pairingStore: ExtensionAPIPairingStore(keychain: LiveKeychainStore()),
-                callerVerifier: AlwaysAllowCallerVerifier(),
-                loadPrompts: { AIPromptStore().loadPrompts() }
-            )
+            handler: extensionAPIHandler
         )
         self.captureCoordinator = CaptureCoordinator(
             viewModel: newSessionViewModel,
@@ -210,6 +211,18 @@ final class AppState {
         self.captureCoordinator.discardPendingSession = { [weak self] in
             guard let self, pendingSession != nil else { return }
             discardPendingSession()
+        }
+        if let modelContext {
+            extensionAPIHandler.recording = ExtensionAPIRecording(
+                coordinator: captureCoordinator,
+                audioDeviceService: services.main.audioDeviceService,
+                appAudioService: services.main.appAudioService,
+                screenCaptureService: services.main.screenCaptureService,
+                permissionService: services.main.permissionService,
+                menuBarSettings: menuBarSettings,
+                context: modelContext,
+                requestSession: { [weak self] in self?.requestSession($0) }
+            )
         }
     }
 
