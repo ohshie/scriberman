@@ -449,6 +449,16 @@ final class AppStateTests {
     }
 
     @Test
+    func importedSessionRequestIsConsumedOnce() {
+        let appState = AppState(services: makeServiceContainer(permissionService: MockPermissionService()))
+        let id = UUID()
+
+        appState.requestSession(.imported(id))
+        #expect(appState.consumeSessionRequest(isAvailable: { _ in true }) == .imported(id))
+        #expect(appState.consumeSessionRequest(isAvailable: { _ in true }) == nil)
+    }
+
+    @Test
     func sessionRequestForUnavailableSessionStaysPendingUntilItAppears() {
         let appState = AppState(services: makeServiceContainer(permissionService: MockPermissionService()))
         let id = UUID()

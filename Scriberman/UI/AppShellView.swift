@@ -264,11 +264,28 @@ struct AppShellView: View {
     }
 
     private func sessionItem(for request: AppState.SessionRequest) -> JobsViewModel.SessionListItem? {
+        Self.sessionItem(
+            for: request,
+            pendingSession: appState.pendingSession,
+            recordingSessions: recordingSessions,
+            importedSessions: importedSessions
+        )
+    }
+
+    /// The list item a session request selects, or nil when that session is not in the list yet.
+    static func sessionItem(
+        for request: AppState.SessionRequest,
+        pendingSession: PendingSession?,
+        recordingSessions: [RecordingSession],
+        importedSessions: [ImportedSession]
+    ) -> JobsViewModel.SessionListItem? {
         switch request {
         case .pending:
-            return appState.pendingSession.map { .pending($0) }
+            return pendingSession.map { .pending($0) }
         case .recording(let sessionID):
             return recordingSessions.first { $0.id == sessionID }.map { .recording($0) }
+        case .imported(let sessionID):
+            return importedSessions.first { $0.id == sessionID }.map { .imported($0) }
         }
     }
 
@@ -808,10 +825,8 @@ struct AppShellView: View {
 
     private func exportTranscript(for session: any TranscribableSession) {
         Task { @MainActor in
-            do {
-                try await appState.jobsViewModel.exportTranscript(for: session)
-            } catch {
-                studyActionErrorMessage = error.localizedDescription
+            if case .failed(let message) = await appState.jobsViewModel.exportTranscript(for: session) {
+                studyActionErrorMessage = message
             }
         }
     }

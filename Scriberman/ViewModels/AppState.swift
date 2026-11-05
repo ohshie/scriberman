@@ -66,6 +66,8 @@ final class AppState {
     /// SwiftUI's `openSettings` action, registered by `ContentView`. Lets AppKit-hosted UI such as
     /// the dictation HUD open the Settings scene.
     @ObservationIgnored var openSettingsAction: (() -> Void)?
+    /// Brings the main window forward, registered by the app delegate's owner.
+    @ObservationIgnored var showMainWindowAction: (() -> Void)?
     /// A session asked for from outside a window (menu bar extra, calendar suggestion, start
     /// failure panel), waiting for the key main window to show it. A newer request replaces it.
     private(set) var sessionRequest: SessionRequest?
@@ -235,6 +237,15 @@ final class AppState {
                 requestSession: { [weak self] in self?.requestSession($0) }
             )
         }
+        let workspaceService = services.background.workspaceService
+        extensionAPIHandler.sessionActions = ExtensionAPISessionActions(
+            requestSession: { [weak self] in self?.requestSession($0) },
+            showWindow: { [weak self] in self?.showMainWindowAction?() },
+            export: { [jobsViewModel] session, mayWrite in
+                await jobsViewModel.exportTranscript(for: session, mayWrite: mayWrite)
+            },
+            authorizedWorkspace: { () throws(WorkspaceError) in try await workspaceService.requireAuthorizedWorkspace() }
+        )
     }
 
     /// Recording or dictation in progress. Calendar suggestions are hidden while this is true.
@@ -337,6 +348,7 @@ final class AppState {
     enum SessionRequest: Equatable {
         case pending
         case recording(UUID)
+        case imported(UUID)
     }
 
     func requestSession(_ request: SessionRequest) {

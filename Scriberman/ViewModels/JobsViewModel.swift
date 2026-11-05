@@ -691,18 +691,63 @@ final class JobsViewModel {
         return markdownRenderer.renderMarkdown(session: session, transcript: transcript)
     }
 
-    func exportTranscript(for session: any TranscribableSession) async throws {
+    /// What an export did.
+    enum ExportOutcome: Equatable {
+        case saved
+        /// The save panel was closed without choosing a file.
+        case cancelled
+        /// Nothing was written; the message is the error's description.
+        case failed(String)
+        /// The session was deleted while the save panel was open. Nothing was written.
+        case sessionDeleted
+        /// `mayWrite` said no once the save panel closed. Nothing was written.
+        case writeRefused
+    }
+
+    /// Asks where to save the session's transcript, then writes it there.
+    ///
+    /// After the save panel closes, the session must still exist and `mayWrite` must agree, or
+    /// nothing is written.
+    func exportTranscript(
+        for session: any TranscribableSession,
+        mayWrite: @MainActor () -> Bool = { true }
+    ) async -> ExportOutcome {
         guard let markdown = renderedTranscript(for: session) else {
-            throw TranscriptExportError.transcriptUnavailable
+            return .failed(TranscriptExportError.transcriptUnavailable.localizedDescription)
         }
 
         let suggestedName = markdownRenderer.defaultFileName(for: session.title)
+        let generation = sessionJobs.generation(of: session.id)
+        let wasInStore = Self.isInStore(session)
 
         guard let destinationURL = await savePanelPresenter(suggestedName) else {
-            return
+            return .cancelled
+        }
+        guard sessionJobs.mayWrite(generation), !wasInStore || Self.isInStore(session) else {
+            return .sessionDeleted
+        }
+        guard mayWrite() else {
+            return .writeRefused
         }
 
-        try transcriptExportService.write(markdown, to: destinationURL)
+        do {
+            try transcriptExportService.write(markdown, to: destinationURL)
+            return .saved
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    /// Whether the session is saved in a context and not deleted from it.
+    private static func isInStore(_ session: any TranscribableSession) -> Bool {
+        switch session {
+        case let recording as RecordingSession:
+            recording.modelContext != nil && !recording.isDeleted
+        case let imported as ImportedSession:
+            imported.modelContext != nil && !imported.isDeleted
+        default:
+            true
+        }
     }
 
     /// Deletes an imported session and its folder.

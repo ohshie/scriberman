@@ -128,6 +128,7 @@ struct ScribermanApp: App {
                 .environment(appState.aiProviderService)
                 .task {
                     appDelegate.appState = appState
+                    appState.showMainWindowAction = { [weak appDelegate] in appDelegate?.showMainWindow() }
                     appDelegate.modelContext = modelContainer.mainContext
                     appDelegate.wireIdleSessionPrompt()
                     appDelegate.wireCalendarSuggestions()

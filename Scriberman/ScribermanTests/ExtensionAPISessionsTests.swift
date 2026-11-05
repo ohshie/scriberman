@@ -366,7 +366,7 @@ struct ExtensionAPISessionsTests {
         try fixture.sessionContext.save()
 
         let response = await fixture.sendSigned(signer, "GET", "/v1/sessions/recording:\(session.id.uuidString)")
-        try await jobs.exportTranscript(for: session)
+        #expect(await jobs.exportTranscript(for: session) == .saved)
         let written = try String(contentsOf: outputURL, encoding: .utf8)
 
         #expect(response.status == 200)
