@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 /// The error codes of API contract v1.
 enum ExtensionAPIErrorCode: String, Sendable, CaseIterable {
@@ -98,6 +99,9 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
     /// Imports one staged file and returns the new session's id. It calls the closure it is given
     /// once the session's conversion has finished or failed.
     typealias ImportAudioFile = @MainActor (URL, @escaping @Sendable () -> Void) async throws(SingleAudioImportError) -> UUID
+    /// Where routes that name a session look it up. Nil finds no session.
+    private let modelContext: ModelContext?
+    private let transformationRunner: AITransformationRunner?
 
     /// Nonces seen per client, with the time each was seen.
     private var seenNonces: [String: Date] = [:]
@@ -127,7 +131,9 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         importAudioFile: @escaping ImportAudioFile = { _, _ throws(SingleAudioImportError) in throw .workspaceUnavailable },
         stagingDirectory: URL = FileManager.default.temporaryDirectory,
         availableDiskSpace: (@MainActor () -> Int64?)? = nil,
-        makeStagingDirectory: @escaping @MainActor (URL) throws -> URL = { try ExtensionAPIStagedUpload.makeUniqueDirectory(in: $0) }
+        makeStagingDirectory: @escaping @MainActor (URL) throws -> URL = { try ExtensionAPIStagedUpload.makeUniqueDirectory(in: $0) },
+        modelContext: ModelContext? = nil,
+        transformationRunner: AITransformationRunner? = nil
     ) {
         self.port = port
         self.pairingStore = pairingStore
@@ -143,6 +149,8 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
             return values?.volumeAvailableCapacityForImportantUsage
         }
         self.makeStagingDirectory = makeStagingDirectory
+        self.modelContext = modelContext
+        self.transformationRunner = transformationRunner
     }
 
     func admit(_ head: HTTPRequestHead, peer: ExtensionAPIPeer) async -> ExtensionAPIAdmission {
@@ -284,6 +292,10 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         case .status, .captureOptions, .quickStart, .startRecording, .stopRecording:
             guard let recording else { return Self.error(.notFoundRoute, status: 404) }
             return await respond(to: route, recording: recording, body: body, signing: signing)
+        case .runTransformation:
+            return await runTransformation(sessionID: route.idSegment(in: head.path), body: body, signing: signing)
+        case .operation:
+            return operation(route.idSegment(in: head.path))
         default:
             // Each remaining route arrives with its own ticket.
             return Self.error(.notFoundRoute, status: 404)
@@ -409,6 +421,103 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         }
 
         let prompts: [Prompt]
+    }
+
+    // MARK: - Transformations
+
+    private struct TransformationBody: Decodable {
+        let promptId: String
+    }
+
+    private struct OperationStarted: Encodable {
+        let operationId: String
+    }
+
+    private struct OperationBody: Encodable {
+        let state: String
+        var transformationId: String?
+        var code: String?
+        var message: String?
+    }
+
+    private func runTransformation(sessionID: String, body: Data, signing: RequestSigning) async -> HTTPResponse {
+        guard let request = try? JSONDecoder().decode(TransformationBody.self, from: body),
+              let promptID = UUID(uuidString: request.promptId)
+        else {
+            return Self.error(.invalidRequest, status: 400)
+        }
+        let prompts = await loadPrompts()
+        if let revoked = revocationResponse(for: signing) { return revoked }
+
+        // Looked up after the suspension, so a session deleted meanwhile is not found.
+        guard let runner = transformationRunner, let session = session(withID: sessionID) else {
+            return Self.error(.notFound, status: 404)
+        }
+        guard let prompt = prompts.first(where: { $0.id == promptID }) else {
+            return Self.error(.notFound, status: 404)
+        }
+        let operationID: UUID
+        do {
+            operationID = try runner.start(prompt: prompt, on: session)
+        } catch {
+            return Self.error(.transformationRunning, status: 409)
+        }
+        // A run whose requirements are unmet has already failed; those failures answer the request.
+        if case .failed(let failure) = runner.state(of: operationID) {
+            switch failure.code {
+            case .aiNotConfigured:
+                return Self.error(.aiNotConfigured, status: 409)
+            case .noTranscript:
+                return Self.error(.noTranscript, status: 409)
+            case .providerFailed, .notFound, .saveFailed:
+                break
+            }
+        }
+        return Self.json(OperationStarted(operationId: operationID.uuidString), status: 202)
+    }
+
+    private func operation(_ id: String) -> HTTPResponse {
+        guard let operationID = UUID(uuidString: id),
+              let state = transformationRunner?.state(of: operationID)
+        else {
+            return Self.error(.notFound, status: 404)
+        }
+        switch state {
+        case .running:
+            return Self.json(OperationBody(state: "running"))
+        case .succeeded(let transformationID):
+            return Self.json(OperationBody(state: "succeeded", transformationId: transformationID.uuidString))
+        case .failed(let failure):
+            let code = Self.operationCode(failure.code)
+            // Without an error description the message repeats the code, as error responses do.
+            return Self.json(OperationBody(state: "failed", code: code, message: failure.message ?? code))
+        }
+    }
+
+    private static func operationCode(_ code: AITransformationRunner.Failure.Code) -> String {
+        switch code {
+        case .aiNotConfigured: ExtensionAPIErrorCode.aiNotConfigured.rawValue
+        case .noTranscript: ExtensionAPIErrorCode.noTranscript.rawValue
+        case .notFound: ExtensionAPIErrorCode.notFound.rawValue
+        case .providerFailed: "provider_failed"
+        case .saveFailed: "save_failed"
+        }
+    }
+
+    // MARK: - Sessions
+
+    /// The session a kind-qualified id (`recording:<uuid>` or `imported:<uuid>`) names, or nil.
+    private func session(withID id: String) -> (any TranscribableSession)? {
+        guard let modelContext, let parsed = ExtensionAPISessionID(pathSegment: id) else { return nil }
+        let uuid = parsed.uuid
+        switch parsed.kind {
+        case .recording:
+            let descriptor = FetchDescriptor<RecordingSession>(predicate: #Predicate { $0.id == uuid })
+            return try? modelContext.fetch(descriptor).first
+        case .imported:
+            let descriptor = FetchDescriptor<ImportedSession>(predicate: #Predicate { $0.id == uuid })
+            return try? modelContext.fetch(descriptor).first
+        }
     }
 
     // MARK: - Signing
@@ -679,6 +788,13 @@ enum ExtensionAPIRoute: Equatable, Sendable, CaseIterable {
         case .operation: ["operations", nil]
         case .imports: ["imports"]
         }
+    }
+
+    /// The id segment of `path`, for a route with one; empty when there is none.
+    func idSegment(in path: String) -> String {
+        let segments = path.split(separator: "/", omittingEmptySubsequences: false).dropFirst(2)
+        guard let index = pattern.firstIndex(where: { $0 == nil }), index < segments.count else { return "" }
+        return String(Array(segments)[index])
     }
 
     private func matches(_ segments: [Substring]) -> Bool {

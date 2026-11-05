@@ -130,11 +130,12 @@ final class AppState {
         self.mainServices = services.main
         self.backgroundServices = services.background
         self.permissionService = services.main.permissionService
-        self.aiTransformationRunner = AITransformationRunner(
+        let aiTransformationRunner = AITransformationRunner(
             aiProviderService: services.main.aiProviderService,
             promptStore: AIPromptStore(),
             sessionJobs: services.background.sessionJobs
         )
+        self.aiTransformationRunner = aiTransformationRunner
         let developerSettings = DeveloperSettings()
         self.developerSettings = developerSettings
         self.updateService = updateService ?? .live(developerSettings: developerSettings)
@@ -203,7 +204,9 @@ final class AppState {
             importAudioFile: { [jobsViewModel = self.jobsViewModel] url, conversionEnded throws(SingleAudioImportError) in
                 guard let modelContext else { throw .workspaceUnavailable }
                 return try await jobsViewModel.importAudioFile(at: url, context: modelContext, conversionEnded: conversionEnded)
-            }
+            },
+            modelContext: modelContext,
+            transformationRunner: aiTransformationRunner
         )
         self.extensionAPI = ExtensionAPIService(
             settings: extensionAPISettings,

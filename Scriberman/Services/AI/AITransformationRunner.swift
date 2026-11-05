@@ -79,6 +79,12 @@ final class AITransformationRunner {
             promptName: prompt.name,
             modelID: aiProviderService.selectedModelID ?? ""
         )
+        // An unmet requirement fails the operation at once, so a caller can read the failure
+        // right after `start` returns.
+        if let unmet = unmetRequirement(of: request) {
+            operations[operationID] = .failed(Self.failure(for: unmet))
+            return operationID
+        }
         let generation = sessionJobs.generation(of: sessionID)
         runningSessionIDs.insert(sessionID)
         operations[operationID] = .running
@@ -112,10 +118,6 @@ final class AITransformationRunner {
         promptID: UUID,
         generation: SessionJobs.Generation
     ) async -> OperationState {
-        if let unmet = unmetRequirement(of: request) {
-            return .failed(Self.failure(for: unmet))
-        }
-
         // The request runs in a task of its own, so a delete of the session cancels it and waits
         // for it.
         let aiProviderService = aiProviderService

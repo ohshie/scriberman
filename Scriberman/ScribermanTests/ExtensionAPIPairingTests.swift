@@ -41,6 +41,17 @@ final class ExtensionAPIFixture {
     deinit {
         try? FileManager.default.removeItem(at: stagingRoot)
     }
+    let aiService = MockAIProviderService()
+    let sessionJobs = SessionJobs()
+    lazy var container = try! ModelContainer(
+        for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+        configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+    )
+    lazy var runner = AITransformationRunner(
+        aiProviderService: aiService,
+        promptStore: AIPromptStore(defaults: defaults),
+        sessionJobs: sessionJobs
+    )
 
     lazy var store = ExtensionAPIPairingStore(defaults: defaults, keychain: keychain)
     lazy var handler: ExtensionAPIHandler = {
@@ -65,7 +76,9 @@ final class ExtensionAPIFixture {
             availableDiskSpace: { [unowned self] in availableDiskSpace },
             makeStagingDirectory: { [unowned self] root in
                 try makeStagingDirectory?(root) ?? ExtensionAPIStagedUpload.makeUniqueDirectory(in: root)
-            }
+            },
+            modelContext: container.mainContext,
+            transformationRunner: runner
         )
         handler.pairingPresenter = presenter
         return handler
