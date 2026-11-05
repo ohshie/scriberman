@@ -1,17 +1,13 @@
 import SwiftUI
 
-/// Settings for the local extension API: on/off, port, listener status and paired clients.
+/// Settings for the local extension API: on/off, port and paired clients.
 struct ExtensionAPISettingsSection: View {
     @Bindable var model: ExtensionAPISettingsViewModel
     @FocusState private var isPortFocused: Bool
 
     var body: some View {
-        Section(ExtensionAPIStrings.sectionTitle) {
+        Section {
             Toggle(ExtensionAPIStrings.enableToggle, isOn: $model.isEnabled)
-            Text(ExtensionAPIStrings.enableHelp)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
             TextField(ExtensionAPIStrings.portLabel, text: $model.portText)
                 .focused($isPortFocused)
                 .onSubmit { model.commitPort() }
@@ -22,17 +18,17 @@ struct ExtensionAPISettingsSection: View {
                 Text(portError)
                     .font(.caption)
                     .foregroundStyle(.red)
-            } else {
-                Text(model.portHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
-
-            let status = model.status
-            Text(status.text)
-                .font(.footnote)
-                .foregroundStyle(status.isFailure ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
-                .textSelection(.enabled)
+            if let listenerError = model.listenerError {
+                Text(listenerError)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
+        } header: {
+            Text(ExtensionAPIStrings.sectionTitle)
+        } footer: {
+            Text(ExtensionAPIStrings.enableHelp)
         }
 
         Section(ExtensionAPIStrings.pairedClientsTitle) {
@@ -49,12 +45,13 @@ struct ExtensionAPISettingsSection: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         if let signingIdentifier = client.signingIdentifier {
-                            LabeledContent(ExtensionAPIStrings.signingIdentifierLabel) {
-                                Text(signingIdentifier).textSelection(.enabled)
-                            }
-                            .font(.caption)
-                            LabeledContent(ExtensionAPIStrings.teamLabel) {
-                                Text(client.teamText).textSelection(.enabled)
+                            DisclosureGroup(ExtensionAPIStrings.signingDetails) {
+                                LabeledContent(ExtensionAPIStrings.signingIdentifierLabel) {
+                                    Text(signingIdentifier).textSelection(.enabled)
+                                }
+                                LabeledContent(ExtensionAPIStrings.teamLabel) {
+                                    Text(client.teamText).textSelection(.enabled)
+                                }
                             }
                             .font(.caption)
                         }

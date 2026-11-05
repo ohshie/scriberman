@@ -6,25 +6,14 @@ import Foundation
 enum ExtensionAPIStrings {
     // MARK: - Settings
 
-    static let sectionTitle = "Local API"
-    static let enableToggle = "Enable local API"
-    static let enableHelp = "Allows Tinycast and other local apps on this Mac to control Scriberman. Only paired programs can connect."
+    static let sectionTitle = "Tinycast extension"
+    static let enableToggle = "Enable"
+    static let enableHelp = "Allows Tinycast and similar apps on this Mac to control Scriberman"
     static let portLabel = "Port"
-
-    static func portHelp(min: Int, max: Int) -> String {
-        "Enter a number from \(min) to \(max). The default is 47615."
-    }
 
     static func portInvalid(min: Int, max: Int) -> String {
         "Enter a number from \(min) to \(max)."
     }
-
-    static func listening(port: Int) -> String {
-        "Listening on 127.0.0.1 port \(port)."
-    }
-
-    static let off = "API is off."
-    static let starting = "Starting the API."
 
     static func portInUse(port: Int) -> String {
         "Port \(port) is already used by another program."
@@ -42,6 +31,7 @@ enum ExtensionAPIStrings {
     }
 
     static let signingIdentifierLabel = "Signing identifier"
+    static let signingDetails = "Signing details"
     static let teamLabel = "Team identifier"
     static let noTeam = "No team"
     static let pairAgainNotice = "Paired with an older version of Scriberman. Remove it and pair it again to use it."

@@ -211,13 +211,44 @@ struct ExtensionAPIPairingTests {
         #expect(!defaultsText.contains(hex))
     }
 
-    @Test("Two pairings get different client ids and secrets")
+    @Test("Pairing the same signing identifier and team replaces the old client and secret")
     func distinctSecrets() async throws {
         let fixture = ExtensionAPIFixture()
-        let first = try await fixture.pair()
-        let second = try await fixture.pair()
+        fixture.verifier.pairingIdentity = .init(designatedRequirement: "old", signingIdentifier: "com.tinycast.app", teamIdentifier: "TEAM")
+        let first = try await fixture.pair(name: "Old name")
+        fixture.verifier.pairingIdentity = .init(designatedRequirement: "new", signingIdentifier: "com.tinycast.app", teamIdentifier: "TEAM")
+        let second = try await fixture.pair(name: "New name")
         #expect(first.clientID != second.clientID)
         #expect(first.secret != second.secret)
+        #expect(fixture.store.clients.map(\.id) == [second.clientID])
+        #expect(!fixture.keychain.storage.values.contains(ExtensionAPITestSigner.hex(first.secret)))
+        #expect(errorCode(await fixture.sendSigned(first)) == "unauthorized")
+        #expect(await fixture.sendSigned(second).status == 200)
+    }
+
+    @Test("A new store retains the newest stored pairing for each signing identity")
+    func deduplicatesStoredClients() throws {
+        let fixture = ExtensionAPIFixture()
+        let identity = ExtensionAPICallerIdentity(designatedRequirement: "dr", signingIdentifier: "com.tinycast.app")
+        let newer = try fixture.store.pair(name: "New", callerIdentity: identity, at: fixture.now)
+        let distinct = try fixture.store.pair(
+            name: "Other team",
+            callerIdentity: .init(designatedRequirement: "other", signingIdentifier: "com.tinycast.app", teamIdentifier: "OTHER"),
+            at: fixture.now
+        )
+        let old = try fixture.store.pair(name: "Old", callerIdentity: .init(designatedRequirement: "legacy"), at: fixture.now - 60)
+        let legacyRecord = ExtensionAPIPairedClient(
+            id: old.client.id, name: old.client.name, pairedAt: old.client.pairedAt, callerIdentity: identity
+        )
+        fixture.defaults.set(
+            try JSONEncoder().encode([newer.client, distinct.client, legacyRecord]),
+            forKey: "extensionAPI.pairedClients"
+        )
+
+        let reopened = ExtensionAPIPairingStore(defaults: fixture.defaults, keychain: fixture.keychain)
+        #expect(reopened.clients.map(\.id) == [newer.client.id, distinct.client.id])
+        #expect(!fixture.keychain.storage.values.contains(ExtensionAPITestSigner.hex(old.secret)))
+        #expect(reopened.isPaired(newer.client.id))
     }
 
     @Test("The caller identity from the verifier is stored with the client")
@@ -347,7 +378,9 @@ struct ExtensionAPIPairingTests {
     @Test("A client claiming an existing client's name gets its own id and secret, and the first client keeps working")
     func spoofedName() async throws {
         let fixture = ExtensionAPIFixture()
+        fixture.verifier.pairingIdentity = .init(designatedRequirement: "first", signingIdentifier: "com.tinycast.app", teamIdentifier: "TEAM")
         let original = try await fixture.pair(name: "Tinycast")
+        fixture.verifier.pairingIdentity = .init(designatedRequirement: "second", signingIdentifier: "com.tinycast.app", teamIdentifier: "OTHER")
         let impostor = try await fixture.pair(name: "Tinycast")
 
         #expect(impostor.clientID != original.clientID)
@@ -387,6 +420,20 @@ struct ExtensionAPIPairingTests {
 
         #expect(response.status != 200)
         #expect(fixture.store.clients.isEmpty)
+    }
+
+    @Test("A failed replacement leaves the previous pairing intact")
+    func failedReplacementKeepsExistingClient() throws {
+        let fixture = ExtensionAPIFixture()
+        let identity = ExtensionAPICallerIdentity(designatedRequirement: "dr", signingIdentifier: "com.tinycast.app", teamIdentifier: "TEAM")
+        let original = try fixture.store.pair(name: "Original", callerIdentity: identity, at: fixture.now)
+        fixture.keychain.failsSaves = true
+
+        #expect(throws: ExtensionAPIPairingStore.PairError.self) {
+            try fixture.store.pair(name: "Replacement", callerIdentity: identity, at: fixture.now)
+        }
+        #expect(fixture.store.clients.map(\.id) == [original.client.id])
+        #expect(fixture.store.credentials(for: original.client.id)?.secret == original.secret)
     }
 
     // MARK: - Caller verifier

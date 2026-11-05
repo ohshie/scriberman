@@ -7,11 +7,6 @@ import Observation
 @MainActor
 @Observable
 final class ExtensionAPISettingsViewModel {
-    struct Status: Equatable {
-        let text: String
-        let isFailure: Bool
-    }
-
     struct ClientRow: Equatable, Identifiable {
         let id: String
         /// The client's own claim.
@@ -50,10 +45,6 @@ final class ExtensionAPISettingsViewModel {
         set { settings.isEnabled = newValue }
     }
 
-    var portHelp: String {
-        ExtensionAPIStrings.portHelp(min: ExtensionAPISettings.validPorts.lowerBound, max: ExtensionAPISettings.validPorts.upperBound)
-    }
-
     /// Saves the typed port, or keeps the current one and shows why.
     func commitPort() {
         let trimmed = portText.trimmingCharacters(in: .whitespaces)
@@ -68,19 +59,13 @@ final class ExtensionAPISettingsViewModel {
         portText = String(port)
     }
 
-    var status: Status {
-        switch state() {
-        case .listening(let port):
-            return Status(text: ExtensionAPIStrings.listening(port: port), isFailure: false)
-        case .failed(let failure):
-            if failure.error == .posix(.EADDRINUSE) {
-                return Status(text: ExtensionAPIStrings.portInUse(port: failure.port), isFailure: true)
-            }
-            let detail = failure.error?.localizedDescription ?? ""
-            return Status(text: ExtensionAPIStrings.bindFailed(port: failure.port, detail: detail), isFailure: true)
-        case .stopped:
-            return Status(text: settings.isEnabled ? ExtensionAPIStrings.starting : ExtensionAPIStrings.off, isFailure: false)
+    var listenerError: String? {
+        guard case .failed(let failure) = state() else { return nil }
+        if failure.error == .posix(.EADDRINUSE) {
+            return ExtensionAPIStrings.portInUse(port: failure.port)
         }
+        let detail = failure.error?.localizedDescription ?? ""
+        return ExtensionAPIStrings.bindFailed(port: failure.port, detail: detail)
     }
 
     var clients: [ClientRow] {

@@ -35,6 +35,17 @@ final class ExtensionAPIPairingStore {
     @ObservationIgnored private let makeSecret: () -> Data?
     @ObservationIgnored private let logger = Logger(subsystem: "Scriberman", category: "ExtensionAPIPairingStore")
 
+    private struct SigningIdentity: Hashable {
+        let identifier: String
+        let team: String?
+
+        init?(_ caller: ExtensionAPICallerIdentity) {
+            guard let identifier = caller.signingIdentifier, !identifier.isEmpty else { return nil }
+            self.identifier = identifier
+            team = caller.teamIdentifier
+        }
+    }
+
     init(
         defaults: UserDefaults = .standard,
         keychain: any KeychainStore,
@@ -43,6 +54,7 @@ final class ExtensionAPIPairingStore {
         self.defaults = defaults
         self.keychain = keychain
         self.makeSecret = makeSecret
+        removeDuplicateClients()
     }
 
     enum PairError: Error {
@@ -73,7 +85,16 @@ final class ExtensionAPIPairingStore {
             logger.error("Extension API pairing could not save the client secret: \(String(describing: error), privacy: .public)")
             throw PairError.keychain(error)
         }
-        save(clients + [client])
+        let existing = clients
+        let replaced: [ExtensionAPIPairedClient]
+        if let identity = SigningIdentity(callerIdentity) {
+            replaced = existing.filter { SigningIdentity($0.callerIdentity) == identity }
+        } else {
+            replaced = []
+        }
+        let replacedIDs = Set(replaced.map(\.id))
+        save(existing.filter { !replacedIDs.contains($0.id) } + [client])
+        for previous in replaced { deleteSecret(previous.id) }
         return ExtensionAPIClientCredentials(client: client, secret: secret)
     }
 
@@ -104,6 +125,28 @@ final class ExtensionAPIPairingStore {
     /// because a client must be listed to be accepted.
     func revoke(_ clientID: String) {
         save(clients.filter { $0.id != clientID })
+        deleteSecret(clientID)
+    }
+
+    private func removeDuplicateClients() {
+        let existing = clients
+        var latest: [SigningIdentity: ExtensionAPIPairedClient] = [:]
+        for client in existing {
+            guard let identity = SigningIdentity(client.callerIdentity) else { continue }
+            if let previous = latest[identity], previous.pairedAt > client.pairedAt { continue }
+            latest[identity] = client
+        }
+        let retained = existing.filter { client in
+            guard let identity = SigningIdentity(client.callerIdentity) else { return true }
+            return latest[identity]?.id == client.id
+        }
+        guard retained.count != existing.count else { return }
+        save(retained)
+        let retainedIDs = Set(retained.map(\.id))
+        for client in existing where !retainedIDs.contains(client.id) { deleteSecret(client.id) }
+    }
+
+    private func deleteSecret(_ clientID: String) {
         do {
             try keychain.delete(key: Self.secretKey(clientID))
         } catch {

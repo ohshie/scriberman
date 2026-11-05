@@ -77,17 +77,17 @@ struct ExtensionAPISettingsUITests {
 
     // MARK: - Status
 
-    @Test("Off, starting and listening each have their status line")
+    @Test("The listener has no settings message unless binding fails")
     func statusLines() {
         let box = StateBox()
         let (model, _, _) = makeModel(state: box)
-        #expect(model.status == .init(text: ExtensionAPIStrings.off, isFailure: false))
+        #expect(model.listenerError == nil)
 
         model.isEnabled = true
-        #expect(model.status == .init(text: ExtensionAPIStrings.starting, isFailure: false))
+        #expect(model.listenerError == nil)
 
         box.state = .listening(port: 47615)
-        #expect(model.status == .init(text: ExtensionAPIStrings.listening(port: 47615), isFailure: false))
+        #expect(model.listenerError == nil)
     }
 
     @Test("A port taken by another program is shown as a failure naming the port")
@@ -96,7 +96,7 @@ struct ExtensionAPISettingsUITests {
         box.state = .failed(.init(port: 4000, error: .posix(.EADDRINUSE)))
         let (model, _, _) = makeModel(state: box)
         model.isEnabled = true
-        #expect(model.status == .init(text: ExtensionAPIStrings.portInUse(port: 4000), isFailure: true))
+        #expect(model.listenerError == ExtensionAPIStrings.portInUse(port: 4000))
     }
 
     @Test("Another bind failure is shown with the system's description")
@@ -106,10 +106,7 @@ struct ExtensionAPISettingsUITests {
         box.state = .failed(.init(port: 4000, error: error))
         let (model, _, _) = makeModel(state: box)
         model.isEnabled = true
-        #expect(model.status == .init(
-            text: ExtensionAPIStrings.bindFailed(port: 4000, detail: error.localizedDescription),
-            isFailure: true
-        ))
+        #expect(model.listenerError == ExtensionAPIStrings.bindFailed(port: 4000, detail: error.localizedDescription))
     }
 
     // MARK: - Paired clients
