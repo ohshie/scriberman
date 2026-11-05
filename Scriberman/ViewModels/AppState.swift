@@ -234,6 +234,9 @@ final class AppState {
                 context: modelContext,
                 requestSession: { [weak self] in self?.requestSession($0) }
             )
+            extensionAPIHandler.calendar = extensionAPIHandler.recording.map {
+                ExtensionAPICalendar(controller: calendarSuggestions, recording: $0)
+            }
         }
     }
 
@@ -311,8 +314,13 @@ final class AppState {
     }
 
     private func sessionTitle(for suggestion: CalendarMeetingSuggestion) -> String {
+        Self.sessionTitle(for: suggestion)
+    }
+
+    /// The meeting's title, or the draft session title when the meeting has none.
+    static func sessionTitle(for suggestion: CalendarMeetingSuggestion) -> String {
         let title = suggestion.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return title.isEmpty ? Self.defaultPendingSessionTitle() : title
+        return title.isEmpty ? defaultPendingSessionTitle() : title
     }
 
     func selectPendingSession() {

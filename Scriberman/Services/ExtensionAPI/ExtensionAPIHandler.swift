@@ -85,6 +85,8 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
     weak var pairingPresenter: (any ExtensionAPIPairingPresenter)?
     /// Status, capture options, start and stop. Without it those routes answer `not_found_route`.
     var recording: ExtensionAPIRecording?
+    /// Calendar suggestions and starting from one. Without it those routes answer `not_found_route`.
+    var calendar: ExtensionAPICalendar?
 
     private let port: @MainActor () -> Int
     private let pairingStore: ExtensionAPIPairingStore
@@ -294,6 +296,10 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         case .status, .captureOptions, .quickStart, .startRecording, .stopRecording, .updateCurrentRecording:
             guard let recording else { return Self.error(.notFoundRoute, status: 404) }
             return await respond(to: route, recording: recording, body: body, signing: signing)
+        case .calendarSuggestions, .startFromCalendar:
+            guard let calendar else { return Self.error(.notFoundRoute, status: 404) }
+            let response = route == .calendarSuggestions ? await calendar.suggestions() : await calendar.start(body: body)
+            return revocationResponse(for: signing) ?? response
         case .runTransformation:
             return await runTransformation(sessionID: route.idSegment(in: head.path), body: body, signing: signing)
         case .operation:
