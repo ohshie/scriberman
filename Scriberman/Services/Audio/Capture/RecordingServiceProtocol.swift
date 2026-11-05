@@ -47,4 +47,7 @@ protocol RecordingServiceProtocol: Sendable {
     func stopRecording() async -> UUID?
     func consumePendingError() async -> RecordingError?
     func retargetMic(desiredDeviceUID: String?) async
+    /// Whether the current recording is capturing the screen. Screen capture that fails to start
+    /// leaves the recording running without video, so a start asked for a display may not have one.
+    func isScreenCaptureActive() async -> Bool
 }

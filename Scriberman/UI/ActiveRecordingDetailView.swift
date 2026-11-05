@@ -4,6 +4,7 @@ import SwiftUI
 struct ActiveRecordingDetailView: View {
     let session: RecordingSession
     let viewModel: NewSessionViewModel
+    let coordinator: CaptureCoordinator
     let modelContext: ModelContext
     /// Called when a title edit fails to save; the session keeps its previous title.
     let onTitleNotSaved: () -> Void
@@ -18,11 +19,13 @@ struct ActiveRecordingDetailView: View {
     init(
         session: RecordingSession,
         viewModel: NewSessionViewModel,
+        coordinator: CaptureCoordinator,
         modelContext: ModelContext,
         onTitleNotSaved: @escaping () -> Void
     ) {
         self.session = session
         self.viewModel = viewModel
+        self.coordinator = coordinator
         self.modelContext = modelContext
         self.onTitleNotSaved = onTitleNotSaved
     }
@@ -117,7 +120,7 @@ struct ActiveRecordingDetailView: View {
                     caption: "Stop"
                 ) {
                     Task {
-                        _ = await viewModel.stopRecording(context: modelContext)
+                        _ = await coordinator.stop(context: modelContext)
                     }
                 }
                 Spacer()

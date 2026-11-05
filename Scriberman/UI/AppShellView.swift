@@ -279,6 +279,7 @@ struct AppShellView: View {
             if let pendingSession = appState.pendingSession, pendingSession.id == pendingItem.id {
                 NewSessionPanelView(
                     viewModel: appState.newSessionViewModel,
+                    coordinator: appState.captureCoordinator,
                     pendingSession: Binding(
                         get: { appState.pendingSession ?? pendingSession },
                         set: { appState.pendingSession = $0 }
@@ -303,6 +304,7 @@ struct AppShellView: View {
                 ActiveRecordingDetailView(
                     session: session,
                     viewModel: appState.newSessionViewModel,
+                    coordinator: appState.captureCoordinator,
                     modelContext: modelContext,
                     onTitleNotSaved: { storeFailureAlert = .titleNotSaved }
                 )
@@ -693,16 +695,21 @@ struct AppShellView: View {
         }
 
         Task {
-            if let session = await viewModel.startRecording(title: pendingSession.title, context: modelContext) {
+            let result = await appState.captureCoordinator.start(
+                viewModel.windowChoice(title: pendingSession.title),
+                origin: .window,
+                context: modelContext
+            )
+            if case .success(let started) = result {
                 appState.discardPendingSession()
-                selectedSession = .recording(session)
+                selectedSession = .recording(started.session)
             }
         }
     }
 
     private func stopRecording() {
         Task {
-            _ = await appState.newSessionViewModel.stopRecording(context: modelContext)
+            _ = await appState.captureCoordinator.stop(context: modelContext)
         }
     }
 

@@ -1267,6 +1267,10 @@ actor RecordingService: RecordingServiceProtocol {
         return pendingError
     }
 
+    func isScreenCaptureActive() async -> Bool {
+        screenCaptureSession != nil
+    }
+
     func retargetMic(desiredDeviceUID: String?) async {
         guard isRecordingValue else {
             return
