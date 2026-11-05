@@ -9,6 +9,13 @@ final class FakeCallerVerifier: ExtensionAPICallerVerifier, @unchecked Sendable 
     private var _acceptsRequests = true
     private var _pairingCalls = 0
     private var _verifyCalls: [ExtensionAPICallerIdentity] = []
+    private var _delegate: (any ExtensionAPICallerVerifier)?
+
+    /// When set, every call is answered by this verifier instead of the values below.
+    var delegate: (any ExtensionAPICallerVerifier)? {
+        get { lock.withLock { _delegate } }
+        set { lock.withLock { _delegate = newValue } }
+    }
 
     /// What pairing returns; nil refuses the caller.
     var pairingIdentity: ExtensionAPICallerIdentity? {
@@ -25,14 +32,16 @@ final class FakeCallerVerifier: ExtensionAPICallerVerifier, @unchecked Sendable 
     var verifyCalls: [ExtensionAPICallerIdentity] { lock.withLock { _verifyCalls } }
 
     func identityForPairing(_ peer: ExtensionAPIPeer) async -> ExtensionAPICallerIdentity? {
-        lock.withLock {
+        if let delegate { return await delegate.identityForPairing(peer) }
+        return lock.withLock {
             _pairingCalls += 1
             return _pairingIdentity
         }
     }
 
     func verify(_ peer: ExtensionAPIPeer, matches identity: ExtensionAPICallerIdentity) async -> Bool {
-        lock.withLock {
+        if let delegate { return await delegate.verify(peer, matches: identity) }
+        return lock.withLock {
             _verifyCalls.append(identity)
             return _acceptsRequests
         }

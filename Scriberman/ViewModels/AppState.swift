@@ -196,7 +196,6 @@ final class AppState {
             handler: ExtensionAPIHandler(
                 port: { extensionAPISettings.port },
                 pairingStore: ExtensionAPIPairingStore(keychain: LiveKeychainStore()),
-                callerVerifier: AlwaysAllowCallerVerifier(),
                 loadPrompts: { AIPromptStore().loadPrompts() }
             )
         )

@@ -141,7 +141,7 @@ private final class ExtensionAPIConnection: @unchecked Sendable {
     private var handleTask: Task<Void, Never>?
 
     private var peer: ExtensionAPIPeer {
-        ExtensionAPIPeer(endpoint: connection.endpoint)
+        ExtensionAPIPeer(endpoint: connection.endpoint, localEndpoint: connection.currentPath?.localEndpoint)
     }
 
     init(
