@@ -426,7 +426,8 @@ struct CallerVerifierHandlerTests {
                 defaults: UserDefaults(suiteName: "CallerVerifierDefault-\(UUID().uuidString)")!,
                 keychain: MockKeychainStore()
             ),
-            loadPrompts: { [] }
+            loadPrompts: { [] },
+            sessions: ExtensionAPISessionCatalog(context: nil, renderTranscript: { _ in nil })
         )
         let fixture = ExtensionAPIFixture()
         let admission = await handler.admit(fixture.pairHead(), peer: ExtensionAPIPeer(endpoint: nil))
