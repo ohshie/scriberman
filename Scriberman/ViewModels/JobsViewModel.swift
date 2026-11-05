@@ -189,39 +189,26 @@ final class JobsViewModel {
         }
 
         let combined = (recordingItems + importedItems).sorted { $0.createdAt > $1.createdAt }
-        return applyingSearchQuery(to: applyingTagFilter(to: combined))
+        return SessionFiltering.filter(combined, query: activeSearchQuery, tagIDs: effectiveTagIDs(in: combined))
     }
 
-    /// Narrows the list to recordings carrying any of the selected tags.
+    /// The selected tags that some recording in `items` carries.
     ///
-    /// Union rather than intersection: intersecting two tags over a personal archive returns almost
-    /// nothing, which would make multi-selection useless.
+    /// Only tags some recording actually carries can filter. A tag that lost its last recording
+    /// has no chip any more, so leaving it in the selection would filter the list to nothing
+    /// with no visible way to undo it. Ignoring it instead makes the selection self-healing.
     ///
-    /// While a filter is active, imported and pending sessions drop out. They carry no tags, so
-    /// they cannot match — and showing them anyway would mean a filtered list still contains rows
-    /// the filter says nothing about.
-    ///
-    /// Applied here, after the selection-preserving branch above, so filtering the selected item
-    /// out wins over keeping it visible.
-    private func applyingTagFilter(to items: [SessionListItem]) -> [SessionListItem] {
-        guard !selectedTagIDs.isEmpty else { return items }
-
-        // Only tags some recording actually carries can filter. A tag that lost its last recording
-        // has no chip any more, so leaving it in the selection would filter the list to nothing
-        // with no visible way to undo it. Ignoring it instead makes the selection self-healing.
+    /// Computed over the list after the selection-preserving branch above, so filtering the
+    /// selected item out wins over keeping it visible.
+    private func effectiveTagIDs(in items: [SessionListItem]) -> Set<UUID> {
+        guard !selectedTagIDs.isEmpty else { return [] }
         var present: Set<UUID> = []
         for item in items {
             if case .recording(let session) = item {
                 for tag in session.tags { present.insert(tag.id) }
             }
         }
-        let effective = selectedTagIDs.intersection(present)
-        guard !effective.isEmpty else { return items }
-
-        return items.filter { item in
-            guard case .recording(let session) = item else { return false }
-            return session.tags.contains { effective.contains($0.id) }
-        }
+        return selectedTagIDs.intersection(present)
     }
 
     /// What the search field holds. Empty, or nothing but whitespace, means no search.
@@ -233,55 +220,12 @@ final class JobsViewModel {
     /// The query with its surrounding whitespace removed, or `nil` when there is nothing to search
     /// for. Every search path goes through this, so "    " and "" behave identically.
     var activeSearchQuery: String? {
-        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        SessionFiltering.activeQuery(searchQuery)
     }
 
-    /// Narrows the list to sessions whose title or transcript contains the query.
-    ///
-    /// Applied after the tag filter, which is what makes the two AND: tags narrow the set, the
-    /// query searches within it.
-    ///
-    /// A query that matches nothing yields an empty list. It deliberately does not fall back to
-    /// showing everything — a list that ignores the query looks like a search that found the whole
-    /// library.
-    ///
-    /// Matching is `localizedStandardContains`, which is case- and diacritic-insensitive, the same
-    /// comparison the in-transcript find bar uses. A pending session drops out while a query is
-    /// active: it has no transcript and no title of its own yet, so it cannot match, and leaving it
-    /// in would put a row in the results the query says nothing about.
-    private func applyingSearchQuery(to items: [SessionListItem]) -> [SessionListItem] {
-        guard let query = activeSearchQuery else { return items }
-        return items.filter { Self.matches(query: query, item: $0) != nil }
-    }
-
-    /// How an item matched a query, or `nil` when it did not.
-    ///
-    /// A session can match on both; the transcript wins, because that is the match a snippet can be
-    /// built from.
+    /// How an item matched a query, or `nil` when it did not. See `SessionFiltering.matches`.
     static func matches(query: String, item: SessionListItem) -> SessionSearchMatchKind? {
-        switch item {
-        case .pending:
-            return nil
-        case .recording(let session):
-            return matches(query: query, title: session.title, searchableText: session.searchableText)
-        case .imported(let session):
-            return matches(query: query, title: session.title, searchableText: session.searchableText)
-        }
-    }
-
-    private static func matches(
-        query: String,
-        title: String,
-        searchableText: String?
-    ) -> SessionSearchMatchKind? {
-        if searchableText?.localizedStandardContains(query) == true {
-            return .transcript
-        }
-        if title.localizedStandardContains(query) {
-            return .title
-        }
-        return nil
+        SessionFiltering.matches(query: query, item: item)
     }
 
     /// Where the query matched inside each transcript result, keyed by list item id.
@@ -617,6 +561,53 @@ final class JobsViewModel {
         return failedImportURLs
     }
 
+    /// Imports one file and returns the new session's id once the session is saved. Conversion
+    /// and transcription go on after it returns; `conversionEnded` is called once conversion has
+    /// finished or failed, since conversion reads `url`.
+    func importAudioFile(
+        at url: URL,
+        context: ModelContext,
+        conversionEnded: @escaping @Sendable () -> Void
+    ) async throws(SingleAudioImportError) -> UUID {
+        guard Self.isAudioURL(url) else {
+            throw .notAudio
+        }
+        let workspace: Workspace
+        do {
+            workspace = try await workspaceService.requireAuthorizedWorkspace()
+        } catch {
+            logger.error("Import skipped because workspace is unavailable: \(error.localizedDescription, privacy: .public)")
+            throw .workspaceUnavailable
+        }
+
+        let modelContainer = context.container
+        let pipelineSettings = currentPipelineSettings
+        let service = audioImportService
+        let logger = logger
+        activeImports += 1
+        let outcome: Result<UUID, SingleAudioImportError> = await withCheckedContinuation { continuation in
+            let reply = SingleImportReply(continuation)
+            // Not a child task: conversion and transcription carry on after this returns.
+            Task {
+                defer { self.activeImports -= 1 }
+                do {
+                    try await service.importAudio(
+                        from: url,
+                        workspace: workspace,
+                        modelContainer: modelContainer,
+                        pipelineSettings: pipelineSettings,
+                        onRecorded: { reply.send(.success($0)) },
+                        onConversionEnded: conversionEnded
+                    )
+                } catch {
+                    logger.error("Import of \(url.lastPathComponent, privacy: .public) could not be recorded: \(error.localizedDescription, privacy: .public)")
+                    reply.send(.failure(.notRecorded))
+                }
+            }
+        }
+        return try outcome.get()
+    }
+
     func retryImported(session: ImportedSession, context: ModelContext) {
         guard session.mixdownURL != nil else {
             return
@@ -700,18 +691,63 @@ final class JobsViewModel {
         return markdownRenderer.renderMarkdown(session: session, transcript: transcript)
     }
 
-    func exportTranscript(for session: any TranscribableSession) async throws {
+    /// What an export did.
+    enum ExportOutcome: Equatable {
+        case saved
+        /// The save panel was closed without choosing a file.
+        case cancelled
+        /// Nothing was written; the message is the error's description.
+        case failed(String)
+        /// The session was deleted while the save panel was open. Nothing was written.
+        case sessionDeleted
+        /// `mayWrite` said no once the save panel closed. Nothing was written.
+        case writeRefused
+    }
+
+    /// Asks where to save the session's transcript, then writes it there.
+    ///
+    /// After the save panel closes, the session must still exist and `mayWrite` must agree, or
+    /// nothing is written.
+    func exportTranscript(
+        for session: any TranscribableSession,
+        mayWrite: @MainActor () -> Bool = { true }
+    ) async -> ExportOutcome {
         guard let markdown = renderedTranscript(for: session) else {
-            throw TranscriptExportError.transcriptUnavailable
+            return .failed(TranscriptExportError.transcriptUnavailable.localizedDescription)
         }
 
         let suggestedName = markdownRenderer.defaultFileName(for: session.title)
+        let generation = sessionJobs.generation(of: session.id)
+        let wasInStore = Self.isInStore(session)
 
         guard let destinationURL = await savePanelPresenter(suggestedName) else {
-            return
+            return .cancelled
+        }
+        guard sessionJobs.mayWrite(generation), !wasInStore || Self.isInStore(session) else {
+            return .sessionDeleted
+        }
+        guard mayWrite() else {
+            return .writeRefused
         }
 
-        try transcriptExportService.write(markdown, to: destinationURL)
+        do {
+            try transcriptExportService.write(markdown, to: destinationURL)
+            return .saved
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    /// Whether the session is saved in a context and not deleted from it.
+    private static func isInStore(_ session: any TranscribableSession) -> Bool {
+        switch session {
+        case let recording as RecordingSession:
+            recording.modelContext != nil && !recording.isDeleted
+        case let imported as ImportedSession:
+            imported.modelContext != nil && !imported.isDeleted
+        default:
+            true
+        }
     }
 
     /// Deletes an imported session and its folder.
@@ -735,11 +771,43 @@ final class JobsViewModel {
            contentType.conforms(to: .audio) {
             return true
         }
+        return isAudioFileName(url.lastPathComponent)
+    }
 
-        let ext = url.pathExtension.lowercased()
+    /// Whether a file of this name is taken for audio by its extension.
+    nonisolated static func isAudioFileName(_ name: String) -> Bool {
+        let ext = (name as NSString).pathExtension.lowercased()
         guard !ext.isEmpty, let type = UTType(filenameExtension: ext) else {
             return false
         }
         return type.conforms(to: .audio)
     }
+}
+
+/// Passes the first outcome of a single-file import to the waiting caller; later ones are dropped.
+private final class SingleImportReply: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Result<UUID, SingleAudioImportError>, Never>?
+
+    init(_ continuation: CheckedContinuation<Result<UUID, SingleAudioImportError>, Never>) {
+        self.continuation = continuation
+    }
+
+    func send(_ outcome: Result<UUID, SingleAudioImportError>) {
+        let pending = lock.withLock {
+            defer { continuation = nil }
+            return continuation
+        }
+        pending?.resume(returning: outcome)
+    }
+}
+
+/// Why a single-file import did not produce a session.
+enum SingleAudioImportError: Error, Equatable, Sendable {
+    /// The file is not an audio file.
+    case notAudio
+    /// No authorized workspace to import into.
+    case workspaceUnavailable
+    /// The new session could not be saved.
+    case notRecorded
 }

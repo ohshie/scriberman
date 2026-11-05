@@ -4,6 +4,7 @@ import SwiftUI
 
 struct NewSessionPanelView: View {
     var viewModel: NewSessionViewModel
+    var coordinator: CaptureCoordinator
     @Binding var pendingSession: PendingSession
     var onRecordingStarted: (RecordingSession) -> Void = { _ in }
     var onImportFile: () -> Void = {}
@@ -63,8 +64,13 @@ struct NewSessionPanelView: View {
             isEnabled: viewModel.canRecord
         ) {
             Task {
-                if let session = await viewModel.startRecording(title: pendingSession.title, context: modelContext) {
-                    onRecordingStarted(session)
+                let result = await coordinator.start(
+                    viewModel.windowChoice(title: pendingSession.title),
+                    origin: .window,
+                    context: modelContext
+                )
+                if case .success(let started) = result {
+                    onRecordingStarted(started.session)
                 }
             }
         }

@@ -11,7 +11,7 @@ struct NewSessionViewModelTests {
         workspaceService: MockWorkspaceService,
         recordingService: MockRecordingService,
         audioDeviceService: MockAudioDeviceService,
-        appAudioService: MockNewSessionAppAudioService,
+        appAudioService: MockAppAudioService,
         permissionService: MockPermissionService,
         menuBarSettings: MenuBarSettings,
         viewModel: NewSessionViewModel,
@@ -31,7 +31,7 @@ struct NewSessionViewModelTests {
         let workspaceService = MockWorkspaceService()
         let recordingService = MockRecordingService()
         let audioDeviceService = MockAudioDeviceService()
-        let appAudioService = MockNewSessionAppAudioService()
+        let appAudioService = MockAppAudioService()
         let screenCaptureService = MockScreenCaptureService()
         screenCaptureService.availableDisplays = availableDisplays
         screenCaptureService.selectedDisplayID = selectedDisplayID
@@ -1960,33 +1960,6 @@ struct NewSessionViewModelTests {
 
         #expect(fixture.recordingService.restartAudioCaptureCallCount == 1)
         #expect(!fixture.viewModel.didFailToStartRecording)
-    }
-}
-
-@MainActor
-private final class MockNewSessionAppAudioService: AppAudioServiceProtocol {
-    var runningApps: [CapturedApp] = []
-    var selectedApp: CapturedApp?
-    var refreshCalls = 0
-    var incrementUsageCalls: [String] = []
-
-    func incrementUsage(for bundleID: String) {
-        incrementUsageCalls.append(bundleID)
-    }
-
-    func refreshRunningApps() {
-        refreshCalls += 1
-    }
-}
-
-@MainActor
-private final class MockScreenCaptureService: ScreenCaptureServiceProtocol {
-    var availableDisplays: [CaptureDisplay] = []
-    var selectedDisplayID: CGDirectDisplayID?
-    var refreshCalls = 0
-
-    func refreshAvailableDisplays() async {
-        refreshCalls += 1
     }
 }
 

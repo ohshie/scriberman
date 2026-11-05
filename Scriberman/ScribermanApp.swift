@@ -128,11 +128,13 @@ struct ScribermanApp: App {
                 .environment(appState.aiProviderService)
                 .task {
                     appDelegate.appState = appState
+                    appState.showMainWindowAction = { [weak appDelegate] in appDelegate?.showMainWindow() }
                     appDelegate.modelContext = modelContainer.mainContext
                     appDelegate.wireIdleSessionPrompt()
                     appDelegate.wireCalendarSuggestions()
                     // macOS resets to the bundle icon on every launch, so re-apply the choice.
                     appState.appIconPreferences.apply()
+                    appState.extensionAPI.start()
                     ScribermanApp.prepareTags(in: modelContainer.mainContext)
                     ScribermanApp.prepareSearchText(in: modelContainer.mainContext)
                     ScribermanApp.removeOrphanedTranscriptSegments(in: modelContainer.mainContext)

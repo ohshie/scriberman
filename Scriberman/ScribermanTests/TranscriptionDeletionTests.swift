@@ -329,22 +329,25 @@ final class TranscriptionDeletionTests {
         )
         service.isEnabled = true
         service.selectedModelID = "gpt-5.2"
-        return TranscriptDetailViewModel(
+        let promptStore = AIPromptStore(defaults: defaults)
+        let prompt = promptStore.addPrompt(name: "Summary", content: "Summarize")
+        let viewModel = TranscriptDetailViewModel(
             session: session,
             aiProviderService: service,
-            promptStore: AIPromptStore(defaults: defaults),
-            sessionJobs: jobs
+            promptStore: promptStore,
+            aiTransformationRunner: AITransformationRunner(
+                aiProviderService: service,
+                promptStore: promptStore,
+                sessionJobs: jobs
+            )
         )
+        viewModel.prompts = [prompt]
+        viewModel.selectedPromptID = prompt.id
+        return viewModel
     }
 
     private func startTransformation(_ viewModel: TranscriptDetailViewModel, of session: RecordingSession) -> Task<Void, Never> {
-        let request = AITransformationRequest(
-            transcript: "first",
-            systemPrompt: "Summarize",
-            promptName: "Summary",
-            modelID: "gpt-5.2"
-        )
-        return Task { await viewModel.runTransformation(request, session: session, promptID: nil) }
+        Task { await viewModel.runTransformation() }
     }
 
     @Test

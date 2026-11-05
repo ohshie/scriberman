@@ -19,9 +19,13 @@ final class AppState {
     let backgroundServices: BackgroundServiceContainer
     let permissionService: PermissionServiceProtocol
     let newSessionViewModel: NewSessionViewModel
+    /// Starts and stops every recording: the window, the menu-bar item and app lifecycle use it.
+    let captureCoordinator: CaptureCoordinator
     let jobsViewModel: JobsViewModel
     /// Every window's deletes and restores, run one session at a time.
     let sessionDeletion: SessionDeletionCoordinator
+    /// Every window's AI transformation runs, one at a time per session.
+    let aiTransformationRunner: AITransformationRunner
     let settingsViewModel: SettingsViewModel
     let updateService: UpdateService
     let menuBarSettings: MenuBarSettings
@@ -29,6 +33,14 @@ final class AppState {
     let idlePromptPreferences = IdlePromptPreferences()
     let appIconPreferences = AppIconPreferences()
     let developerSettings: DeveloperSettings
+    let extensionAPISettings: ExtensionAPISettings
+    /// The local HTTP API for the Tinycast extension. Started once at launch by `ScribermanApp`.
+    let extensionAPI: ExtensionAPIService
+    /// The extension API section of Settings.
+    let extensionAPISettingsViewModel: ExtensionAPISettingsViewModel
+    /// Holds the pending pairing request; the handler keeps only a weak reference.
+    private let extensionAPIPairingPrompter = ExtensionAPIPairingPrompter()
+    private let extensionAPIPairingPanel = ExtensionAPIPairingPanelController()
     private let restoreWorkspaceHandler: () async throws -> Workspace
     private let setWorkspaceHandler: (URL) async throws -> Workspace
 
@@ -59,6 +71,8 @@ final class AppState {
     /// SwiftUI's `openSettings` action, registered by `ContentView`. Lets AppKit-hosted UI such as
     /// the dictation HUD open the Settings scene.
     @ObservationIgnored var openSettingsAction: (() -> Void)?
+    /// Brings the main window forward, registered by the app delegate's owner.
+    @ObservationIgnored var showMainWindowAction: (() -> Void)?
     /// A session asked for from outside a window (menu bar extra, calendar suggestion, start
     /// failure panel), waiting for the key main window to show it. A newer request replaces it.
     private(set) var sessionRequest: SessionRequest?
@@ -123,6 +137,12 @@ final class AppState {
         self.mainServices = services.main
         self.backgroundServices = services.background
         self.permissionService = services.main.permissionService
+        let aiTransformationRunner = AITransformationRunner(
+            aiProviderService: services.main.aiProviderService,
+            promptStore: AIPromptStore(),
+            sessionJobs: services.background.sessionJobs
+        )
+        self.aiTransformationRunner = aiTransformationRunner
         let developerSettings = DeveloperSettings()
         self.developerSettings = developerSettings
         self.updateService = updateService ?? .live(developerSettings: developerSettings)
@@ -141,7 +161,7 @@ final class AppState {
             permissionService: services.main.permissionService,
             speakerEmbeddingStore: services.background.speakerEmbeddingStore
         )
-        self.jobsViewModel = JobsViewModel(
+        let jobsViewModel = JobsViewModel(
             workspaceService: services.background.workspaceService,
             transcriptionService: services.background.transcriptionService,
             retranscriptionService: services.background.retranscriptionService,
@@ -149,6 +169,7 @@ final class AppState {
             transcriptExportService: services.main.transcriptExportService,
             sessionJobs: services.background.sessionJobs
         )
+        self.jobsViewModel = jobsViewModel
         self.sessionDeletion = sessionDeletion ?? SessionDeletionCoordinator(
             workspaceService: services.background.workspaceService,
             sessionJobs: services.background.sessionJobs
@@ -177,6 +198,81 @@ final class AppState {
             service: services.main.calendarService,
             preferences: services.main.calendarPreferences
         )
+        let extensionAPISettings = ExtensionAPISettings()
+        self.extensionAPISettings = extensionAPISettings
+        let extensionAPIPairingStore = ExtensionAPIPairingStore(keychain: LiveKeychainStore())
+        let extensionAPIHandler = ExtensionAPIHandler(
+            port: { extensionAPISettings.port },
+            pairingStore: extensionAPIPairingStore,
+            loadPrompts: { AIPromptStore().loadPrompts() },
+            sessions: ExtensionAPISessionCatalog(
+                context: modelContext,
+                renderTranscript: { jobsViewModel.renderedTranscript(for: $0) }
+            ),
+            importAudioFile: { [jobsViewModel = self.jobsViewModel] url, conversionEnded throws(SingleAudioImportError) in
+                guard let modelContext else { throw .workspaceUnavailable }
+                return try await jobsViewModel.importAudioFile(at: url, context: modelContext, conversionEnded: conversionEnded)
+            },
+            modelContext: modelContext,
+            transformationRunner: aiTransformationRunner
+        )
+        let extensionAPI = ExtensionAPIService(
+            settings: extensionAPISettings,
+            handler: extensionAPIHandler
+        )
+        self.extensionAPI = extensionAPI
+        self.extensionAPISettingsViewModel = ExtensionAPISettingsViewModel(
+            settings: extensionAPISettings,
+            pairingStore: extensionAPIPairingStore,
+            state: { extensionAPI.state }
+        )
+        self.captureCoordinator = CaptureCoordinator(
+            viewModel: newSessionViewModel,
+            workspaceService: services.background.workspaceService,
+            permissionService: services.main.permissionService,
+            menuBarSettings: menuBarSettings,
+            modelsReady: { [settingsViewModel] in settingsViewModel.bundlePhase == .allReady }
+        )
+        self.captureCoordinator.discardPendingSession = { [weak self] in
+            guard let self, pendingSession != nil else { return }
+            discardPendingSession()
+        }
+        if let modelContext {
+            extensionAPIHandler.recording = ExtensionAPIRecording(
+                coordinator: captureCoordinator,
+                audioDeviceService: services.main.audioDeviceService,
+                appAudioService: services.main.appAudioService,
+                screenCaptureService: services.main.screenCaptureService,
+                permissionService: services.main.permissionService,
+                menuBarSettings: menuBarSettings,
+                context: modelContext,
+                requestSession: { [weak self] in self?.requestSession($0) }
+            )
+            extensionAPIHandler.calendar = extensionAPIHandler.recording.map {
+                ExtensionAPICalendar(controller: calendarSuggestions, recording: $0)
+            }
+        }
+        let workspaceService = services.background.workspaceService
+        extensionAPIHandler.sessionActions = ExtensionAPISessionActions(
+            requestSession: { [weak self] in self?.requestSession($0) },
+            showWindow: { [weak self] in self?.showMainWindowAction?() },
+            export: { [jobsViewModel] session, mayWrite in
+                await jobsViewModel.exportTranscript(for: session, mayWrite: mayWrite)
+            },
+            authorizedWorkspace: { () throws(WorkspaceError) in try await workspaceService.requireAuthorizedWorkspace() }
+        )
+        extensionAPIHandler.pairingPresenter = extensionAPIPairingPrompter
+        extensionAPIPairingPrompter.onChange = { [weak extensionAPIPairingPrompter, extensionAPIPairingPanel] request in
+            guard let request else {
+                extensionAPIPairingPanel.hide()
+                return
+            }
+            extensionAPIPairingPanel.show(
+                request,
+                onApprove: { extensionAPIPairingPrompter?.approve() },
+                onDeny: { extensionAPIPairingPrompter?.deny() }
+            )
+        }
     }
 
     /// Recording or dictation in progress. Calendar suggestions are hidden while this is true.
@@ -253,8 +349,13 @@ final class AppState {
     }
 
     private func sessionTitle(for suggestion: CalendarMeetingSuggestion) -> String {
+        Self.sessionTitle(for: suggestion)
+    }
+
+    /// The meeting's title, or the draft session title when the meeting has none.
+    static func sessionTitle(for suggestion: CalendarMeetingSuggestion) -> String {
         let title = suggestion.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return title.isEmpty ? Self.defaultPendingSessionTitle() : title
+        return title.isEmpty ? defaultPendingSessionTitle() : title
     }
 
     func selectPendingSession() {
@@ -279,6 +380,7 @@ final class AppState {
     enum SessionRequest: Equatable {
         case pending
         case recording(UUID)
+        case imported(UUID)
     }
 
     func requestSession(_ request: SessionRequest) {

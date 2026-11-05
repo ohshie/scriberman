@@ -90,11 +90,16 @@ actor AudioImportService {
     ///
     /// Everything after that first save is one job of the session: a delete cancels it, waits for
     /// it, and it writes nothing afterwards.
+    ///
+    /// `onRecorded` gets the session's id once it is saved. `onConversionEnded` is called once
+    /// conversion, the last step that reads `url`, has finished or failed.
     func importAudio(
         from url: URL,
         workspace: Workspace,
         modelContainer: ModelContainer,
-        pipelineSettings: LiveTranscriptionPipelineSettings = .defaults
+        pipelineSettings: LiveTranscriptionPipelineSettings = .defaults,
+        onRecorded: (@Sendable (UUID) -> Void)? = nil,
+        onConversionEnded: (@Sendable () -> Void)? = nil
     ) async throws {
         let context = ModelContext(modelContainer)
         let fallbackTitle = Self.defaultTitle(from: url)
@@ -128,6 +133,7 @@ actor AudioImportService {
         } catch {
             throw AudioImportError.couldNotRecord(error.localizedDescription)
         }
+        onRecorded?(session.id)
 
         let job = Task {
             await convertAndTranscribe(
@@ -137,7 +143,8 @@ actor AudioImportService {
                 workspace: workspace,
                 modelContainer: modelContainer,
                 pipelineSettings: pipelineSettings,
-                generation: generation
+                generation: generation,
+                conversionEnded: onConversionEnded
             )
         }
         sessionJobs.track(job, as: generation)
@@ -155,13 +162,29 @@ actor AudioImportService {
         workspace: Workspace,
         modelContainer: ModelContainer,
         pipelineSettings: LiveTranscriptionPipelineSettings,
-        generation: SessionJobs.Generation
+        generation: SessionJobs.Generation,
+        conversionEnded: (@Sendable () -> Void)?
     ) async {
+        let converted = await convert(session, from: url, context: context, workspace: workspace, generation: generation)
+        conversionEnded?()
+        guard converted, sessionJobs.mayWrite(generation) else { return }
+        await retranscribe(session.id, modelContainer, workspace, pipelineSettings)
+    }
+
+    /// Converts `url` into the session's mixdown. Returns whether transcription should follow; a
+    /// failure is recorded as the session's error status.
+    private func convert(
+        _ session: ImportedSession,
+        from url: URL,
+        context: ModelContext,
+        workspace: Workspace,
+        generation: SessionJobs.Generation
+    ) async -> Bool {
         let sessionID = session.id
 
         do {
             let probe = try await probeAudio(url)
-            guard sessionJobs.mayWrite(generation) else { return }
+            guard sessionJobs.mayWrite(generation) else { return false }
             session.title = probe.title
             session.originalFileName = probe.originalFileName
             session.originalFormat = probe.originalFormat
@@ -173,7 +196,7 @@ actor AudioImportService {
                 createdAt: session.createdAt,
                 workspace: workspace
             )
-            guard sessionJobs.mayWrite(generation) else { return }
+            guard sessionJobs.mayWrite(generation) else { return false }
             try createDirectory(importFolderURL)
             // The record names the folder only once conversion sets the mixdown.
             sessionJobs.recordFolder(importFolderURL, of: sessionID)
@@ -186,7 +209,7 @@ actor AudioImportService {
                 // rate are converted first; written unconverted they would play at the wrong speed.
                 let outputSamples = try AudioResampler(targetSampleRate: AudioMixdownService.outputSampleRate)
                     .resample(monoSamples, from: decoded.sampleRate)
-                guard sessionJobs.mayWrite(generation) else { return }
+                guard sessionJobs.mayWrite(generation) else { return false }
                 try await writeMonoAAC(outputSamples, outputURL)
             } catch {
                 if sessionJobs.mayWrite(generation), shouldFallbackToMixdownService(for: error) {
@@ -196,16 +219,16 @@ actor AudioImportService {
                 }
             }
 
-            guard sessionJobs.mayWrite(generation) else { return }
+            guard sessionJobs.mayWrite(generation) else { return false }
             session.mixdownURL = outputURL.path
             session.status = .transcribing
             try? saveContext(context)
-
-            await retranscribe(sessionID, modelContainer, workspace, pipelineSettings)
+            return true
         } catch {
-            guard sessionJobs.mayWrite(generation) else { return }
+            guard sessionJobs.mayWrite(generation) else { return false }
             session.status = .error(error.localizedDescription)
             try? saveContext(context)
+            return false
         }
     }
 

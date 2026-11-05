@@ -21,6 +21,8 @@ final class MockAIProviderService: AIProviderServiceProtocol {
     var transformationResult = ""
     var addCustomModelError: Error?
     var transformationError: Error?
+    /// Awaited inside `performTransformation` before it answers, so a test can hold a run open.
+    var transformationGate: (@MainActor () async -> Void)?
 
     func saveAPIKey(_ key: String) {
         saveAPIKeyCalls.append(key)
@@ -60,6 +62,9 @@ final class MockAIProviderService: AIProviderServiceProtocol {
 
     func performTransformation(_ request: AITransformationRequest) async throws -> AITransformationResult {
         performedTransformations.append(request)
+        if let transformationGate {
+            await transformationGate()
+        }
         if let transformationError {
             throw transformationError
         }
