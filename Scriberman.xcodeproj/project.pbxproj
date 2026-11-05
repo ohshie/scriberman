@@ -2228,7 +2228,7 @@
 			repositoryURL = "https://github.com/FluidInference/FluidAudio.git";
 			requirement = {
 				kind = exactVersion;
-				version = 0.17.4;
+				version = 0.18.2;
 			};
 		};
 		E1E1E1E1E1E1E1E1E1E1E1E1 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
