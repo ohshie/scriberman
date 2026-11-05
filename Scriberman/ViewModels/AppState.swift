@@ -36,6 +36,11 @@ final class AppState {
     let extensionAPISettings: ExtensionAPISettings
     /// The local HTTP API for the Tinycast extension. Started once at launch by `ScribermanApp`.
     let extensionAPI: ExtensionAPIService
+    /// The extension API section of Settings.
+    let extensionAPISettingsViewModel: ExtensionAPISettingsViewModel
+    /// Holds the pending pairing request; the handler keeps only a weak reference.
+    private let extensionAPIPairingPrompter = ExtensionAPIPairingPrompter()
+    private let extensionAPIPairingPanel = ExtensionAPIPairingPanelController()
     private let restoreWorkspaceHandler: () async throws -> Workspace
     private let setWorkspaceHandler: (URL) async throws -> Workspace
 
@@ -195,9 +200,10 @@ final class AppState {
         )
         let extensionAPISettings = ExtensionAPISettings()
         self.extensionAPISettings = extensionAPISettings
+        let extensionAPIPairingStore = ExtensionAPIPairingStore(keychain: LiveKeychainStore())
         let extensionAPIHandler = ExtensionAPIHandler(
             port: { extensionAPISettings.port },
-            pairingStore: ExtensionAPIPairingStore(keychain: LiveKeychainStore()),
+            pairingStore: extensionAPIPairingStore,
             loadPrompts: { AIPromptStore().loadPrompts() },
             sessions: ExtensionAPISessionCatalog(
                 context: modelContext,
@@ -210,9 +216,15 @@ final class AppState {
             modelContext: modelContext,
             transformationRunner: aiTransformationRunner
         )
-        self.extensionAPI = ExtensionAPIService(
+        let extensionAPI = ExtensionAPIService(
             settings: extensionAPISettings,
             handler: extensionAPIHandler
+        )
+        self.extensionAPI = extensionAPI
+        self.extensionAPISettingsViewModel = ExtensionAPISettingsViewModel(
+            settings: extensionAPISettings,
+            pairingStore: extensionAPIPairingStore,
+            state: { extensionAPI.state }
         )
         self.captureCoordinator = CaptureCoordinator(
             viewModel: newSessionViewModel,
@@ -249,6 +261,18 @@ final class AppState {
             },
             authorizedWorkspace: { () throws(WorkspaceError) in try await workspaceService.requireAuthorizedWorkspace() }
         )
+        extensionAPIHandler.pairingPresenter = extensionAPIPairingPrompter
+        extensionAPIPairingPrompter.onChange = { [weak extensionAPIPairingPrompter, extensionAPIPairingPanel] request in
+            guard let request else {
+                extensionAPIPairingPanel.hide()
+                return
+            }
+            extensionAPIPairingPanel.show(
+                request,
+                onApprove: { extensionAPIPairingPrompter?.approve() },
+                onDeny: { extensionAPIPairingPrompter?.deny() }
+            )
+        }
     }
 
     /// Recording or dictation in progress. Calendar suggestions are hidden while this is true.

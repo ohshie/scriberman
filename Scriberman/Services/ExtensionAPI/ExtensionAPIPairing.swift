@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import OSLog
 import Security
 
@@ -19,16 +20,20 @@ struct ExtensionAPIClientCredentials: Sendable {
 }
 
 /// Paired clients in user defaults, each client's secret in the Keychain. Secrets are never logged.
+/// Observable so Settings lists a client paired or revoked while it is open.
 @MainActor
+@Observable
 final class ExtensionAPIPairingStore {
     nonisolated static let secretByteCount = 32
     private static let clientsKey = "extensionAPI.pairedClients"
     private static let secretKeyPrefix = "extensionAPI.clientSecret."
 
-    private let defaults: UserDefaults
-    private let keychain: any KeychainStore
-    private let makeSecret: () -> Data?
-    private let logger = Logger(subsystem: "Scriberman", category: "ExtensionAPIPairingStore")
+    /// Bumped on every save; `clients` reads it so observers see changes to user defaults.
+    private var revision = 0
+    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let keychain: any KeychainStore
+    @ObservationIgnored private let makeSecret: () -> Data?
+    @ObservationIgnored private let logger = Logger(subsystem: "Scriberman", category: "ExtensionAPIPairingStore")
 
     init(
         defaults: UserDefaults = .standard,
@@ -46,6 +51,7 @@ final class ExtensionAPIPairingStore {
     }
 
     var clients: [ExtensionAPIPairedClient] {
+        _ = revision
         guard let data = defaults.data(forKey: Self.clientsKey) else { return [] }
         return (try? JSONDecoder().decode([ExtensionAPIPairedClient].self, from: data)) ?? []
     }
@@ -108,6 +114,7 @@ final class ExtensionAPIPairingStore {
     private func save(_ clients: [ExtensionAPIPairedClient]) {
         guard let data = try? JSONEncoder().encode(clients) else { return }
         defaults.set(data, forKey: Self.clientsKey)
+        revision += 1
     }
 
     private static func secretKey(_ clientID: String) -> String {
@@ -126,6 +133,8 @@ struct ExtensionAPIPairingRequest: Equatable, Sendable, Identifiable {
     let id: UUID
     /// The name the client sent. Shown as the client's own claim.
     let claimedName: String
+    /// The identity the caller verifier read from the operating system for this request.
+    let callerIdentity: ExtensionAPICallerIdentity
 }
 
 enum ExtensionAPIPairingDecision: Equatable, Sendable {
@@ -133,7 +142,7 @@ enum ExtensionAPIPairingDecision: Equatable, Sendable {
     case deny
 }
 
-/// Shows a pairing request to the user and reports the answer. Its UI is ticket 13.
+/// Shows a pairing request to the user and reports the answer.
 @MainActor
 protocol ExtensionAPIPairingPresenter: AnyObject {
     /// Shows the request. `decide` may be called once; calls after the request ended are ignored.

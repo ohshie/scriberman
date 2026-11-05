@@ -508,8 +508,7 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
             return Self.json(OperationBody(state: "succeeded", transformationId: transformationID.uuidString))
         case .failed(let failure):
             let code = Self.operationCode(failure.code)
-            // Without an error description the message repeats the code, as error responses do.
-            return Self.json(OperationBody(state: "failed", code: code, message: failure.message ?? code))
+            return Self.json(OperationBody(state: "failed", code: code, message: failure.message ?? Self.operationMessage(failure.code)))
         }
     }
 
@@ -520,6 +519,17 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         case .notFound: ExtensionAPIErrorCode.notFound.rawValue
         case .providerFailed: "provider_failed"
         case .saveFailed: "save_failed"
+        }
+    }
+
+    /// The message for a failure that came without a description.
+    private static func operationMessage(_ code: AITransformationRunner.Failure.Code) -> String {
+        switch code {
+        case .aiNotConfigured: ExtensionAPIErrorCode.aiNotConfigured.message
+        case .noTranscript: ExtensionAPIErrorCode.noTranscript.message
+        case .notFound: ExtensionAPIErrorCode.notFound.message
+        case .providerFailed: ExtensionAPIStrings.providerFailed
+        case .saveFailed: ExtensionAPIErrorCode.saveFailed.message
         }
     }
 
@@ -727,7 +737,7 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
             return Self.error(.pairingBusy, status: 409)
         }
 
-        let request = ExtensionAPIPairingRequest(id: UUID(), claimedName: name)
+        let request = ExtensionAPIPairingRequest(id: UUID(), claimedName: name, callerIdentity: identity)
         let outcome = await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<PairingOutcome, Never>) in
                 guard !Task.isCancelled else {
@@ -795,14 +805,13 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         )
     }
 
-    /// An error response with the `{code, message}` body of the API contract. The message text
-    /// is the code until the maintainer supplies wording.
+    /// An error response with the `{code, message}` body of the API contract.
     nonisolated static func error(
         _ code: ExtensionAPIErrorCode,
         status: Int,
         extraHeaders: [HTTPRequestHead.Header] = []
     ) -> HTTPResponse {
-        let body = (try? JSONEncoder().encode(["code": code.rawValue, "message": code.rawValue])) ?? Data()
+        let body = (try? JSONEncoder().encode(["code": code.rawValue, "message": code.message])) ?? Data()
         return HTTPResponse(
             status: status,
             headers: [.init(name: "Content-Type", value: "application/json; charset=utf-8")] + extraHeaders,

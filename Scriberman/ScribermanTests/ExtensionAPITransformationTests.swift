@@ -361,6 +361,7 @@ struct ExtensionAPITransformationTests {
         let state = try await operation(signer, operationID)
         #expect(state.state == "failed")
         #expect(state.code == "not_found")
+        #expect(state.message == ExtensionAPIErrorCode.notFound.message)
         #expect(try savedHistory(of: sessionID).isEmpty)
     }
 
