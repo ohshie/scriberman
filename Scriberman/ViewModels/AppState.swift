@@ -19,6 +19,8 @@ final class AppState {
     let backgroundServices: BackgroundServiceContainer
     let permissionService: PermissionServiceProtocol
     let newSessionViewModel: NewSessionViewModel
+    /// Starts and stops every recording: the window, the menu-bar item and app lifecycle use it.
+    let captureCoordinator: CaptureCoordinator
     let jobsViewModel: JobsViewModel
     /// Every window's deletes and restores, run one session at a time.
     let sessionDeletion: SessionDeletionCoordinator
@@ -177,6 +179,17 @@ final class AppState {
             service: services.main.calendarService,
             preferences: services.main.calendarPreferences
         )
+        self.captureCoordinator = CaptureCoordinator(
+            viewModel: newSessionViewModel,
+            workspaceService: services.background.workspaceService,
+            permissionService: services.main.permissionService,
+            menuBarSettings: menuBarSettings,
+            modelsReady: { [settingsViewModel] in settingsViewModel.bundlePhase == .allReady }
+        )
+        self.captureCoordinator.discardPendingSession = { [weak self] in
+            guard let self, pendingSession != nil else { return }
+            discardPendingSession()
+        }
     }
 
     /// Recording or dictation in progress. Calendar suggestions are hidden while this is true.
