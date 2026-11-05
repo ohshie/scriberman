@@ -22,6 +22,8 @@ final class AppState {
     let jobsViewModel: JobsViewModel
     /// Every window's deletes and restores, run one session at a time.
     let sessionDeletion: SessionDeletionCoordinator
+    /// Every window's AI transformation runs, one at a time per session.
+    let aiTransformationRunner: AITransformationRunner
     let settingsViewModel: SettingsViewModel
     let updateService: UpdateService
     let menuBarSettings: MenuBarSettings
@@ -123,6 +125,11 @@ final class AppState {
         self.mainServices = services.main
         self.backgroundServices = services.background
         self.permissionService = services.main.permissionService
+        self.aiTransformationRunner = AITransformationRunner(
+            aiProviderService: services.main.aiProviderService,
+            promptStore: AIPromptStore(),
+            sessionJobs: services.background.sessionJobs
+        )
         let developerSettings = DeveloperSettings()
         self.developerSettings = developerSettings
         self.updateService = updateService ?? .live(developerSettings: developerSettings)

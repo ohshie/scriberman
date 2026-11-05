@@ -290,6 +290,7 @@
 		A55A55A55A55A55A55A55A55 /* OpenAI in Frameworks */ = {isa = PBXBuildFile; productRef = D11D11D11D11D11D11D11D11 /* OpenAI */; };
 		A66A66A66A66A66A66A66A66 /* MockKeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B66B66B66B66B66B66B66B66 /* MockKeychainStore.swift */; };
 		A77A77A77A77A77A77A77A77 /* AIProviderServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B77B77B77B77B77B77B77B77 /* AIProviderServiceTests.swift */; };
+		AA10A1000000000000000003 /* AITransformationRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10A1000000000000000004 /* AITransformationRunnerTests.swift */; };
 		D19000000000000000000001 /* KeychainStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D19000000000000000000002 /* KeychainStoreTests.swift */; };
 		A88A88A88A88A88A88A88A88 /* ConnectionStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B88B88B88B88B88B88B88B88 /* ConnectionStatusTests.swift */; };
 		B1C2D3E4F5061728394A5B6C /* StatusTagViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E4F5061728394A5B6D /* StatusTagViewTests.swift */; };
@@ -332,6 +333,7 @@
 		F0A1B2C3D4E5F60718293B44 /* AppAudioServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F60718293A44 /* AppAudioServiceProtocol.swift */; };
 		F0A1B2C3D4E5F60718293B45 /* AudioDeviceHardware.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F60718293A45 /* AudioDeviceHardware.swift */; };
 		F0A1B2C3D4E5F60718293B47 /* AIProviderServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F60718293A47 /* AIProviderServiceProtocol.swift */; };
+		AA10A1000000000000000001 /* AITransformationRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10A1000000000000000002 /* AITransformationRunner.swift */; };
 		F0A1B2C3D4E5F60718293B48 /* MicrophonePermissionProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F60718293A48 /* MicrophonePermissionProvider.swift */; };
 		F0A1B2C3D4E5F60718293B49 /* ScreenRecordingPermissionProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F60718293A49 /* ScreenRecordingPermissionProvider.swift */; };
 		F0A1B2C3D4E5F60718293B4A /* PermissionServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F60718293A4A /* PermissionServiceProtocol.swift */; };
@@ -634,6 +636,7 @@
 		B66B66B66B66B66B66B66B66 /* MockKeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockKeychainStore.swift; sourceTree = "<group>"; };
 		B6D3426D4147C8FFE524865F /* TrimEditorView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrimEditorView.swift; sourceTree = "<group>"; };
 		B77B77B77B77B77B77B77B77 /* AIProviderServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderServiceTests.swift; sourceTree = "<group>"; };
+		AA10A1000000000000000004 /* AITransformationRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AITransformationRunnerTests.swift; sourceTree = "<group>"; };
 		D19000000000000000000002 /* KeychainStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStoreTests.swift; sourceTree = "<group>"; };
 		B88B88B88B88B88B88B88B88 /* ConnectionStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStatusTests.swift; sourceTree = "<group>"; };
 		BA65604F12187C96E37A1413 /* WorkspacePicker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WorkspacePicker.swift; sourceTree = "<group>"; };
@@ -663,6 +666,7 @@
 		F0A1B2C3D4E5F60718293A44 /* AppAudioServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAudioServiceProtocol.swift; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F60718293A45 /* AudioDeviceHardware.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDeviceHardware.swift; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F60718293A47 /* AIProviderServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderServiceProtocol.swift; sourceTree = "<group>"; };
+		AA10A1000000000000000002 /* AITransformationRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AITransformationRunner.swift; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F60718293A48 /* MicrophonePermissionProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicrophonePermissionProvider.swift; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F60718293A49 /* ScreenRecordingPermissionProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenRecordingPermissionProvider.swift; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F60718293A4A /* PermissionServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionServiceProtocol.swift; sourceTree = "<group>"; };
@@ -733,6 +737,7 @@
 				9E139E48C80C6FA0CE0746BE /* CalendarSuggestionPreferencesTests.swift */,
 				A9D1E2F3A4B5C6D7E8FB1004 /* UpdateServiceTests.swift */,
 				B77B77B77B77B77B77B77B77 /* AIProviderServiceTests.swift */,
+				AA10A1000000000000000004 /* AITransformationRunnerTests.swift */,
 				D19000000000000000000002 /* KeychainStoreTests.swift */,
 				B88B88B88B88B88B88B88B88 /* ConnectionStatusTests.swift */,
 				B5871E10D502FAEB70EDC99F /* MarkdownRendererTests.swift */,
@@ -1288,6 +1293,7 @@
 			children = (
 				B44B44B44B44B44B44B44B44 /* AIProviderService.swift */,
 				F0A1B2C3D4E5F60718293A47 /* AIProviderServiceProtocol.swift */,
+				AA10A1000000000000000002 /* AITransformationRunner.swift */,
 			);
 			path = AI;
 			sourceTree = "<group>";
@@ -1512,6 +1518,7 @@
 				7954B91C2FEA726D00870A9B /* HotkeyRegistrar.swift in Sources */,
 				B08A1E0100000000000000B1 /* HotkeyLabel.swift in Sources */,
 				F0A1B2C3D4E5F60718293B47 /* AIProviderServiceProtocol.swift in Sources */,
+				AA10A1000000000000000001 /* AITransformationRunner.swift in Sources */,
 				F0A1B2C3D4E5F60718293B48 /* MicrophonePermissionProvider.swift in Sources */,
 				F0A1B2C3D4E5F60718293B49 /* ScreenRecordingPermissionProvider.swift in Sources */,
 				F0A1B2C3D4E5F60718293B4A /* PermissionServiceProtocol.swift in Sources */,
@@ -1628,6 +1635,7 @@
 				816FF901FE991921C588D21B /* MockCalendarService.swift in Sources */,
 				A9D1E2F3A4B5C6D7E8FB1003 /* UpdateServiceTests.swift in Sources */,
 				A77A77A77A77A77A77A77A77 /* AIProviderServiceTests.swift in Sources */,
+				AA10A1000000000000000003 /* AITransformationRunnerTests.swift in Sources */,
 				D19000000000000000000001 /* KeychainStoreTests.swift in Sources */,
 				7987328C2F7DB47F00570A03 /* ModelInstallServiceTests.swift in Sources */,
 				D1C7A719B2C3D4E5F6A80002 /* AsrProcessorSettingsTests.swift in Sources */,
