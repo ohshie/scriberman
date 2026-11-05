@@ -15,6 +15,7 @@
 		84213AFD83D4AAAB3213AE1E /* ExtensionAPISigning.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6702002B73F71DC8B7D33D3 /* ExtensionAPISigning.swift */; };
 		A12C0F3E5B7D4E9A8C1F2B01 /* ExtensionAPIStagedUpload.swift in Sources */ = {isa = PBXBuildFile; fileRef = A12C0F3E5B7D4E9A8C1F2B02 /* ExtensionAPIStagedUpload.swift */; };
 		526EBC7A9200D29B7BED4A67 /* ExtensionAPICallerVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16202986B8043F6391A92D2D /* ExtensionAPICallerVerifier.swift */; };
+		526EBC7A9200D29B7BED4A14 /* ExtensionAPICallerInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16202986B8043F6391A92D14 /* ExtensionAPICallerInspector.swift */; };
 		FF81092B480848FCE9A1FC02 /* ExtensionAPIPairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 852626576EFD5A7B33B6E8F2 /* ExtensionAPIPairing.swift */; };
 		FE8B2D3787E419FB0178EBE8 /* ExtensionAPIRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = 464E1955BEE4C1665CF905F0 /* ExtensionAPIRecording.swift */; };
 		EBF32D86DD987B33CDE0C1AE /* ExtensionAPIHandlerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAF32D86DD987B33CDE0C1AE /* ExtensionAPIHandlerTests.swift */; };
@@ -25,6 +26,7 @@
 		A7E04957D18B99A9A63908F4 /* SessionFilteringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2297D7E9ADA81BA6EB5B0B05 /* SessionFilteringTests.swift */; };
 		9D15705A3D10FA32EA942A16 /* ExtensionAPISessionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 147C94BCC8AF2A5ADB80A6C4 /* ExtensionAPISessionsTests.swift */; };
 		A12C0F3E5B7D4E9A8C1F2B03 /* ExtensionAPIImportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A12C0F3E5B7D4E9A8C1F2B04 /* ExtensionAPIImportTests.swift */; };
+		88415C43AD082030758F8814 /* ExtensionAPICallerVerifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82EC96768D2F61C765779314 /* ExtensionAPICallerVerifierTests.swift */; };
 		EB6470DC68383B678408A521 /* ExtensionAPISettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA6470DC68383B678408A521 /* ExtensionAPISettings.swift */; };
 		EB3D0056F5052EF946C25262 /* ExtensionAPISettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA3D0056F5052EF946C25262 /* ExtensionAPISettingsTests.swift */; };
 		EBFFD63E47E74BAD5A4C6BF5 /* HTTPFraming.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAFFD63E47E74BAD5A4C6BF5 /* HTTPFraming.swift */; };
@@ -390,6 +392,7 @@
 		D6702002B73F71DC8B7D33D3 /* ExtensionAPISigning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPISigning.swift"; sourceTree = SOURCE_ROOT; };
 		A12C0F3E5B7D4E9A8C1F2B02 /* ExtensionAPIStagedUpload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPIStagedUpload.swift"; sourceTree = SOURCE_ROOT; };
 		16202986B8043F6391A92D2D /* ExtensionAPICallerVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPICallerVerifier.swift"; sourceTree = SOURCE_ROOT; };
+		16202986B8043F6391A92D14 /* ExtensionAPICallerInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPICallerInspector.swift"; sourceTree = SOURCE_ROOT; };
 		852626576EFD5A7B33B6E8F2 /* ExtensionAPIPairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPIPairing.swift"; sourceTree = SOURCE_ROOT; };
 		464E1955BEE4C1665CF905F0 /* ExtensionAPIRecording.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPIRecording.swift"; sourceTree = SOURCE_ROOT; };
 		EAF32D86DD987B33CDE0C1AE /* ExtensionAPIHandlerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPIHandlerTests.swift"; sourceTree = SOURCE_ROOT; };
@@ -400,6 +403,7 @@
 		2297D7E9ADA81BA6EB5B0B05 /* SessionFilteringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/SessionFilteringTests.swift"; sourceTree = SOURCE_ROOT; };
 		147C94BCC8AF2A5ADB80A6C4 /* ExtensionAPISessionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPISessionsTests.swift"; sourceTree = SOURCE_ROOT; };
 		A12C0F3E5B7D4E9A8C1F2B04 /* ExtensionAPIImportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPIImportTests.swift"; sourceTree = SOURCE_ROOT; };
+		82EC96768D2F61C765779314 /* ExtensionAPICallerVerifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPICallerVerifierTests.swift"; sourceTree = SOURCE_ROOT; };
 		EA6470DC68383B678408A521 /* ExtensionAPISettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPISettings.swift"; sourceTree = SOURCE_ROOT; };
 		EA3D0056F5052EF946C25262 /* ExtensionAPISettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPISettingsTests.swift"; sourceTree = SOURCE_ROOT; };
 		EAFFD63E47E74BAD5A4C6BF5 /* HTTPFraming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/HTTPFraming.swift"; sourceTree = SOURCE_ROOT; };
@@ -802,6 +806,7 @@
 				2297D7E9ADA81BA6EB5B0B05 /* SessionFilteringTests.swift */,
 				147C94BCC8AF2A5ADB80A6C4 /* ExtensionAPISessionsTests.swift */,
 				A12C0F3E5B7D4E9A8C1F2B04 /* ExtensionAPIImportTests.swift */,
+				82EC96768D2F61C765779314 /* ExtensionAPICallerVerifierTests.swift */,
 				EA0F7CDC6EE8CF8B0F0D1946 /* ExtensionAPIListenerTests.swift */,
 				EAFC51BBE885552D4607C8BA /* ExtensionAPIServiceTests.swift */,
 				AA10A1000000000000000004 /* AITransformationRunnerTests.swift */,
@@ -1239,6 +1244,7 @@
 				D6702002B73F71DC8B7D33D3 /* ExtensionAPISigning.swift */,
 				A12C0F3E5B7D4E9A8C1F2B02 /* ExtensionAPIStagedUpload.swift */,
 				16202986B8043F6391A92D2D /* ExtensionAPICallerVerifier.swift */,
+				16202986B8043F6391A92D14 /* ExtensionAPICallerInspector.swift */,
 				852626576EFD5A7B33B6E8F2 /* ExtensionAPIPairing.swift */,
 				464E1955BEE4C1665CF905F0 /* ExtensionAPIRecording.swift */,
 				249B468EA5D87F4CED9E3BC1 /* ExtensionAPISessions.swift */,
@@ -1533,6 +1539,7 @@
 				84213AFD83D4AAAB3213AE1E /* ExtensionAPISigning.swift in Sources */,
 				A12C0F3E5B7D4E9A8C1F2B01 /* ExtensionAPIStagedUpload.swift in Sources */,
 				526EBC7A9200D29B7BED4A67 /* ExtensionAPICallerVerifier.swift in Sources */,
+				526EBC7A9200D29B7BED4A14 /* ExtensionAPICallerInspector.swift in Sources */,
 				FF81092B480848FCE9A1FC02 /* ExtensionAPIPairing.swift in Sources */,
 				FE8B2D3787E419FB0178EBE8 /* ExtensionAPIRecording.swift in Sources */,
 				26222CC1321B2AC5DAC03A5A /* ExtensionAPISessions.swift in Sources */,
@@ -1741,6 +1748,7 @@
 				A7E04957D18B99A9A63908F4 /* SessionFilteringTests.swift in Sources */,
 				9D15705A3D10FA32EA942A16 /* ExtensionAPISessionsTests.swift in Sources */,
 				A12C0F3E5B7D4E9A8C1F2B03 /* ExtensionAPIImportTests.swift in Sources */,
+				88415C43AD082030758F8814 /* ExtensionAPICallerVerifierTests.swift in Sources */,
 				EB0F7CDC6EE8CF8B0F0D1946 /* ExtensionAPIListenerTests.swift in Sources */,
 				EBFC51BBE885552D4607C8BA /* ExtensionAPIServiceTests.swift in Sources */,
 				AA10A1000000000000000003 /* AITransformationRunnerTests.swift in Sources */,

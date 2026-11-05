@@ -195,7 +195,6 @@ final class AppState {
         let extensionAPIHandler = ExtensionAPIHandler(
             port: { extensionAPISettings.port },
             pairingStore: ExtensionAPIPairingStore(keychain: LiveKeychainStore()),
-            callerVerifier: AlwaysAllowCallerVerifier(),
             loadPrompts: { AIPromptStore().loadPrompts() },
             sessions: ExtensionAPISessionCatalog(
                 context: modelContext,

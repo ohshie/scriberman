@@ -119,7 +119,7 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
     init(
         port: @escaping @MainActor () -> Int,
         pairingStore: ExtensionAPIPairingStore,
-        callerVerifier: any ExtensionAPICallerVerifier,
+        callerVerifier: any ExtensionAPICallerVerifier = CodeSigningCallerVerifier(),
         now: @escaping @MainActor () -> Date = { Date() },
         waitForPairingExpiry: @escaping @MainActor () async -> Void = { try? await Task.sleep(for: .seconds(120)) },
         loadPrompts: @escaping @MainActor () async -> [AIPrompt],

@@ -16,7 +16,7 @@ final class ExtensionAPIFixture {
     var prompts: [AIPrompt] = []
     /// When set, the prompts route waits on this before it answers, to stand for a suspension.
     var promptsGate: (@MainActor () async -> Void)?
-    let peer = ExtensionAPIPeer(endpoint: nil)
+    var peer = ExtensionAPIPeer(endpoint: nil)
     /// The sessions the sessions routes read.
     lazy var sessionContainer: ModelContainer = try! ModelContainer(
         for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self, RecordingTag.self,
@@ -410,14 +410,5 @@ struct ExtensionAPIPairingTests {
         #expect(response.status == 403)
         #expect(errorCode(response) == "forbidden_caller")
         #expect(fixture.presenter.presented.isEmpty)
-    }
-
-    @Test("The always-allow verifier accepts any caller at pairing and on requests")
-    func alwaysAllow() async throws {
-        let verifier = AlwaysAllowCallerVerifier()
-        let peer = ExtensionAPIPeer(endpoint: nil)
-        let identity = try #require(await verifier.identityForPairing(peer))
-        #expect(await verifier.verify(peer, matches: identity))
-        #expect(await verifier.verify(peer, matches: ExtensionAPICallerIdentity(designatedRequirement: "other")))
     }
 }
