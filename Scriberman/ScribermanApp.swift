@@ -133,6 +133,7 @@ struct ScribermanApp: App {
                     appDelegate.wireCalendarSuggestions()
                     // macOS resets to the bundle icon on every launch, so re-apply the choice.
                     appState.appIconPreferences.apply()
+                    appState.extensionAPI.start()
                     ScribermanApp.prepareTags(in: modelContainer.mainContext)
                     ScribermanApp.prepareSearchText(in: modelContainer.mainContext)
                     ScribermanApp.removeOrphanedTranscriptSegments(in: modelContainer.mainContext)

@@ -29,6 +29,9 @@ final class AppState {
     let idlePromptPreferences = IdlePromptPreferences()
     let appIconPreferences = AppIconPreferences()
     let developerSettings: DeveloperSettings
+    let extensionAPISettings: ExtensionAPISettings
+    /// The local HTTP API for the Tinycast extension. Started once at launch by `ScribermanApp`.
+    let extensionAPI: ExtensionAPIService
     private let restoreWorkspaceHandler: () async throws -> Workspace
     private let setWorkspaceHandler: (URL) async throws -> Workspace
 
@@ -176,6 +179,12 @@ final class AppState {
         self.calendarSuggestions = CalendarSuggestionController(
             service: services.main.calendarService,
             preferences: services.main.calendarPreferences
+        )
+        let extensionAPISettings = ExtensionAPISettings()
+        self.extensionAPISettings = extensionAPISettings
+        self.extensionAPI = ExtensionAPIService(
+            settings: extensionAPISettings,
+            handler: ExtensionAPIHandler(port: { extensionAPISettings.port })
         )
     }
 

@@ -7,6 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		EBE50E7BA3FA78B4AE99D237 /* ExtensionAPIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAE50E7BA3FA78B4AE99D237 /* ExtensionAPIService.swift */; };
+		EBFC51BBE885552D4607C8BA /* ExtensionAPIServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAFC51BBE885552D4607C8BA /* ExtensionAPIServiceTests.swift */; };
+		EBDDA03D8D6B2A0B0A8C3790 /* ExtensionAPIListener.swift in Sources */ = {isa = PBXBuildFile; fileRef = EADDA03D8D6B2A0B0A8C3790 /* ExtensionAPIListener.swift */; };
+		EB0F7CDC6EE8CF8B0F0D1946 /* ExtensionAPIListenerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA0F7CDC6EE8CF8B0F0D1946 /* ExtensionAPIListenerTests.swift */; };
+		EBD44DCF609E48E59C7C561D /* ExtensionAPIHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAD44DCF609E48E59C7C561D /* ExtensionAPIHandler.swift */; };
+		EBF32D86DD987B33CDE0C1AE /* ExtensionAPIHandlerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAF32D86DD987B33CDE0C1AE /* ExtensionAPIHandlerTests.swift */; };
+		EB6470DC68383B678408A521 /* ExtensionAPISettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA6470DC68383B678408A521 /* ExtensionAPISettings.swift */; };
+		EB3D0056F5052EF946C25262 /* ExtensionAPISettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA3D0056F5052EF946C25262 /* ExtensionAPISettingsTests.swift */; };
+		EBFFD63E47E74BAD5A4C6BF5 /* HTTPFraming.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAFFD63E47E74BAD5A4C6BF5 /* HTTPFraming.swift */; };
+		EB7FB68D963585024757E2D6 /* HTTPFramingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA7FB68D963585024757E2D6 /* HTTPFramingTests.swift */; };
 		9E81C76C8C9B81DA6CA78608 /* CalendarSuggestionPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04C4982D4A91E2B28FA4D2E8 /* CalendarSuggestionPanelView.swift */; };
 		501253F24BF1C1D4D7E39B88 /* CalendarSuggestionPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = EED4653DA418BC121BF9026D /* CalendarSuggestionPanelController.swift */; };
 		5BC079418194DC96FF453974 /* CalendarSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8968B1CB856C12E41157B277 /* CalendarSettingsSection.swift */; };
@@ -352,6 +362,16 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		EAE50E7BA3FA78B4AE99D237 /* ExtensionAPIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPIService.swift"; sourceTree = SOURCE_ROOT; };
+		EAFC51BBE885552D4607C8BA /* ExtensionAPIServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPIServiceTests.swift"; sourceTree = SOURCE_ROOT; };
+		EADDA03D8D6B2A0B0A8C3790 /* ExtensionAPIListener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPIListener.swift"; sourceTree = SOURCE_ROOT; };
+		EA0F7CDC6EE8CF8B0F0D1946 /* ExtensionAPIListenerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPIListenerTests.swift"; sourceTree = SOURCE_ROOT; };
+		EAD44DCF609E48E59C7C561D /* ExtensionAPIHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPIHandler.swift"; sourceTree = SOURCE_ROOT; };
+		EAF32D86DD987B33CDE0C1AE /* ExtensionAPIHandlerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPIHandlerTests.swift"; sourceTree = SOURCE_ROOT; };
+		EA6470DC68383B678408A521 /* ExtensionAPISettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/ExtensionAPISettings.swift"; sourceTree = SOURCE_ROOT; };
+		EA3D0056F5052EF946C25262 /* ExtensionAPISettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPISettingsTests.swift"; sourceTree = SOURCE_ROOT; };
+		EAFFD63E47E74BAD5A4C6BF5 /* HTTPFraming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/ExtensionAPI/HTTPFraming.swift"; sourceTree = SOURCE_ROOT; };
+		EA7FB68D963585024757E2D6 /* HTTPFramingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/HTTPFramingTests.swift"; sourceTree = SOURCE_ROOT; };
 		04C4982D4A91E2B28FA4D2E8 /* CalendarSuggestionPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/CalendarSuggestionPanelView.swift"; sourceTree = SOURCE_ROOT; };
 		EED4653DA418BC121BF9026D /* CalendarSuggestionPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/Services/Calendar/CalendarSuggestionPanelController.swift"; sourceTree = SOURCE_ROOT; };
 		8968B1CB856C12E41157B277 /* CalendarSettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/UI/CalendarSettingsSection.swift"; sourceTree = SOURCE_ROOT; };
@@ -733,6 +753,11 @@
 				9E139E48C80C6FA0CE0746BE /* CalendarSuggestionPreferencesTests.swift */,
 				A9D1E2F3A4B5C6D7E8FB1004 /* UpdateServiceTests.swift */,
 				B77B77B77B77B77B77B77B77 /* AIProviderServiceTests.swift */,
+				EA7FB68D963585024757E2D6 /* HTTPFramingTests.swift */,
+				EA3D0056F5052EF946C25262 /* ExtensionAPISettingsTests.swift */,
+				EAF32D86DD987B33CDE0C1AE /* ExtensionAPIHandlerTests.swift */,
+				EA0F7CDC6EE8CF8B0F0D1946 /* ExtensionAPIListenerTests.swift */,
+				EAFC51BBE885552D4607C8BA /* ExtensionAPIServiceTests.swift */,
 				D19000000000000000000002 /* KeychainStoreTests.swift */,
 				B88B88B88B88B88B88B88B88 /* ConnectionStatusTests.swift */,
 				B5871E10D502FAEB70EDC99F /* MarkdownRendererTests.swift */,
@@ -1155,6 +1180,11 @@
 			children = (
 				B33B33B33B33B33B33B33B33 /* AIProviderStore.swift */,
 				C9A001A001A001A001A001A1 /* AIPromptStore.swift */,
+				EAFFD63E47E74BAD5A4C6BF5 /* HTTPFraming.swift */,
+				EA6470DC68383B678408A521 /* ExtensionAPISettings.swift */,
+				EAD44DCF609E48E59C7C561D /* ExtensionAPIHandler.swift */,
+				EADDA03D8D6B2A0B0A8C3790 /* ExtensionAPIListener.swift */,
+				EAE50E7BA3FA78B4AE99D237 /* ExtensionAPIService.swift */,
 				B22B22B22B22B22B22B22B22 /* KeychainStore.swift */,
 				27994768D463D730435539F3 /* BookmarkStore.swift */,
 				797571712F79C752006AEFB6 /* SpeakerEmbeddingStore.swift */,
@@ -1437,6 +1467,11 @@
 				79BE35392F7EA83000DB542F /* AudioPlayerBar.swift in Sources */,
 				6C07E0AE252F7D34AF16F2C2 /* BookmarkStore.swift in Sources */,
 				79C2018A2F7FAE79002A1163 /* MenuBarSettings.swift in Sources */,
+				EBFFD63E47E74BAD5A4C6BF5 /* HTTPFraming.swift in Sources */,
+				EB6470DC68383B678408A521 /* ExtensionAPISettings.swift in Sources */,
+				EBD44DCF609E48E59C7C561D /* ExtensionAPIHandler.swift in Sources */,
+				EBDDA03D8D6B2A0B0A8C3790 /* ExtensionAPIListener.swift in Sources */,
+				EBE50E7BA3FA78B4AE99D237 /* ExtensionAPIService.swift in Sources */,
 				A22A22A22A22A22A22A22A22 /* KeychainStore.swift in Sources */,
 				A33A33A33A33A33A33A33A33 /* AIProviderStore.swift in Sources */,
 				C9B001B001B001B001B001B1 /* AIPromptStore.swift in Sources */,
@@ -1628,6 +1663,11 @@
 				816FF901FE991921C588D21B /* MockCalendarService.swift in Sources */,
 				A9D1E2F3A4B5C6D7E8FB1003 /* UpdateServiceTests.swift in Sources */,
 				A77A77A77A77A77A77A77A77 /* AIProviderServiceTests.swift in Sources */,
+				EB7FB68D963585024757E2D6 /* HTTPFramingTests.swift in Sources */,
+				EB3D0056F5052EF946C25262 /* ExtensionAPISettingsTests.swift in Sources */,
+				EBF32D86DD987B33CDE0C1AE /* ExtensionAPIHandlerTests.swift in Sources */,
+				EB0F7CDC6EE8CF8B0F0D1946 /* ExtensionAPIListenerTests.swift in Sources */,
+				EBFC51BBE885552D4607C8BA /* ExtensionAPIServiceTests.swift in Sources */,
 				D19000000000000000000001 /* KeychainStoreTests.swift in Sources */,
 				7987328C2F7DB47F00570A03 /* ModelInstallServiceTests.swift in Sources */,
 				D1C7A719B2C3D4E5F6A80002 /* AsrProcessorSettingsTests.swift in Sources */,
