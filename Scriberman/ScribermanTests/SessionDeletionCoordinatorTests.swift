@@ -477,6 +477,7 @@ final class SessionDeletionCoordinatorTests {
         "originalTranscriptData": same(\.originalTranscriptData),
         "originalRetranscriptData": same(\.originalRetranscriptData),
         "trimEnd": same(\.trimEnd),
+        "spliceGroupID": same(\.spliceGroupID),
     ]
 
     private static let importedAttributes: [String: (ImportedSession, ImportedSession) -> Bool] = [
@@ -558,6 +559,7 @@ final class SessionDeletionCoordinatorTests {
         session.originalTranscriptData = Data("original transcript".utf8)
         session.originalRetranscriptData = Data("original retranscript".utf8)
         session.trimEnd = 1_800.25
+        session.spliceGroupID = UUID()
         context.insert(session)
         session.tags = tags
         session.transcriptSegments = [
@@ -626,6 +628,7 @@ final class SessionDeletionCoordinatorTests {
         case "originalTranscriptData": copy.originalTranscriptData = source.originalTranscriptData
         case "originalRetranscriptData": copy.originalRetranscriptData = source.originalRetranscriptData
         case "trimEnd": copy.trimEnd = source.trimEnd
+        case "spliceGroupID": copy.spliceGroupID = source.spliceGroupID
         default: Issue.record("No copy for stored attribute \(name)")
         }
     }

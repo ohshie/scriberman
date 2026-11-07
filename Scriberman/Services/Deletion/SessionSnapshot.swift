@@ -127,6 +127,7 @@ struct RecordingSessionRecord: Codable, Equatable {
     let originalTranscriptData: Data?
     let originalRetranscriptData: Data?
     let trimEnd: Double?
+    let spliceGroupID: UUID?
     let tagIDs: [UUID]
     let transcriptSegments: [SegmentRecord]
 
@@ -176,6 +177,7 @@ struct RecordingSessionRecord: Codable, Equatable {
         originalTranscriptData = session.originalTranscriptData
         originalRetranscriptData = session.originalRetranscriptData
         trimEnd = session.trimEnd
+        spliceGroupID = session.spliceGroupID
         tagIDs = session.tags.map(\.id)
         transcriptSegments = session.transcriptSegments.map { segment in
             SegmentRecord(
@@ -244,6 +246,7 @@ struct RecordingSessionRecord: Codable, Equatable {
         session.originalTranscriptData = originalTranscriptData
         session.originalRetranscriptData = originalRetranscriptData
         session.trimEnd = trimEnd
+        session.spliceGroupID = spliceGroupID
         context.insert(session)
         session.transcriptSegments = transcriptSegments.map { record in
             let segment = RecordingTranscriptSegment(
