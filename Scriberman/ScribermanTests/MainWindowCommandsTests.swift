@@ -3,6 +3,60 @@ import SwiftUI
 import Testing
 @testable import Scriberman
 
+@MainActor
+@Suite(.serialized)
+struct MainWindowLifecycleTests {
+    private func makeWindow() -> NSWindow {
+        NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 200),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+    }
+
+    @Test
+    func reopeningUsesTheMainSceneWhenAnotherWindowIsVisible() {
+        let delegate = AppDelegate()
+        let settings = makeWindow()
+        settings.makeKeyAndOrderFront(nil)
+        defer { settings.orderOut(nil) }
+        var openCount = 0
+        delegate.openMainWindow = { openCount += 1 }
+
+        delegate.applicationDidBecomeActive(Notification(name: NSApplication.didBecomeActiveNotification))
+        #expect(settings.delegate !== delegate)
+        #expect(!delegate.applicationShouldHandleReopen(NSApp, hasVisibleWindows: true))
+        #expect(openCount == 1)
+        #expect(settings.delegate !== delegate)
+    }
+
+    @Test
+    func repeatedReopeningKeepsTheRegisteredWindowAndDisallowsTabs() {
+        let delegate = AppDelegate()
+        let window = makeWindow()
+        delegate.registerMainWindow(window)
+        defer { window.orderOut(nil) }
+        var openCount = 0
+        delegate.openMainWindow = { openCount += 1 }
+
+        delegate.showMainWindow()
+        #expect(window.isVisible)
+        #expect(window.delegate === delegate)
+        #expect(window.tabbingMode == .disallowed)
+        #expect(openCount == 1)
+
+        delegate.showMainWindow()
+        #expect(window.isVisible)
+        #expect(openCount == 1)
+
+        window.orderOut(nil)
+        #expect(!delegate.applicationShouldHandleReopen(NSApp, hasVisibleWindows: false))
+        #expect(window.isVisible)
+        #expect(openCount == 2)
+    }
+}
+
 struct ControlsCommandsTests {
     @Test
     func playPauseIsTitledForWhatItWillDo() {

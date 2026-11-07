@@ -2,8 +2,8 @@ import SwiftData
 import SwiftUI
 
 /// What a main window publishes to the menu bar: its selection, which commands it can run, and how
-/// to run them. Menus act on the focused window's value only, so with two windows open each acts on
-/// its own selection, and with Settings or no main window focused the value is absent.
+/// to run them. Menus act on the focused window's value only; with Settings or no main window
+/// focused the value is absent.
 struct MainWindowCommandContext {
     let selection: JobsViewModel.SessionListItem?
     let availability: SessionCommandAvailability

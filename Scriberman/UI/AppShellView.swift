@@ -922,7 +922,7 @@ private enum StoreFailureAlert: Equatable {
 }
 
 /// Reports the window this view is in, and again whenever it moves to another.
-private struct WindowReader: NSViewRepresentable {
+struct WindowReader: NSViewRepresentable {
     let onWindowChange: (NSWindow?) -> Void
 
     func makeNSView(context: Context) -> ReportingView {
