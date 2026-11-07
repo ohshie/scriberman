@@ -560,6 +560,11 @@ final class SessionDeletionCoordinatorTests {
         session.originalRetranscriptData = Data("original retranscript".utf8)
         session.trimEnd = 1_800.25
         session.spliceGroupID = UUID()
+        // Membership survives recovery while the group exists; absent groups are cleared.
+        try FileManager.default.createDirectory(
+            at: workspace.rootURL.appendingPathComponent("splice").appendingPathComponent(session.spliceGroupID!.uuidString),
+            withIntermediateDirectories: true
+        )
         context.insert(session)
         session.tags = tags
         session.transcriptSegments = [

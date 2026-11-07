@@ -25,7 +25,8 @@ struct SessionCommandAvailabilityTests {
                 isTranscriptShown: isTranscriptShown,
                 hasLoadedAudio: hasLoadedAudio,
                 hasFindTarget: hasFindTarget,
-                isSelectionInActiveWorkspace: isSelectionInActiveWorkspace
+                isSelectionInActiveWorkspace: isSelectionInActiveWorkspace,
+                hasSpliceCutPoint: true
             )
         }
     }
@@ -78,7 +79,7 @@ struct SessionCommandAvailabilityTests {
             isTranscriptShown: true,
             hasLoadedAudio: true,
             enabled: [.newSession, .importFile, .startRecording, .find, .playPause,
-                      .reprocess, .copyTranscript, .export, .rawMarkdown, .tags, .transform, .trim, .delete]
+                      .reprocess, .copyTranscript, .export, .rawMarkdown, .tags, .transform, .splice, .delete]
         ),
         Row(
             name: "finished recording while another recording runs",
@@ -87,7 +88,7 @@ struct SessionCommandAvailabilityTests {
             isTranscriptShown: true,
             hasLoadedAudio: true,
             enabled: [.newSession, .importFile, .stopRecording, .find, .playPause,
-                      .reprocess, .copyTranscript, .export, .rawMarkdown, .tags, .transform, .trim, .delete]
+                      .reprocess, .copyTranscript, .export, .rawMarkdown, .tags, .transform, .splice, .delete]
         ),
         Row(
             name: "finished, trimmed recording",
@@ -102,14 +103,14 @@ struct SessionCommandAvailabilityTests {
             selection: .recording(.done, isTrimmed: false),
             isTranscriptShown: true,
             enabled: [.newSession, .importFile, .startRecording, .find,
-                      .copyTranscript, .export, .rawMarkdown, .tags, .transform, .trim, .delete]
+                      .copyTranscript, .export, .rawMarkdown, .tags, .transform, .splice, .delete]
         ),
         Row(
             name: "finished recording, transcript not shown",
             selection: .recording(.done, isTrimmed: false),
             hasLoadedAudio: true,
             enabled: [.newSession, .importFile, .startRecording, .find, .playPause,
-                      .reprocess, .tags, .trim, .delete]
+                      .reprocess, .tags, .splice, .delete]
         ),
         Row(
             name: "failed recording",
@@ -171,17 +172,16 @@ struct SessionCommandAvailabilityTests {
         }
     }
 
-    /// A session of a workspace that is not active cannot be deleted; everything else it allows is
-    /// unchanged.
+    /// File-changing commands are unavailable outside the active workspace.
     @Test(arguments: rows)
     func deleteIsDisabledOutsideTheActiveWorkspace(_ row: Row) {
         var outside = row
         outside.isSelectionInActiveWorkspace = false
-        #expect(outside.availability.enabledCommands == row.enabled.subtracting([.delete]))
+        #expect(outside.availability.enabledCommands == row.enabled.subtracting([.delete, .splice, .restoreOriginal]))
     }
 
     @Test
-    func finishedSessionOfAnotherWorkspaceKeepsEveryCommandButDelete() {
+    func finishedSessionOfAnotherWorkspaceDisablesSpliceAndDelete() {
         let row = Row(
             name: "finished recording of another workspace",
             selection: .recording(.done, isTrimmed: false),
@@ -189,7 +189,7 @@ struct SessionCommandAvailabilityTests {
             hasLoadedAudio: true,
             isSelectionInActiveWorkspace: false,
             enabled: [.newSession, .importFile, .startRecording, .find, .playPause,
-                      .reprocess, .copyTranscript, .export, .rawMarkdown, .tags, .transform, .trim]
+                      .reprocess, .copyTranscript, .export, .rawMarkdown, .tags, .transform]
         )
         #expect(row.availability.enabledCommands == row.enabled)
     }
@@ -212,7 +212,7 @@ struct SessionMenuTests {
     func sessionMenuHoldsEverySessionActionInOrder() {
         #expect(SessionCommandAvailability.sessionMenuCommands == [
             .transcribe, .reprocess, .copyTranscript, .export, .tags,
-            .transform, .restoreOriginal, .trim, .delete,
+            .transform, .restoreOriginal, .splice, .delete,
         ])
     }
 
@@ -235,7 +235,8 @@ struct SessionMenuTests {
                 isTranscriptShown: isTranscriptShown,
                 hasLoadedAudio: hasLoadedAudio,
                 hasFindTarget: true,
-                isSelectionInActiveWorkspace: isSelectionInActiveWorkspace
+                isSelectionInActiveWorkspace: isSelectionInActiveWorkspace,
+                hasSpliceCutPoint: true
             )
         }
     }
@@ -261,7 +262,7 @@ struct SessionMenuTests {
             selection: .recording(.done, isTrimmed: false),
             isTranscriptShown: true,
             hasLoadedAudio: true,
-            enabled: [.reprocess, .copyTranscript, .export, .tags, .transform, .trim, .delete]
+            enabled: [.reprocess, .copyTranscript, .export, .tags, .transform, .splice, .delete]
         ),
         Case(
             name: "done and trimmed",
@@ -288,7 +289,7 @@ struct SessionMenuTests {
             isTranscriptShown: true,
             hasLoadedAudio: true,
             isSelectionInActiveWorkspace: false,
-            enabled: [.reprocess, .copyTranscript, .export, .tags, .transform, .trim]
+            enabled: [.reprocess, .copyTranscript, .export, .tags, .transform]
         ),
         Case(
             name: "imported, converting, another workspace",

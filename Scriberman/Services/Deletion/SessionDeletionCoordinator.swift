@@ -171,6 +171,10 @@ final class SessionDeletionCoordinator {
         removingSessionIDs.contains(sessionID)
     }
 
+    func isActiveWorkspace(_ workspace: Workspace) async -> Bool {
+        await workspaceService.currentWorkspace() == workspace
+    }
+
     static func postAnnouncement(_ text: String) {
         AccessibilityNotification.Announcement(text).post()
     }
@@ -439,7 +443,20 @@ final class SessionDeletionCoordinator {
 
         switch snapshot.session {
         case .recording(let record):
-            record.insertRecording(into: context).tags = tags
+            let restored = record.insertRecording(into: context)
+            restored.tags = tags
+            if let groupID = restored.spliceGroupID {
+                do {
+                    let group = try SpliceService.groupFolder(groupID, workspace: workspace)
+                    _ = try FileManager.default.attributesOfItem(atPath: group.path)
+                } catch {
+                    let error = error as NSError
+                    if error.domain == NSCocoaErrorDomain,
+                       [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(error.code) {
+                        restored.spliceGroupID = nil
+                    }
+                }
+            }
         case .imported(let record):
             _ = record.insertImported(into: context)
         }

@@ -63,6 +63,7 @@ struct SpliceJournal: Codable {
     let previousMarkdown: Data?
     let results: [Result]
     let startedAt: Date
+    var restoreMemberIDs: [UUID]? = nil
 }
 
 /// Prevents concurrent splices of a session or group across service instances.
@@ -72,8 +73,12 @@ final class SpliceReservations {
     private var sessions: Set<UUID> = []
     private var groups: Set<UUID> = []
 
+    func isReserved(sessionID: UUID, groupID: UUID) -> Bool {
+        sessions.contains(sessionID) || groups.contains(groupID)
+    }
+
     func reserve(sessionID: UUID, groupID: UUID) throws {
-        guard !sessions.contains(sessionID), !groups.contains(groupID) else { throw SpliceError.busy }
+        guard !isReserved(sessionID: sessionID, groupID: groupID) else { throw SpliceError.busy }
         sessions.insert(sessionID)
         groups.insert(groupID)
     }

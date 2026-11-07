@@ -81,8 +81,7 @@ struct TrimEditorView: View {
 }
 
 extension View {
-    /// The confirmation shown before a trimmed recording is restored, shared by the trim sheet and
-    /// the detail toolbar.
+    /// The confirmation shared by the recording detail and the legacy trim editor.
     func restoreOriginalConfirmation(isPresented: Binding<Bool>, onRestore: @escaping () -> Void) -> some View {
         confirmationDialog(
             "Restore Original?",
@@ -92,7 +91,7 @@ extension View {
             Button("Restore", role: .destructive, action: onRestore)
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Any retranscription done on the trimmed version will be lost.")
+            Text("This session becomes the full recording again.")
         }
     }
 }

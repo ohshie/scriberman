@@ -18,7 +18,7 @@ struct SessionCommandAvailability: Equatable {
         case tags
         case transform
         case restoreOriginal
-        case trim
+        case splice
         case delete
     }
 
@@ -33,7 +33,7 @@ struct SessionCommandAvailability: Equatable {
     /// The Session menu's items, in menu order.
     static let sessionMenuCommands: [Command] = [
         .transcribe, .reprocess, .copyTranscript, .export, .tags,
-        .transform, .restoreOriginal, .trim, .delete,
+        .transform, .restoreOriginal, .splice, .delete,
     ]
 
     /// Settings or no window is focused: no main-window command may act.
@@ -51,7 +51,13 @@ struct SessionCommandAvailability: Equatable {
         isTranscriptShown: Bool,
         hasLoadedAudio: Bool,
         hasFindTarget: Bool,
-        isSelectionInActiveWorkspace: Bool
+        isSelectionInActiveWorkspace: Bool,
+        hasSpliceCutPoint: Bool = false,
+        hasPendingScreenMux: Bool = false,
+        isSpliceEditorOpen: Bool = false,
+        isApplyingSplice: Bool = false,
+        hasSpliceGroup: Bool = false,
+        hasBusySpliceMember: Bool = false
     ) {
         var commands: Set<Command> = [.importFile]
         commands.insert(isRecordingRunning ? .stopRecording : .startRecording)
@@ -75,10 +81,12 @@ struct SessionCommandAvailability: Equatable {
             if recordingStatus == .recorded {
                 commands.insert(.transcribe)
             }
-            if recordingStatus == .done, !isTrimmed {
-                commands.insert(.trim)
+            if recordingStatus == .done, !isTrimmed, hasSpliceCutPoint,
+               !hasPendingScreenMux, isSelectionInActiveWorkspace {
+                commands.insert(.splice)
             }
-            if isTrimmed, Self.isSettled(recordingStatus) {
+            if isTrimmed || hasSpliceGroup, Self.isSettled(recordingStatus),
+               isSelectionInActiveWorkspace, !hasPendingScreenMux, !hasBusySpliceMember {
                 commands.insert(.restoreOriginal)
             }
         case .imported(let importedStatus):
@@ -103,6 +111,12 @@ struct SessionCommandAvailability: Equatable {
             }
         }
 
+        if isSpliceEditorOpen {
+            commands.subtract([.reprocess, .restoreOriginal, .rawMarkdown, .transform, .delete])
+        }
+        if isApplyingSplice {
+            commands.subtract([.splice, .newSession, .importFile, .startRecording, .playPause, .tags])
+        }
         enabledCommands = commands
     }
 
@@ -111,7 +125,7 @@ struct SessionCommandAvailability: Equatable {
     }
 
     /// No recording, conversion or transcription is working on the session.
-    private static func isSettled(_ status: RecordingStatus) -> Bool {
+    static func isSettled(_ status: RecordingStatus) -> Bool {
         switch status {
         case .recorded, .done, .error:
             return true

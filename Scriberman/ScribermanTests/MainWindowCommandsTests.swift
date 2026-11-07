@@ -138,6 +138,15 @@ struct ControlsAndFindMenuBarTests {
     }
 
     @Test
+    func spliceReplacesTrimInTheSessionMenu() async throws {
+        let session = try await topMenu("Session")
+        let splice = try #require(session.items.first { $0.title == "Splice…" })
+        #expect(splice.keyEquivalent.lowercased() == "s")
+        #expect(splice.keyEquivalentModifierMask == [.command, .option])
+        #expect(!session.items.contains { $0.title == "Trim…" })
+    }
+
+    @Test
     func rawMarkdownIsInTheViewMenu() async throws {
         let view = try await topMenu("View")
         let rawMarkdown = try #require(view.items.first { $0.title == "Show Raw Markdown" })

@@ -154,6 +154,7 @@ struct ScribermanApp: App {
             SidebarCommands()
             RawMarkdownCommands()
             FileCommands()
+            SpliceUndoCommands()
             SessionCommands(appState: appState)
             FindCommands()
             ControlsCommands()

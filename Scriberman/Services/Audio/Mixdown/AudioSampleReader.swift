@@ -37,6 +37,39 @@ actor AudioSampleReader {
         try await readSamplesWithRetry(from: url, label: label)
     }
 
+    /// Reads bounded chunks on this actor. Waveform rendering needs peaks, so it never retains
+    /// a recording's full decoded samples or resamples them onto the main actor.
+    func peaks(from url: URL, bucketCount: Int = 600) throws -> [Float] {
+        guard bucketCount > 0 else { return [] }
+        let file = try AVAudioFile(forReading: url)
+        guard file.length > 0 else { return [] }
+        let count = min(bucketCount, Int(file.length))
+        var peaks = [Float](repeating: 0, count: count)
+        let format = file.processingFormat
+        while file.framePosition < file.length {
+            try Task.checkCancellation()
+            let start = file.framePosition
+            let buffer = try allocatePeakBuffer(format: format)
+            try file.read(into: buffer, frameCount: AVAudioFrameCount(min(Int64(processingChunkSize), file.length - start)))
+            guard buffer.frameLength > 0 else { break }
+            let samples = try monoSamplesFromBuffer(buffer, inputFormat: format,
+                                                   frameCount: Int(buffer.frameLength), channelCount: Int(format.channelCount))
+            for (offset, sample) in samples.enumerated() where sample.isFinite {
+                let bucket = min(count - 1, Int(Double(start + Int64(offset)) / Double(file.length) * Double(count)))
+                peaks[bucket] = max(peaks[bucket], abs(sample))
+            }
+        }
+        let maximum = peaks.max() ?? 0
+        return maximum > 0 ? peaks.map { $0 / maximum } : peaks
+    }
+
+    private func allocatePeakBuffer(format: AVAudioFormat) throws -> AVAudioPCMBuffer {
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: processingChunkSize) else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        return buffer
+    }
+
     private func readSamplesWithRetry(from url: URL, label: String) async throws -> [Float] {
         let maxAttempts = 3
         var lastError: Error?
