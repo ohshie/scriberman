@@ -186,6 +186,19 @@ struct SessionCommandAvailabilityTests {
         #expect(row.availability.enabledCommands == row.enabled)
     }
 
+    /// A recording that trim migration skipped still has its trim backups; splicing it would fail.
+    @Test(arguments: [false, true])
+    func aTrimmedRecordingWithACutPointCannotBeSpliced(isTrimmed: Bool) {
+        let availability = SessionCommandAvailability(
+            selection: .recording(.done), isRecordingRunning: false, isTranscriptShown: true,
+            hasLoadedAudio: true, hasFindTarget: true, isSelectionInActiveWorkspace: true,
+            hasSpliceCutPoint: true, isTrimmed: isTrimmed
+        )
+        #expect(availability.isEnabled(.splice) == !isTrimmed)
+        #expect(!availability.isEnabled(.restoreOriginal))
+        #expect(availability.isEnabled(.delete))
+    }
+
     @Test(arguments: [false, true])
     func aRunningAIPromptDisablesSpliceAndRestoreOnly(isGroupMember: Bool) {
         func availability(running: Bool) -> SessionCommandAvailability {

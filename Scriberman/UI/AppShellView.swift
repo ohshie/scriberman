@@ -739,6 +739,7 @@ struct AppShellView: View {
             hasFindTarget: true,
             isSelectionInActiveWorkspace: isSelectionInActiveWorkspace,
             hasSpliceCutPoint: selectedRecordingHasCutPoints,
+            isTrimmed: (selectedTranscribableSession as? RecordingSession)?.isTrimmed == true,
             hasPendingScreenMux: (selectedTranscribableSession as? RecordingSession)?.screenMuxState != nil,
             isSpliceEditorOpen: spliceEditor != nil || isRestoringOriginal,
             isApplyingSplice: isApplyingSessionEdit,

@@ -53,6 +53,7 @@ struct SessionCommandAvailability: Equatable {
         hasFindTarget: Bool,
         isSelectionInActiveWorkspace: Bool,
         hasSpliceCutPoint: Bool = false,
+        isTrimmed: Bool = false,
         hasPendingScreenMux: Bool = false,
         isSpliceEditorOpen: Bool = false,
         isApplyingSplice: Bool = false,
@@ -83,7 +84,7 @@ struct SessionCommandAvailability: Equatable {
             if recordingStatus == .recorded {
                 commands.insert(.transcribe)
             }
-            if recordingStatus == .done, hasSpliceCutPoint,
+            if recordingStatus == .done, !isTrimmed, hasSpliceCutPoint,
                !hasPendingScreenMux, isSelectionInActiveWorkspace {
                 commands.insert(.splice)
             }
