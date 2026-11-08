@@ -57,7 +57,9 @@ struct SessionCommandAvailability: Equatable {
         isSpliceEditorOpen: Bool = false,
         isApplyingSplice: Bool = false,
         hasSpliceGroup: Bool = false,
-        hasBusySpliceMember: Bool = false
+        hasBusySpliceMember: Bool = false,
+        isSessionReserved: Bool = false,
+        isTransformationRunning: Bool = false
     ) {
         var commands: Set<Command> = [.importFile]
         commands.insert(isRecordingRunning ? .stopRecording : .startRecording)
@@ -116,6 +118,14 @@ struct SessionCommandAvailability: Equatable {
         }
         if isApplyingSplice {
             commands.subtract([.splice, .newSession, .importFile, .startRecording, .playPause, .tags])
+        }
+        // A prompt's result would arrive while the group is reserved and be refused.
+        if isTransformationRunning {
+            commands.subtract([.splice, .restoreOriginal])
+        }
+        if isSessionReserved {
+            commands.subtract([.playPause, .transcribe, .reprocess, .copyTranscript, .export, .rawMarkdown,
+                               .tags, .transform, .restoreOriginal, .splice, .delete])
         }
         enabledCommands = commands
     }

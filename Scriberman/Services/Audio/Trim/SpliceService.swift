@@ -12,6 +12,8 @@ final class SpliceService {
     private let save: (ModelContext) throws -> Void
     private let now: () -> Date
     private let reservations: SpliceReservations
+    private let membership: SpliceMembershipReader
+    private let reconciliationCoordinator: SessionDeletionCoordinator?
     private let logger = Logger(subsystem: "Scriberman", category: "SpliceService")
 
     init(
@@ -23,7 +25,9 @@ final class SpliceService {
         export: Export? = nil,
         saveContext: @escaping (ModelContext) throws -> Void = { try $0.save() },
         now: @escaping () -> Date = { .now },
-        reservations: SpliceReservations? = nil
+        reservations: SpliceReservations? = nil,
+        membership: SpliceMembershipReader = SpliceMembershipReader(),
+        reconciliationCoordinator: SessionDeletionCoordinator? = nil
     ) {
         self.files = files
         capacity = capacityProvider
@@ -31,6 +35,8 @@ final class SpliceService {
         save = saveContext
         self.now = now
         self.reservations = reservations ?? .shared
+        self.membership = membership
+        self.reconciliationCoordinator = reconciliationCoordinator
     }
 
     /// Files are staged before the journal and moved only after it. No await occurs between
@@ -73,8 +79,9 @@ final class SpliceService {
             manifest = try readManifest(in: group)
         }
         guard !exists(group.appendingPathComponent(SpliceJournal.fileName)) else { throw SpliceError.busy }
-        try reservations.reserve(sessionID: session.id, groupID: groupID)
-        defer { reservations.release(sessionID: session.id, groupID: groupID) }
+        let memberIDs = try Set(groupMembers(groupID, context: context).map(\.id)).union([session.id])
+        let reservation = try reservations.reserve(sessionIDs: memberIDs, groupID: groupID)
+        defer { reservations.release(reservation) }
         if context.hasChanges { try save(context) }
         let before = RecordingSessionRecord(session)
         try checkDiskSpace([audio, video].compactMap { $0 }, workspace: workspace)
@@ -104,8 +111,10 @@ final class SpliceService {
                     video: video.map { _ in staging.appendingPathComponent("\(index).mov") }
                 )
                 try await export(audio, output.audio, boundaries[index], boundaries[index + 1])
+                try Task.checkCancellation()
                 if let video, let destination = output.video {
                     try await export(video, destination, boundaries[index], boundaries[index + 1])
+                    try Task.checkCancellation()
                 }
                 outputs.append(output)
             }
@@ -174,9 +183,8 @@ final class SpliceService {
                 part.createdAt = output.createdAt
                 part.duration = output.duration
                 part.title = output.title
-                // Persist the exact bytes recorded in the journal. Re-encoding here could change
-                // JSON key order and prevent recovery from recognizing the committed result.
-                // This model setter also refreshes search text from the displayed pass.
+                // Persist the exact pass bytes recorded in the journal. This model setter also
+                // refreshes search text from the displayed pass.
                 part.restoreTranscripts(
                     transcriptData: preparedJournal.results[index].transcriptData,
                     retranscriptData: preparedJournal.results[index].retranscriptData
@@ -186,20 +194,24 @@ final class SpliceService {
                 sessions.append(part)
             }
             try save(context)
+            try files.checkpoint(.storeSaved)
             // The save committed. Cleanup errors leave a journal; they do not report a failed
             // splice or reverse files belonging to the now-saved parts.
             do {
                 try removeIfPresent(staging)
                 try files.remove(journalURL)
             } catch {
+                if error is SpliceFileOperations.Interruption { throw error }
                 logger.error("Splice committed; cleanup remains in journal: \(error.localizedDescription, privacy: .public)")
             }
             return sessions
         } catch {
             if modelsTouched { context.rollback() }
+            if error is SpliceFileOperations.Interruption { throw error }
             do {
                 if let journal, exists(journalURL) {
                     try rollback(journal)
+                    try markRollbackCompleted(journal, at: journalURL)
                 }
                 for folder in newFolders { try removeIfPresent(folder) }
                 try removeIfPresent(staging)
@@ -224,7 +236,6 @@ final class SpliceService {
         session: RecordingSession, workspace: Workspace, context: ModelContext,
         coordinator: SessionDeletionCoordinator
     ) async throws -> RestoreResult {
-        guard await coordinator.isActiveWorkspace(workspace) else { throw SpliceError.inactiveWorkspace }
         let folder = URL(fileURLWithPath: session.micAudioURL).deletingLastPathComponent()
         guard isSessionFolder(folder, workspace: workspace), session.modelContext === context, !session.isDeleted else {
             throw SpliceError.inactiveWorkspace
@@ -253,8 +264,10 @@ final class SpliceService {
                 throw SpliceError.inactiveWorkspace
             }
         }
-        try reservations.reserve(sessionID: session.id, groupID: groupID)
-        defer { reservations.release(sessionID: session.id, groupID: groupID) }
+        let reservation = try reservations.reserve(sessionIDs: Set(members.map(\.id)), groupID: groupID)
+        defer { reservations.release(reservation) }
+        guard await coordinator.isActiveWorkspace(workspace) else { throw SpliceError.inactiveWorkspace }
+        try Task.checkCancellation()
         if context.hasChanges { try save(context) }
         let staging = workspace.rootURL.appendingPathComponent("_restore_" + UUID().uuidString, isDirectory: true)
         let markdown = transcriptMarkdownURL(for: session)
@@ -293,10 +306,15 @@ final class SpliceService {
             session.status = .done
             try writeTranscriptMarkdown(for: session, writeEmpty: true, writeData: files.write)
             try save(context)
+            try files.checkpoint(.storeSaved)
         } catch {
             if modelsTouched { context.rollback() }
+            if error is SpliceFileOperations.Interruption { throw error }
             do {
-                if exists(journalURL) { try rollback(journal) }
+                if exists(journalURL) {
+                    try rollback(journal)
+                    try markRollbackCompleted(journal, at: journalURL)
+                }
                 try removeIfPresent(staging)
                 try removeIfPresent(journalURL)
             } catch {
@@ -305,12 +323,25 @@ final class SpliceService {
             throw error
         }
 
+        return try await finishRestore(journal, workspace: workspace, context: context, coordinator: coordinator, reservation: reservation)
+    }
+
+    private func finishRestore(
+        _ journal: SpliceJournal, workspace: Workspace, context: ModelContext, coordinator: SessionDeletionCoordinator,
+        reservation: SpliceReservations.Reservation
+    ) async throws -> RestoreResult {
+        let groupID = journal.groupID
+        let staging = journal.stagingFolder
+        let siblingIDs = journal.restoreMemberIDs ?? []
         var result = RestoreResult()
         for id in siblingIDs {
             do {
                 guard let member = try RecordingSession.fetch(id: id, in: context), member.spliceGroupID == groupID else { continue }
-                let deletion = await coordinator.delete(member, context: context, undoManager: nil)
-                guard deletion != .deleted else { continue }
+                let deletion = await coordinator.delete(member, context: context, undoManager: nil, announces: false, reservation: reservation)
+                if deletion == .deleted {
+                    try files.checkpoint(.memberProcessed(id))
+                    continue
+                }
                 result.failedSessionIDs.append(id)
                 // A failed hold may have rolled back the context. Resolve the member again.
                 guard let remaining = try RecordingSession.fetch(id: id, in: context) else { continue }
@@ -319,10 +350,12 @@ final class SpliceService {
                 do { try save(context) }
                 catch { context.rollback(); throw error }
             } catch {
+                if error is SpliceFileOperations.Interruption { throw error }
                 if !result.failedSessionIDs.contains(id) { result.failedSessionIDs.append(id) }
                 result.requiresReconciliation = true
                 logger.error("Restore committed; member cleanup remains in journal: \(error.localizedDescription, privacy: .public)")
             }
+            try files.checkpoint(.memberProcessed(id))
         }
         do {
             let remaining = try groupMembers(groupID, context: context)
@@ -336,15 +369,222 @@ final class SpliceService {
                 try files.remove(Self.groupFolder(groupID, workspace: workspace))
             }
         } catch {
+            if error is SpliceFileOperations.Interruption { throw error }
             result.requiresReconciliation = true
             logger.error("Restore committed; group cleanup remains in journal: \(error.localizedDescription, privacy: .public)")
         }
         return result
     }
 
+    private func markRollbackCompleted(_ journal: SpliceJournal, at url: URL) throws {
+        var completed = journal
+        completed.rollbackCompleted = true
+        try files.write(JSONEncoder().encode(completed), url)
+    }
+
+    /// Called only after the workspace has been authorized. A fresh context reads the durable
+    /// transaction outcome, rather than any pending edits in the caller's context.
+    func reconcile(workspace: Workspace, context: ModelContext) async {
+        let parent = workspace.rootURL.appendingPathComponent("splice", isDirectory: true)
+        guard parent.resolvingSymlinksInPath().path == workspace.rootURL.resolvingSymlinksInPath()
+            .appendingPathComponent("splice").path else { return }
+        let entries: [URL]
+        do { entries = try FileManager.default.contentsOfDirectory(at: parent, includingPropertiesForKeys: nil) }
+        catch {
+            if !Self.isMissingFile(error) { logger.error("Cannot read splice journals: \(error.localizedDescription, privacy: .public)") }
+            return
+        }
+        let coordinator = reconciliationCoordinator ?? SessionDeletionCoordinator(
+            workspaceService: ReconciliationWorkspace(workspace: workspace), spliceReservations: reservations
+        )
+        if reconciliationCoordinator == nil { await coordinator.activate(workspace, context: context) }
+        for entry in entries {
+            guard let id = UUID(uuidString: entry.lastPathComponent) else { continue }
+            do {
+                let group = try Self.groupFolder(id, workspace: workspace)
+                let url = group.appendingPathComponent(SpliceJournal.fileName)
+                guard exists(url) else { continue }
+                guard url.resolvingSymlinksInPath().path == group.resolvingSymlinksInPath().appendingPathComponent(SpliceJournal.fileName).path else {
+                    throw SpliceError.inactiveWorkspace
+                }
+                let journal = try JSONDecoder().decode(SpliceJournal.self, from: Data(contentsOf: url))
+                try validateJournal(journal, groupID: id, workspace: workspace)
+                let memberIDs = try Set(groupMembers(id, context: context).map(\.id))
+                    .union(journal.restoreMemberIDs ?? []).union([journal.originalRecord.id])
+                let reservation = try reservations.reserve(sessionIDs: memberIDs, groupID: id)
+                defer { reservations.release(reservation) }
+                let saved = ModelContext(context.container)
+                guard let target = try RecordingSession.fetch(id: journal.originalRecord.id, in: saved),
+                      let result = journal.results.first(where: { $0.sessionID == target.id }) else {
+                    throw SpliceError.stalePlan
+                }
+                let committed = target.spliceGroupID == (journal.operation == "splice" ? id : nil)
+                    && target.createdAt == result.createdAt && target.duration == result.duration
+                let before = target.spliceGroupID == journal.originalRecord.spliceGroupID
+                    && target.createdAt == journal.originalRecord.createdAt && target.duration == journal.originalRecord.duration
+                if committed {
+                    if journal.operation == "restore" {
+                        _ = try await finishRestore(journal, workspace: workspace, context: context, coordinator: coordinator, reservation: reservation)
+                    } else {
+                        try removeIfPresent(journal.stagingFolder)
+                        try removeIfPresent(url)
+                    }
+                } else if before {
+                    if journal.rollbackCompleted != true {
+                        try rollback(journal)
+                        try markRollbackCompleted(journal, at: url)
+                    }
+                    for folder in journal.newFolders { try removeIfPresent(folder) }
+                    try removeIfPresent(journal.stagingFolder)
+                    if journal.createsGroup { try removeIfPresent(group) }
+                    else { try removeIfPresent(url) }
+                } else { throw SpliceError.stalePlan }
+            } catch {
+                logger.error("Kept splice journal \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        sweepUnusedGroups(workspace: workspace, context: context)
+    }
+
+    private func validateJournal(_ journal: SpliceJournal, groupID: UUID, workspace: Workspace) throws {
+        let original = URL(fileURLWithPath: journal.originalRecord.micAudioURL).deletingLastPathComponent()
+        let staging = journal.stagingFolder.standardizedFileURL
+        let prefix = journal.operation == "splice" ? "_splice_" : "_restore_"
+        guard journal.formatVersion == 1, ["splice", "restore"].contains(journal.operation),
+              journal.groupID == groupID, isSessionFolder(original, workspace: workspace),
+              staging.deletingLastPathComponent().path == workspace.rootURL.standardizedFileURL.path,
+              staging.lastPathComponent.hasPrefix(prefix),
+              UUID(uuidString: String(staging.lastPathComponent.dropFirst(prefix.count))) != nil,
+              staging.resolvingSymlinksInPath().path == workspace.rootURL.resolvingSymlinksInPath()
+                .appendingPathComponent(staging.lastPathComponent).path,
+              journal.newFolders.allSatisfy({ isSessionFolder($0, workspace: workspace) && $0.standardizedFileURL != original.standardizedFileURL }),
+              journal.markdownURL.standardizedFileURL == original.appendingPathComponent("transcript.md").standardizedFileURL,
+              !journal.results.isEmpty,
+              journal.results.allSatisfy({ $0.duration.isFinite && $0.duration > 0 }),
+              journal.operation != "restore" || (!journal.createsGroup && journal.newFolders.isEmpty && journal.restoreMemberIDs != nil)
+        else { throw SpliceError.inactiveWorkspace }
+        let group = try Self.groupFolder(groupID, workspace: workspace)
+        let folders = [original, staging, group] + journal.newFolders
+        for file in journal.moves.flatMap({ [$0.source, $0.destination] }) + [journal.markdownURL] {
+            guard file.isFileURL, folders.contains(where: {
+                file.standardizedFileURL.deletingLastPathComponent() == $0.standardizedFileURL
+                    && file.resolvingSymlinksInPath().path == $0.resolvingSymlinksInPath().appendingPathComponent(file.lastPathComponent).path
+            }) else { throw SpliceError.inactiveWorkspace }
+        }
+    }
+
     private func groupMembers(_ id: UUID, context: ModelContext) throws -> [RecordingSession] {
         try context.fetch(FetchDescriptor<RecordingSession>()).filter { $0.spliceGroupID == id }
             .sorted { $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt < $1.createdAt }
+    }
+
+    enum GroupCleanupResult: Equatable {
+        case removed
+        case absent
+        case inUse
+        case journalPresent
+        case membershipUnavailable
+        case invalidPath
+        case removalFailed
+    }
+
+    /// No await separates the membership read from removal. Unknown membership always keeps the
+    /// group; a journal belongs to reconciliation and is never retired here.
+    @discardableResult
+    func removeGroupIfUnused(_ id: UUID, workspace: Workspace, context: ModelContext) -> GroupCleanupResult {
+        removeGroupIfUnused(id, workspace: workspace) { try self.readMembership(workspace: workspace, context: context) }
+    }
+
+    /// Also retries orphans whose last known member was removed while another snapshot was
+    /// unreadable. Reconciliation can call this after it has processed journals.
+    @discardableResult
+    func sweepUnusedGroups(workspace: Workspace, context: ModelContext) -> [UUID: GroupCleanupResult] {
+        let parent = workspace.rootURL.appendingPathComponent("splice", isDirectory: true)
+        let expected = workspace.rootURL.resolvingSymlinksInPath().appendingPathComponent("splice", isDirectory: true)
+        guard parent.resolvingSymlinksInPath().path == expected.path else {
+            logger.error("Kept splice groups because the splice folder is outside the workspace.")
+            return [:]
+        }
+        let entries: [URL]
+        do { entries = try FileManager.default.contentsOfDirectory(at: parent, includingPropertiesForKeys: nil) }
+        catch {
+            if !Self.isMissingFile(error) {
+                logger.error("Kept splice groups because their folder could not be read: \(error.localizedDescription, privacy: .public)")
+            }
+            return [:]
+        }
+        let ids = entries.compactMap { UUID(uuidString: $0.lastPathComponent) }
+        var cachedMembership: Result<Set<UUID>, Error>?
+        var results: [UUID: GroupCleanupResult] = [:]
+        for id in ids {
+            results[id] = removeGroupIfUnused(id, workspace: workspace) {
+                if let cachedMembership { return try cachedMembership.get() }
+                let groups = Result { try self.readMembership(workspace: workspace, context: context) }
+                cachedMembership = groups
+                return try groups.get()
+            }
+        }
+        return results
+    }
+
+    private func readMembership(workspace: Workspace, context: ModelContext) throws -> Set<UUID> {
+        let live: Set<UUID>
+        do { live = try membership.liveGroupIDs(context) }
+        catch {
+            logger.error("Kept splice groups because store membership could not be fetched: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+        do { return try live.union(membership.heldGroupIDs(workspace)) }
+        catch {
+            logger.error("Kept splice groups because holding membership could not be read: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
+    private func removeGroupIfUnused(
+        _ id: UUID, workspace: Workspace, readMembership: () throws -> Set<UUID>
+    ) -> GroupCleanupResult {
+        let group: URL
+        do { group = try Self.groupFolder(id, workspace: workspace) }
+        catch {
+            logger.error("Kept splice group \(id, privacy: .public) because its path is outside the splice folder.")
+            return .invalidPath
+        }
+        do {
+            let attributes = try FileManager.default.attributesOfItem(atPath: group.path)
+            guard attributes[.type] as? FileAttributeType == .typeDirectory else {
+                logger.error("Kept splice group \(id, privacy: .public) because its path is not a directory.")
+                return .invalidPath
+            }
+        } catch {
+            if Self.isMissingFile(error) { return .absent }
+            logger.error("Kept splice group \(id, privacy: .public) because its folder could not be read: \(error.localizedDescription, privacy: .public)")
+            return .membershipUnavailable
+        }
+        do {
+            _ = try FileManager.default.attributesOfItem(atPath: group.appendingPathComponent(SpliceJournal.fileName).path)
+            return .journalPresent
+        } catch {
+            guard Self.isMissingFile(error) else {
+                logger.error("Kept splice group \(id, privacy: .public) because its journal could not be checked: \(error.localizedDescription, privacy: .public)")
+                return .membershipUnavailable
+            }
+        }
+        do {
+            guard try !readMembership().contains(id) else { return .inUse }
+        } catch { return .membershipUnavailable }
+        do {
+            try files.remove(group)
+            return .removed
+        } catch {
+            logger.error("Kept splice group \(id, privacy: .public) because removal failed: \(error.localizedDescription, privacy: .public)")
+            return .removalFailed
+        }
+    }
+
+    private static func isMissingFile(_ error: Error) -> Bool {
+        let error = error as NSError
+        return error.domain == NSCocoaErrorDomain && [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(error.code)
     }
 
     private struct Output {

@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-enum SpliceError: Error, Equatable {
+enum SpliceError: LocalizedError, Equatable {
     case invalidPlan
     case stalePlan
     case inactiveWorkspace
@@ -13,6 +13,8 @@ enum SpliceError: Error, Equatable {
     case busy
     case insufficientDiskSpace
     case exportFailed
+
+    var errorDescription: String? { SpliceCopy.errorMessage(self) }
 }
 
 struct SplicePlan: Equatable {

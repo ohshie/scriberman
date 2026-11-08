@@ -46,6 +46,7 @@ final class SessionDeletionCoordinator {
         let workspace: Workspace
         let target: DeletionUndoTarget
         weak var undoManager: UndoManager?
+        let context: ModelContext
     }
 
     /// Changes after every operation on a held session, so a view listing them knows to read the
@@ -57,6 +58,7 @@ final class SessionDeletionCoordinator {
 
     /// What removing a held session now did.
     enum RemovalResult: Equatable {
+        case busy
         case removed
         /// No workspace is active, so nothing was removed.
         case notHeld
@@ -84,6 +86,11 @@ final class SessionDeletionCoordinator {
             case .recording(let session): session.id
             case .imported(let session): session.id
             }
+        }
+
+        var groupID: UUID? {
+            if case .recording(let session) = self { return session.spliceGroupID }
+            return nil
         }
 
         var isInStore: Bool {
@@ -121,6 +128,8 @@ final class SessionDeletionCoordinator {
     }
 
     private let workspaceService: WorkspaceServiceProtocol
+    private let spliceService: SpliceService
+    private let spliceReservations: SpliceReservations
     private let tagService: TagService
     private let saveContext: @MainActor (ModelContext) throws -> Void
     private let now: @MainActor () -> Date
@@ -152,8 +161,11 @@ final class SessionDeletionCoordinator {
         stopAccess: @escaping @MainActor (URL) -> Void = { $0.stopAccessingSecurityScopedResource() },
         scheduleExpiry: @escaping @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> AnyCancellable
             = SessionDeletionCoordinator.schedule,
-        sessionJobs: SessionJobs = SessionJobs()
+        sessionJobs: SessionJobs = SessionJobs(),
+        spliceService: SpliceService? = nil,
+        spliceReservations: SpliceReservations? = nil
     ) {
+        self.spliceReservations = spliceReservations ?? .shared
         self.workspaceService = workspaceService
         self.tagService = tagService
         self.saveContext = saveContext
@@ -163,6 +175,7 @@ final class SessionDeletionCoordinator {
         self.stopAccess = stopAccess
         self.scheduleExpiry = scheduleExpiry
         self.sessionJobs = sessionJobs
+        self.spliceService = spliceService ?? SpliceService(reservations: self.spliceReservations)
     }
 
     /// Whether `sessionID` is being deleted: off the list while its jobs stop, before its record
@@ -220,13 +233,17 @@ final class SessionDeletionCoordinator {
     }
 
     /// Holds `session` and deletes its record, then registers undo with `undoManager`.
+    /// `announces` is false when the deletion is one step of a larger operation, such as a splice
+    /// restore holding its other parts, which would otherwise announce once per part.
     @discardableResult
     func delete(
         _ session: RecordingSession,
         context: ModelContext,
-        undoManager: UndoManager?
+        undoManager: UndoManager?,
+        announces: Bool = true,
+        reservation: SpliceReservations.Reservation? = nil
     ) async -> JobsViewModel.DeletionResult {
-        await delete(.recording(session), context: context, undoManager: undoManager)
+        await delete(.recording(session), context: context, undoManager: undoManager, announces: announces, reservation: reservation)
     }
 
     /// Holds a settled imported session and deletes its record, then registers undo with
@@ -311,27 +328,31 @@ final class SessionDeletionCoordinator {
     private func delete(
         _ session: HeldSession,
         context: ModelContext,
-        undoManager: UndoManager?
+        undoManager: UndoManager?,
+        announces: Bool = true,
+        reservation: SpliceReservations.Reservation? = nil
     ) async -> JobsViewModel.DeletionResult {
         let sessionID = session.id
+        guard mayChange(session, reservation: reservation) else { return .busy }
         return await enqueue(sessionID) { [self] in
+            guard mayChange(session, reservation: reservation) else { return .busy }
             // A second window's delete of the same session, queued behind the first.
             guard session.isInStore else {
                 logger.notice("Skipped deleting a session that is already deleted.")
                 return .deleted
             }
             notifyRemoval(of: sessionID)
-            let (result, workspace) = await hold(session, context: context)
+            let (result, workspace) = await hold(session, context: context, reservation: reservation)
             guard result == .deleted, let workspace else { return result }
             let target = DeletionUndoTarget(sessionID: sessionID)
-            holds[sessionID] = Hold(workspace: workspace, target: target, undoManager: undoManager)
+            holds[sessionID] = Hold(workspace: workspace, target: target, undoManager: undoManager, context: context)
             startExpiry(of: sessionID)
             if let undoManager {
                 undoManager.beginUndoGrouping()
                 registerUndo(of: target, context: context, undoManager: undoManager)
                 undoManager.endUndoGrouping()
             }
-            announce(Self.deletedAnnouncement)
+            if announces { announce(Self.deletedAnnouncement) }
             return .deleted
         }.value
     }
@@ -341,9 +362,11 @@ final class SessionDeletionCoordinator {
     /// when it worked.
     private func hold(
         _ session: HeldSession,
-        context: ModelContext
+        context: ModelContext,
+        reservation: SpliceReservations.Reservation? = nil
     ) async -> (JobsViewModel.DeletionResult, Workspace?) {
         let sessionID = session.id
+        guard mayChange(session, reservation: reservation) else { return (.busy, nil) }
         // Off the list at once; nothing moves until every job of the session has stopped.
         removingSessionIDs.insert(sessionID)
         defer { removingSessionIDs.remove(sessionID) }
@@ -354,6 +377,7 @@ final class SessionDeletionCoordinator {
             logger.error("Refusing to delete a session with no workspace available.")
             return (.moveFailed, nil)
         }
+        guard mayChange(session, reservation: reservation) else { return (.busy, nil) }
         let isScoped = startAccess(workspace.rootURL)
         defer { if isScoped { stopAccess(workspace.rootURL) } }
 
@@ -397,9 +421,15 @@ final class SessionDeletionCoordinator {
 
     // MARK: - Restore
 
+    private func mayChange(_ session: HeldSession, reservation: SpliceReservations.Reservation? = nil) -> Bool {
+        !spliceReservations.isReserved(sessionID: session.id, groupID: session.groupID)
+            || spliceReservations.permits(reservation, sessionID: session.id)
+    }
+
     /// Moves the held folder back and inserts its record. Returns whether it worked.
     private func restore(_ target: DeletionUndoTarget, context: ModelContext) async -> Bool {
         let sessionID = target.sessionID
+        guard !spliceReservations.isReserved(sessionID: sessionID) else { return false }
         guard let hold = holds[sessionID], hold.target === target else {
             logger.notice("Skipped restoring a session this undo entry no longer holds.")
             return false
@@ -420,6 +450,7 @@ final class SessionDeletionCoordinator {
             logger.error("Could not read the snapshot of a held session: \(error.localizedDescription, privacy: .public)")
             return false
         }
+        guard !spliceReservations.isReserved(sessionID: sessionID, groupID: snapshot.spliceGroupID) else { return false }
         let folder = URL(fileURLWithPath: snapshot.originalFolderPath)
 
         // Before anything is inserted: seeding the default tag saves the context. Imported sessions
@@ -529,7 +560,7 @@ final class SessionDeletionCoordinator {
                 self.notifyRemoval(of: sessionID)
                 let (result, workspace) = await self.hold(session, context: context)
                 if result == .deleted, let workspace {
-                    self.holds[sessionID] = Hold(workspace: workspace, target: target, undoManager: undoManager)
+                    self.holds[sessionID] = Hold(workspace: workspace, target: target, undoManager: undoManager, context: context)
                     self.startExpiry(of: sessionID)
                     self.announce(Self.deletedAnnouncement)
                 } else {
@@ -556,11 +587,12 @@ final class SessionDeletionCoordinator {
     /// window registered it. Works for a session deleted in an earlier run, which has no entry.
     /// Returns whether it worked.
     func restoreHeld(_ sessionID: UUID, context: ModelContext) async -> Bool {
-        await enqueue(sessionID) { [self] in
+        guard !spliceReservations.isReserved(sessionID: sessionID) else { return false }
+        return await enqueue(sessionID) { [self] in
             let registered = holds[sessionID]
             let target = registered?.target ?? DeletionUndoTarget(sessionID: sessionID)
             if registered == nil, let workspace = await workspaceService.currentWorkspace() {
-                holds[sessionID] = Hold(workspace: workspace, target: target, undoManager: nil)
+                holds[sessionID] = Hold(workspace: workspace, target: target, undoManager: nil, context: context)
             }
             guard await restore(target, context: context) else {
                 if registered == nil, holds[sessionID]?.target === target {
@@ -576,21 +608,30 @@ final class SessionDeletionCoordinator {
 
     /// Removes a held session of the active workspace for good and removes its undo entry from
     /// whichever window registered it.
-    func removeHeld(_ sessionID: UUID) async -> RemovalResult {
+    func removeHeld(_ sessionID: UUID, context: ModelContext) async -> RemovalResult {
         await enqueue(sessionID) { [self] in
             guard let workspace = await workspaceService.currentWorkspace() else {
                 logger.notice("Skipped removing a held session with no workspace available.")
                 return .notHeld
             }
+            let isScoped = startAccess(workspace.rootURL)
+            defer { if isScoped { stopAccess(workspace.rootURL) } }
+            let holding = HoldingFolder(workspace: workspace)
+            let snapshot = try? SessionSnapshot.read(from: holding.heldFolder(for: sessionID))
+            guard !spliceReservations.isReserved(sessionID: sessionID, groupID: snapshot?.spliceGroupID) else { return .busy }
             if let hold = holds.removeValue(forKey: sessionID) {
                 hold.undoManager?.removeAllActions(withTarget: hold.target)
             }
             expiryTimers[sessionID] = nil
-            let isScoped = startAccess(workspace.rootURL)
-            defer { if isScoped { stopAccess(workspace.rootURL) } }
-            let holding = HoldingFolder(workspace: workspace)
             do {
                 try holding.remove(sessionID: sessionID)
+                if let snapshot {
+                    if let groupID = snapshot.spliceGroupID {
+                        spliceService.removeGroupIfUnused(groupID, workspace: workspace, context: context)
+                    }
+                } else {
+                    spliceService.sweepUnusedGroups(workspace: workspace, context: context)
+                }
                 return .removed
             } catch {
                 let folder = holding.heldFolder(for: sessionID)
@@ -631,13 +672,18 @@ final class SessionDeletionCoordinator {
 
         let holding = HoldingFolder(workspace: workspace)
         let folder = holding.heldFolder(for: sessionID)
-        let deadline: Date
+        let snapshot: SessionSnapshot
         do {
-            deadline = try SessionSnapshot.read(from: folder).deletedAt.addingTimeInterval(Self.holdDuration)
+            snapshot = try SessionSnapshot.read(from: folder)
         } catch {
             logger.error("Could not read the snapshot of an expiring held session; it stays held: \(folder.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return
         }
+        if spliceReservations.isReserved(sessionID: sessionID, groupID: snapshot.spliceGroupID) {
+            scheduleExpiry(at: now().addingTimeInterval(1), sessionID: sessionID)
+            return
+        }
+        let deadline = snapshot.deletedAt.addingTimeInterval(Self.holdDuration)
         guard deadline <= now() else {
             scheduleExpiry(at: deadline, sessionID: sessionID)
             return
@@ -650,6 +696,9 @@ final class SessionDeletionCoordinator {
         }
         holds[sessionID] = nil
         hold.undoManager?.removeAllActions(withTarget: hold.target)
+        if let groupID = snapshot.spliceGroupID {
+            spliceService.removeGroupIfUnused(groupID, workspace: workspace, context: hold.context)
+        }
     }
 
     // MARK: - Workspace activation
@@ -674,6 +723,7 @@ final class SessionDeletionCoordinator {
             now: now(),
             holdDuration: Self.holdDuration
         ).run()
+        spliceService.sweepUnusedGroups(workspace: workspace, context: context)
 
         for sessionID in result.removed + result.notDeleted {
             if let hold = holds.removeValue(forKey: sessionID) {
@@ -683,11 +733,14 @@ final class SessionDeletionCoordinator {
         for snapshot in result.held {
             let sessionID = snapshot.sessionID
             // A session deleted in this run keeps its undo entry.
-            if holds[sessionID]?.workspace != workspace {
+            if let previous = holds[sessionID], previous.workspace == workspace {
+                holds[sessionID] = Hold(workspace: workspace, target: previous.target, undoManager: previous.undoManager, context: context)
+            } else {
                 holds[sessionID] = Hold(
                     workspace: workspace,
                     target: DeletionUndoTarget(sessionID: sessionID),
-                    undoManager: nil
+                    undoManager: nil,
+                    context: context
                 )
             }
             scheduleExpiry(at: snapshot.deletedAt.addingTimeInterval(Self.holdDuration), sessionID: sessionID)

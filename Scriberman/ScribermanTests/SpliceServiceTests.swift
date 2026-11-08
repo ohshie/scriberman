@@ -382,7 +382,7 @@ struct SpliceServiceTests {
 }
 
 @MainActor
-private final class SpliceFixture {
+final class SpliceFixture {
     static let audio = Data("original audio".utf8)
     static let video = Data("original video".utf8)
     let workspace: Workspace

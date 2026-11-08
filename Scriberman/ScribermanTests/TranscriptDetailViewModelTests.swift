@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import OpenAI
 import SwiftData
 import Testing
@@ -442,7 +443,9 @@ struct TranscriptDetailViewModelTests {
 struct TranscriptDetailViewModelTranscriptTests {
     private func makeViewModel(
         session: any TranscribableSession,
-        store: SpeakerEmbeddingStore? = nil
+        store: SpeakerEmbeddingStore? = nil,
+        saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() },
+        writeSpeakerData: @escaping (Data, URL) throws -> Void = { try $0.write(to: $1, options: .atomic) }
     ) -> TranscriptDetailViewModel {
         let suiteName = "TranscriptDetailViewModelTranscriptTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName) ?? .standard
@@ -451,7 +454,9 @@ struct TranscriptDetailViewModelTranscriptTests {
             aiProviderService: AIProviderService(keychainStore: MockKeychainStore(), store: AIProviderStore(defaults: defaults)),
             promptStore: AIPromptStore(defaults: defaults),
             store: store,
-            transcript: session.displayedTranscript
+            transcript: session.displayedTranscript,
+            saveContext: saveContext,
+            writeSpeakerData: writeSpeakerData
         )
     }
 
@@ -1373,5 +1378,321 @@ extension TranscriptDetailViewModelTranscriptTests {
 
         undoManager.redo()
         #expect(try String(contentsOf: markdownURL, encoding: .utf8).contains("Zoltan"))
+    }
+}
+
+extension TranscriptDetailViewModelTranscriptTests {
+    @Test(arguments: [TranscriptPass.transcript, .retranscript])
+    func linkedRenamesReplaceOneSharedSourceAndUndoEveryPart(pass: TranscriptPass) async throws {
+        let f = try await LinkedSpeakersFixture(pass: pass)
+        let store = try makeStore()
+        let first = makeViewModel(session: f.parts[1], store: store)
+        let second = makeViewModel(session: f.parts[2], store: store)
+        let undo = UndoManager.forTests()
+        let otherPass = f.parts.map { pass == .transcript ? $0.retranscriptData : $0.transcriptData }
+        let originalManifest = try f.manifest()
+        let originalRecords = f.parts.map(RecordingSessionRecord.init)
+        let source = VoiceprintSource(sessionID: f.origin, pass: pass, speakerID: "S1")
+        #expect(TranscriptDetailViewModel.voiceprintSource(for: "S1", of: f.parts[1]) == source)
+
+        await undo.asOneEvent { first.renameSpeaker(id: "S1", to: "Ana", undoManager: undo) }?.value
+        try f.expectNames("Ana", pass: pass)
+        #expect(undo.undoActionName == UndoActionName.renameSpeaker)
+        #expect(try await names(in: store) == ["Ana"])
+        #expect(try await store.fetchAllSnapshots().map(\.sampleCount) == [2])
+        #expect(try await store.snapshot(of: [source]).voiceprints.count == 2)
+
+        // A different view model opened before the first edit must refresh its stale input.
+        second.refreshTranscript()
+        await undo.asOneEvent { second.renameSpeaker(id: "S1", to: "Bea", undoManager: undo) }?.value
+        try f.expectNames("Bea", pass: pass)
+        #expect(try await names(in: store) == ["Bea"])
+        #expect(try await store.fetchAllSnapshots().map(\.sampleCount) == [2])
+        #expect(f.parts.map { pass == .transcript ? $0.retranscriptData : $0.transcriptData } == otherPass)
+        let renamedManifest = try f.manifest()
+        #expect(pass == .transcript ? renamedManifest.retranscriptData == originalManifest.retranscriptData
+            : renamedManifest.transcriptData == originalManifest.transcriptData)
+
+        undo.undo()
+        await second.speakerMemoryUpdate?.value
+        try f.expectNames("Ana", pass: pass)
+        #expect(try await names(in: store) == ["Ana"])
+        undo.undo()
+        await first.speakerMemoryUpdate?.value
+        try f.expectNames("Speaker 1", pass: pass)
+        #expect(f.parts.map(RecordingSessionRecord.init) == originalRecords)
+        #expect(try f.manifest() == originalManifest)
+        #expect(try await store.fetchAllSnapshots().isEmpty)
+        #expect(!undo.canUndo)
+        undo.redo()
+        await first.speakerMemoryUpdate?.value
+        try f.expectNames("Ana", pass: pass)
+        undo.redo()
+        await second.speakerMemoryUpdate?.value
+        try f.expectNames("Bea", pass: pass)
+        #expect(try await store.fetchAllSnapshots().map(\.sampleCount) == [2])
+        let saved = ModelContext(f.container)
+        for part in f.parts {
+            let reloaded = try #require(try RecordingSession.fetch(id: part.id, in: saved))
+            #expect(f.pass(of: reloaded, pass: pass)?.speakers.first?.label == "Bea")
+        }
+    }
+
+    @Test(arguments: ["retranscribed", "differentOrigin", "differentGroup", "missingSpeaker", "held"])
+    func linkedRenameSkipsMembersThatNoLongerShareItsSpeaker(reason: String) async throws {
+        let f = try await LinkedSpeakersFixture(pass: .retranscript)
+        let excluded = f.parts[1]
+        var transcript = try #require(excluded.retranscript)
+        var coordinator: SessionDeletionCoordinator?
+        switch reason {
+        case "retranscribed": transcript.spliceOriginSessionID = nil; excluded.retranscript = transcript
+        case "differentOrigin": transcript.spliceOriginSessionID = UUID(); excluded.retranscript = transcript
+        case "differentGroup": excluded.spliceGroupID = UUID()
+        case "missingSpeaker": transcript.speakers.removeAll { $0.id == "S1" }; excluded.retranscript = transcript
+        default:
+            coordinator = f.coordinator()
+            #expect(await coordinator!.delete(excluded, context: f.context, undoManager: nil) == .deleted)
+        }
+        try f.context.save()
+        let before = reason == "held" ? nil : excluded.retranscriptData
+        let heldBefore = reason == "held" ? try HoldingFolder(workspace: f.workspace).snapshotsForMembership() : []
+        let vm = makeViewModel(session: f.parts[0], store: try makeStore())
+        await vm.renameSpeaker(id: "S1", to: "Ana")?.value
+        #expect(f.parts[0].retranscript?.speakers.first?.label == "Ana")
+        #expect(f.parts[2].retranscript?.speakers.first?.label == "Ana")
+        #expect(try f.manifestPass(.retranscript)?.speakers.first?.label == "Ana")
+        if reason == "held" {
+            #expect(try HoldingFolder(workspace: f.workspace).snapshotsForMembership() == heldBefore)
+        } else { #expect(excluded.retranscriptData == before) }
+    }
+
+    @Test
+    func linkedRenameUpdatesTheSamePassEvenWhenAnotherMemberDisplaysANewPass() async throws {
+        let f = try await LinkedSpeakersFixture(pass: .transcript)
+        let newPass = try #require(TranscriptSpeakerEditing.rename("S1", to: "Independent", in: teachableConversation()))
+        f.parts[1].retranscript = newPass
+        try writeTranscriptMarkdown(for: f.parts[1])
+        try f.context.save()
+        let before = f.parts[1].retranscriptData
+        let vm = makeViewModel(session: f.parts[0])
+        _ = vm.renameSpeaker(id: "S1", to: "Ana")
+        #expect(f.parts[1].transcript?.speakers.first?.label == "Ana")
+        #expect(f.parts[1].retranscriptData == before)
+        #expect(try String(contentsOf: transcriptMarkdownURL(for: f.parts[1]), encoding: .utf8).contains("Independent"))
+        #expect(TranscriptDetailViewModel.voiceprintSource(for: "S1", of: f.parts[1]).sessionID == f.parts[1].id)
+    }
+
+    @Test
+    func mergeAndReassignmentAndTheirUndoStayInTheirOwnPart() async throws {
+        let f = try await LinkedSpeakersFixture(pass: .transcript)
+        let before = f.parts.map(\.transcriptData)
+        let manifest = try Data(contentsOf: f.manifestURL)
+        let first = makeViewModel(session: f.parts[0], store: try makeStore())
+        let mergeUndo = UndoManager.forTests()
+        await mergeUndo.asOneEvent { first.mergeSpeaker("S2", into: "S1", undoManager: mergeUndo) }?.value
+        #expect(f.parts[0].transcript?.speakers.count == 1)
+        #expect(f.parts[1].transcriptData == before[1] && f.parts[2].transcriptData == before[2])
+        let second = makeViewModel(session: f.parts[1])
+        let assignmentUndo = UndoManager.forTests()
+        let block = try #require(second.blocks.first { $0.speaker.id == "S2" })
+        assignmentUndo.asOneEvent { second.assign(block, to: "S1", undoManager: assignmentUndo) }
+        #expect(f.parts[1].transcriptData != before[1])
+        #expect(f.parts[2].transcriptData == before[2])
+        #expect(try Data(contentsOf: f.manifestURL) == manifest)
+        assignmentUndo.undo()
+        mergeUndo.undo()
+        await first.speakerMemoryUpdate?.value
+        #expect(f.parts.map(\.transcript) == before.map { $0.flatMap { try? JSONDecoder().decode(Transcript.self, from: $0) } })
+        #expect(try Data(contentsOf: f.manifestURL) == manifest)
+    }
+
+    @Test
+    func restoreKeepsTheNamesFromTheRenamedManifest() async throws {
+        let f = try await LinkedSpeakersFixture(pass: .retranscript)
+        let vm = makeViewModel(session: f.parts[1], store: try makeStore())
+        let undo = UndoManager.forTests()
+        await undo.asOneEvent { vm.renameSpeaker(id: "S1", to: "Ana", undoManager: undo) }?.value
+        let target = f.parts[1]
+        let coordinator = f.coordinator()
+        let result = try await SpliceService().restore(session: target, workspace: f.workspace, context: f.context, coordinator: coordinator)
+        #expect(result == SpliceService.RestoreResult())
+        #expect(target.duration == 30)
+        #expect(target.retranscript?.speakers.first?.label == "Ana")
+        #expect(target.transcript?.speakers.first?.label == "Speaker 1")
+        #expect(try Data(contentsOf: URL(fileURLWithPath: target.mixdownURL!)) == LinkedSpeakersFixture.audio)
+        #expect(!FileManager.default.fileExists(atPath: f.manifestURL.deletingLastPathComponent().path))
+        undo.undo()
+        await vm.speakerMemoryUpdate?.value
+        #expect(target.retranscript?.speakers.first?.label == "Ana")
+        #expect(try f.context.fetch(FetchDescriptor<RecordingSession>()).count == 1)
+    }
+
+    @Test(arguments: ["manifestMissing", "manifestCorrupt", "writeFirst", "writeManifest", "save", "reserved"])
+    func linkedRenameFailureLeavesModelsFilesMemoryAndUndoUnchanged(reason: String) async throws {
+        let f = try await LinkedSpeakersFixture(pass: .transcript)
+        let store = try makeStore()
+        if reason == "manifestMissing" { try FileManager.default.removeItem(at: f.manifestURL) }
+        if reason == "manifestCorrupt" { try Data([0]).write(to: f.manifestURL) }
+        let records = f.parts.map(RecordingSessionRecord.init)
+        let disk = try f.disk()
+        var written = 0
+        var failed = false
+        let vm = makeViewModel(session: f.parts[1], store: store, saveContext: { context in
+            if reason == "save" { throw CocoaError(.fileWriteUnknown) }
+            try context.save()
+        }, writeSpeakerData: { data, url in
+            try data.write(to: url, options: .atomic)
+            written += 1
+            if !failed && ((reason == "writeFirst" && written == 1) || (reason == "writeManifest" && url == f.manifestURL)) {
+                failed = true
+                throw CocoaError(.fileWriteUnknown)
+            }
+        })
+        let undo = UndoManager.forTests()
+        let registry = SpliceReservations.shared
+        if reason == "reserved" { try registry.reserve(sessionID: f.parts[1].id, groupID: f.groupID) }
+        let task = undo.asOneEvent { vm.renameSpeaker(id: "S1", to: "Ana", undoManager: undo) }
+        if reason == "reserved" { registry.release(sessionID: f.parts[1].id, groupID: f.groupID) }
+        await task?.value
+        #expect(task == nil)
+        #expect(undo.undoActionName.isEmpty)
+        #expect(f.parts.map(RecordingSessionRecord.init) == records)
+        #expect(try f.disk() == disk)
+        #expect(try await store.fetchAllSnapshots().isEmpty)
+        let saved = ModelContext(f.container)
+        #expect(try saved.fetch(FetchDescriptor<RecordingSession>()).map(RecordingSessionRecord.init).sorted { $0.id.uuidString < $1.id.uuidString }
+            == records.sorted { $0.id.uuidString < $1.id.uuidString })
+    }
+    @Test
+    func queuedRenamesAndImmediateUndoFromDifferentPartsKeepMemoryInOrder() async throws {
+        let f = try await LinkedSpeakersFixture(pass: .transcript)
+        let store = try makeStore()
+        let first = makeViewModel(session: f.parts[0], store: store)
+        let undo = UndoManager.forTests()
+        _ = undo.asOneEvent { first.renameSpeaker(id: "S1", to: "Ana", undoManager: undo) }
+        let second = makeViewModel(session: f.parts[1], store: store)
+        _ = undo.asOneEvent { second.renameSpeaker(id: "S1", to: "Bea", undoManager: undo) }
+        undo.undo()
+        undo.undo()
+        await first.speakerMemoryUpdate?.value
+        try f.expectNames("Speaker 1", pass: .transcript)
+        #expect(try await store.fetchAllSnapshots().isEmpty)
+        undo.redo()
+        undo.redo()
+        await second.speakerMemoryUpdate?.value
+        try f.expectNames("Bea", pass: .transcript)
+        #expect(try await names(in: store) == ["Bea"])
+        #expect(try await store.fetchAllSnapshots().map(\.sampleCount) == [2])
+    }
+
+    @Test
+    func retranscribedPartRenamesLocallyAndUndoOfALinkedEditLeavesItsNewPassAlone() async throws {
+        let f = try await LinkedSpeakersFixture(pass: .retranscript)
+        let store = try makeStore()
+        let first = makeViewModel(session: f.parts[0], store: store)
+        let undo = UndoManager.forTests()
+        await undo.asOneEvent { first.renameSpeaker(id: "S1", to: "Ana", undoManager: undo) }?.value
+        var independent = try #require(f.parts[1].retranscript)
+        independent.spliceOriginSessionID = nil
+        f.parts[1].retranscript = independent
+        let second = makeViewModel(session: f.parts[1], store: store)
+        await second.renameSpeaker(id: "S1", to: "Independent")?.value
+        #expect(f.parts[0].retranscript?.speakers.first?.label == "Ana")
+        #expect(try f.manifestPass(.retranscript)?.speakers.first?.label == "Ana")
+        let changed = f.parts[1].retranscriptData
+        undo.undo()
+        await first.speakerMemoryUpdate?.value
+        #expect(f.parts[0].retranscript?.speakers.first?.label == "Speaker 1")
+        #expect(f.parts[2].retranscript?.speakers.first?.label == "Speaker 1")
+        #expect(f.parts[1].retranscriptData == changed)
+        #expect(try await names(in: store) == ["Independent"])
+    }
+
+    @Test
+    func mergeAndResetInOnePartLeaveWhatTheGroupTaughtAlone() async throws {
+        let f = try await LinkedSpeakersFixture(pass: .transcript)
+        let store = try makeStore()
+        let first = makeViewModel(session: f.parts[0], store: store)
+        await first.renameSpeaker(id: "S1", to: "Ana")?.value
+        let shared = VoiceprintSource(sessionID: f.origin, pass: .transcript, speakerID: "S1")
+        let taught = try await store.snapshot(of: [shared]).voiceprints.map(\.embedding)
+        #expect(taught.count == 2)
+
+        await makeViewModel(session: f.parts[1], store: store).resetSpeaker("S1")?.value
+        await makeViewModel(session: f.parts[2], store: store).mergeSpeaker("S1", into: "S2")?.value
+
+        #expect(try await store.snapshot(of: [shared]).voiceprints.map(\.embedding) == taught)
+        #expect(try await names(in: store) == ["Ana"])
+        #expect(f.parts[0].transcript?.speakers.first?.label == "Ana")
+    }
+}
+
+@MainActor
+private final class LinkedSpeakersFixture {
+    static let audio = Data("Original full audio".utf8)
+    let workspace: Workspace
+    let container: ModelContainer
+    let context: ModelContext
+    let origin: UUID
+    let groupID: UUID
+    let parts: [RecordingSession]
+    var manifestURL: URL { workspace.rootURL.appendingPathComponent("splice/\(groupID.uuidString)/manifest.json") }
+
+    init(pass: TranscriptPass) async throws {
+        workspace = Workspace(rootURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let folder = try RecordingFileLayout.createRecordingFolder(in: workspace, createdAt: .now)
+        try Self.audio.write(to: folder.appendingPathComponent("recording.m4a"))
+        container = try ModelContainer(for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        context = ModelContext(container)
+        context.autosaveEnabled = false
+        let session = RecordingSession(duration: 30, micAudioURL: folder.appendingPathComponent("mic.wav").path,
+            mixdownURL: folder.appendingPathComponent("recording.m4a").path, title: "Original", status: .done)
+        origin = session.id
+        let times: [(String, Float, Float)] = [("S1", 0, 2), ("S2", 3, 4), ("S1", 8, 10), ("S2", 13, 14),
+            ("S1", 18, 20), ("S2", 23, 24), ("S1", 28, 30)]
+        var transcript = Transcript(fullText: "Words", segments: times.map {
+            TranscriptSegment(speakerId: $0.0, text: "Words", startTime: $0.1, endTime: $0.2)
+        }, speakers: [TranscriptSpeaker(id: "S1", label: "Speaker 1", colorHex: "112233"),
+                      TranscriptSpeaker(id: "S2", label: "Speaker 2", colorHex: "445566")])
+        transcript.voiceprintSpace = VoiceprintSpace.current
+        transcript.speakerVoiceprints = ["S1": [[1, 0], [0.8, 0.2]], "S2": [[0, 1]]]
+        session.transcript = transcript
+        if pass == .retranscript { session.retranscript = transcript }
+        context.insert(session)
+        try context.save()
+        parts = try await SpliceService(capacityProvider: { _ in .max }, export: { from, to, start, end in
+            try (Data("\(start)..\(end):".utf8) + Data(contentsOf: from)).write(to: to)
+        }).splice(session: session, plan: SplicePlan(cuts: [11.5, 21.5],
+            parts: [.init(title: "One"), .init(title: "Two"), .init(title: "Three")],
+            transcriptFingerprint: SplicePlan.fingerprint(transcriptData: session.transcriptData, retranscriptData: session.retranscriptData)),
+            workspace: workspace, context: context)
+        groupID = try #require(session.spliceGroupID)
+    }
+    deinit { try? FileManager.default.removeItem(at: workspace.rootURL) }
+    func pass(of session: RecordingSession, pass: TranscriptPass) -> Transcript? {
+        pass == .transcript ? session.transcript : session.retranscript
+    }
+    func manifest() throws -> SpliceManifest { try JSONDecoder().decode(SpliceManifest.self, from: Data(contentsOf: manifestURL)) }
+    func manifestPass(_ pass: TranscriptPass) throws -> Transcript? {
+        let manifest = try manifest()
+        return try (pass == .transcript ? manifest.transcriptData : manifest.retranscriptData).map { try JSONDecoder().decode(Transcript.self, from: $0) }
+    }
+    func expectNames(_ name: String, pass: TranscriptPass) throws {
+        #expect(parts.allSatisfy { self.pass(of: $0, pass: pass)?.speakers.first?.label == name })
+        #expect(try manifestPass(pass)?.speakers.first?.label == name)
+        for part in parts { #expect(try String(contentsOf: transcriptMarkdownURL(for: part), encoding: .utf8).contains(name)) }
+    }
+    func coordinator() -> SessionDeletionCoordinator {
+        SessionDeletionCoordinator(workspaceService: ReconciliationWorkspace(workspace: workspace), announce: { _ in },
+            startAccess: { _ in false }, stopAccess: { _ in }, scheduleExpiry: { _, _ in AnyCancellable {} })
+    }
+    func disk() throws -> [String: Data] {
+        var result: [String: Data] = [:]
+        let enumerator = try #require(FileManager.default.enumerator(at: workspace.rootURL, includingPropertiesForKeys: [.isRegularFileKey]))
+        for case let file as URL in enumerator where try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
+            result[String(file.path.dropFirst(workspace.rootURL.path.count))] = try Data(contentsOf: file)
+        }
+        return result
     }
 }

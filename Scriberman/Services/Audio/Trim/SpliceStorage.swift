@@ -1,7 +1,32 @@
 import Foundation
+import Observation
+import SwiftData
+
+/// Throwing reads keep unknown membership distinct from an empty set. Both the saved store and
+/// pending context changes count: an unsaved detach or delete must not retire original media.
+@MainActor
+struct SpliceMembershipReader {
+    var liveGroupIDs: (ModelContext) throws -> Set<UUID> = { context in
+        let saved = ModelContext(context.container)
+        let persisted = try saved.fetch(FetchDescriptor<RecordingSession>()).compactMap(\.spliceGroupID)
+        let pending = try context.fetch(FetchDescriptor<RecordingSession>()).compactMap(\.spliceGroupID)
+        return Set(persisted + pending)
+    }
+    var heldGroupIDs: (Workspace) throws -> Set<UUID> = { workspace in
+        Set(try HoldingFolder(workspace: workspace).snapshotsForMembership().compactMap(\.spliceGroupID))
+    }
+}
 
 /// Every filesystem mutation of the transaction, including Markdown, uses this boundary.
 struct SpliceFileOperations {
+    /// Test seams model a stopped process rather than an ordinary operation failure. The store
+    /// and filesystem are reopened before recovery; no filesystem rollback runs for this signal.
+    struct Interruption: Error {}
+    enum Checkpoint: Equatable {
+        case storeSaved
+        case memberProcessed(UUID)
+    }
+    var checkpoint: (Checkpoint) throws -> Void = { _ in }
     var createDirectory: (URL, Bool) throws -> Void = {
         try FileManager.default.createDirectory(at: $0, withIntermediateDirectories: $1)
     }
@@ -20,8 +45,8 @@ struct SpliceManifest: Codable, Equatable {
     let title: String
     let createdAt: Date
     let duration: Double
-    let transcriptData: Data?
-    let retranscriptData: Data?
+    var transcriptData: Data?
+    var retranscriptData: Data?
     let hasScreenVideo: Bool
 
     init(session: RecordingSession) {
@@ -64,27 +89,63 @@ struct SpliceJournal: Codable {
     let results: [Result]
     let startedAt: Date
     var restoreMemberIDs: [UUID]? = nil
+    /// Written before retiring any rollback backups, so cleanup can be retried independently.
+    var rollbackCompleted: Bool? = nil
 }
 
-/// Prevents concurrent splices of a session or group across service instances.
+/// Reconciliation's caller has already authorized this workspace. The app supplies its long-lived
+/// coordinator; standalone service callers still use the same deletion implementation.
+struct ReconciliationWorkspace: WorkspaceServiceProtocol {
+    let workspace: Workspace
+    func currentWorkspace() async -> Workspace? { workspace }
+    func requireAuthorizedWorkspace() async throws(WorkspaceError) -> Workspace { workspace }
+}
+
+/// Shared exclusion for splice, restore and session mutations across service instances.
 @MainActor
+@Observable
 final class SpliceReservations {
     static let shared = SpliceReservations()
-    private var sessions: Set<UUID> = []
-    private var groups: Set<UUID> = []
+    /// Restore may hold its own reserved members. Only an active lease grants that permission.
+    struct Reservation: Equatable {
+        fileprivate let id = UUID()
+        let sessionIDs: Set<UUID>
+        let groupID: UUID
+    }
+    private var active: [UUID: Reservation] = [:]
 
-    func isReserved(sessionID: UUID, groupID: UUID) -> Bool {
-        sessions.contains(sessionID) || groups.contains(groupID)
+    var hasReservations: Bool { !active.isEmpty }
+
+    func isReserved(_ session: any TranscribableSession) -> Bool {
+        isReserved(sessionID: session.id, groupID: (session as? RecordingSession)?.spliceGroupID)
+    }
+
+    func isReserved(sessionID: UUID, groupID: UUID? = nil) -> Bool {
+        active.values.contains { $0.sessionIDs.contains(sessionID) || $0.groupID == groupID }
     }
 
     func reserve(sessionID: UUID, groupID: UUID) throws {
-        guard !isReserved(sessionID: sessionID, groupID: groupID) else { throw SpliceError.busy }
-        sessions.insert(sessionID)
-        groups.insert(groupID)
+        _ = try reserve(sessionIDs: [sessionID], groupID: groupID)
+    }
+
+    func reserve(sessionIDs: Set<UUID>, groupID: UUID) throws -> Reservation {
+        guard !active.values.contains(where: { $0.groupID == groupID || !$0.sessionIDs.isDisjoint(with: sessionIDs) }) else {
+            throw SpliceError.busy
+        }
+        let reservation = Reservation(sessionIDs: sessionIDs, groupID: groupID)
+        active[reservation.id] = reservation
+        return reservation
+    }
+
+    func permits(_ reservation: Reservation?, sessionID: UUID) -> Bool {
+        guard let reservation, active[reservation.id] == reservation else { return false }
+        return reservation.sessionIDs.contains(sessionID)
     }
 
     func release(sessionID: UUID, groupID: UUID) {
-        sessions.remove(sessionID)
-        groups.remove(groupID)
+        guard let reservation = active.values.first(where: { $0.groupID == groupID && $0.sessionIDs == [sessionID] }) else { return }
+        release(reservation)
     }
+
+    func release(_ reservation: Reservation) { active[reservation.id] = nil }
 }

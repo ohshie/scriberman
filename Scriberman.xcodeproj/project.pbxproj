@@ -392,6 +392,10 @@
 		795877134FEA4E23B1238E68 /* SpliceTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6B5F4F66528443C8259C499 /* SpliceTranscriptView.swift */; };
 		01D5D7E77F2E47A3A5A91D13 /* SpliceEditorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93D23C276D554CEF9BBC012B /* SpliceEditorTests.swift */; };
 		FF792FA93155491CA5BA2725 /* SpliceRestoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7916EC598D1F4C6DA223639E /* SpliceRestoreTests.swift */; };
+		ECC49BC343E94FCFA0C9D36F /* SpliceGroupLifetimeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BCDDE477E3245F096576C99 /* SpliceGroupLifetimeTests.swift */; };
+		A70000000000000000000001 /* SpliceReconciliationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70000000000000000000002 /* SpliceReconciliationTests.swift */; };
+		A80000000000000000000001 /* SpliceReservationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80000000000000000000002 /* SpliceReservationTests.swift */; };
+		A90000000000000000000001 /* SpliceSpeakerRename.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000002 /* SpliceSpeakerRename.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -790,6 +794,10 @@
 		B6B5F4F66528443C8259C499 /* SpliceTranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpliceTranscriptView.swift; sourceTree = "<group>"; };
 		93D23C276D554CEF9BBC012B /* SpliceEditorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpliceEditorTests.swift; sourceTree = "<group>"; };
 		7916EC598D1F4C6DA223639E /* SpliceRestoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpliceRestoreTests.swift; sourceTree = "<group>"; };
+		9BCDDE477E3245F096576C99 /* SpliceGroupLifetimeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpliceGroupLifetimeTests.swift; sourceTree = "<group>"; };
+		A70000000000000000000002 /* SpliceReconciliationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpliceReconciliationTests.swift; sourceTree = "<group>"; };
+		A80000000000000000000002 /* SpliceReservationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpliceReservationTests.swift; sourceTree = "<group>"; };
+		A90000000000000000000002 /* SpliceSpeakerRename.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpliceSpeakerRename.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -954,6 +962,9 @@
 				FE7D1E5C8F3850B4506BBA36 /* AudioTrimServiceTests.swift */,
 				F217C2FF84044EEA9A62399D /* SpliceServiceTests.swift */,
 				7916EC598D1F4C6DA223639E /* SpliceRestoreTests.swift */,
+				9BCDDE477E3245F096576C99 /* SpliceGroupLifetimeTests.swift */,
+				A70000000000000000000002 /* SpliceReconciliationTests.swift */,
+				A80000000000000000000002 /* SpliceReservationTests.swift */,
 				93D23C276D554CEF9BBC012B /* SpliceEditorTests.swift */,
 				58E915A568254101B1229E00 /* TranscriptRowTests.swift */,
 				55CC6D2AD3334083B03FAE55 /* TestTargetMembershipTests.swift */,
@@ -1348,6 +1359,7 @@
 				7732237A107EB96EA5FFD11B /* AudioTrimService.swift */,
 				43B43742018A47C09FAA693A /* SpliceService.swift */,
 				AC95FB8C724843ECB9AECA2E /* SpliceStorage.swift */,
+				A90000000000000000000002 /* SpliceSpeakerRename.swift */,
 				12ADF3D98C6E40EA8967E4F9 /* SplicePlan.swift */,
 			);
 			path = Trim;
@@ -1794,6 +1806,7 @@
 				2F539BBC434CFBFCF3584106 /* AudioTrimService.swift in Sources */,
 				2FA8746B9EE649E79F6A9DD7 /* SpliceService.swift in Sources */,
 				D504BE73FA644B1B97B71B5D /* SpliceStorage.swift in Sources */,
+				A90000000000000000000001 /* SpliceSpeakerRename.swift in Sources */,
 				28C9F173C4604CA3B5BB2B99 /* SplicePlan.swift in Sources */,
 				44ADED04585E9F8E56D01C89 /* TrimEditorViewModel.swift in Sources */,
 				10ED2A481E45453D8A91B834 /* SpliceEditorViewModel.swift in Sources */,
@@ -1940,6 +1953,9 @@
 				B72B82B2F929E58EEF71508F /* AudioTrimServiceTests.swift in Sources */,
 				80199C59E09D4F0DBD2C8F5E /* SpliceServiceTests.swift in Sources */,
 				FF792FA93155491CA5BA2725 /* SpliceRestoreTests.swift in Sources */,
+				ECC49BC343E94FCFA0C9D36F /* SpliceGroupLifetimeTests.swift in Sources */,
+				A70000000000000000000001 /* SpliceReconciliationTests.swift in Sources */,
+				A80000000000000000000001 /* SpliceReservationTests.swift in Sources */,
 				01D5D7E77F2E47A3A5A91D13 /* SpliceEditorTests.swift in Sources */,
 				712E8E5BDF5B4757A330E0B2 /* TranscriptRowTests.swift in Sources */,
 				17A6B2D8252449F28C67CD03 /* TestTargetMembershipTests.swift in Sources */,

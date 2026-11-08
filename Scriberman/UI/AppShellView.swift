@@ -491,6 +491,9 @@ struct AppShellView: View {
         switch result {
         case .deleted:
             break
+        case .busy:
+            selectedSession = item
+            storeFailureAlert = .deletionFailed(SpliceCopy.errorMessage(SpliceError.busy))
         case .saveFailed(let reason):
             selectedSession = item
             storeFailureAlert = .deletionFailed(reason)
@@ -536,8 +539,10 @@ struct AppShellView: View {
     /// Removes a held session for good, once the user has confirmed.
     private func removeNow(_ row: PendingDeletionsViewModel.Row) {
         Task {
-            if case .folderLeft(let folder) = await pendingDeletions.removeNow(row) {
-                storeFailureAlert = .filesLeft(folder.path)
+            switch await pendingDeletions.removeNow(row, context: modelContext) {
+            case .folderLeft(let folder): storeFailureAlert = .filesLeft(folder.path)
+            case .busy: storeFailureAlert = .deletionFailed(SpliceCopy.errorMessage(SpliceError.busy))
+            case .removed, .notHeld: break
             }
         }
     }
@@ -560,7 +565,7 @@ struct AppShellView: View {
     }
 
     private func restoreOriginal(of session: RecordingSession) async throws {
-        guard !isApplyingSessionEdit else { throw SpliceError.busy }
+        guard !isApplyingSessionEdit, !selectedGroupHasRunningTransformation else { throw SpliceError.busy }
         guard let workspace = appState.workspace, isSelectionInActiveWorkspace else { throw SpliceError.inactiveWorkspace }
         isRestoringOriginal = true
         defer {
@@ -742,13 +747,24 @@ struct AppShellView: View {
             isSpliceEditorOpen: spliceEditor != nil || isRestoringOriginal,
             isApplyingSplice: isApplyingSessionEdit,
             hasSpliceGroup: (selectedTranscribableSession as? RecordingSession)?.spliceGroupID != nil,
-            hasBusySpliceMember: selectedGroupHasBusyMember
+            hasBusySpliceMember: selectedGroupHasBusyMember,
+            isSessionReserved: selectedTranscribableSession.map { SpliceReservations.shared.isReserved($0) } ?? false,
+            isTransformationRunning: selectedGroupHasRunningTransformation
         )
     }
 
     private var selectedRecordingHasCutPoints: Bool {
         guard let session = selectedTranscribableSession as? RecordingSession else { return false }
         return spliceCutPointCache.hasCutPoint(session)
+    }
+
+    /// An AI prompt runs on the selected session or on another part of its splice group.
+    private var selectedGroupHasRunningTransformation: Bool {
+        guard let session = selectedTranscribableSession else { return false }
+        let runner = appState.aiTransformationRunner
+        if runner.isRunning(session.id) { return true }
+        guard let groupID = (session as? RecordingSession)?.spliceGroupID else { return false }
+        return recordingSessions.contains { $0.spliceGroupID == groupID && runner.isRunning($0.id) }
     }
 
     private var selectedGroupHasBusyMember: Bool {
@@ -781,6 +797,11 @@ struct AppShellView: View {
               case .recording(let session) = selectedSession else { return }
         guard let workspace = appState.workspace, isSelectionInActiveWorkspace else {
             spliceError = SpliceError.inactiveWorkspace
+            return
+        }
+        // A prompt can still start while the editor is open, through the extension API.
+        guard !selectedGroupHasRunningTransformation else {
+            spliceError = SpliceError.busy
             return
         }
         audioPlayerViewModel.stop()

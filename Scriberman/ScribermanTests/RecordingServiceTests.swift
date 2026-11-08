@@ -1308,11 +1308,13 @@ final class RecordingServiceTests {
             capturedAppName: nil, appProcessID: nil, title: "Tagged mid-capture"
         )
 
-        let context = ModelContext(container)
-        let tagService = TagService()
-        let session = try fetchRecordingSession(id: sessionID, from: context)
-        let work = try tagService.createTag(name: "Work", in: context)
-        _ = try tagService.assign(work, to: session, in: context)
+        try await MainActor.run {
+            let context = ModelContext(container)
+            let tagService = TagService()
+            let session = try #require(try RecordingSession.fetch(id: sessionID, in: context))
+            let work = try tagService.createTag(name: "Work", in: context)
+            _ = try tagService.assign(work, to: session, in: context)
+        }
 
         _ = await service.stopRecording()
 

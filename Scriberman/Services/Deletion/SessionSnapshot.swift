@@ -43,6 +43,13 @@ struct SessionSnapshot: Codable, Equatable {
         }
     }
 
+    var spliceGroupID: UUID? {
+        switch session {
+        case .recording(let record): record.spliceGroupID
+        case .imported: nil
+        }
+    }
+
     var title: String {
         switch session {
         case .recording(let record): record.title

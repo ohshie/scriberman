@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 @MainActor
 @Observable
 final class JobsViewModel {
+    private let spliceReservations: SpliceReservations
     enum SessionListItem: Identifiable, Hashable {
         case pending(PendingSession)
         case recording(RecordingSession)
@@ -119,8 +120,10 @@ final class JobsViewModel {
         markdownRenderer: MarkdownRenderer = MarkdownRenderer(),
         savePanelPresenter: @escaping @MainActor (_ suggestedName: String) async -> URL? = JobsViewModel.defaultSavePanelPresenter(suggestedName:),
         saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() },
-        sessionJobs: SessionJobs = SessionJobs()
+        sessionJobs: SessionJobs = SessionJobs(),
+        spliceReservations: SpliceReservations? = nil
     ) {
+        self.spliceReservations = spliceReservations ?? .shared
         self.workspaceService = workspaceService
         self.transcriptionService = transcriptionService
         self.retranscriptionService = retranscriptionService
@@ -391,6 +394,7 @@ final class JobsViewModel {
     }
 
     func transcribe(session: RecordingSession, context: ModelContext) {
+        guard !spliceReservations.isReserved(session) else { return }
         guard case .recorded = session.status else {
             return
         }
@@ -436,6 +440,7 @@ final class JobsViewModel {
     }
 
     func retry(session: RecordingSession, context: ModelContext) {
+        guard !spliceReservations.isReserved(session) else { return }
         session.status = .recorded
         session.errorMessage = nil
         try? context.save()
@@ -443,6 +448,7 @@ final class JobsViewModel {
 
     /// What a deletion did, for the view to report.
     enum DeletionResult: Equatable {
+        case busy
         /// The record is gone, and its folder is held or removed.
         case deleted
         /// Saving the store failed. The record and its folder are both where they were.
@@ -640,6 +646,7 @@ final class JobsViewModel {
     }
 
     func reprocess(session: any TranscribableSession, context: ModelContext) {
+        guard !spliceReservations.isReserved(session) else { return }
         guard session.mixdownURL != nil else {
             session.status = .error("No mixdown available for reprocessing")
             session.errorMessage = "No mixdown available for reprocessing"

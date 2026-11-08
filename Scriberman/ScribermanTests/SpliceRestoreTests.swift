@@ -37,6 +37,8 @@ struct SpliceRestoreTests {
         #expect(f.delays.count == 3)
         #expect(f.delays.allSatisfy { $0 == SessionDeletionCoordinator.holdDuration })
         #expect(!f.windowUndo.canUndo && !f.windowUndo.canRedo)
+        // Holding the other parts is one step of the restore, so none of them is announced.
+        #expect(f.announcements.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: f.group.path))
         #expect(try f.stagingFolders().isEmpty)
         #expect(f.deleteSaveCount == 3)
@@ -395,6 +397,7 @@ private final class RestoreFixture {
     var deleteSaveCount = 0
     var beforeDeletionSave: ((ModelContext, Int) throws -> Void)?
     var delays: [TimeInterval] = []
+    var announcements: [String] = []
     var expiryActions: [@MainActor () -> Void] = []
     let windowUndo = UndoManager.forTests()
     var group: URL { workspace.rootURL.appendingPathComponent("splice").appendingPathComponent(groupID.uuidString) }
@@ -406,7 +409,7 @@ private final class RestoreFixture {
             try beforeDeletionSave?(context, deleteSaveCount)
             try context.save()
         },
-        now: { [unowned self] in time }, announce: { _ in }, startAccess: { _ in false }, stopAccess: { _ in },
+        now: { [unowned self] in time }, announce: { [unowned self] in announcements.append($0) }, startAccess: { _ in false }, stopAccess: { _ in },
         scheduleExpiry: { [unowned self] delay, action in
             delays.append(delay)
             expiryActions.append(action)

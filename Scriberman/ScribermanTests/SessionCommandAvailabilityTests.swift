@@ -194,6 +194,26 @@ struct SessionCommandAvailabilityTests {
         #expect(row.availability.enabledCommands == row.enabled)
     }
 
+    @Test(arguments: [false, true])
+    func aRunningAIPromptDisablesSpliceAndRestoreOnly(isGroupMember: Bool) {
+        func availability(running: Bool) -> SessionCommandAvailability {
+            SessionCommandAvailability(
+                selection: .recording(.done, isTrimmed: false),
+                isRecordingRunning: false, isTranscriptShown: true, hasLoadedAudio: true,
+                hasFindTarget: true, isSelectionInActiveWorkspace: true,
+                hasSpliceCutPoint: true, hasSpliceGroup: isGroupMember,
+                isTransformationRunning: running
+            )
+        }
+        let idle = availability(running: false)
+        let running = availability(running: true)
+        #expect(idle.isEnabled(.splice))
+        #expect(idle.isEnabled(.restoreOriginal) == isGroupMember)
+        #expect(!running.isEnabled(.splice))
+        #expect(!running.isEnabled(.restoreOriginal))
+        #expect(running.enabledCommands == idle.enabledCommands.subtracting([.splice, .restoreOriginal]))
+    }
+
     @Test
     func noFocusedMainWindowDisablesEveryCommand() {
         let availability = SessionCommandAvailability.noMainWindow

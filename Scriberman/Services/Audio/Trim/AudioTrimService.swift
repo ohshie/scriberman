@@ -81,6 +81,7 @@ final class AudioTrimService {
     /// session is saved. A failure at any step puts the pre-trim files back and leaves the
     /// session's trim fields as they were.
     func trim(session: RecordingSession, end trimEnd: Double, context: ModelContext) async throws {
+        guard !SpliceReservations.shared.isReserved(session) else { throw SpliceError.busy }
         guard !session.isTrimmed else { throw AudioTrimError.alreadyTrimmed }
         guard let mixdownPath = session.mixdownURL, !mixdownPath.isEmpty else { throw AudioTrimError.missingMixdown }
         let mixdownURL = URL(fileURLWithPath: mixdownPath)
@@ -118,6 +119,7 @@ final class AudioTrimService {
         }
 
         // 2. Swap files, keeping the pre-trim versions as `-original` backups.
+        guard !SpliceReservations.shared.isReserved(session) else { throw SpliceError.busy }
         try replaceItem(mixdownURL, tempMixdownURL, originalMixdownURL.lastPathComponent)
         if let screenURL, let tempScreenURL, let originalScreenURL {
             do {
@@ -162,6 +164,7 @@ final class AudioTrimService {
     /// saved untrimmed, and only then are the trimmed files deleted. A failure at any step puts the
     /// trimmed files back and leaves the session marked trimmed, so restore can be retried.
     func restore(session: RecordingSession, context: ModelContext) async throws {
+        guard !SpliceReservations.shared.isReserved(session) else { throw SpliceError.busy }
         guard session.isTrimmed, let originalMixdownPath = session.originalMixdownURL else {
             throw AudioTrimError.notTrimmed
         }
