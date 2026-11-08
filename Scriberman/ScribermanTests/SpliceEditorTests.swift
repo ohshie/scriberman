@@ -162,7 +162,7 @@ struct SpliceEditorTests {
     @Test
     func commandAvailabilityRequiresCutPointsWorkspaceAndFinishedScreenMux() {
         func availability(cut: Bool = true, mux: Bool = false, workspace: Bool = true, status: RecordingStatus = .done) -> SessionCommandAvailability {
-            SessionCommandAvailability(selection: .recording(status, isTrimmed: false), isRecordingRunning: false,
+            SessionCommandAvailability(selection: .recording(status), isRecordingRunning: false,
                 isTranscriptShown: true, hasLoadedAudio: true, hasFindTarget: true,
                 isSelectionInActiveWorkspace: workspace, hasSpliceCutPoint: cut, hasPendingScreenMux: mux)
         }
@@ -186,7 +186,7 @@ struct SpliceEditorTests {
     @Test
     func applyingKeepsTheSelectionUntilTheOperationFinishes() {
         let availability = SessionCommandAvailability(
-            selection: .recording(.done, isTrimmed: false), isRecordingRunning: false,
+            selection: .recording(.done), isRecordingRunning: false,
             isTranscriptShown: true, hasLoadedAudio: true, hasFindTarget: true,
             isSelectionInActiveWorkspace: true, hasSpliceCutPoint: true,
             isSpliceEditorOpen: true, isApplyingSplice: true

@@ -359,7 +359,7 @@ struct SpliceRestoreTests {
     func restoreAvailabilityChecksTheWorkspaceAndEveryGroupMembersReadiness() {
         func availability(group: Bool = true, workspace: Bool = true, mux: Bool = false,
                           busy: Bool = false, status: RecordingStatus = .done) -> SessionCommandAvailability {
-            SessionCommandAvailability(selection: .recording(status, isTrimmed: false), isRecordingRunning: false,
+            SessionCommandAvailability(selection: .recording(status), isRecordingRunning: false,
                 isTranscriptShown: false, hasLoadedAudio: false, hasFindTarget: true, isSelectionInActiveWorkspace: workspace,
                 hasPendingScreenMux: mux, hasSpliceGroup: group, hasBusySpliceMember: busy)
         }

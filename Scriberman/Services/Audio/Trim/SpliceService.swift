@@ -385,6 +385,12 @@ final class SpliceService {
     /// Called only after the workspace has been authorized. A fresh context reads the durable
     /// transaction outcome, rather than any pending edits in the caller's context.
     func reconcile(workspace: Workspace, context: ModelContext) async {
+        await reconcileJournals(workspace: workspace, context: context)
+        migrateTrimmedSessions(workspace: workspace, context: context)
+        sweepUnusedGroups(workspace: workspace, context: context)
+    }
+
+    private func reconcileJournals(workspace: Workspace, context: ModelContext) async {
         let parent = workspace.rootURL.appendingPathComponent("splice", isDirectory: true)
         guard parent.resolvingSymlinksInPath().path == workspace.rootURL.resolvingSymlinksInPath()
             .appendingPathComponent("splice").path else { return }
@@ -418,7 +424,7 @@ final class SpliceService {
                       let result = journal.results.first(where: { $0.sessionID == target.id }) else {
                     throw SpliceError.stalePlan
                 }
-                let committed = target.spliceGroupID == (journal.operation == "splice" ? id : nil)
+                let committed = target.spliceGroupID == (journal.operation == "restore" ? nil : id)
                     && target.createdAt == result.createdAt && target.duration == result.duration
                 let before = target.spliceGroupID == journal.originalRecord.spliceGroupID
                     && target.createdAt == journal.originalRecord.createdAt && target.duration == journal.originalRecord.duration
@@ -443,14 +449,132 @@ final class SpliceService {
                 logger.error("Kept splice journal \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
         }
-        sweepUnusedGroups(workspace: workspace, context: context)
+    }
+
+    // MARK: - Trim migration
+
+    /// Turns every live trimmed recording of the workspace into a group of one. A stopped process
+    /// leaves a journal that the next reconciliation resolves before migrating again.
+    private func migrateTrimmedSessions(workspace: Workspace, context: ModelContext) {
+        let trimmed: [RecordingSession]
+        do { trimmed = try context.fetch(FetchDescriptor<RecordingSession>()).filter { $0.originalMixdownURL != nil } }
+        catch {
+            logger.error("Cannot read trimmed sessions: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        for session in trimmed {
+            do { try migrateTrim(of: session, workspace: workspace, context: context) }
+            catch is SpliceFileOperations.Interruption { return }
+            catch {
+                logger.error("Trim migration of \(session.id, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// Migrates one trimmed recording, such as one just recovered from Pending deletions, at its
+    /// current folder. Failures are logged and leave the session as it was.
+    func migrateTrimIfNeeded(_ session: RecordingSession, workspace: Workspace, context: ModelContext) {
+        guard session.originalMixdownURL != nil else { return }
+        do { try migrateTrim(of: session, workspace: workspace, context: context) }
+        catch {
+            logger.error("Trim migration of \(session.id, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// The backups move into a new group folder as its original files. The trimmed files, the
+    /// transcripts and `transcript.md` stay; the session's duration becomes the trim end.
+    private func migrateTrim(of session: RecordingSession, workspace: Workspace, context: ModelContext) throws {
+        guard let backupPath = session.originalMixdownURL, !session.isDeleted, session.modelContext === context else { return }
+        let folder = URL(fileURLWithPath: session.micAudioURL).deletingLastPathComponent()
+        guard isSessionFolder(folder, workspace: workspace) else { return }
+        guard session.spliceGroupID == nil else {
+            logger.error("Trim migration skipped \(session.id, privacy: .public): the session is already in a splice group.")
+            return
+        }
+        guard let trimEnd = session.trimEnd, trimEnd.isFinite, trimEnd > 0, trimEnd <= session.duration else {
+            logger.error("Trim migration skipped \(session.id, privacy: .public): the trim end is missing or invalid.")
+            return
+        }
+        // The folder may have been recovered from Pending deletions, so the backups are found by
+        // name in the session's current folder.
+        let audioBackup = folder.appendingPathComponent(URL(fileURLWithPath: backupPath).lastPathComponent)
+        let videoBackup = session.originalScreenVideoURL.map { folder.appendingPathComponent(URL(fileURLWithPath: $0).lastPathComponent) }
+        for backup in [audioBackup, videoBackup].compactMap({ $0 }) where !FileManager.default.isReadableFile(atPath: backup.path) {
+            logger.error("Trim migration skipped \(session.id, privacy: .public): \(backup.lastPathComponent, privacy: .public) is missing.")
+            return
+        }
+        guard !reservations.isReserved(sessionID: session.id) else {
+            logger.error("Trim migration skipped \(session.id, privacy: .public): the session is busy.")
+            return
+        }
+        let groupID = UUID()
+        let group = try Self.groupFolder(groupID, workspace: workspace)
+        let reservation = try reservations.reserve(sessionIDs: [session.id], groupID: groupID)
+        defer { reservations.release(reservation) }
+        if context.hasChanges { try save(context) }
+
+        let manifest = SpliceManifest(
+            originalSessionID: session.id, title: session.title, createdAt: session.createdAt, duration: session.duration,
+            transcriptData: session.originalTranscriptData, retranscriptData: session.originalRetranscriptData,
+            hasScreenVideo: videoBackup != nil
+        )
+        var moves = [SpliceJournal.Move(source: audioBackup, destination: group.appendingPathComponent("recording.m4a"))]
+        if let videoBackup { moves.append(.init(source: videoBackup, destination: group.appendingPathComponent("screen.mov"))) }
+        let markdown = transcriptMarkdownURL(for: session)
+        var journal = SpliceJournal(
+            groupID: groupID, createsGroup: true, originalRecord: RecordingSessionRecord(session), moves: moves,
+            newFolders: [], stagingFolder: workspace.rootURL.appendingPathComponent("_splice_" + UUID().uuidString, isDirectory: true),
+            markdownURL: markdown, previousMarkdown: exists(markdown) ? try Data(contentsOf: markdown) : nil,
+            results: [.init(sessionID: session.id, createdAt: session.createdAt, duration: trimEnd, title: session.title,
+                            transcriptData: session.transcriptData, retranscriptData: session.retranscriptData)],
+            startedAt: now()
+        )
+        journal.operation = "migrate"
+        let journalURL = group.appendingPathComponent(SpliceJournal.fileName)
+        var madeGroup = false
+        var modelsTouched = false
+        do {
+            try files.createDirectory(group, true)
+            madeGroup = true
+            try files.write(JSONEncoder().encode(journal), journalURL)
+            for move in moves { try files.move(move.source, move.destination) }
+            try files.write(JSONEncoder().encode(manifest), group.appendingPathComponent(SpliceManifest.fileName))
+            modelsTouched = true
+            session.duration = trimEnd
+            session.spliceGroupID = groupID
+            session.originalMixdownURL = nil
+            session.originalScreenVideoURL = nil
+            session.originalTranscriptData = nil
+            session.originalRetranscriptData = nil
+            session.trimEnd = nil
+            try save(context)
+            try files.checkpoint(.storeSaved)
+            do { try files.remove(journalURL) }
+            catch {
+                if error is SpliceFileOperations.Interruption { throw error }
+                logger.error("Trim migration committed; cleanup remains in journal: \(error.localizedDescription, privacy: .public)")
+            }
+        } catch {
+            if modelsTouched { context.rollback() }
+            if error is SpliceFileOperations.Interruption { throw error }
+            do {
+                if exists(journalURL) {
+                    try rollback(journal)
+                    try markRollbackCompleted(journal, at: journalURL)
+                }
+                if madeGroup { try removeIfPresent(group) }
+            } catch {
+                logger.error("Trim migration rollback failed; journal retained: \(error.localizedDescription, privacy: .public)")
+            }
+            throw error
+        }
     }
 
     private func validateJournal(_ journal: SpliceJournal, groupID: UUID, workspace: Workspace) throws {
         let original = URL(fileURLWithPath: journal.originalRecord.micAudioURL).deletingLastPathComponent()
         let staging = journal.stagingFolder.standardizedFileURL
-        let prefix = journal.operation == "splice" ? "_splice_" : "_restore_"
-        guard journal.formatVersion == 1, ["splice", "restore"].contains(journal.operation),
+        let prefix = journal.operation == "restore" ? "_restore_" : "_splice_"
+        guard journal.formatVersion == 1, ["splice", "restore", "migrate"].contains(journal.operation),
               journal.groupID == groupID, isSessionFolder(original, workspace: workspace),
               staging.deletingLastPathComponent().path == workspace.rootURL.standardizedFileURL.path,
               staging.lastPathComponent.hasPrefix(prefix),
@@ -461,7 +585,8 @@ final class SpliceService {
               journal.markdownURL.standardizedFileURL == original.appendingPathComponent("transcript.md").standardizedFileURL,
               !journal.results.isEmpty,
               journal.results.allSatisfy({ $0.duration.isFinite && $0.duration > 0 }),
-              journal.operation != "restore" || (!journal.createsGroup && journal.newFolders.isEmpty && journal.restoreMemberIDs != nil)
+              journal.operation != "restore" || (!journal.createsGroup && journal.newFolders.isEmpty && journal.restoreMemberIDs != nil),
+              journal.operation != "migrate" || (journal.createsGroup && journal.newFolders.isEmpty && journal.results.count == 1)
         else { throw SpliceError.inactiveWorkspace }
         let group = try Self.groupFolder(groupID, workspace: workspace)
         let folders = [original, staging, group] + journal.newFolders

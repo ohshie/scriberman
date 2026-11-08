@@ -56,26 +56,26 @@ struct SessionCommandAvailabilityTests {
         ),
         Row(
             name: "the session being recorded",
-            selection: .recording(.recording, isTrimmed: false),
+            selection: .recording(.recording),
             isRecordingRunning: true,
             enabled: [.importFile, .stopRecording, .find]
         ),
         Row(
             name: "recorded, not transcribed",
-            selection: .recording(.recorded, isTrimmed: false),
+            selection: .recording(.recorded),
             hasLoadedAudio: true,
             enabled: [.newSession, .importFile, .startRecording, .find, .playPause,
                       .transcribe, .reprocess, .tags, .delete]
         ),
         Row(
             name: "recording being transcribed",
-            selection: .recording(.transcribing, isTrimmed: false),
+            selection: .recording(.transcribing),
             hasLoadedAudio: true,
             enabled: [.newSession, .importFile, .startRecording, .find, .playPause, .tags, .delete]
         ),
         Row(
             name: "finished recording with transcript and audio",
-            selection: .recording(.done, isTrimmed: false),
+            selection: .recording(.done),
             isTranscriptShown: true,
             hasLoadedAudio: true,
             enabled: [.newSession, .importFile, .startRecording, .find, .playPause,
@@ -83,7 +83,7 @@ struct SessionCommandAvailabilityTests {
         ),
         Row(
             name: "finished recording while another recording runs",
-            selection: .recording(.done, isTrimmed: false),
+            selection: .recording(.done),
             isRecordingRunning: true,
             isTranscriptShown: true,
             hasLoadedAudio: true,
@@ -91,37 +91,29 @@ struct SessionCommandAvailabilityTests {
                       .reprocess, .copyTranscript, .export, .rawMarkdown, .tags, .transform, .splice, .delete]
         ),
         Row(
-            name: "finished, trimmed recording",
-            selection: .recording(.done, isTrimmed: true),
-            isTranscriptShown: true,
-            hasLoadedAudio: true,
-            enabled: [.newSession, .importFile, .startRecording, .find, .playPause,
-                      .reprocess, .copyTranscript, .export, .rawMarkdown, .tags, .transform, .restoreOriginal, .delete]
-        ),
-        Row(
             name: "finished recording, audio not loaded",
-            selection: .recording(.done, isTrimmed: false),
+            selection: .recording(.done),
             isTranscriptShown: true,
             enabled: [.newSession, .importFile, .startRecording, .find,
                       .copyTranscript, .export, .rawMarkdown, .tags, .transform, .splice, .delete]
         ),
         Row(
             name: "finished recording, transcript not shown",
-            selection: .recording(.done, isTrimmed: false),
+            selection: .recording(.done),
             hasLoadedAudio: true,
             enabled: [.newSession, .importFile, .startRecording, .find, .playPause,
                       .reprocess, .tags, .splice, .delete]
         ),
         Row(
             name: "failed recording",
-            selection: .recording(.error("failed"), isTrimmed: false),
+            selection: .recording(.error("failed")),
             hasLoadedAudio: true,
             enabled: [.newSession, .importFile, .startRecording, .find, .playPause,
                       .reprocess, .tags, .delete]
         ),
         Row(
             name: "recording being reprocessed",
-            selection: .recording(.retranscribing, isTrimmed: true),
+            selection: .recording(.retranscribing),
             isTranscriptShown: true,
             hasLoadedAudio: true,
             enabled: [.newSession, .importFile, .startRecording, .find, .playPause,
@@ -184,7 +176,7 @@ struct SessionCommandAvailabilityTests {
     func finishedSessionOfAnotherWorkspaceDisablesSpliceAndDelete() {
         let row = Row(
             name: "finished recording of another workspace",
-            selection: .recording(.done, isTrimmed: false),
+            selection: .recording(.done),
             isTranscriptShown: true,
             hasLoadedAudio: true,
             isSelectionInActiveWorkspace: false,
@@ -198,7 +190,7 @@ struct SessionCommandAvailabilityTests {
     func aRunningAIPromptDisablesSpliceAndRestoreOnly(isGroupMember: Bool) {
         func availability(running: Bool) -> SessionCommandAvailability {
             SessionCommandAvailability(
-                selection: .recording(.done, isTrimmed: false),
+                selection: .recording(.done),
                 isRecordingRunning: false, isTranscriptShown: true, hasLoadedAudio: true,
                 hasFindTarget: true, isSelectionInActiveWorkspace: true,
                 hasSpliceCutPoint: true, hasSpliceGroup: isGroupMember,
@@ -266,30 +258,23 @@ struct SessionMenuTests {
         Case(name: "pending", selection: .pending, enabled: []),
         Case(
             name: "recording",
-            selection: .recording(.recording, isTrimmed: false),
+            selection: .recording(.recording),
             isRecordingRunning: true,
             hasLoadedAudio: true,
             enabled: []
         ),
         Case(
             name: "recorded, not transcribed",
-            selection: .recording(.recorded, isTrimmed: false),
+            selection: .recording(.recorded),
             hasLoadedAudio: true,
             enabled: [.transcribe, .reprocess, .tags, .delete]
         ),
         Case(
             name: "done",
-            selection: .recording(.done, isTrimmed: false),
+            selection: .recording(.done),
             isTranscriptShown: true,
             hasLoadedAudio: true,
             enabled: [.reprocess, .copyTranscript, .export, .tags, .transform, .splice, .delete]
-        ),
-        Case(
-            name: "done and trimmed",
-            selection: .recording(.done, isTrimmed: true),
-            isTranscriptShown: true,
-            hasLoadedAudio: true,
-            enabled: [.reprocess, .copyTranscript, .export, .tags, .transform, .restoreOriginal, .delete]
         ),
         Case(
             name: "imported, converting",
@@ -305,7 +290,7 @@ struct SessionMenuTests {
         ),
         Case(
             name: "done, another workspace",
-            selection: .recording(.done, isTrimmed: false),
+            selection: .recording(.done),
             isTranscriptShown: true,
             hasLoadedAudio: true,
             isSelectionInActiveWorkspace: false,

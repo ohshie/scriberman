@@ -26,7 +26,7 @@ struct SessionCommandAvailability: Equatable {
     enum Selection: Equatable {
         case none
         case pending
-        case recording(RecordingStatus, isTrimmed: Bool)
+        case recording(RecordingStatus)
         case imported(RecordingStatus)
     }
 
@@ -74,7 +74,7 @@ struct SessionCommandAvailability: Equatable {
             status = nil
         case .pending:
             status = nil
-        case .recording(let recordingStatus, let isTrimmed):
+        case .recording(let recordingStatus):
             status = recordingStatus
             if recordingStatus != .recording {
                 commands.insert(.newSession)
@@ -83,11 +83,11 @@ struct SessionCommandAvailability: Equatable {
             if recordingStatus == .recorded {
                 commands.insert(.transcribe)
             }
-            if recordingStatus == .done, !isTrimmed, hasSpliceCutPoint,
+            if recordingStatus == .done, hasSpliceCutPoint,
                !hasPendingScreenMux, isSelectionInActiveWorkspace {
                 commands.insert(.splice)
             }
-            if isTrimmed || hasSpliceGroup, Self.isSettled(recordingStatus),
+            if hasSpliceGroup, Self.isSettled(recordingStatus),
                isSelectionInActiveWorkspace, !hasPendingScreenMux, !hasBusySpliceMember {
                 commands.insert(.restoreOriginal)
             }

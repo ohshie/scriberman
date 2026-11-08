@@ -573,14 +573,10 @@ struct AppShellView: View {
             showRequestedSession()
         }
         audioPlayerViewModel.stop()
-        if session.spliceGroupID != nil {
-            let result = try await SpliceService().restore(
-                session: session, workspace: workspace, context: modelContext, coordinator: appState.sessionDeletion
-            )
-            if !result.failedSessionIDs.isEmpty { restoreFailedMemberCount = result.failedSessionIDs.count }
-        } else {
-            try await AudioTrimService().restore(session: session, context: modelContext)
-        }
+        let result = try await SpliceService().restore(
+            session: session, workspace: workspace, context: modelContext, coordinator: appState.sessionDeletion
+        )
+        if !result.failedSessionIDs.isEmpty { restoreFailedMemberCount = result.failedSessionIDs.count }
         audioPlayerViewModel.reload()
     }
 
@@ -901,7 +897,7 @@ struct AppShellView: View {
         case .pending:
             return .pending
         case .recording(let session):
-            return .recording(session.status, isTrimmed: session.isTrimmed)
+            return .recording(session.status)
         case .imported(let session):
             return .imported(session.status)
         }

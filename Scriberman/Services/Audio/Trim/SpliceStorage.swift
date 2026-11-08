@@ -58,6 +58,17 @@ struct SpliceManifest: Codable, Equatable {
         retranscriptData = session.retranscriptData
         hasScreenVideo = session.screenVideoURL != nil
     }
+
+    init(originalSessionID: UUID, title: String, createdAt: Date, duration: Double,
+         transcriptData: Data?, retranscriptData: Data?, hasScreenVideo: Bool) {
+        self.originalSessionID = originalSessionID
+        self.title = title
+        self.createdAt = createdAt
+        self.duration = duration
+        self.transcriptData = transcriptData
+        self.retranscriptData = retranscriptData
+        self.hasScreenVideo = hasScreenVideo
+    }
 }
 
 /// Written in full before the first move. Backups and staged exports have distinct paths, so

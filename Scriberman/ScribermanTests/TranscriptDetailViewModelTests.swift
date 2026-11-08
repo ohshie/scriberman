@@ -1048,10 +1048,10 @@ struct TranscriptDetailViewModelTranscriptTests {
         #expect(try await store.fetchAllSnapshots().isEmpty)
     }
 
-    /// Spec scenario "Rename after trim": the space survives the trim and both renames, and the
-    /// second rename still teaches speaker memory.
+    /// The space survives dropping the tail and both renames, and the second rename still teaches
+    /// speaker memory.
     @Test
-    func testTrimThenRenameTwiceKeepsTeachingSpeakerMemory() async throws {
+    func testDroppedTailThenRenameTwiceKeepsTeachingSpeakerMemory() async throws {
         let store = try makeStore()
         let session = RecordingSession(duration: 10, micAudioURL: "/tmp/i/mic.wav", title: "I")
         let original = Transcript(
@@ -1069,7 +1069,7 @@ struct TranscriptDetailViewModelTranscriptTests {
             voiceprintSpace: VoiceprintSpace.current
         )
 
-        let trimmed = AudioTrimService.trimmedTranscript(original, end: 5)
+        let trimmed = SpliceService.slice(original, cuts: [5], originSessionID: session.id)[0]
         #expect(trimmed.voiceprintSpace == VoiceprintSpace.current)
         #expect(trimmed.segments.map(\.text) == ["one", "two"])
         session.transcript = trimmed

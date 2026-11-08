@@ -70,7 +70,7 @@ struct SpliceReservationTests {
                 _ = try await SpliceService(reservations: registry).restore(session: member, workspace: f.workspace,
                     context: f.context, coordinator: coordinator)
             }
-            let availability = SessionCommandAvailability(selection: .recording(.done, isTrimmed: false),
+            let availability = SessionCommandAvailability(selection: .recording(.done),
                 isRecordingRunning: false, isTranscriptShown: true, hasLoadedAudio: true, hasFindTarget: true,
                 isSelectionInActiveWorkspace: true, hasSpliceCutPoint: true, hasSpliceGroup: true,
                 isSessionReserved: registry.isReserved(member))

@@ -29,7 +29,7 @@ struct TranscriptDetailView: View {
     let onExport: () -> Void
     /// Asks the window to confirm and delete the session; `nil` while it cannot be deleted.
     let onDelete: (() -> Void)?
-    /// Restores a splice group or legacy trim; nil while restoration is unavailable.
+    /// Restores a splice group; nil while restoration is unavailable.
     let onRestoreOriginal: (() async throws -> Void)?
     let onOpenTransformation: ((UUID) -> Void)?
     /// Called when a title commit fails to save; the session keeps its previous title.
@@ -227,7 +227,7 @@ struct TranscriptDetailView: View {
             if let recording = session as? RecordingSession {
                 ToolbarSpacer(.fixed, placement: .primaryAction)
 
-                if recording.spliceGroupID != nil || recording.isTrimmed {
+                if recording.spliceGroupID != nil {
                     ToolbarItem(placement: .primaryAction) {
                         Button {
                             showingRestoreConfirmation = true

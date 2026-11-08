@@ -159,7 +159,7 @@ struct SpliceServiceTests {
         #expect(RecordingSessionRecord(f.session) == record)
     }
 
-    @Test(arguments: ["workspace", "status", "mux", "audio", "transcript", "corruptPass", "video", "manifest", "originalAudio", "originalVideo", "legacyTrim"])
+    @Test(arguments: ["workspace", "status", "mux", "audio", "audioPath", "transcript", "corruptPass", "video", "manifest", "originalAudio", "originalVideo", "legacyTrim"])
     func preconditionsRejectWithoutChanges(reason: String) async throws {
         let f = try SpliceFixture(video: true)
         var workspace = f.workspace
@@ -169,6 +169,7 @@ struct SpliceServiceTests {
         case "status": f.session.status = .recording; expected = .unfinishedRecording
         case "mux": f.session.screenMuxState = "pending"; expected = .unfinishedRecording
         case "audio": try FileManager.default.removeItem(at: f.audioURL); expected = .missingMixdown
+        case "audioPath": f.session.mixdownURL = nil; expected = .missingMixdown
         case "transcript": f.session.transcriptData = nil; f.session.retranscriptData = nil; expected = .missingTranscript
         case "corruptPass": f.session.transcriptData = Data([0]); expected = .missingTranscript
         case "video": try FileManager.default.removeItem(at: f.videoURL)

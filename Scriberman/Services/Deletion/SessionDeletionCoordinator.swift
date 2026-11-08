@@ -472,9 +472,11 @@ final class SessionDeletionCoordinator {
             return false
         }
 
+        var recovered: RecordingSession?
         switch snapshot.session {
         case .recording(let record):
             let restored = record.insertRecording(into: context)
+            recovered = restored
             restored.tags = tags
             if let groupID = restored.spliceGroupID {
                 do {
@@ -508,6 +510,8 @@ final class SessionDeletionCoordinator {
 
         removeSnapshot(from: folder)
         holds[sessionID] = nil
+        // A recording trimmed by an earlier build becomes a group of one now that its folder is back.
+        if let recovered { spliceService.migrateTrimIfNeeded(recovered, workspace: workspace, context: context) }
         return true
     }
 
