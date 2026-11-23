@@ -14,13 +14,48 @@ struct SplicePlanTests {
 
     @Test
     @MainActor
-    func cutPointsMergeBothPassesAndIgnoreMalformedTimes() {
+    func cutRangesCoverEveryBoundaryOfTheDisplayedPassAndIgnoreMalformedTimes() {
+        func ranges(_ first: Transcript, _ second: Transcript? = nil) -> [ClosedRange<Double>] {
+            SpliceService.cutRanges(transcript: first, retranscript: second, duration: 60)
+        }
         let first = pass([(0, 10), (20, 30), (40, 50), (.nan, 35), (32, 31), (34, .infinity)])
-        let second = pass([(8, 22)], source: .app)
-        #expect(SpliceService.cutPoints(transcript: first, retranscript: second, duration: 60) == [35])
-        #expect(SpliceService.cutPoints(transcript: pass([(0, 60)]), retranscript: nil, duration: 60).isEmpty)
-        #expect(SpliceService.cutPoints(transcript: pass([]), retranscript: nil, duration: 60).isEmpty)
-        #expect(SpliceService.cutPoints(transcript: pass([(0, 10), (10, 20)]), retranscript: nil, duration: 60).isEmpty)
+        #expect(ranges(first) == [10...20, 30...40])
+        #expect(SpliceService.cutPoints(transcript: first, retranscript: nil, duration: 60) == [15, 35])
+        #expect(ranges(first, pass([(8, 22), (25, 30)], source: .app)) == [22...25])
+        #expect(ranges(pass([(0, 60)])).isEmpty)
+        #expect(ranges(pass([])).isEmpty)
+        #expect(ranges(pass([(0, 10), (10, 20)])) == [10...10])
+        // Overlapping, inside a longer segment, and starting together.
+        #expect(ranges(pass([(0, 12), (10, 20)])) == [10...10])
+        #expect(ranges(pass([(0, 30), (5, 8), (9, 12), (40, 50)])) == [5...5, 9...9, 30...40])
+        #expect(ranges(pass([(0, 10), (20, 30), (20, 25)])) == [10...20])
+        #expect(ranges(pass([(0, 10), (0, 20), (60, 70)])).allSatisfy { $0.upperBound > 0 && $0.upperBound < 60 })
+    }
+
+    @Test
+    @MainActor
+    func validationAcceptsAnyTimeInsideACutRangeOnly() throws {
+        let displayed = pass([(0, 10), (20, 30), (28, 40)])
+        func validate(_ cuts: [Double]) throws {
+            try SpliceService.validate(
+                plan: SplicePlan(cuts: cuts, parts: (0...cuts.count).map { .init(title: "\($0)") },
+                                 transcriptFingerprint: SplicePlan.fingerprint(transcriptData: nil, retranscriptData: nil)),
+                duration: 60, transcript: displayed, retranscript: nil, transcriptData: nil, retranscriptData: nil)
+        }
+        for cuts in [[10], [11.3], [20], [12, 17, 28]] as [[Double]] { try validate(cuts) }
+        for cut in [9.9, 20.1, 29, 45] {
+            #expect(throws: SpliceError.invalidPlan) { try validate([cut]) }
+        }
+    }
+
+    @Test
+    @MainActor
+    func slicingEndsAnOverlappingSegmentWithItsPart() {
+        let parts = SpliceService.slice(pass([(0, 12), (10, 20)]), cuts: [10], originSessionID: UUID())
+        #expect(parts[0].segments.map(\.endTime) == [10])
+        #expect(parts[0].segments.map(\.text) == ["0"])
+        #expect(parts[1].segments.map(\.startTime) == [0])
+        #expect(parts[1].segments.map(\.endTime) == [10])
     }
 
     @Test
@@ -143,7 +178,7 @@ struct SpliceServiceTests {
         case "zero": plan.cuts[0] = 0
         case "end": plan.cuts[1] = 120
         case "outside": plan.cuts[0] = -1
-        case "notGap": plan.cuts[0] = 30
+        case "notGap": plan.cuts[0] = 55
         case "descending": plan.cuts.reverse()
         case "duplicate": plan.cuts[1] = 35
         case "count": plan.parts.removeLast()

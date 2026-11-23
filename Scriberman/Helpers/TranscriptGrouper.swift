@@ -11,7 +11,9 @@ enum TranscriptGrouper {
         guard transcript.segments.isEmpty == false else { return [] }
         let boundaries = cutPoints.filter(\.isFinite).sorted()
         func hasBoundary(from end: Float, to start: Float) -> Bool {
-            guard end.isFinite, start.isFinite, end <= start else { return false }
+            guard end.isFinite, start.isFinite else { return false }
+            // An overlapping segment can only be cut off where it starts.
+            let end = min(end, start)
             var lower = 0, upper = boundaries.count
             while lower < upper {
                 let middle = (lower + upper) / 2

@@ -20,7 +20,7 @@ struct SpliceTranscriptView: View {
                     TranscriptBlockView(
                         block: block,
                         isActive: player.currentTime >= Double(block.startTime) && player.currentTime < Double(block.endTime),
-                        onTap: { player.seek(to: Double(block.startTime)); player.play() },
+                        onTap: { editor.stopPlaying(); player.seek(to: Double(block.startTime)); player.play() },
                         speakerEditing: nil,
                         showsAudioSource: transcript.isSinglePassOfMixedAudio != true
                     )
@@ -40,7 +40,7 @@ struct SpliceTranscriptView: View {
     private func divider(at index: Int) -> some View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
-                Text(editor.parts[index].isDropped ? "Dropped" : editor.title(at: index)).lineLimit(1)
+                Text(editor.parts[index].isDropped ? "Dropped" : editor.title(at: index)).lineLimit(1).truncationMode(.middle)
                 // The part's length, as on its band.
                 let range = editor.range(at: index)
                 Text(TimeFormatter.displayFormat(seconds: Float(range.upperBound - range.lowerBound))).monospacedDigit()
@@ -56,7 +56,9 @@ struct SpliceTranscriptView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .background(color(index).opacity(0.12), in: Capsule())
-            Rectangle().fill(color(index).opacity(0.5)).frame(height: 1)
+            // The line takes what the name leaves; without this they share the width evenly.
+            .layoutPriority(1)
+            Rectangle().fill(color(index).opacity(0.5)).frame(minWidth: 20).frame(height: 1)
         }
         .foregroundStyle(color(index))
         .padding(.top, 6)
@@ -65,7 +67,7 @@ struct SpliceTranscriptView: View {
     private func color(_ index: Int) -> Color { editor.parts[index].isDropped ? .gray : SplicePartBand.color(index) }
     private func gapPoint(from earlier: TranscriptBlock, to later: TranscriptBlock) -> Double? {
         editor.cutPoints.first { point in
-            point >= Double(earlier.endTime) && point <= Double(later.startTime) && !editor.cuts.contains { $0.time == point }
+            point >= Double(min(earlier.endTime, later.startTime)) && point <= Double(later.startTime) && !editor.cuts.contains { $0.time == point }
         }
     }
 }

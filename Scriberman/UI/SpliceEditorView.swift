@@ -12,6 +12,8 @@ struct SpliceEditorView: View {
     @State private var hoveredMarker: UUID?
     @State private var draggedMarker: UUID?
     @State private var draggedStart = 0.0
+    /// How far the pointer had moved when the drag began, so the cut does not jump by that much.
+    @State private var draggedOffset = 0.0
     @State private var dragOffTimeline = false
 
     var body: some View {
@@ -27,6 +29,12 @@ struct SpliceEditorView: View {
         .padding(.horizontal, 20)
         .padding(.bottom, 12)
         .disabled(editor.isApplying)
+        .onChange(of: player.currentTime) { _, time in
+            guard let end = editor.haltTime(at: time) else { return }
+            player.pause()
+            player.seek(to: end, exactly: true)
+        }
+        .onChange(of: player.isPlaying) { _, playing in if !playing { editor.stopPlaying() } }
         .task(id: audioURL) {
             do { peaks = try await AudioSampleReader().peaks(from: audioURL) }
             catch { peaks = [] }
@@ -83,8 +91,8 @@ struct SpliceEditorView: View {
                 }
                 ForEach(editor.cuts) { cut in
                     Rectangle().fill(.orange)
-                        .frame(width: 1.5, height: 91)
-                        .offset(x: x(cut.time, width: width), y: 20)
+                        .frame(width: 1.5, height: 77)
+                        .offset(x: x(cut.time, width: width) - 0.75, y: 20)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                     marker(cut, width: width)
@@ -116,11 +124,11 @@ struct SpliceEditorView: View {
         .contentShape(Rectangle())
         .onContinuousHover { phase in
             switch phase {
-            case .active(let location): editor.hover(at: seconds(location.x, width: width))
+            case .active(let location): editor.hover(at: seconds(location.x, width: width), tolerance: tolerance(width))
             case .ended: editor.hover(at: nil)
             }
         }
-        .gesture(SpatialTapGesture().onEnded { editor.addCut(near: seconds($0.location.x, width: width)) })
+        .gesture(SpatialTapGesture().onEnded { editor.addCut(near: seconds($0.location.x, width: width), tolerance: tolerance(width)) })
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Add cut")
         .accessibilityValue(editor.hoveredCutPoint.map(time) ?? "")
@@ -156,7 +164,10 @@ struct SpliceEditorView: View {
         }
         .frame(height: 60)
         .contentShape(Rectangle())
-        .gesture(DragGesture(minimumDistance: 0).onChanged { player.seek(to: seconds($0.location.x, width: width)) })
+        .gesture(DragGesture(minimumDistance: 0).onChanged {
+            editor.stopPlaying()
+            player.seek(to: seconds($0.location.x, width: width))
+        })
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Recording")
         .accessibilityValue(time(player.currentTime))
@@ -205,15 +216,18 @@ struct SpliceEditorView: View {
                 .foregroundStyle(.white)
                 .background(.orange, in: Circle())
                 .contentShape(Circle())
-                .gesture(DragGesture(minimumDistance: 2)
+                // Global, because the marker moves with the drag: in its own space every move would
+                // change the translation and the cut would jump back and forth.
+                .gesture(DragGesture(minimumDistance: 6, coordinateSpace: .global)
                     .onChanged { value in
                         if draggedMarker == nil {
                             draggedMarker = cut.id
                             draggedStart = cut.time
+                            draggedOffset = value.translation.width
                             editor.beginMovingCut(cut.id)
                         }
                         dragOffTimeline = abs(value.translation.height) > 60
-                        editor.previewMove(near: draggedStart + seconds(value.translation.width, width: width, clamp: false))
+                        editor.previewMove(near: draggedStart + seconds(value.translation.width - draggedOffset, width: width, clamp: false), tolerance: tolerance(width))
                     }
                     .onEnded { _ in
                         editor.endMovingCut(remove: dragOffTimeline)
@@ -249,8 +263,15 @@ struct SpliceEditorView: View {
                     let range = editor.range(at: index)
                     let width = max(0, geometry.size.width - Double(editor.parts.count - 1) * 2) * (range.upperBound - range.lowerBound) / max(editor.duration, 1)
                     SplicePartBand(editor: editor, partID: part.id, index: index, width: width) {
-                        player.seek(to: range.lowerBound)
-                        player.play()
+                        if editor.playingPartID == part.id, player.isPlaying {
+                            editor.stopPlaying()
+                            player.pause()
+                            player.seek(to: range.lowerBound, exactly: true)
+                        } else {
+                            player.seek(to: range.lowerBound, exactly: true)
+                            player.play()
+                            editor.startPlaying(part.id)
+                        }
                     }
                     .frame(width: width)
                 }
@@ -259,6 +280,8 @@ struct SpliceEditorView: View {
         .frame(height: 44)
     }
 
+    /// How near a segment edge the pointer sticks to it.
+    private func tolerance(_ width: Double) -> Double { seconds(6, width: width) }
     private func time(_ seconds: Double) -> String { TimeFormatter.displayFormat(seconds: Float(seconds)) }
     private func x(_ time: Double, width: Double) -> Double { max(0, min(width, time / max(editor.duration, 1) * width)) }
     private func seconds(_ x: Double, width: Double, clamp: Bool = true) -> Double {
@@ -291,37 +314,31 @@ struct SplicePartBand: View {
     private var color: Color { dropped ? .gray : Self.color(index) }
     static func color(_ index: Int) -> Color { [.purple, .teal, .orange, .pink][index % 4] }
 
+    private var isPlaying: Bool { editor.playingPartID == partID }
+    /// Too narrow for a row: the name gets the full width, with the buttons and length below it.
+    private var isStacked: Bool { width > 60 && width <= 135 }
+
     var body: some View {
-        HStack(spacing: 5) {
-            if width > 35 {
-                Button(action: onPlay) { Image(systemName: "play.fill").font(.system(size: 9)) }
-                    .accessibilityLabel("Play part")
-            }
-            if width > 135 {
+        Group {
+            if isStacked {
                 VStack(alignment: .leading, spacing: 2) {
-                    if dropped { Text("Dropped").font(.caption.weight(.semibold)) }
-                    else {
-                        TextField("", text: $name)
-                            .textFieldStyle(.plain)
-                            .font(.caption.weight(.semibold))
-                            .focused($isEditing)
-                            .accessibilityLabel("Part name")
-                            .onSubmit { commitName(); isEditing = false }
-                            .onChange(of: isEditing) { _, focused in if !focused { commitName() } }
+                    nameView
+                    HStack(spacing: 4) {
+                        playButton
+                        if width > 85 || !showsDropToggle { lengthText }
+                        Spacer(minLength: 0)
+                        if showsDropToggle { dropToggle }
                     }
-                    Text(TimeFormatter.displayFormat(seconds: Float(length)))
-                        .font(.system(size: 10).monospacedDigit())
-                        .foregroundStyle(.secondary)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if width > 50 {
-                Button { editor.toggleDropped(partID) } label: {
-                    Image(systemName: dropped ? "plus.circle" : "minus.circle")
+            } else {
+                HStack(spacing: 5) {
+                    if width > 35 { playButton }
+                    if width > 135 {
+                        VStack(alignment: .leading, spacing: 2) { nameView; lengthText }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if width > 50 { dropToggle.opacity(showsDropToggle ? 1 : 0) }
                 }
-                .help(dropped ? "Keep this part" : "Drop this part")
-                .accessibilityLabel(dropped ? "Keep this part" : "Drop this part")
-                .opacity(dropped || isHovering ? 1 : 0)
             }
         }
         .buttonStyle(.plain)
@@ -338,6 +355,50 @@ struct SplicePartBand: View {
         .accessibilityLabel(dropped ? "Dropped" : editor.title(at: index))
         .accessibilityValue(SpliceCopy.length(length))
         .accessibilityAction(named: dropped ? "Keep this part" : "Drop this part") { editor.toggleDropped(partID) }
+    }
+
+    private var showsDropToggle: Bool { dropped || isHovering }
+
+    private var playButton: some View {
+        Button(action: onPlay) { Image(systemName: isPlaying ? "stop.fill" : "play.fill").font(.system(size: 9)) }
+            .accessibilityLabel(isPlaying ? "Stop part" : "Play part")
+    }
+
+    @ViewBuilder private var nameView: some View {
+        if dropped { Text("Dropped").font(.caption.weight(.semibold)).lineLimit(1) }
+        else {
+            TextField("", text: $name)
+                .textFieldStyle(.plain)
+                // A text field cannot truncate in the middle, so a label shows the name until it is edited.
+                .foregroundStyle(isEditing ? AnyShapeStyle(color) : AnyShapeStyle(.clear))
+                .focused($isEditing)
+                .accessibilityLabel("Part name")
+                .onSubmit { commitName(); isEditing = false }
+                .onChange(of: isEditing) { _, focused in if !focused { commitName() } }
+                .overlay(alignment: .leading) {
+                    if !isEditing {
+                        Text(name).lineLimit(1).truncationMode(.middle)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .font(.caption.weight(.semibold))
+        }
+    }
+
+    private var lengthText: some View {
+        Text(TimeFormatter.displayFormat(seconds: Float(length)))
+            .font(.system(size: 10).monospacedDigit())
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+    }
+
+    private var dropToggle: some View {
+        Button { editor.toggleDropped(partID) } label: {
+            Image(systemName: dropped ? "plus.circle" : "minus.circle")
+        }
+        .help(dropped ? "Keep this part" : "Drop this part")
+        .accessibilityLabel(dropped ? "Keep this part" : "Drop this part")
     }
 
     private var length: Double { let range = editor.range(at: index); return range.upperBound - range.lowerBound }

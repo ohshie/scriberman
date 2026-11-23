@@ -21,24 +21,64 @@ struct SpliceEditorTests {
     }
 
     @Test
-    func hoverAndAddSnapToTheNearestFreePoint() {
+    func hoverAndAddTakeAnyTimeInASilenceAndStickToSegmentEdges() {
         let e = editor()
         #expect(e.cutPoints == [15, 35, 55])
         #expect(!e.canApply)
-        e.hover(at: 31)
-        #expect(e.hoveredCutPoint == 35)
-        e.addCut(near: 31)
-        #expect(e.cuts.map(\.time) == [35])
-        #expect(e.nearestFreePoint(to: 35) == 15)
-        e.addCut(near: 55)
-        e.addCut(near: 15)
-        #expect(e.cuts.map(\.time) == [15, 35, 55])
-        #expect(e.nearestFreePoint(to: 40) == nil)
-        e.addCut(near: 40)
-        #expect(e.cuts.count == 3)
+        e.hover(at: 33.3)
+        #expect(e.hoveredCutPoint == 33.3)
+        e.hover(at: 31, tolerance: 0.5)
+        #expect(e.hoveredCutPoint == 31)
+        e.hover(at: 31, tolerance: 2)
+        #expect(e.hoveredCutPoint == 30)
+        // Inside speech the nearest edge is offered.
+        e.hover(at: 27)
+        #expect(e.hoveredCutPoint == 30)
+        e.addCut(near: 33.3)
+        #expect(e.cuts.map(\.time) == [33.3])
+        // A second cut in the same silence keeps its distance.
+        e.addCut(near: 33.3)
+        #expect(e.cuts.count == 2)
+        #expect(abs(e.cuts[1].time - e.cuts[0].time) >= SpliceEditorViewModel.minimumPartLength - 1e-9)
         #expect(e.nearestFreePoint(to: .nan) == nil)
         e.hover(at: nil)
         #expect(e.hoveredCutPoint == nil)
+    }
+
+    @Test
+    func touchingAndOverlappingSegmentsOfferTheirBoundary() {
+        let segments = [(0, 10), (10, 22), (20, 30)].map {
+            TranscriptSegment(speakerId: "A", text: "x", startTime: Float($0.0), endTime: Float($0.1))
+        }
+        let pass = Transcript(fullText: "", segments: segments, speakers: [])
+        let e = SpliceEditorViewModel(title: "T", duration: 30, transcript: pass, retranscript: nil, fingerprint: Data())
+        #expect(e.cutPoints == [10, 20])
+        e.addCut(near: 12)
+        e.addCut(near: 12)
+        e.addCut(near: 12)
+        #expect(e.cuts.map(\.time) == [10, 20])
+        #expect(e.nearestFreePoint(to: 15) == nil)
+        #expect(TranscriptGrouper.makeBlocks(from: pass, breaksAt: e.cutPoints).map(\.startTime) == [0, 10, 20])
+    }
+
+    @Test
+    func playingAPartHaltsAtItsEndAndAJumpAwayForgetsIt() {
+        let e = editor()
+        e.addCut(near: 35)
+        #expect(e.haltTime(at: 40) == nil)
+        let id = e.parts[0].id
+        e.startPlaying(id)
+        #expect(e.haltTime(at: 34.9) == nil)
+        #expect(e.playingPartID == id)
+        #expect(e.haltTime(at: 35.04) == 35)
+        #expect(e.playingPartID == nil)
+        e.startPlaying(id)
+        #expect(e.haltTime(at: 60) == nil)
+        #expect(e.playingPartID == nil)
+        e.startPlaying(e.parts[1].id)
+        e.removeCut(e.cuts[0].id)
+        #expect(e.haltTime(at: 50) == nil)
+        #expect(e.playingPartID == nil)
     }
 
     @Test
@@ -79,7 +119,7 @@ struct SpliceEditorTests {
         let cut = try #require(e.cuts.first)
         e.beginMovingCut(cut.id)
         e.previewMove(near: 30)
-        e.previewMove(near: 54)
+        e.previewMove(near: 35)
         #expect(e.cuts.map(\.time) == [35, 55])
         #expect(!e.canApply)
         e.endMovingCut()
@@ -318,10 +358,12 @@ struct SpliceEditorRenderTests {
         }
         let transcript = Transcript(fullText: Transcript.fullText(joining: segments), segments: segments,
                                     speakers: [TranscriptSpeaker(id: "A", label: "Alice", colorHex: "112233")])
-        for (width, dark) in [(800.0, false), (800, true), (460, false)] {
-            let editor = SpliceEditorViewModel(title: "Planning", duration: 120, transcript: transcript, retranscript: nil, fingerprint: Data())
+        for (width, dark, title) in [(800.0, false, "Planning"), (800, true, "Planning"), (460, false, "Planning"), (535, true, "Session 18 Oct 2026 at 16:09")] {
+            let editor = SpliceEditorViewModel(title: title, duration: 120, transcript: transcript, retranscript: nil, fingerprint: Data())
             editor.addCut(near: 27); editor.addCut(near: 65)
-            editor.toggleDropped(editor.parts[1].id)
+            if title == "Planning" { editor.toggleDropped(editor.parts[1].id) }
+            else { editor.moveCut(editor.cuts[0].id, near: 35); editor.moveCut(editor.cuts[1].id, near: 56) }
+            if title != "Planning" { editor.startPlaying(editor.parts[1].id) }
             let player = AudioPlayerViewModel()
             player.duration = 120; player.currentTime = 18
             let content = VStack(alignment: .leading) {
