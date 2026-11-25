@@ -51,16 +51,20 @@ extension Notification.Name {
     static let appAudioCaptureAccessDenied = Notification.Name("appAudioCaptureAccessDenied")
 }
 
+/// Kept microphone samples, their rate, and the adjusted and raw host time of the first one.
+typealias MicBufferHandler = @Sendable ([Float], Double, HostNanoseconds, HostNanoseconds) -> Void
+
 protocol MicCaptureControlling: AnyObject {
     func startCapture(
         deviceID: AudioDeviceID?,
         targetFormat: AVAudioFormat,
         micFileURL: URL,
         micStreamer: AudioFileStreamer,
+        gate: CaptureAudioGate,
         voiceProcessingEnabled: Bool,
         applyVoiceProcessing: @Sendable (AVAudioInputNode, Bool) -> Void,
         onFirstHostTime: @escaping @Sendable (HostNanoseconds) -> Void,
-        onBuffer: @escaping @Sendable ([Float], Double, HostNanoseconds?) -> Void
+        onBuffer: @escaping MicBufferHandler
     ) throws
     func stopCapture()
     func retargetDevice(_ deviceID: AudioDeviceID?) throws
@@ -69,17 +73,17 @@ protocol MicCaptureControlling: AnyObject {
 
 final class AVAudioEngineMicCaptureController: MicCaptureControlling {
     private var audioEngine: AVAudioEngine?
-    private var converter: AVAudioConverter?
 
     func startCapture(
         deviceID: AudioDeviceID?,
         targetFormat: AVAudioFormat,
         micFileURL _: URL,
         micStreamer: AudioFileStreamer,
+        gate: CaptureAudioGate,
         voiceProcessingEnabled: Bool,
         applyVoiceProcessing: @Sendable (AVAudioInputNode, Bool) -> Void,
         onFirstHostTime: @escaping @Sendable (HostNanoseconds) -> Void,
-        onBuffer: @escaping @Sendable ([Float], Double, HostNanoseconds?) -> Void
+        onBuffer: @escaping MicBufferHandler
     ) throws {
         stopCapture()
 
@@ -97,42 +101,21 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
             throw RecordingError.failedToStart("Invalid audio input format.")
         }
 
-        if inputFormat.sampleRate == targetFormat.sampleRate,
-           inputFormat.channelCount == targetFormat.channelCount,
-           inputFormat.commonFormat == targetFormat.commonFormat,
-           inputFormat.isInterleaved == targetFormat.isInterleaved {
-            converter = nil
-        } else {
-            guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
-                throw RecordingError.failedToStart("Unable to create mic audio converter.")
-            }
-            self.converter = converter
-        }
+        let tap = try EngineMicTap(
+            inputFormat: inputFormat,
+            targetFormat: targetFormat,
+            micStreamer: micStreamer,
+            gate: gate,
+            onFirstHostTime: onFirstHostTime,
+            onBuffer: onBuffer
+        )
 
         inputNode.removeTap(onBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, audioTime in
-            guard let self else {
+            guard self != nil else {
                 return
             }
-
-            let hostTime = Self.hostTime(of: audioTime)
-            if let hostTime {
-                onFirstHostTime(hostTime)
-            }
-
-            let outputBuffer: AVAudioPCMBuffer
-            if let converter = self.converter {
-                guard let converted = self.convert(buffer, with: converter, to: targetFormat) else {
-                    return
-                }
-                outputBuffer = converted
-            } else {
-                outputBuffer = buffer
-            }
-
-            micStreamer.write(buffer: outputBuffer, hostTimeNanos: hostTime?.nanoseconds)
-            let samples = AudioDownmixer.toMono(buffer: outputBuffer)
-            onBuffer(samples, outputBuffer.format.sampleRate, hostTime)
+            tap.process(buffer, hostTime: Self.hostTime(of: audioTime))
         }
 
         engine.prepare()
@@ -149,7 +132,6 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioEngine = nil
-        converter = nil
     }
 
     func retargetDevice(_ deviceID: AudioDeviceID?) throws {
@@ -185,39 +167,58 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
             throw RecordingError.failedToStart("Unable to route microphone input.")
         }
     }
+}
 
-    private func convert(
-        _ buffer: AVAudioPCMBuffer,
-        with converter: AVAudioConverter,
-        to targetFormat: AVAudioFormat
-    ) -> AVAudioPCMBuffer? {
-        let ratio = targetFormat.sampleRate / buffer.format.sampleRate
-        let estimatedCapacity = max(AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 32, 1)
-        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: estimatedCapacity) else {
-            return nil
-        }
+/// What an engine microphone tap does with its buffers: convert, cut paused audio, write and
+/// deliver. Separate from the engine so it can be fed without hardware.
+///
+/// @unchecked Sendable: used only from the tap's callback thread.
+final class EngineMicTap: @unchecked Sendable {
+    private let conversion: GatedAudioConversion
+    private let micStreamer: AudioFileStreamer
+    private let gate: CaptureAudioGate
+    private let onFirstHostTime: @Sendable (HostNanoseconds) -> Void
+    private let onBuffer: MicBufferHandler
 
-        // Feed the input buffer exactly once per convert() call; returning it again when the
-        // converter requests more input duplicates frames and time-stretches the channel.
-        var didProvideInput = false
-        var error: NSError?
-        let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
-            if didProvideInput {
-                outStatus.pointee = .noDataNow
-                return nil
+    init(
+        inputFormat: AVAudioFormat,
+        targetFormat: AVAudioFormat,
+        micStreamer: AudioFileStreamer,
+        gate: CaptureAudioGate,
+        onFirstHostTime: @escaping @Sendable (HostNanoseconds) -> Void,
+        onBuffer: @escaping MicBufferHandler
+    ) throws {
+        var converter: AVAudioConverter?
+        let matchesTarget = inputFormat.sampleRate == targetFormat.sampleRate
+            && inputFormat.channelCount == targetFormat.channelCount
+            && inputFormat.commonFormat == targetFormat.commonFormat
+            && inputFormat.isInterleaved == targetFormat.isInterleaved
+        if !matchesTarget {
+            converter = AVAudioConverter(from: inputFormat, to: targetFormat)
+            guard converter != nil else {
+                throw RecordingError.failedToStart("Unable to create mic audio converter.")
             }
-            didProvideInput = true
-            outStatus.pointee = .haveData
-            return buffer
         }
+        self.conversion = GatedAudioConversion(converter: converter, targetFormat: targetFormat, gate: gate)
+        self.micStreamer = micStreamer
+        self.gate = gate
+        self.onFirstHostTime = onFirstHostTime
+        self.onBuffer = onBuffer
+    }
 
-        switch status {
-        case .haveData, .inputRanDry, .endOfStream:
-            return outputBuffer.frameLength > 0 ? outputBuffer : nil
-        case .error:
-            return nil
-        @unknown default:
-            return nil
+    func process(_ buffer: AVAudioPCMBuffer, hostTime: HostNanoseconds?) {
+        gate.recordArrival()
+        if let hostTime, let firstKept = gate.firstKeptHostTime(
+            startingAt: hostTime,
+            frameCount: Int(buffer.frameLength),
+            sampleRate: buffer.format.sampleRate
+        ) {
+            onFirstHostTime(firstKept)
+        }
+        for audio in conversion.process(buffer, hostTime: hostTime) {
+            micStreamer.write(buffer: audio.buffer, hostTimeNanos: audio.hostTime?.nanoseconds)
+            guard let adjusted = audio.hostTime, let raw = audio.rawHostTime else { continue }
+            onBuffer(AudioDownmixer.toMono(buffer: audio.buffer), audio.buffer.format.sampleRate, adjusted, raw)
         }
     }
 }
@@ -232,6 +233,7 @@ actor RecordingService: RecordingServiceProtocol {
     typealias ScreenCaptureSessionFactory = @Sendable () -> any ScreenCaptureSessionControlling
     typealias DefaultTagApplier = @Sendable (RecordingSession, ModelContext) throws -> Void
     typealias DateProvider = @Sendable () -> Date
+    typealias HostTimeProvider = @Sendable () -> HostNanoseconds
 
     /// A capture session about to start its ScreenCaptureKit stream.
     enum CaptureSessionStart: Sendable {
@@ -261,6 +263,8 @@ actor RecordingService: RecordingServiceProtocol {
     private let voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)?
     private let applyDefaultTag: DefaultTagApplier
     private let now: DateProvider
+    /// The host clock that pauses and the stop are timed by.
+    private let hostNow: HostTimeProvider
     private let startCaptureSession: CaptureSessionStarter
 
     private var audioEngine: AVAudioEngine?
@@ -268,6 +272,8 @@ actor RecordingService: RecordingServiceProtocol {
     private var audioRecorder: AVAudioRecorder?
     private var recordingStartedAt: Date?
     private var recordingCreatedAt: Date?
+    /// When the stop closed the pause clock.
+    private var recordingStopRequestedAt: Date?
     private var recordingIdentifier: String?
     /// Chosen once at start and held until the recording is finalized.
     private var recordingFolderURL: URL?
@@ -315,6 +321,9 @@ actor RecordingService: RecordingServiceProtocol {
 #endif
     private var micRecoveryRetryTask: Task<Void, Never>?
     private var liveAudioClock: LiveCaptureClock?
+    /// The recording's pause clock and source gates. Made once per recording, kept by every
+    /// capture restart.
+    private var captureGates = RecordingCaptureGates()
     private var liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation?
     // nonisolated(unsafe): written once in init on the actor; read only in deinit; lifetime matches the actor
     nonisolated(unsafe) private var engineConfigurationObserver: NSObjectProtocol?
@@ -364,6 +373,7 @@ actor RecordingService: RecordingServiceProtocol {
         voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)? = nil,
         defaultTagApplier: @escaping DefaultTagApplier = { try TagService().applyDefaultTag(to: $0, in: $1) },
         now: @escaping DateProvider = { Date() },
+        hostNow: @escaping HostTimeProvider = { HostNanoseconds(machTicks: mach_absolute_time()) },
         captureSessionStarter: @escaping CaptureSessionStarter = { start in
             switch start {
             case .unified(let session):
@@ -386,6 +396,7 @@ actor RecordingService: RecordingServiceProtocol {
         self.voiceProcessingPropertySetter = voiceProcessingPropertySetter
         self.applyDefaultTag = defaultTagApplier
         self.now = now
+        self.hostNow = hostNow
         self.startCaptureSession = captureSessionStarter
         self.hardwareListenerQueue = DispatchQueue(label: "Scriberman.RecordingService.HardwareListeners")
         let mixdownCoordinator = mixdownCoordinator ?? RecordingMixdownCoordinator(
@@ -476,6 +487,7 @@ actor RecordingService: RecordingServiceProtocol {
         activeAppProcessID: pid_t? = nil,
         liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation? = nil
     ) {
+        self.captureGates = RecordingCaptureGates()
         self.liveAudioContinuation = liveAudioContinuation
         self.activeAppFileURL = activeAppFileURL
         self.activeAppProcessID = activeAppProcessID
@@ -608,6 +620,11 @@ actor RecordingService: RecordingServiceProtocol {
     }
 
     func audioLevels() async -> (mic: Float, app: Float) {
+        guard !isPaused() else {
+            audioLevelValue = 0
+            return (0, 0)
+        }
+
         if let unifiedCaptureSession {
             let mic = unifiedCaptureSession.micAudioLevel
             let app = unifiedCaptureSession.appAudioLevel
@@ -689,7 +706,8 @@ actor RecordingService: RecordingServiceProtocol {
                     onAppFirstHostTime: { [weak self, clock = liveAudioClock] hostTime in
                         clock?.observe(hostTime)
                         Task { [weak self] in await self?.captureAppStartHostTimeIfNeeded(hostTime) }
-                    }
+                    },
+                    gates: captureGates
                 )
                 unified.onStreamStopped = { [weak self] error in
                     Task { [weak self] in await self?.reportCaptureStreamFailure(error) }
@@ -716,7 +734,8 @@ actor RecordingService: RecordingServiceProtocol {
                         await self?.captureAppStartHostTimeIfNeeded(hostTime)
                     }
                 },
-                liveAudioContinuation: liveAudioContinuation
+                liveAudioContinuation: liveAudioContinuation,
+                gate: captureGates.app
             )
             appSession.onStreamStopped = { [weak self] error in
                 Task { [weak self] in await self?.reportCaptureStreamFailure(error) }
@@ -851,7 +870,8 @@ actor RecordingService: RecordingServiceProtocol {
                 clock?.observe(hostTime)
                 Task { [weak self] in await self?.captureAppStartHostTimeIfNeeded(hostTime) }
             },
-            reusingStreamers: reused
+            reusingStreamers: reused,
+            gates: captureGates
         )
         replacement.onStreamStopped = { [weak self] error in
             Task { [weak self] in await self?.reportCaptureStreamFailure(error) }
@@ -909,6 +929,7 @@ actor RecordingService: RecordingServiceProtocol {
             throw RecordingError.alreadyRecording
         }
         lifecycleState = .starting
+        self.captureGates = RecordingCaptureGates()
         self.liveAudioClock = liveAudioClock
         self.liveAudioContinuation = liveAudioContinuation
         var didStart = false
@@ -978,7 +999,8 @@ actor RecordingService: RecordingServiceProtocol {
                 appFileURL: appFileURL,
                 appProcessID: appProcessID
             )
-            self.recordingStartedAt = Date()
+            self.recordingStartedAt = now()
+            self.recordingStopRequestedAt = nil
             self.recordingCreatedAt = recordingCreatedAt
             self.recordingIdentifier = recordingIdentifier
             self.lifecycleState = .recording
@@ -1062,6 +1084,10 @@ actor RecordingService: RecordingServiceProtocol {
         case .stopping(let teardown):
             return await teardown.value
         case .recording:
+            // Closed before the first suspension, so nothing captured from here on is admitted
+            // while the capture queues drain.
+            recordingStopRequestedAt = now()
+            captureGates.clock.close(at: hostNow)
             let teardown = Task { await self.finalizeActiveRecording() }
             lifecycleState = .stopping(teardown)
             return await teardown.value
@@ -1126,9 +1152,9 @@ actor RecordingService: RecordingServiceProtocol {
         liveAudioContinuation?.finish()
         liveAudioContinuation = nil
 
-        let startedAt = recordingStartedAt ?? recordingCreatedAt ?? Date()
-        let stoppedAt = Date()
-        let duration = max(0, stoppedAt.timeIntervalSince(startedAt))
+        let stoppedAt = now()
+        let startedAt = recordingStartedAt ?? recordingCreatedAt ?? stoppedAt
+        let duration = savedDuration(from: startedAt, to: stoppedAt)
 
         guard recordingIdentifier != nil, let recordingFolderURL, let sessionID = currentSessionID else {
             await cleanupRecordingState()
@@ -1262,6 +1288,48 @@ actor RecordingService: RecordingServiceProtocol {
         }
     }
 
+    /// Wall time minus pauses. A recording with pauses ends when its clock closed, so that
+    /// teardown does not count as recorded time after a pause it stopped in.
+    private func savedDuration(from startedAt: Date, to stoppedAt: Date) -> TimeInterval {
+        let timeline = captureGates.clock.timeline
+        guard timeline.hasPauses else {
+            return max(0, stoppedAt.timeIntervalSince(startedAt))
+        }
+        let wall = (recordingStopRequestedAt ?? stoppedAt).timeIntervalSince(startedAt)
+        return max(0, wall - timeline.pausedSeconds(until: hostNow()))
+    }
+
+    // MARK: - Pause and resume
+
+    /// Pauses the active recording. Capture streams stay open and what they deliver is discarded.
+    /// True when the recording is paused, including when it already was.
+    ///
+    /// The `AVAudioRecorder` fallback has no buffers to discard, so it is refused.
+    func pauseRecording() -> Bool {
+        guard isRecordingValue, audioRecorder == nil else { return false }
+        captureGates.clock.pause(at: hostNow)
+        return true
+    }
+
+    /// Ends the pause. Assumes the capture sources are alive. True when the recording is running,
+    /// including when it was not paused.
+    func resumeRecording() -> Bool {
+        guard isRecordingValue else { return false }
+        captureGates.clock.resume(at: hostNow)
+        return true
+    }
+
+    /// True while a recording is paused. `isRecording()` stays true.
+    func isPaused() -> Bool {
+        isRecordingValue && captureGates.clock.isPaused
+    }
+
+    /// Raw buffers each source has delivered during this recording, paused ones included. `app` is
+    /// nil when app audio is not captured.
+    func captureArrivalCounts() -> (mic: Int64, app: Int64?) {
+        (captureGates.mic.arrivalCount, appAudioURL == nil ? nil : captureGates.app.arrivalCount)
+    }
+
     func consumePendingError() async -> RecordingError? {
         defer { pendingError = nil }
         return pendingError
@@ -1326,6 +1394,7 @@ actor RecordingService: RecordingServiceProtocol {
         }
         appAudioURL = nil
         recordingStartedAt = nil
+        recordingStopRequestedAt = nil
         recordingCreatedAt = nil
         recordingIdentifier = nil
         recordingFolderURL = nil
@@ -1485,6 +1554,7 @@ actor RecordingService: RecordingServiceProtocol {
             targetFormat: micTargetFormat,
             micFileURL: micFileURL,
             micStreamer: micStreamer,
+            gate: captureGates.mic,
             voiceProcessingEnabled: vpEnabled,
             applyVoiceProcessing: { [weak self] inputNode, enabled in
                 self?.applyVoiceProcessingIfNeeded(to: inputNode, enabled: enabled)
@@ -1495,8 +1565,14 @@ actor RecordingService: RecordingServiceProtocol {
                     await self?.captureMicStartHostTimeIfNeeded(hostTime)
                 }
             },
-            onBuffer: { samples, sampleRate, hostTime in
-                liveContinuation?.yield(LiveAudioChunk(samples: samples, source: .mic, sampleRate: sampleRate, hostTime: hostTime))
+            onBuffer: { samples, sampleRate, hostTime, rawHostTime in
+                liveContinuation?.yield(LiveAudioChunk(
+                    samples: samples,
+                    source: .mic,
+                    sampleRate: sampleRate,
+                    hostTime: hostTime,
+                    rawHostTime: rawHostTime
+                ))
             }
         )
         self.audioRecorder = nil

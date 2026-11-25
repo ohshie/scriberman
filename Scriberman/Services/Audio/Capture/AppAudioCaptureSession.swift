@@ -7,7 +7,7 @@ import ScreenCaptureKit
 final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendable {
     private let fileURL: URL
     private let processID: pid_t
-    private let outputHandler: AppAudioStreamOutputHandler
+    let outputHandler: AppAudioStreamOutputHandler
     private let sampleQueue = DispatchQueue(label: "com.scriberman.app-audio.stream")
     private let notificationCenter: NotificationCenter
     private let logger = Logger(subsystem: "Scriberman", category: "AppAudioCaptureSession")
@@ -60,12 +60,18 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Senda
         processID: pid_t,
         onFirstBufferHostTime: (@Sendable (HostNanoseconds) -> Void)? = nil,
         liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation? = nil,
-        notificationCenter: NotificationCenter = .default
+        notificationCenter: NotificationCenter = .default,
+        streamer: AudioFileStreamer = AudioFileStreamer(label: "app"),
+        gate: CaptureAudioGate = CaptureAudioGate()
     ) {
         self.fileURL = fileURL
         self.processID = processID
         self.notificationCenter = notificationCenter
-        self.outputHandler = AppAudioStreamOutputHandler(liveAudioContinuation: liveAudioContinuation)
+        self.outputHandler = AppAudioStreamOutputHandler(
+            liveAudioContinuation: liveAudioContinuation,
+            streamer: streamer,
+            gate: gate
+        )
         outputHandler.onFirstBufferHostTime = onFirstBufferHostTime
         super.init()
     }

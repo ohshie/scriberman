@@ -5,7 +5,25 @@ struct LiveAudioChunk: Sendable {
     let samples: [Float]
     let source: AudioSource
     let sampleRate: Double
+    /// Capture time without pauses. Positions the chunk in the recording.
     let hostTime: HostNanoseconds?
+    /// Capture time as the hardware reported it. Comparable with the current host time.
+    let rawHostTime: HostNanoseconds?
+
+    /// `rawHostTime` defaults to `hostTime`, which is right for audio with no pause before it.
+    init(
+        samples: [Float],
+        source: AudioSource,
+        sampleRate: Double,
+        hostTime: HostNanoseconds?,
+        rawHostTime: HostNanoseconds? = nil
+    ) {
+        self.samples = samples
+        self.source = source
+        self.sampleRate = sampleRate
+        self.hostTime = hostTime
+        self.rawHostTime = rawHostTime ?? hostTime
+    }
 }
 
 /// The streams and their only consumers belong to one recording attempt.
@@ -77,7 +95,7 @@ struct LiveAudioQueueMonitor {
     }
 
     mutating func observe(_ chunk: LiveAudioChunk, now: HostNanoseconds = HostNanoseconds(machTicks: mach_absolute_time())) {
-        guard let hostTime = chunk.hostTime else { return }
+        guard let hostTime = chunk.rawHostTime else { return }
         let seconds = max(0, now.seconds(since: hostTime))
         if seconds > Self.warningThresholdSeconds {
             if delayedSources.insert(chunk.source).inserted { report(chunk.source, true, seconds) }

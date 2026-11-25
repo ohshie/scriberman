@@ -14,8 +14,8 @@ import ScreenCaptureKit
 final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendable {
     private let appFileURL: URL
     private let processID: pid_t
-    private let appHandler: AppAudioStreamOutputHandler
-    private let micHandler: MicStreamOutputHandler
+    let appHandler: AppAudioStreamOutputHandler
+    let micHandler: MicStreamOutputHandler
     private let appQueue = DispatchQueue(label: "com.scriberman.unified.app")
     private let micQueue = DispatchQueue(label: "com.scriberman.unified.mic")
     private let notificationCenter: NotificationCenter
@@ -76,7 +76,8 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
         onMicFirstHostTime: (@Sendable (HostNanoseconds) -> Void)? = nil,
         onAppFirstHostTime: (@Sendable (HostNanoseconds) -> Void)? = nil,
         notificationCenter: NotificationCenter = .default,
-        reusingStreamers: (mic: AudioFileStreamer, app: AudioFileStreamer)? = nil
+        reusingStreamers: (mic: AudioFileStreamer, app: AudioFileStreamer)? = nil,
+        gates: RecordingCaptureGates = RecordingCaptureGates()
     ) {
         self.appFileURL = appFileURL
         self.processID = processID
@@ -85,11 +86,13 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
         self.notificationCenter = notificationCenter
         self.appHandler = AppAudioStreamOutputHandler(
             liveAudioContinuation: liveAudioContinuation,
-            streamer: reusingStreamers?.app ?? AudioFileStreamer(label: "app")
+            streamer: reusingStreamers?.app ?? AudioFileStreamer(label: "app"),
+            gate: gates.app
         )
         self.micHandler = MicStreamOutputHandler(
             liveAudioContinuation: liveAudioContinuation,
-            streamer: reusingStreamers?.mic ?? AudioFileStreamer(label: "mic")
+            streamer: reusingStreamers?.mic ?? AudioFileStreamer(label: "mic"),
+            gate: gates.mic
         )
         self.appHandler.onFirstBufferHostTime = onAppFirstHostTime
         self.micHandler.onFirstBufferHostTime = onMicFirstHostTime

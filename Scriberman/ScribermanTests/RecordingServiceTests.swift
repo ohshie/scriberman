@@ -36,7 +36,7 @@ final class RecordingServiceTests {
         await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
         let emit = try #require(fixture.micController.onBuffer)
         let time = HostNanoseconds(nanoseconds: 2_000_000_000)
-        emit([1, 2], 48_000, time)
+        emit([1, 2], 48_000, time, time)
         _ = await fixture.service.stopRecording()
         var iterator = audio.stream.makeAsyncIterator()
         let chunk = try #require(await iterator.next())
@@ -2186,7 +2186,7 @@ private final class MockMicCaptureController: MicCaptureControlling, @unchecked 
     var startCaptureError: Error?
     var startCaptureErrors: [Error] = []
     private(set) var startCaptureCalls: [StartCall] = []
-    var onBuffer: (@Sendable ([Float], Double, HostNanoseconds?) -> Void)?
+    var onBuffer: MicBufferHandler?
     private(set) var stopCaptureCallCount = 0
     var isRunning = false
 
@@ -2195,10 +2195,11 @@ private final class MockMicCaptureController: MicCaptureControlling, @unchecked 
         targetFormat: AVAudioFormat,
         micFileURL _: URL,
         micStreamer _: AudioFileStreamer,
+        gate _: CaptureAudioGate,
         voiceProcessingEnabled _: Bool,
         applyVoiceProcessing _: @Sendable (AVAudioInputNode, Bool) -> Void,
         onFirstHostTime _: @escaping @Sendable (HostNanoseconds) -> Void,
-        onBuffer: @escaping @Sendable ([Float], Double, HostNanoseconds?) -> Void
+        onBuffer: @escaping MicBufferHandler
     ) throws {
         if !startCaptureErrors.isEmpty {
             throw startCaptureErrors.removeFirst()
