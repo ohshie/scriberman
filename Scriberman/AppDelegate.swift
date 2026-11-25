@@ -4,6 +4,8 @@ import SwiftData
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
+    static let mainWindowSceneID = "main"
+    var openMainWindow: (() -> Void)?
     weak var appState: AppState?
     var modelContext: ModelContext?
     /// Floating "Stop this recording?" panel for idle recordings.
@@ -74,9 +76,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        attachWindowDelegateIfNeeded()
         syncStatusItemVisibilityFromSettings()
         ensureMainWindowVisibleIfNeeded()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showMainWindow()
+        return false
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -117,14 +123,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     func showMainWindow() {
-        guard let window = resolveMainWindow() else {
-            logger.info("showMainWindow no window resolved")
-            return
-        }
-
         let changed = NSApp.setActivationPolicy(.regular)
         NSApp.unhide(nil)
         NSApp.activate()
+        if mainWindow?.isVisible != true {
+            openMainWindow?()
+        }
+        guard let window = resolveMainWindow() else {
+            return
+        }
         if window.isMiniaturized {
             window.deminiaturize(nil)
         }
@@ -170,30 +177,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
     }
 
-    private func attachWindowDelegateIfNeeded() {
-        guard let window = resolveMainWindow() else {
-            return
-        }
-
-        guard mainWindow !== window || window.delegate !== self else {
-            return
-        }
-
+    func registerMainWindow(_ window: NSWindow) {
+        window.tabbingMode = .disallowed
         window.delegate = self
         mainWindow = window
     }
 
     private func resolveMainWindow() -> NSWindow? {
-        if let mainWindow {
-            return mainWindow
-        }
-
-        if let candidate = NSApp.mainWindow ?? NSApp.keyWindow ?? NSApp.windows.first {
-            mainWindow = candidate
-            return candidate
-        }
-
-        return nil
+        mainWindow
     }
 
     private func ensureMainWindowVisibleIfNeeded() {

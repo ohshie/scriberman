@@ -43,6 +43,8 @@ final class ExtensionAPIFixture {
     }
     let aiService = MockAIProviderService()
     let sessionJobs = SessionJobs()
+    var spliceReservations: SpliceReservations?
+    var transformationContext: ModelContext?
     lazy var container = try! ModelContainer(
         for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
         configurations: ModelConfiguration(isStoredInMemoryOnly: true)
@@ -50,7 +52,8 @@ final class ExtensionAPIFixture {
     lazy var runner = AITransformationRunner(
         aiProviderService: aiService,
         promptStore: AIPromptStore(defaults: defaults),
-        sessionJobs: sessionJobs
+        sessionJobs: sessionJobs,
+        spliceReservations: spliceReservations
     )
 
     lazy var store = ExtensionAPIPairingStore(defaults: defaults, keychain: keychain)
@@ -77,8 +80,9 @@ final class ExtensionAPIFixture {
             makeStagingDirectory: { [unowned self] root in
                 try makeStagingDirectory?(root) ?? ExtensionAPIStagedUpload.makeUniqueDirectory(in: root)
             },
-            modelContext: container.mainContext,
-            transformationRunner: runner
+            modelContext: transformationContext ?? container.mainContext,
+            transformationRunner: runner,
+            spliceReservations: spliceReservations
         )
         handler.pairingPresenter = presenter
         return handler

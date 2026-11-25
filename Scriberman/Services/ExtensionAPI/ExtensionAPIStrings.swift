@@ -86,6 +86,7 @@ extension ExtensionAPIErrorCode {
         case .noTranscript: "The session has no transcript yet."
         case .aiNotConfigured: "No AI provider is set up in Scriberman."
         case .transformationRunning: "An AI prompt is already running on this session."
+        case .sessionBusy: SpliceCopy.errorMessage(SpliceError.busy)
         case .notAudio: "The uploaded file is not an audio file that Scriberman can import."
         case .invalidFileName: "The file name of the upload is not valid."
         case .importNotRecorded: "The file was received, but the import could not be recorded."

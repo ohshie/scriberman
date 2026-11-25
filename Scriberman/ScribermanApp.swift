@@ -122,8 +122,8 @@ struct ScribermanApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        Window("Scriberman", id: AppDelegate.mainWindowSceneID) {
+            MainWindowContent(appDelegate: appDelegate)
                 .environment(appState)
                 .environment(appState.aiProviderService)
                 .task {
@@ -154,6 +154,7 @@ struct ScribermanApp: App {
             SidebarCommands()
             RawMarkdownCommands()
             FileCommands()
+            SpliceUndoCommands()
             SessionCommands(appState: appState)
             FindCommands()
             ControlsCommands()
@@ -168,10 +169,29 @@ struct ScribermanApp: App {
                 .environment(appState)
                 .environment(appState.aiProviderService)
         }
-        // Settings is its own scene and does not inherit the WindowGroup's container. Without this
+        // Settings is its own scene and does not inherit the main window's container. Without this
         // every `@Query` and `@Environment(\.modelContext)` inside Settings resolves to a throwaway
         // context: reads return nothing and writes go nowhere.
         .modelContainer(modelContainer)
+    }
+}
+
+private struct MainWindowContent: View {
+    @Environment(\.openWindow) private var openWindow
+    let appDelegate: AppDelegate
+
+    var body: some View {
+        ContentView()
+            .background {
+                WindowReader { window in
+                    if let window {
+                        appDelegate.registerMainWindow(window)
+                    }
+                }
+            }
+            .onAppear {
+                appDelegate.openMainWindow = { openWindow(id: AppDelegate.mainWindowSceneID) }
+            }
     }
 }
 

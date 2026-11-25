@@ -370,7 +370,7 @@ final class RecordingPipelineDeletionTests {
         let restored = try #require(try storedRecording())
         #expect(restored.status == .recorded)
         let availability = SessionCommandAvailability(
-            selection: .recording(restored.status, isTrimmed: false),
+            selection: .recording(restored.status),
             isRecordingRunning: false,
             isTranscriptShown: false,
             hasLoadedAudio: false,

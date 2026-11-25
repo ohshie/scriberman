@@ -25,6 +25,10 @@ struct SessionSnapshotTests {
         defer { try? FileManager.default.removeItem(at: folder) }
         let session = RecordingSession(duration: 12, micAudioURL: folder.appendingPathComponent("mic.wav").path, title: "A")
         context.insert(session)
+        session.spliceGroupID = UUID()
+        var transcript = Transcript(fullText: "Hello", segments: [], speakers: [])
+        transcript.spliceOriginSessionID = UUID()
+        session.transcript = transcript
         session.transcriptSegments = [
             RecordingTranscriptSegment(speakerId: "S1", text: "Hello", startTime: 0, endTime: 1, audioSource: .app)
         ]
@@ -35,6 +39,30 @@ struct SessionSnapshotTests {
 
         #expect(try SessionSnapshot.read(from: folder) == snapshot)
         #expect(SessionSnapshot.exists(in: folder))
+    }
+
+    @Test
+    func spliceMembershipAndOriginSurviveRecordReinsertionAndOldRecordsDecode() throws {
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let session = RecordingSession(duration: 12, micAudioURL: folder.appendingPathComponent("mic.wav").path, title: "Part")
+        session.spliceGroupID = UUID()
+        var transcript = Transcript(fullText: "Part", segments: [], speakers: [])
+        transcript.spliceOriginSessionID = UUID()
+        session.transcript = transcript
+        let record = RecordingSessionRecord(session)
+        let bytes = try JSONEncoder().encode(record)
+        let decoded = try JSONDecoder().decode(RecordingSessionRecord.self, from: bytes)
+        let restored = decoded.insertRecording(into: context)
+        #expect(restored.spliceGroupID == session.spliceGroupID)
+        #expect(restored.transcript?.spliceOriginSessionID == transcript.spliceOriginSessionID)
+
+        var legacy = try #require(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        legacy.removeValue(forKey: "spliceGroupID")
+        let oldRecord = try JSONDecoder().decode(RecordingSessionRecord.self, from: JSONSerialization.data(withJSONObject: legacy))
+        #expect(oldRecord.spliceGroupID == nil)
+        var oldPass = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(transcript)) as? [String: Any])
+        oldPass.removeValue(forKey: "spliceOriginSessionID")
+        #expect(try JSONDecoder().decode(Transcript.self, from: JSONSerialization.data(withJSONObject: oldPass)).spliceOriginSessionID == nil)
     }
 
     @Test

@@ -7,6 +7,19 @@ import Foundation
 /// moved here whole, with its snapshot inside. Moving keeps the files on the same volume, so
 /// holding and releasing are renames.
 struct HoldingFolder: Equatable {
+    enum MembershipError: LocalizedError {
+        case invalidHeldFolder(URL)
+        case snapshotIDMismatch(URL)
+        case unreadableSnapshot(URL, String)
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidHeldFolder(let url): "Cannot establish membership of held folder: \(url.path)"
+            case .snapshotIDMismatch(let url): "Snapshot ID does not match its held folder: \(url.path)"
+            case .unreadableSnapshot(let url, let reason): "Cannot read held snapshot at \(url.path): \(reason)"
+            }
+        }
+    }
     enum HoldingError: LocalizedError {
         case notASessionFolder(URL)
         case originalPathOccupied(URL)
@@ -73,6 +86,37 @@ struct HoldingFolder: Equatable {
                   snapshot.sessionID == sessionID else {
                 return nil
             }
+            return snapshot
+        }
+    }
+
+    /// Cleanup must account for every held folder. The UI's best-effort reader intentionally
+    /// skips damaged snapshots, which cannot establish that shared original media is unused.
+    func snapshotsForMembership() throws -> [SessionSnapshot] {
+        let expected = workspace.rootURL.resolvingSymlinksInPath().appendingPathComponent(Self.name, isDirectory: true)
+        guard url.resolvingSymlinksInPath().path == expected.path else {
+            throw HoldingError.outsideHoldingFolder(url)
+        }
+        let entries: [URL]
+        do {
+            entries = try FileManager.default.contentsOfDirectory(
+                at: url, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey]
+            )
+        } catch {
+            let error = error as NSError
+            if error.domain == NSCocoaErrorDomain,
+               [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(error.code) { return [] }
+            throw error
+        }
+        return try entries.compactMap { folder in
+            let values = try folder.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            guard values.isSymbolicLink != true else { throw MembershipError.invalidHeldFolder(folder) }
+            guard values.isDirectory == true else { return nil }
+            guard let id = UUID(uuidString: folder.lastPathComponent) else { throw MembershipError.invalidHeldFolder(folder) }
+            let snapshot: SessionSnapshot
+            do { snapshot = try SessionSnapshot.read(from: folder) }
+            catch { throw MembershipError.unreadableSnapshot(SessionSnapshot.url(in: folder), error.localizedDescription) }
+            guard snapshot.sessionID == id else { throw MembershipError.snapshotIDMismatch(folder) }
             return snapshot
         }
     }

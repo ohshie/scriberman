@@ -29,16 +29,20 @@ enum RecordingFileLayout {
         in workspace: Workspace,
         createdAt: Date,
         timeZone: TimeZone = .current,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        createDirectory: ((URL, Bool) throws -> Void)? = nil
     ) throws -> URL {
-        try fileManager.createDirectory(at: workspace.recordingsURL, withIntermediateDirectories: true)
+        let create = createDirectory ?? { url, intermediates in
+            try fileManager.createDirectory(at: url, withIntermediateDirectories: intermediates)
+        }
+        try create(workspace.recordingsURL, true)
         let baseName = folderName(createdAt: createdAt, timeZone: timeZone)
         var lastError: Error?
         for suffix in 1...maximumFolderSuffix {
             let name = suffix == 1 ? baseName : "\(baseName) \(suffix)"
             let folderURL = workspace.recordingsURL.appendingPathComponent(name, isDirectory: true)
             do {
-                try fileManager.createDirectory(at: folderURL, withIntermediateDirectories: false)
+                try create(folderURL, false)
                 return folderURL
             } catch CocoaError.fileWriteFileExists {
                 lastError = CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: folderURL.path])

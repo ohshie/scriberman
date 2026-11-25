@@ -476,7 +476,7 @@ struct RecordingStatusTests {
     }
 
     /// The detail toolbar groups Copy and Export, Transform, Tags, and Delete with fixed spacers.
-    /// Reprocess and Restore Original are reached through the Session menu instead.
+    /// Reprocess is reached through the Session menu instead.
     @Test(.tags(.sourceLint))
     func testTheDetailToolbarKeepsOnlyTheGroupedActions() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -487,7 +487,6 @@ struct RecordingStatusTests {
         #expect(detail.components(separatedBy: "ToolbarSpacer(.fixed, placement: .primaryAction)").count - 1 == 4)
         #expect(detail.contains("Label(\"Export\", systemImage: \"square.and.arrow.up\")"))
         #expect(!detail.contains("Label(\"Reprocess\""))
-        #expect(!detail.contains("Label(\"Restore Original\""))
         #expect(detail.contains("Label(\"Delete\", systemImage: \"trash\")"))
         #expect(!detail.contains("role: .destructive"))
     }

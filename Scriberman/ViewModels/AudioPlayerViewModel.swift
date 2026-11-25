@@ -10,6 +10,7 @@ final class AudioPlayerViewModel {
     private var periodicTimeObserver: Any?
     private var playbackEndedObserver: NSObjectProtocol?
     private var loadedURL: URL?
+    private var pendingSeeks = 0
 
     var isReady = false
     var isPlaying = false
@@ -97,10 +98,17 @@ final class AudioPlayerViewModel {
         isPlaying = false
     }
 
-    func seek(to seconds: Double) {
+    func seek(to seconds: Double) { seek(to: seconds, exactly: false) }
+
+    /// `exactly` starts at the given time instead of wherever AVPlayer finds it quick to land.
+    func seek(to seconds: Double, exactly: Bool) {
         let clampedSeconds = max(0, min(seconds, duration > 0 ? duration : seconds))
         let time = CMTime(seconds: clampedSeconds, preferredTimescale: 600)
-        player.seek(to: time)
+        let tolerance = exactly ? CMTime.zero : .positiveInfinity
+        pendingSeeks += 1
+        player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.pendingSeeks -= 1 }
+        }
         currentTime = clampedSeconds
     }
 
@@ -126,7 +134,8 @@ final class AudioPlayerViewModel {
     private func addPeriodicTimeObserver() {
         let interval = CMTime(seconds: 0.05, preferredTimescale: 600)
         periodicTimeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            guard let self, isScrubbing == false else {
+            // Until a seek lands, the observer still reports the time it left.
+            guard let self, isScrubbing == false, pendingSeeks == 0 else {
                 return
             }
 

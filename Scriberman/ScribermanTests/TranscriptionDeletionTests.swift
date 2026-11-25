@@ -130,7 +130,7 @@ final class TranscriptionDeletionTests {
 
     private func availability(of session: RecordingSession) -> SessionCommandAvailability {
         SessionCommandAvailability(
-            selection: .recording(session.status, isTrimmed: false),
+            selection: .recording(session.status),
             isRecordingRunning: false,
             isTranscriptShown: session.displayedTranscript != nil,
             hasLoadedAudio: true,

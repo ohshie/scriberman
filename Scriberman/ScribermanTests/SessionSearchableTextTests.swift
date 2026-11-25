@@ -3,7 +3,7 @@ import Testing
 @testable import Scriberman
 
 /// The stored searchable text follows the transcript pass the app displays, and stays current
-/// through every writer — including the trim restore, which used to assign the blobs directly.
+/// through every writer — including the splice restore.
 @MainActor
 final class SessionSearchableTextTests {
     private func transcript(_ text: String) -> Transcript {
@@ -147,7 +147,7 @@ final class SessionSearchableTextTests {
             "../ViewModels/NewSessionViewModel.swift",
             "../ViewModels/JobsViewModel.swift",
             "../Services/Transcription/RetranscriptionService.swift",
-            "../Services/Audio/Trim/AudioTrimService.swift",
+            "../Services/Audio/Trim/SpliceService.swift",
         ]
 
         // The pattern requires a lowercase property name after the dot, so the trim backups —

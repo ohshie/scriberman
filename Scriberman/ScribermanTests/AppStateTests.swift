@@ -17,7 +17,7 @@ final class AppStateTests {
 
     @Test
     func testOpenSettingsCallsRegisteredAction() {
-        let appState = AppState(services: makeServiceContainer(permissionService: MockPermissionService()))
+        let appState = makeAppState(services: makeServiceContainer(permissionService: MockPermissionService()))
         var calls = 0
         appState.openSettingsAction = { calls += 1 }
 
@@ -28,14 +28,14 @@ final class AppStateTests {
 
     @Test
     func testIsBootstrappingIsTrueInitially() {
-        let appState = AppState(services: makeServiceContainer(permissionService: MockPermissionService()))
+        let appState = makeAppState(services: makeServiceContainer(permissionService: MockPermissionService()))
         #expect(appState.isBootstrapping)
     }
 
     @Test
     func testIsBootstrappingIsFalseAfterBootstrapWorkspaceCompletes() async {
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString, isDirectory: true))
-        let appState = AppState(
+        let appState = makeAppState(
             services: makeServiceContainer(permissionService: MockPermissionService()),
             restoreWorkspaceHandler: { workspace }
         )
@@ -54,7 +54,7 @@ final class AppStateTests {
         permissionService.verifyScreenRecordingResult = true
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString, isDirectory: true))
 
-        let appState = AppState(
+        let appState = makeAppState(
             services: makeServiceContainer(permissionService: permissionService),
             restoreWorkspaceHandler: { workspace }
         )
@@ -70,7 +70,7 @@ final class AppStateTests {
         let permissionService = MockPermissionService()
         permissionService.micStatus = .granted
         permissionService.screenRecordingStatus = .denied
-        let appState = AppState(services: makeServiceContainer(permissionService: permissionService))
+        let appState = makeAppState(services: makeServiceContainer(permissionService: permissionService))
         appState.settingsViewModel.bundlePhase = BundleInstallPhase.allReady
 
         #expect(appState.requiredOnboardingStep == .screenRecording)
@@ -81,7 +81,7 @@ final class AppStateTests {
         let permissionService = MockPermissionService()
         permissionService.micStatus = .denied
         permissionService.screenRecordingStatus = .granted
-        let appState = AppState(services: makeServiceContainer(permissionService: permissionService))
+        let appState = makeAppState(services: makeServiceContainer(permissionService: permissionService))
         appState.settingsViewModel.bundlePhase = BundleInstallPhase.allReady
 
         #expect(appState.requiredOnboardingStep == .microphone)
@@ -92,7 +92,7 @@ final class AppStateTests {
         let permissionService = MockPermissionService()
         permissionService.micStatus = .granted
         permissionService.screenRecordingStatus = .granted
-        let appState = AppState(services: makeServiceContainer(permissionService: permissionService))
+        let appState = makeAppState(services: makeServiceContainer(permissionService: permissionService))
         appState.settingsViewModel.bundlePhase = BundleInstallPhase.allReady
 
         #expect(appState.requiredOnboardingStep == .workspace)
@@ -107,7 +107,7 @@ final class AppStateTests {
         permissionService.verifyScreenRecordingResult = true
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString, isDirectory: true))
 
-        let appState = AppState(
+        let appState = makeAppState(
             services: makeServiceContainer(permissionService: permissionService),
             restoreWorkspaceHandler: { workspace }
         )
@@ -126,7 +126,7 @@ final class AppStateTests {
         let services = makeServiceContainer(permissionService: permissionService)
         let workspace = Workspace(rootURL: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString, isDirectory: true))
 
-        let appState = AppState(
+        let appState = makeAppState(
             services: services,
             restoreWorkspaceHandler: { workspace }
         )
@@ -143,7 +143,7 @@ final class AppStateTests {
     func testRefreshPermissionsOnActivationPerformsStrictVerification() async {
         let permissionService = MockPermissionService()
         let services = makeServiceContainer(permissionService: permissionService)
-        let appState = AppState(services: services)
+        let appState = makeAppState(services: services)
 
         await appState.refreshPermissionsOnActivation()
 
@@ -385,7 +385,7 @@ final class AppStateTests {
     func testSelectPendingSessionCreatesSinglePendingSession() {
         let permissionService = MockPermissionService()
         let services = makeServiceContainer(permissionService: permissionService)
-        let appState = AppState(services: services)
+        let appState = makeAppState(services: services)
 
         appState.selectPendingSession()
         let firstPending = appState.pendingSession
@@ -399,7 +399,7 @@ final class AppStateTests {
     func testDiscardPendingSessionClearsPendingAndPreservesRecordingState() {
         let permissionService = MockPermissionService()
         let services = makeServiceContainer(permissionService: permissionService)
-        let appState = AppState(services: services)
+        let appState = makeAppState(services: services)
         _ = RecordingSession(
             createdAt: .now,
             duration: 5,
@@ -423,7 +423,7 @@ final class AppStateTests {
     func testDiscardPendingSessionResetsNewSessionStateWhenIdle() {
         let permissionService = MockPermissionService()
         let services = makeServiceContainer(permissionService: permissionService)
-        let appState = AppState(services: services)
+        let appState = makeAppState(services: services)
 
         appState.selectPendingSession()
         appState.newSessionViewModel.state = .idle
@@ -438,7 +438,7 @@ final class AppStateTests {
 
     @Test
     func sessionRequestIsConsumedOnce() {
-        let appState = AppState(services: makeServiceContainer(permissionService: MockPermissionService()))
+        let appState = makeAppState(services: makeServiceContainer(permissionService: MockPermissionService()))
         let id = UUID()
 
         #expect(appState.consumeSessionRequest(isAvailable: { _ in true }) == nil)
@@ -450,7 +450,7 @@ final class AppStateTests {
 
     @Test
     func importedSessionRequestIsConsumedOnce() {
-        let appState = AppState(services: makeServiceContainer(permissionService: MockPermissionService()))
+        let appState = makeAppState(services: makeServiceContainer(permissionService: MockPermissionService()))
         let id = UUID()
 
         appState.requestSession(.imported(id))
@@ -460,7 +460,7 @@ final class AppStateTests {
 
     @Test
     func sessionRequestForUnavailableSessionStaysPendingUntilItAppears() {
-        let appState = AppState(services: makeServiceContainer(permissionService: MockPermissionService()))
+        let appState = makeAppState(services: makeServiceContainer(permissionService: MockPermissionService()))
         let id = UUID()
         var visible: Set<UUID> = []
         let isAvailable: (AppState.SessionRequest) -> Bool = { request in
@@ -479,7 +479,7 @@ final class AppStateTests {
 
     @Test
     func newerSessionRequestReplacesOlder() {
-        let appState = AppState(services: makeServiceContainer(permissionService: MockPermissionService()))
+        let appState = makeAppState(services: makeServiceContainer(permissionService: MockPermissionService()))
         let older = UUID()
         let newer = UUID()
 
@@ -495,7 +495,7 @@ final class AppStateTests {
 
     @Test
     func sessionRequestWaitsWhileNoWindowConsumesIt() {
-        let appState = AppState(services: makeServiceContainer(permissionService: MockPermissionService()))
+        let appState = makeAppState(services: makeServiceContainer(permissionService: MockPermissionService()))
 
         appState.requestSession(.pending)
 
@@ -512,7 +512,7 @@ final class AppStateTests {
         let second = Workspace(rootURL: URL(fileURLWithPath: "/tmp/readiness-second"))
         var prepared: [Workspace] = []
         var registrations = 0
-        let appState = AppState(
+        let appState = makeAppState(
             services: makeServiceContainer(permissionService: permissions),
             restoreWorkspaceHandler: { first },
             setWorkspaceHandler: { Workspace(rootURL: $0) },
@@ -545,7 +545,7 @@ final class AppStateTests {
     @Test
     func failedWorkspaceSelectionPreservesWorkspaceAndReadiness() async {
         let original = Workspace(rootURL: URL(fileURLWithPath: "/tmp/original"))
-        let appState = AppState(
+        let appState = makeAppState(
             services: makeServiceContainer(permissionService: MockPermissionService()),
             restoreWorkspaceHandler: { original },
             setWorkspaceHandler: { _ in throw WorkspaceError.failedToCreateBookmark }
@@ -561,7 +561,7 @@ final class AppStateTests {
     @Test
     func workspaceSelectionIsBlockedDuringRecordingAndModelInstallation() async {
         var selections = 0
-        let appState = AppState(
+        let appState = makeAppState(
             services: makeServiceContainer(permissionService: MockPermissionService()),
             setWorkspaceHandler: { selections += 1; return Workspace(rootURL: $0) }
         )
@@ -585,7 +585,7 @@ final class AppStateTests {
 
     @Test
     func workspaceSelectionIsBlockedUntilRetranscriptionFinishes() async {
-        let appState = AppState(services: makeServiceContainer(permissionService: MockPermissionService()))
+        let appState = makeAppState(services: makeServiceContainer(permissionService: MockPermissionService()))
         let session = RecordingSession(createdAt: .now, duration: 1, micAudioURL: "/tmp/audio.wav", title: "Test", status: .recorded)
         session.mixdownURL = "/tmp/mixdown.wav"
         modelContainer.mainContext.insert(session)
@@ -597,6 +597,82 @@ final class AppStateTests {
     }
 
     // MARK: - Deletion sweep
+
+    @Test
+    func workspaceSelectionRefusesAPausedSpliceAndBecomesAvailableAfterward() async throws {
+        let f = try SpliceFixture()
+        let registry = SpliceReservations()
+        let gate = PausedSpliceGate()
+        var selections = 0
+        let appState = makeAppState(services: makeServiceContainer(permissionService: MockPermissionService()),
+            setWorkspaceHandler: { _ in selections += 1; return f.workspace }, spliceReservations: registry)
+        let service = SpliceService(capacityProvider: { _ in .max }, export: { from, to, start, end in
+            await gate.pauseOnce()
+            try await SpliceFixture.fakeExport(from, to, start, end)
+        }, reservations: registry)
+        let task = Task { _ = try await service.splice(session: f.session, plan: f.plan(), workspace: f.workspace, context: f.context) }
+        await gate.waitUntilPaused()
+        #expect(!appState.isWorkspaceChangeAllowed)
+        await appState.selectWorkspace(url: f.workspace.rootURL)
+        #expect(selections == 0)
+        gate.release()
+        _ = try await task.value
+        #expect(appState.isWorkspaceChangeAllowed)
+        await appState.selectWorkspace(url: f.workspace.rootURL)
+        #expect(selections == 1)
+    }
+
+    @Test(arguments: ["launch", "switch", "failed"])
+    func authorizedWorkspaceActivationReconcilesSpliceJournals(mode: String) async throws {
+        let workspace = Workspace(rootURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
+        let folder = try RecordingFileLayout.createRecordingFolder(in: workspace, createdAt: .now)
+        let audio = folder.appendingPathComponent("recording.m4a")
+        let original = Data("Original audio".utf8)
+        try original.write(to: audio)
+        let session = RecordingSession(duration: 20, micAudioURL: folder.appendingPathComponent("mic.wav").path,
+            mixdownURL: audio.path, title: "Original", status: .done)
+        session.transcript = Transcript(fullText: "Words", segments: [
+            TranscriptSegment(speakerId: "A", text: "Words", startTime: 0, endTime: 5),
+            TranscriptSegment(speakerId: "A", text: "More", startTime: 15, endTime: 20)
+        ], speakers: [])
+        modelContainer.mainContext.insert(session)
+        try modelContainer.mainContext.save()
+        var files = SpliceFileOperations()
+        files.move = { from, to in
+            try FileManager.default.moveItem(at: from, to: to)
+            throw SpliceFileOperations.Interruption()
+        }
+        do {
+            _ = try await SpliceService(files: files, capacityProvider: { _ in .max }, export: { from, to, _, _ in
+                try FileManager.default.copyItem(at: from, to: to)
+            }).splice(session: session, plan: SplicePlan(cuts: [10], parts: [.init(title: "A"), .init(title: "B")],
+                transcriptFingerprint: SplicePlan.fingerprint(transcriptData: session.transcriptData, retranscriptData: nil)),
+                workspace: workspace, context: modelContainer.mainContext)
+        } catch is SpliceFileOperations.Interruption {}
+        #expect(!FileManager.default.fileExists(atPath: audio.path))
+        let other = Workspace(rootURL: workspace.rootURL.appendingPathComponent("other"))
+        try FileManager.default.createDirectory(at: other.rootURL, withIntermediateDirectories: true)
+        let appState = makeAppState(services: makeServiceContainer(permissionService: MockPermissionService()),
+            restoreWorkspaceHandler: {
+                #expect(!FileManager.default.fileExists(atPath: audio.path))
+                return mode == "switch" ? other : workspace
+            }, setWorkspaceHandler: { _ in
+                #expect(!FileManager.default.fileExists(atPath: audio.path))
+                if mode == "failed" { throw WorkspaceError.failedToCreateBookmark }
+                return workspace
+            }, sessionDeletion: makeDeletionCoordinator(workspace: workspace), modelContext: modelContainer.mainContext)
+        if mode == "launch" { await appState.bootstrapWorkspace() }
+        else {
+            if mode == "switch" {
+                await appState.bootstrapWorkspace()
+                #expect(!FileManager.default.fileExists(atPath: audio.path))
+            }
+            await appState.selectWorkspace(url: workspace.rootURL)
+        }
+        if mode == "failed" { #expect(!FileManager.default.fileExists(atPath: audio.path)) }
+        else { #expect(try Data(contentsOf: audio) == original) }
+    }
 
     /// A workspace holding a stored session's folder with a snapshot: a delete that crashed before
     /// its save, which the sweep moves back.
@@ -638,7 +714,7 @@ final class AppStateTests {
         let (workspace, folder) = try makeWorkspaceWithUncommittedHold()
         defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
         let coordinator = makeDeletionCoordinator(workspace: workspace)
-        let appState = AppState(
+        let appState = makeAppState(
             services: makeServiceContainer(permissionService: MockPermissionService()),
             setWorkspaceHandler: { _ in workspace },
             sessionDeletion: coordinator,
@@ -657,7 +733,7 @@ final class AppStateTests {
     func testAFailedWorkspaceSelectionRunsNoSweep() async throws {
         let (workspace, folder) = try makeWorkspaceWithUncommittedHold()
         defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
-        let appState = AppState(
+        let appState = makeAppState(
             services: makeServiceContainer(permissionService: MockPermissionService()),
             setWorkspaceHandler: { _ in throw WorkspaceError.failedToCreateBookmark },
             sessionDeletion: makeDeletionCoordinator(workspace: workspace),
@@ -673,7 +749,7 @@ final class AppStateTests {
     func testLaunchRunsTheDeletionSweepBeforeBootstrapReturns() async throws {
         let (workspace, folder) = try makeWorkspaceWithUncommittedHold()
         defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
-        let appState = AppState(
+        let appState = makeAppState(
             services: makeServiceContainer(permissionService: MockPermissionService()),
             restoreWorkspaceHandler: { workspace },
             sessionDeletion: makeDeletionCoordinator(workspace: workspace),
@@ -707,7 +783,7 @@ final class AppStateTests {
         sessionJobs.track(job, as: sessionJobs.generation(of: session.id))
         var selections = 0
         let coordinator = makeDeletionCoordinator(sessionJobs: sessionJobs, workspace: workspace)
-        let appState = AppState(
+        let appState = makeAppState(
             services: makeServiceContainer(permissionService: MockPermissionService()),
             setWorkspaceHandler: { selections += 1; return Workspace(rootURL: $0) },
             sessionDeletion: coordinator,
@@ -750,7 +826,7 @@ final class AppStateTests {
         let permissionService = makeReadyPermissions()
         permissionService.verifyMicResult = true
         permissionService.verifyScreenRecordingResult = true
-        let appState = AppState(
+        let appState = makeAppState(
             services: makeServiceContainer(
                 permissionService: permissionService,
                 calendarService: calendarService,
@@ -840,7 +916,7 @@ final class AppStateTests {
             $0.calendars = [CalendarSnapshot(id: "work", title: "Work", sourceTitle: "iCloud")]
             $0.events = [.fixture(title: title, start: start)]
         }
-        let appState = AppState(
+        let appState = makeAppState(
             services: makeServiceContainer(permissionService: makeReadyPermissions(), calendarService: service)
         )
         appState.calendarSuggestions.activate()
@@ -977,6 +1053,25 @@ final class AppStateTests {
 
         #expect(appState.calendarSuggestions.preferences.selectedCalendarIDs.isEmpty)
         #expect(appState.calendarSuggestions.suggestions.isEmpty)
+    }
+
+    // Each test models its own app, independent of reservations in concurrent service tests.
+    private func makeAppState(
+        services: ServiceContainer,
+        updateService: UpdateService? = nil,
+        restoreWorkspaceHandler: (() async throws -> Workspace)? = nil,
+        setWorkspaceHandler: ((URL) async throws -> Workspace)? = nil,
+        prepareDictationHandler: ((Workspace) async -> Void)? = nil,
+        registerHotkeyHandler: (() -> Void)? = nil,
+        sessionDeletion: SessionDeletionCoordinator? = nil,
+        modelContext: ModelContext? = nil,
+        spliceReservations: SpliceReservations? = nil
+    ) -> AppState {
+        AppState(services: services, updateService: updateService,
+            restoreWorkspaceHandler: restoreWorkspaceHandler, setWorkspaceHandler: setWorkspaceHandler,
+            prepareDictationHandler: prepareDictationHandler, registerHotkeyHandler: registerHotkeyHandler,
+            sessionDeletion: sessionDeletion, modelContext: modelContext,
+            spliceReservations: spliceReservations ?? SpliceReservations())
     }
 
     private func makeServiceContainer(

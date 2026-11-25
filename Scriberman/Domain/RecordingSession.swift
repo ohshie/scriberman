@@ -71,6 +71,7 @@ final class RecordingSession {
     var originalTranscriptData: Data?
     var originalRetranscriptData: Data?
     var trimEnd: Double?
+    var spliceGroupID: UUID?
 
     var isTrimmed: Bool { originalMixdownURL != nil }
 
