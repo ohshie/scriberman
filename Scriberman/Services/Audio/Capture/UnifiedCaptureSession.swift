@@ -14,8 +14,8 @@ import ScreenCaptureKit
 final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendable {
     private let appFileURL: URL
     private let processID: pid_t
-    private let appHandler: AppAudioStreamOutputHandler
-    private let micHandler: MicStreamOutputHandler
+    let appHandler: AppAudioStreamOutputHandler
+    let micHandler: MicStreamOutputHandler
     private let appQueue = DispatchQueue(label: "com.scriberman.unified.app")
     private let micQueue = DispatchQueue(label: "com.scriberman.unified.mic")
     private let notificationCenter: NotificationCenter
@@ -50,6 +50,9 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
         return existing
     }
 
+    /// False once the stream has stopped on its own (or been stopped), true while it runs.
+    var isStreamLive: Bool { stream != nil }
+
     /// Invoked for every error the stream delegate receives, TCC denials included, so the owning
     /// recording can react instead of the failure ending in a log line. Set by `RecordingService`.
     var onStreamStopped: (@Sendable (any Error) -> Void)?
@@ -76,7 +79,9 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
         onMicFirstHostTime: (@Sendable (HostNanoseconds) -> Void)? = nil,
         onAppFirstHostTime: (@Sendable (HostNanoseconds) -> Void)? = nil,
         notificationCenter: NotificationCenter = .default,
-        reusingStreamers: (mic: AudioFileStreamer, app: AudioFileStreamer)? = nil
+        reusingStreamers: (mic: AudioFileStreamer, app: AudioFileStreamer)? = nil,
+        preparedStreamers: (mic: Bool, app: Bool) = (true, true),
+        gates: RecordingCaptureGates = RecordingCaptureGates()
     ) {
         self.appFileURL = appFileURL
         self.processID = processID
@@ -85,11 +90,13 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
         self.notificationCenter = notificationCenter
         self.appHandler = AppAudioStreamOutputHandler(
             liveAudioContinuation: liveAudioContinuation,
-            streamer: reusingStreamers?.app ?? AudioFileStreamer(label: "app")
+            streamer: reusingStreamers?.app ?? AudioFileStreamer(label: "app"),
+            gate: gates.app
         )
         self.micHandler = MicStreamOutputHandler(
             liveAudioContinuation: liveAudioContinuation,
-            streamer: reusingStreamers?.mic ?? AudioFileStreamer(label: "mic")
+            streamer: reusingStreamers?.mic ?? AudioFileStreamer(label: "mic"),
+            gate: gates.mic
         )
         self.appHandler.onFirstBufferHostTime = onAppFirstHostTime
         self.micHandler.onFirstBufferHostTime = onMicFirstHostTime
@@ -97,18 +104,27 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
         // A mid-session restart adopts writers that are already open and mid-recording. Preparing
         // them again would truncate the files and reset their timing segments, which is exactly the
         // audio a restart exists to preserve.
-        if reusingStreamers == nil {
-            self.appHandler.configureOutput(url: appFileURL)
-            self.micHandler.configureOutput(url: micFileURL)
-        } else {
+        // A reused writer that its source never opened is prepared on the first buffer, as at start.
+        if reusingStreamers != nil, preparedStreamers.app {
             self.appHandler.adoptPreparedOutput(url: appFileURL)
+        } else {
+            self.appHandler.configureOutput(url: appFileURL)
+        }
+        if reusingStreamers != nil, preparedStreamers.mic {
             self.micHandler.adoptPreparedOutput(url: micFileURL)
+        } else {
+            self.micHandler.configureOutput(url: micFileURL)
         }
     }
 
     /// The writers this session is feeding, so a replacement session can adopt them.
     var streamers: (mic: AudioFileStreamer, app: AudioFileStreamer) {
         (micHandler.streamer, appHandler.streamer)
+    }
+
+    /// Which of those writers are open.
+    var preparedStreamers: (mic: Bool, app: Bool) {
+        (micHandler.isOutputPrepared, appHandler.isOutputPrepared)
     }
 
     func start() async throws {
@@ -233,7 +249,8 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
         await drainSampleCallbacks()
     }
 
-    private func drainSampleCallbacks() async {
+    /// Returns once every sample callback already queued has run.
+    func drainSampleCallbacks() async {
         await withCheckedContinuation { continuation in
             appQueue.async { continuation.resume() }
         }

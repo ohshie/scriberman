@@ -2,7 +2,8 @@ import SwiftUI
 
 /// Shared concentric "hero" button: an outer stroked ring around an inner filled
 /// shape, with a caption below. Used for the New Session Record button
-/// (`.circle`) and the in-progress Stop button (`.roundedSquare`).
+/// (`.circle`), the in-progress Stop button (`.roundedSquare`), and the
+/// recording view's Pause (`.pauseBars`) and Resume (`.circle`) buttons.
 ///
 /// Hover feedback is built in: while enabled and hovered the inner shape scales
 /// up slightly and the ring brightens.
@@ -10,6 +11,7 @@ struct HeroCircleButton: View {
     enum InnerShape {
         case circle
         case roundedSquare
+        case pauseBars
     }
 
     let innerShape: InnerShape
@@ -58,6 +60,15 @@ struct HeroCircleButton: View {
             Circle()
                 .fill(tint)
                 .frame(width: 46, height: 46)
+        case .pauseBars:
+            HStack(spacing: 7) {
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(tint)
+                    .frame(width: 9, height: 28)
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(tint)
+                    .frame(width: 9, height: 28)
+            }
         case .roundedSquare:
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(tint)

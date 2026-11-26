@@ -413,6 +413,8 @@ actor LiveTranscriptionService: LiveTranscribing {
     private var vadConsumedSamples: [AudioSource: Int] = [:]
     private var lastFinalSegmentEndOffsets: [AudioSource: Float] = [:]
     private var decoderStates: [AudioSource: TdtDecoderState] = [:]
+    // Highest pause marker handled per source.
+    private var lastPauseMarkers: [AudioSource: Int] = [:]
 #if DEBUG
     private var processChunkHookForTesting: (@Sendable ([Float], AudioSource, Float) async -> Void)?
     private var asrTranscribeHookForTesting: (@Sendable ([Float], AudioSource, inout TdtDecoderState) async throws -> ASRResult)?
@@ -541,6 +543,7 @@ actor LiveTranscriptionService: LiveTranscribing {
         vadConsumedSamples.removeAll()
         lastFinalSegmentEndOffsets.removeAll()
         decoderStates.removeAll()
+        lastPauseMarkers.removeAll()
         collectedFinalSegments.removeAll()
         speakerIdentities.removeAll()
         segmentReferences.removeAll()
@@ -598,23 +601,8 @@ actor LiveTranscriptionService: LiveTranscribing {
         }
 
         // Flush pending speech buffers before speaker enrollment.
-        for source in speechAccumulationBuffers.keys {
-            guard let pendingSamples = speechAccumulationBuffers[source], !pendingSamples.isEmpty else {
-                continue
-            }
-
-            let fallbackStartOffset = max(
-                0,
-                currentSessionOffset(for: source) - Float(pendingSamples.count) / Self.SAMPLE_RATE
-            )
-            if speechStartOffsets[source] == nil {
-                speechStartOffsets[source] = fallbackStartOffset
-            }
-
-            await flushSpeechBuffer(for: source)
-            speechAccumulationBuffers[source] = []
-            speechStartOffsets[source] = nil
-            recentPreRollChunks[source] = []
+        for source in Array(speechAccumulationBuffers.keys) {
+            await flushOpenSpeech(for: source)
         }
 
         // Anything still held (a stream that failed to finish) is attributed
@@ -671,6 +659,7 @@ actor LiveTranscriptionService: LiveTranscribing {
         vadConsumedSamples.removeAll()
         lastFinalSegmentEndOffsets.removeAll()
         decoderStates.removeAll()
+        lastPauseMarkers.removeAll()
         asrManager = nil
         voiceprintExtractor = nil
         vadStreamProcessor = nil
@@ -687,8 +676,42 @@ actor LiveTranscriptionService: LiveTranscribing {
     // MARK: - Audio Processing
 
     func process(_ chunk: LiveAudioChunk, anchor: HostNanoseconds? = nil) async {
+        if let pauseNumber = chunk.pauseNumber {
+            await endSpeech(atPause: pauseNumber, source: chunk.source)
+            return
+        }
         if captureAnchor == nil { captureAnchor = anchor }
         await process(samples: chunk.samples, source: chunk.source, sampleRate: chunk.sampleRate, hostTime: chunk.hostTime)
+    }
+
+    /// The source has sent all its audio from before the pause. Its open speech is transcribed now
+    /// and its VAD starts over, so no segment holds audio from both sides of the pause. The turn
+    /// diarizer keeps running: held text is emitted once it covers it, and speakers carry over.
+    private func endSpeech(atPause number: Int, source: AudioSource) async {
+        guard number > (lastPauseMarkers[source] ?? 0) else { return }
+        lastPauseMarkers[source] = number
+        await processVADRemainder(for: source)
+        await flushOpenSpeech(for: source)
+        vadStreamStates[source] = nil
+        recentPreRollChunks[source] = []
+    }
+
+    /// Transcribes the source's accumulated speech. Without a recorded start it is placed to end at
+    /// the source's current position.
+    private func flushOpenSpeech(for source: AudioSource) async {
+        guard let pendingSamples = speechAccumulationBuffers[source], !pendingSamples.isEmpty else {
+            return
+        }
+        if speechStartOffsets[source] == nil {
+            speechStartOffsets[source] = max(
+                0,
+                currentSessionOffset(for: source) - Float(pendingSamples.count) / Self.SAMPLE_RATE
+            )
+        }
+        await flushSpeechBuffer(for: source)
+        speechAccumulationBuffers[source] = []
+        speechStartOffsets[source] = nil
+        recentPreRollChunks[source] = []
     }
 
     func process(samples: [Float], source: AudioSource, sampleRate: Double, hostTime: HostNanoseconds? = nil) async {
@@ -815,14 +838,18 @@ actor LiveTranscriptionService: LiveTranscribing {
     /// audio received since the last whole chunk reaches the VAD (design D2).
     private func processFinalVADRemainders() async {
         for source in Array(vadInputRemainders.keys) {
-            guard let remainder = vadInputRemainders[source], !remainder.isEmpty else { continue }
-            vadInputRemainders[source] = []
-            let padded = remainder + [Float](repeating: 0, count: Self.VAD_CHUNK_SIZE - remainder.count)
-            do {
-                try await processVADChunk(padded, realCount: remainder.count, source: source)
-            } catch {
-                logger.error("Error processing final VAD remainder (\(source.rawValue)): \(error.localizedDescription)")
-            }
+            await processVADRemainder(for: source)
+        }
+    }
+
+    private func processVADRemainder(for source: AudioSource) async {
+        guard let remainder = vadInputRemainders[source], !remainder.isEmpty else { return }
+        vadInputRemainders[source] = []
+        let padded = remainder + [Float](repeating: 0, count: Self.VAD_CHUNK_SIZE - remainder.count)
+        do {
+            try await processVADChunk(padded, realCount: remainder.count, source: source)
+        } catch {
+            logger.error("Error processing VAD remainder (\(source.rawValue)): \(error.localizedDescription)")
         }
     }
 

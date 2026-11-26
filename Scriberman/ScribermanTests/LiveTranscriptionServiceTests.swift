@@ -2055,7 +2055,9 @@ private final class ScriptedTurnDiarizer: StreamingTurnDiarizing, @unchecked Sen
 
     func finish() throws -> [TurnDiarizerChunk] { finishResponse }
 
-    func reset() {}
+    private var resets = 0
+    var resetCount: Int { lock.withLock { resets } }
+    func reset() { lock.withLock { resets += 1 } }
 }
 
 private actor SegmentBox {
@@ -2081,8 +2083,11 @@ private actor FlushProbe {
     private var lastSourceValue: Scriberman.AudioSource?
     private var lastOffsetValue: Float?
 
+    private var recordedCalls: [(samples: [Float], offset: Float)] = []
+
     func recordCall(samples: [Float]? = nil, samplesCount: Int? = nil, source: Scriberman.AudioSource? = nil, offset: Float? = nil) {
         calls += 1
+        if let samples, let offset { recordedCalls.append((samples, offset)) }
         if let samples {
             lastSampleValues = samples
             sampleValues.append(samples)
@@ -2103,6 +2108,8 @@ private actor FlushProbe {
     func lastSamplesCount() -> Int? { lastSampleCount }
     func lastSamples() -> [Float]? { lastSampleValues }
     func allSamples() -> [[Float]] { sampleValues }
+    /// Samples and offset of every call that recorded both.
+    func allOffsets() -> [(samples: [Float], offset: Float)] { recordedCalls }
     func lastSource() -> Scriberman.AudioSource? { lastSourceValue }
     func lastOffset() -> Float? { lastOffsetValue }
 }
@@ -2570,5 +2577,397 @@ struct SeededGenerator: RandomNumberGenerator {
         value = (value ^ (value >> 30)) &* 0xBF58476D1CE4E5B9
         value = (value ^ (value >> 27)) &* 0x94D049BB133111EB
         return value ^ (value >> 31)
+    }
+}
+
+// MARK: - Pause markers
+
+extension LiveTranscriptionServiceTests {
+    private func marker(_ number: Int, _ source: Scriberman.AudioSource = .mic) -> LiveAudioChunk {
+        .pauseMarker(number, source: source)
+    }
+
+    @Test
+    func aPauseMarkerFeedsTheRemainderAndFlushesOpenSpeech() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: true, event: nil)
+        await service.setVADProcessorForTesting(processor)
+        let flushProbe = FlushProbe()
+        await service.setProcessChunkHookForTesting { samples, source, offset in
+            await flushProbe.recordCall(samplesCount: samples.count, source: source, offset: offset)
+        }
+
+        await service.process(samples: Array(repeating: 0.6, count: 5_096), source: .mic, sampleRate: 16_000)
+        #expect(await flushProbe.callCount() == 0)
+        await service.process(marker(1))
+
+        #expect(await flushProbe.callCount() == 1)
+        #expect(await flushProbe.lastSamplesCount() == 5_096)
+        #expect(await flushProbe.lastOffset() == 0)
+        #expect(await flushProbe.lastSource() == .mic)
+    }
+
+    @Test
+    func aPauseMarkerResetsTheSourcesVADStateAndPreRoll() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let vad = StatefulScriptedVAD([
+            (false, nil), (false, nil),
+            (true, .speechStart), (false, .speechEnd),
+        ])
+        await service.setVADProcessorForTesting(vad)
+        let flushProbe = FlushProbe()
+        await service.setProcessChunkHookForTesting { samples, _, offset in
+            await flushProbe.recordCall(samples: samples, offset: offset)
+        }
+
+        await service.process(samples: Array(repeating: 0.1, count: 8_192), source: .mic, sampleRate: 16_000)
+        await service.process(marker(1))
+        await service.process(samples: Array(repeating: 0.7, count: 8_192), source: .mic, sampleRate: 16_000)
+
+        #expect(await vad.receivedProcessedSamples == [0, 4_096, 0, 4_096])
+        let flushed = await flushProbe.allSamples()
+        #expect(flushed.count == 1)
+        #expect(flushed.first?.allSatisfy { $0 == 0.7 } == true)
+        #expect(await flushProbe.lastOffset() == Float(8_192) / 16_000)
+    }
+
+    @Test
+    func noSegmentSpansAPause() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        await service.setVADProcessorForTesting(AmplitudeVAD())
+        let flushProbe = FlushProbe()
+        await service.setProcessChunkHookForTesting { samples, _, _ in
+            await flushProbe.recordCall(samples: samples)
+        }
+
+        await service.process(samples: Array(repeating: 0.9, count: 9_000), source: .mic, sampleRate: 16_000)
+        await service.process(marker(1))
+        await service.process(samples: Array(repeating: -0.9, count: 9_000), source: .mic, sampleRate: 16_000)
+        await service.process(marker(2))
+        await service.process(samples: Array(repeating: 0.8, count: 9_000), source: .mic, sampleRate: 16_000)
+        _ = await service.stop()
+
+        let flushed = await flushProbe.allSamples()
+        #expect(flushed.count == 3)
+        #expect(flushed.map { Set($0.filter { abs($0) > 0.5 }) } == [[0.9], [-0.9], [0.8]])
+    }
+
+    @Test
+    func aMarkerOfAnotherSourceLeavesOpenSpeechAlone() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+        let flushProbe = FlushProbe()
+        await service.setProcessChunkHookForTesting { samples, _, _ in
+            await flushProbe.recordCall(samplesCount: samples.count)
+        }
+
+        await service.process(samples: Array(repeating: 0.6, count: 4_096), source: .mic, sampleRate: 16_000)
+        await service.process(marker(1, .app))
+        #expect(await flushProbe.callCount() == 0)
+        await service.process(samples: Array(repeating: 0.6, count: 4_096), source: .mic, sampleRate: 16_000)
+        #expect(await flushProbe.callCount() == 1)
+        #expect(await flushProbe.lastSamplesCount() == 8_192)
+    }
+
+    @Test
+    func aMarkerNumberAlreadySeenIsIgnored() async {
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+        let flushProbe = FlushProbe()
+        await service.setProcessChunkHookForTesting { samples, _, _ in
+            await flushProbe.recordCall(samplesCount: samples.count)
+        }
+
+        await service.process(marker(1))
+        await service.process(samples: Array(repeating: 0.6, count: 4_096), source: .mic, sampleRate: 16_000)
+        await service.process(marker(1))
+        #expect(await flushProbe.callCount() == 0)
+        await service.process(samples: Array(repeating: 0.6, count: 4_096), source: .mic, sampleRate: 16_000)
+        #expect(await flushProbe.callCount() == 1)
+        #expect(await flushProbe.lastSamplesCount() == 8_192)
+    }
+
+    /// Text flushed at a pause is transcribed straight away and emitted once the diarizer covers
+    /// it, here after the resume. The diarizer is not reset, so the speaker carries over.
+    @Test
+    func flushedTextIsTranscribedAtThePauseAndEmittedOnceTheDiarizerCoversIt() async throws {
+        let covering = try makeTurnTimeline(frameSpeakers: Array(repeating: 0, count: 20), numSpeakers: 2)
+        let diarizer = ScriptedTurnDiarizer(numSpeakers: 2, feedResponses: [.success([]), .success([covering])])
+        let service = await makeAttributionService(texts: ["before the pause", "after the pause"], diarizer: diarizer)
+        let transcribed = FlushProbe()
+        let textProbe = TextSequenceProbe(["before the pause", "after the pause"])
+        await service.setAsrTranscribeHookForTesting { samples, _, _ in
+            await transcribed.recordCall(samplesCount: samples.count)
+            return ASRResult(text: textProbe.next(), confidence: 1, duration: TimeInterval(samples.count) / 16_000, processingTime: 0.1)
+        }
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await processor.enqueue(triggered: false, event: .speechEnd)
+        await service.setVADProcessorForTesting(processor)
+        let (task, box) = await startCollecting(from: service)
+        defer { task.cancel() }
+
+        await service.process(samples: Array(repeating: Float(0.6), count: 4_096), source: .mic, sampleRate: 16_000)
+        await service.process(marker(1))
+        #expect(await transcribed.callCount() == 1)
+        #expect(await service.pendingAttributionCountForTesting(source: .mic) == 1)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(await box.values().isEmpty)
+
+        await service.process(samples: Array(repeating: Float(0.6), count: 8_192), source: .mic, sampleRate: 16_000)
+        let segments = await box.values(atLeast: 2)
+        #expect(segments.map(\.text) == ["before the pause", "after the pause"])
+        #expect(segments.map(\.speakerId) == ["speaker_mic_0", "speaker_mic_0"])
+        #expect(diarizer.resetCount == 0)
+    }
+
+    /// Text flushed at a pause that the diarizer never covers before the stop is emitted at stop.
+    @Test
+    func textFlushedAtAPauseIsSavedWhenTheRecordingStopsWhilePaused() async throws {
+        let covering = try makeTurnTimeline(frameSpeakers: Array(repeating: 1, count: 10), numSpeakers: 2)
+        let diarizer = ScriptedTurnDiarizer(numSpeakers: 2, feedResponses: [], finishResponse: [covering])
+        let service = await makeAttributionService(texts: ["last words"], diarizer: diarizer)
+        let processor = MockVADProcessor()
+        await processor.enqueue(triggered: true, event: .speechStart)
+        await service.setVADProcessorForTesting(processor)
+
+        await service.process(samples: Array(repeating: Float(0.6), count: 4_096), source: .mic, sampleRate: 16_000)
+        await service.process(marker(1))
+        let result = await service.stop()
+        #expect(result.segments.map(\.text) == ["last words"])
+        #expect(result.segments.map(\.speakerId) == ["speaker_mic_1"])
+    }
+}
+
+/// Live transcription fed by a real capture handler across several pauses.
+struct LivePauseEndToEndTests {
+    private static let sentinel: Float = 0.99
+    private static let startNanos: UInt64 = 10_000_000_000
+
+    private struct Burst {
+        let start: Double
+        let end: Double
+        let level: Float
+    }
+
+    /// Raw capture of `seconds` in 20 ms buffers through the app handler. Paused time holds the
+    /// sentinel; speech bursts ramp up by 0.1 from their level; everything else is silence.
+    private static func capture(
+        seconds: Double,
+        pauses: [(start: Double, end: Double)],
+        bursts: [Burst],
+        stopAt: Double? = nil
+    ) async throws -> (events: [LiveAudioChunk], samples: [Float], segments: [AudioCaptureSegment]) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("app.wav")
+        let gate = CaptureAudioGate()
+        let audio = AsyncStream<LiveAudioChunk>.makeStream()
+        let streamer = AudioFileStreamer(label: "app")
+        let handler = AppAudioStreamOutputHandler(liveAudioContinuation: audio.continuation, streamer: streamer, gate: gate)
+        handler.configureOutput(url: url)
+        func nanos(_ seconds: Double) -> HostNanoseconds {
+            HostNanoseconds(nanoseconds: startNanos + UInt64((seconds * 1_000_000_000).rounded()))
+        }
+        func value(at time: Double) -> Float {
+            if pauses.contains(where: { time >= $0.start - 1e-9 && time < $0.end - 1e-9 }) { return sentinel }
+            guard let burst = bursts.first(where: { time >= $0.start && time < $0.end }) else { return 0 }
+            return burst.level + 0.1 * Float((time - burst.start) / (burst.end - burst.start))
+        }
+        for index in 0..<Int((seconds * 50).rounded()) {
+            let bufferStart = Double(index) / 50
+            for pause in pauses {
+                if pause.start >= bufferStart, pause.start < bufferStart + 0.02 { gate.clock.pause { nanos(pause.start) } }
+                if pause.end >= bufferStart, pause.end < bufferStart + 0.02 { gate.clock.resume { nanos(pause.end) } }
+            }
+            if let stopAt, stopAt >= bufferStart, stopAt < bufferStart + 0.02 { gate.clock.close { nanos(stopAt) } }
+            let values = (0..<960).map { value(at: bufferStart + Double($0) / 48_000) }
+            handler.processSampleBufferForTesting(
+                try CaptureAudioGateTests.makeSampleBuffer(values, sampleRate: 48_000, hostTime: nanos(bufferStart))
+            )
+        }
+        // The service's call at stop.
+        gate.sendStartedPauseMarkers { audio.continuation.yield(.pauseMarker($0, source: .app)) }
+        streamer.close()
+        audio.continuation.finish()
+        var events: [LiveAudioChunk] = []
+        for await event in audio.stream { events.append(event) }
+        return (
+            events,
+            try CaptureAudioGateTests.readSamples(url),
+            AudioFileStreamer.loadTimingSidecar(for: url)?.segments ?? []
+        )
+    }
+
+    private static func median(_ values: ArraySlice<Float>) -> Float {
+        let sorted = values.sorted()
+        return sorted[sorted.count / 2]
+    }
+
+    @Test
+    func segmentPositionsMatchTheMixdownAfterSeveralPauses() async throws {
+        let pauses = [(start: 1.0, end: 1.8), (start: 2.5, end: 2.6), (start: 3.7, end: 4.9)]
+        let bursts = [
+            Burst(start: 0.3, end: 0.9, level: 0.6),
+            Burst(start: 2.1, end: 2.7, level: 0.7),
+            Burst(start: 3.25, end: 3.65, level: -0.8),
+            Burst(start: 5.1, end: 5.8, level: 0.75),
+        ]
+        let captured = try await Self.capture(seconds: 6.4, pauses: pauses, bursts: bursts)
+        #expect(captured.events.compactMap(\.pauseNumber) == [1, 2, 3])
+
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        await service.setVADProcessorForTesting(StateAmplitudeVAD())
+        let flushes = FlushProbe()
+        await service.setProcessChunkHookForTesting { samples, _, offset in
+            await flushes.recordCall(samples: samples, offset: offset)
+        }
+        let anchor = captured.events.first?.hostTime
+        for event in captured.events { await service.process(event, anchor: anchor) }
+        _ = await service.stop()
+
+        let mixdown = SynchronizedAudioTimeline.reconstruct(
+            samples: captured.samples, segments: captured.segments,
+            referenceHostTimeNanos: Self.startNanos, sampleRate: 48_000
+        ).frames
+        let segments = await flushes.allOffsets()
+        // The second burst is split by the 100 ms pause; each part is its own segment.
+        #expect(segments.count == 5)
+        for (samples, offset) in segments {
+            #expect(samples.allSatisfy { abs($0) < 0.95 })
+            for fraction in [0.25, 0.5, 0.75] {
+                let index = Int(Double(samples.count) * fraction)
+                let mixIndex = Int(((Double(offset) + Double(index) / 16_000) * 48_000).rounded())
+                guard mixIndex + 24 < mixdown.count else {
+                    Issue.record("Segment at \(offset)s lies past the mixdown")
+                    continue
+                }
+                // Medians, so a resampler edge on either side does not decide the comparison.
+                let live = Self.median(samples[max(0, index - 8)..<min(samples.count, index + 8)])
+                let mixed = Self.median(mixdown[max(0, mixIndex - 24)..<(mixIndex + 24)])
+                #expect(abs(mixed - live) < 0.02, "segment at \(offset)s, \(fraction): \(live) vs \(mixed)")
+            }
+        }
+    }
+
+    /// Speech heard during a pause, including after a stop while paused, appears in neither the
+    /// live nor the saved transcript.
+    @Test
+    func speechFromAPauseIsInNeitherTheLiveNorTheSavedTranscript() async throws {
+        let pauses = [(start: 1.0, end: 2.0), (start: 3.0, end: 5.0)]
+        let bursts = [Burst(start: 0.2, end: 0.95, level: 0.6), Burst(start: 2.05, end: 2.9, level: 0.6)]
+        let captured = try await Self.capture(seconds: 5, pauses: pauses, bursts: bursts, stopAt: 4)
+
+        let covering = TurnDiarizerChunk(probabilities: Array(repeating: 0, count: 1_000 * 2), frameCount: 1_000)
+        let diarizer = ScriptedTurnDiarizer(numSpeakers: 2, feedResponses: [.success([covering])])
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        let results = AsyncStream<TranscriptSegment>.makeStream()
+        await service.setResultContinuationForTesting(results.continuation)
+        await service.setStoredConfigForTesting(.defaults)
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+        await service.setTurnDiarizersForTesting([.app: diarizer])
+        await service.setVADProcessorForTesting(StateAmplitudeVAD())
+        let sentinel = Self.sentinel
+        await service.setAsrTranscribeHookForTesting { samples, _, _ in
+            ASRResult(
+                text: samples.contains { abs($0) > sentinel - 0.04 } ? "sentinel" : "speech",
+                confidence: 1, duration: TimeInterval(samples.count) / 16_000, processingTime: 0.1
+            )
+        }
+        let box = SegmentCollector()
+        let collect = Task { for await segment in results.stream { box.append(segment) } }
+        let anchor = captured.events.first?.hostTime
+        for event in captured.events { await service.process(event, anchor: anchor) }
+        let saved = await service.stop()
+        await collect.value
+
+        #expect(!captured.samples.contains { abs($0) > 0.95 })
+        #expect(box.values.map(\.text) == ["speech", "speech"])
+        #expect(saved.segments.map(\.text) == ["speech", "speech"])
+    }
+}
+
+private final class SegmentCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var segments: [TranscriptSegment] = []
+    func append(_ segment: TranscriptSegment) { lock.withLock { segments.append(segment) } }
+    var values: [TranscriptSegment] { lock.withLock { segments } }
+}
+
+/// Voiced while the peak is above 0.5, with start and end events judged against the state passed
+/// in, so a reset state starts speech over as Silero's does.
+private actor StateAmplitudeVAD: LiveVADStreamingProcessing {
+    func processStreamingChunk(
+        _ chunk: [Float],
+        state: VadStreamState,
+        config: VadSegmentationConfig
+    ) async throws -> LiveVADProcessingResult {
+        let voiced = (chunk.map { abs($0) }.max() ?? 0) > 0.5
+        let event: LiveVADEventKind? = voiced == state.triggered ? nil : (voiced ? .speechStart : .speechEnd)
+        var next = state
+        next.triggered = voiced
+        return LiveVADProcessingResult(state: next, isTriggered: voiced, eventKind: event)
+    }
+}
+
+/// Scripted triggers and events. Each returned state counts the samples it has seen, so the state
+/// passed back in shows whether the service kept or reset it.
+private actor StatefulScriptedVAD: LiveVADStreamingProcessing {
+    private var script: [(Bool, LiveVADEventKind?)]
+    private(set) var receivedProcessedSamples: [Int] = []
+
+    init(_ script: [(Bool, LiveVADEventKind?)]) {
+        self.script = script
+    }
+
+    func processStreamingChunk(
+        _ chunk: [Float],
+        state: VadStreamState,
+        config: VadSegmentationConfig
+    ) async throws -> LiveVADProcessingResult {
+        receivedProcessedSamples.append(state.processedSamples)
+        let next = script.isEmpty ? (false, nil) : script.removeFirst()
+        var newState = state
+        newState.processedSamples += chunk.count
+        newState.triggered = next.0
+        return LiveVADProcessingResult(state: newState, isTriggered: next.0, eventKind: next.1)
+    }
+}
+
+extension LivePauseEndToEndTests {
+    /// A live transcription service set up as in
+    /// `speechFromAPauseIsInNeitherTheLiveNorTheSavedTranscript`, and the capture events of speech,
+    /// a pause filled with the sentinel, speech, then a stop during a second pause. Its ASR answers
+    /// "sentinel" for audio that holds the sentinel and "speech" for any other.
+    static func serviceWithSpeechAroundAPause() async throws -> (service: LiveTranscriptionService, events: [LiveAudioChunk]) {
+        let pauses = [(start: 1.0, end: 2.0), (start: 3.0, end: 5.0)]
+        let bursts = [Burst(start: 0.2, end: 0.95, level: 0.6), Burst(start: 2.05, end: 2.9, level: 0.6)]
+        let captured = try await capture(seconds: 5, pauses: pauses, bursts: bursts, stopAt: 4)
+
+        let covering = TurnDiarizerChunk(probabilities: Array(repeating: 0, count: 1_000 * 2), frameCount: 1_000)
+        let diarizer = ScriptedTurnDiarizer(numSpeakers: 2, feedResponses: [.success([covering])])
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        await service.setStoredConfigForTesting(.defaults)
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+        await service.setTurnDiarizersForTesting([.app: diarizer])
+        await service.setVADProcessorForTesting(StateAmplitudeVAD())
+        let sentinel = Self.sentinel
+        await service.setAsrTranscribeHookForTesting { samples, _, _ in
+            ASRResult(
+                text: samples.contains { abs($0) > sentinel - 0.04 } ? "sentinel" : "speech",
+                confidence: 1, duration: TimeInterval(samples.count) / 16_000, processingTime: 0.1
+            )
+        }
+        return (service, captured.events)
     }
 }

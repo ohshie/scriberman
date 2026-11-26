@@ -37,11 +37,15 @@ struct CaptureHealthMonitor: Equatable {
         /// Monotonically increasing. An increase since the last tick means a capture stream
         /// reported that it stopped, which is direct evidence of death rather than an inference.
         var streamFailureCount: Int
+        /// How many of `streamFailureCount` were already dealt with elsewhere, by a resume that
+        /// checked and restarted capture. Those are not acted on again.
+        var handledStreamFailureCount: Int
 
-        init(micFrames: Int64?, appFrames: Int64?, streamFailureCount: Int = 0) {
+        init(micFrames: Int64?, appFrames: Int64?, streamFailureCount: Int = 0, handledStreamFailureCount: Int = 0) {
             self.micFrames = micFrames
             self.appFrames = appFrames
             self.streamFailureCount = streamFailureCount
+            self.handledStreamFailureCount = handledStreamFailureCount
         }
     }
 
@@ -90,13 +94,15 @@ struct CaptureHealthMonitor: Equatable {
             return .none
         }
 
-        // First observation establishes the baseline. Nothing can be stalled yet.
+        // First observation establishes the baseline. Nothing can be stalled yet, but a failure
+        // reported before it is still a failure.
         guard hasSeenFirstTick else {
             hasSeenFirstTick = true
             micTracker.observe(count: snapshot.micFrames, at: now)
             appTracker.observe(count: snapshot.appFrames, at: now)
+            let streamFailed = snapshot.streamFailureCount > max(lastSeenStreamFailureCount, snapshot.handledStreamFailureCount)
             lastSeenStreamFailureCount = snapshot.streamFailureCount
-            return .none
+            return streamFailed ? restartOrFail(now: now) : .none
         }
 
         let micAdvanced = micTracker.observe(count: snapshot.micFrames, at: now)
@@ -107,7 +113,7 @@ struct CaptureHealthMonitor: Equatable {
             consecutiveRestartsWithoutRecovery = 0
         }
 
-        let streamFailed = snapshot.streamFailureCount > lastSeenStreamFailureCount
+        let streamFailed = snapshot.streamFailureCount > max(lastSeenStreamFailureCount, snapshot.handledStreamFailureCount)
         lastSeenStreamFailureCount = snapshot.streamFailureCount
 
         // A reported stream error is direct evidence and does not wait out the stall threshold.
@@ -122,7 +128,18 @@ struct CaptureHealthMonitor: Equatable {
         guard isDead else {
             return .none
         }
+        return restartOrFail(now: now)
+    }
 
+    /// Restarts the stall clocks without touching the restart budget. For a resume: no frames are
+    /// written during a pause, so the time it lasted is not a stall.
+    mutating func restartStallClocks(at now: Date) {
+        micTracker.deferJudgement(to: now)
+        appTracker.deferJudgement(to: now)
+    }
+
+    /// Capture is dead: restart within the budget, or give up.
+    private mutating func restartOrFail(now: Date) -> Effect {
         guard consecutiveRestartsWithoutRecovery < configuration.consecutiveRestartLimit,
               restartsIssued < configuration.totalRestartLimit
         else {

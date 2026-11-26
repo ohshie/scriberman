@@ -51,6 +51,8 @@ struct ExtensionAPIRecordingTests {
                 configurations: ModelConfiguration(isStoredInMemoryOnly: true)
             )
             context = ModelContext(container)
+            // The sessions routes read the store the recordings are saved in.
+            api.sessionContainer = container
             recordingService.persistsSessionsIn = container
             recordingService.isRecordingOverride = true
 
@@ -689,6 +691,25 @@ struct ExtensionAPIRecordingTests {
     }
 
     @Test
+    func renameAndTagWorkWhilePaused() async throws {
+        let fixture = try Fixture()
+        try await fixture.pair()
+        let ops = try fixture.tag("Ops")
+        let started = try await startRecording(fixture)
+        try #require(await fixture.coordinator.pause().isSuccess)
+
+        let response = await fixture.send(
+            "PATCH", "/v1/recordings/current",
+            json: #"{"title": "Paused call", "tagIds": ["\#(ops.id.uuidString)"]}"#
+        )
+
+        #expect(response.status == 200)
+        let stored = try persisted(fixture, started.id)
+        #expect(stored?.title == "Paused call")
+        #expect(tagIDs(stored) == [ops.id])
+    }
+
+    @Test
     func renameAndTagTogetherApplyBoth() async throws {
         let fixture = try Fixture()
         try await fixture.pair()
@@ -935,5 +956,12 @@ final class GatedWorkspaceService: WorkspaceServiceProtocol, @unchecked Sendable
             }
         }
         return try result.get()
+    }
+}
+
+private extension Result where Failure == CaptureCoordinator.TransitionError {
+    var isSuccess: Bool {
+        if case .success = self { return true }
+        return false
     }
 }

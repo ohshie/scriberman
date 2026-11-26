@@ -100,6 +100,60 @@ struct CaptureHealthMonitorTests {
         #expect(monitor.wasInterrupted)
     }
 
+    // MARK: - Pause
+
+    @Test
+    func aFailureReportedBeforeTheFirstObservationRestarts() {
+        var monitor = CaptureHealthMonitor(configuration: config())
+        let effect = monitor.update(now: start, snapshot: snapshot(mic: 0, failures: 1), isRecording: true)
+        #expect(effect == .restart)
+    }
+
+    @Test
+    func failuresAlreadyHandledAreNotActedOn() {
+        var monitor = CaptureHealthMonitor(configuration: config())
+        let handled = CaptureHealthMonitor.Snapshot(micFrames: 960, appFrames: nil, streamFailureCount: 1, handledStreamFailureCount: 1)
+        #expect(monitor.update(now: start, snapshot: handled, isRecording: true) == .none)
+
+        let again = CaptureHealthMonitor.Snapshot(micFrames: 1_920, appFrames: nil, streamFailureCount: 1, handledStreamFailureCount: 1)
+        #expect(monitor.update(now: start.addingTimeInterval(0.05), snapshot: again, isRecording: true) == .none)
+
+        let newer = CaptureHealthMonitor.Snapshot(micFrames: 2_880, appFrames: nil, streamFailureCount: 2, handledStreamFailureCount: 1)
+        #expect(monitor.update(now: start.addingTimeInterval(0.1), snapshot: newer, isRecording: true) == .restart)
+    }
+
+    @Test
+    func aFailureHandledAfterTheMonitorSawItIsNotActedOnAgain() {
+        var monitor = CaptureHealthMonitor(configuration: config())
+        _ = monitor.update(now: start, snapshot: snapshot(mic: 960), isRecording: true)
+        let handled = CaptureHealthMonitor.Snapshot(micFrames: 1_920, appFrames: nil, streamFailureCount: 3, handledStreamFailureCount: 3)
+        #expect(monitor.update(now: start.addingTimeInterval(0.05), snapshot: handled, isRecording: true) == .none)
+    }
+
+    @Test
+    func stallClocksRestartedAtResumeGiveAFullThreshold() {
+        var monitor = CaptureHealthMonitor(configuration: config(stallThreshold: 3))
+        _ = monitor.update(now: start, snapshot: snapshot(mic: 960), isRecording: true)
+
+        // Paused for ten seconds, with no evaluation and no frames written.
+        monitor.restartStallClocks(at: start.addingTimeInterval(10))
+
+        #expect(monitor.update(now: start.addingTimeInterval(12), snapshot: snapshot(mic: 960), isRecording: true) == .none)
+        #expect(monitor.update(now: start.addingTimeInterval(13.5), snapshot: snapshot(mic: 960), isRecording: true) == .restart)
+    }
+
+    @Test
+    func restartingStallClocksKeepsTheRestartBudget() {
+        var monitor = CaptureHealthMonitor(configuration: config(stallThreshold: 3, consecutiveRestartLimit: 1))
+        _ = monitor.update(now: start, snapshot: snapshot(mic: 960), isRecording: true)
+        #expect(monitor.update(now: start.addingTimeInterval(4), snapshot: snapshot(mic: 960), isRecording: true) == .restart)
+
+        monitor.restartStallClocks(at: start.addingTimeInterval(10))
+
+        #expect(monitor.restartsIssued == 1)
+        #expect(monitor.update(now: start.addingTimeInterval(14), snapshot: snapshot(mic: 960), isRecording: true) == .fail)
+    }
+
     // MARK: - D4 trigger table
 
     @Test

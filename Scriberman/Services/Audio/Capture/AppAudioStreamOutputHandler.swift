@@ -10,7 +10,9 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
     /// Injected so a mid-session capture restart can rebuild the stream and its handlers while
     /// continuing to write into the same file, with its accumulated timing segments intact.
     let streamer: AudioFileStreamer
+    private let gate: CaptureAudioGate
     private var monoFormat: AVAudioFormat?
+    private var conversion: GatedAudioConversion?
     private var firstBufferHostTime: HostNanoseconds?
     private let liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation?
     var onFirstBufferHostTime: (@Sendable (HostNanoseconds) -> Void)?
@@ -42,10 +44,12 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
 
     init(
         liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation? = nil,
-        streamer: AudioFileStreamer = AudioFileStreamer(label: "app")
+        streamer: AudioFileStreamer = AudioFileStreamer(label: "app"),
+        gate: CaptureAudioGate = CaptureAudioGate()
     ) {
         self.liveAudioContinuation = liveAudioContinuation
         self.streamer = streamer
+        self.gate = gate
         super.init()
     }
 
@@ -56,6 +60,7 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
         defer { lock.unlock() }
         self.fileURL = url
         self.monoFormat = nil
+        self.conversion = nil
         self.firstBufferHostTime = nil
         self.hasPrepared = true
     }
@@ -65,8 +70,16 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
         defer { lock.unlock() }
         self.fileURL = url
         self.monoFormat = nil
+        self.conversion = nil
         self.firstBufferHostTime = nil
         self.hasPrepared = false
+    }
+
+    /// True once the writer is open: prepared on the first buffer, or adopted from a predecessor.
+    var isOutputPrepared: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return hasPrepared
     }
 
     func closeOutput() {
@@ -92,11 +105,12 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
 #endif
 
     private func process(_ sampleBuffer: CMSampleBuffer) {
+        gate.recordArrival()
         guard layoutTracker.admit(sampleBuffer) else {
             return
         }
         captureFirstBufferHostTimeIfNeeded(from: sampleBuffer)
-        let bufferHostNanos = HostNanoseconds(presentationTimeOf: sampleBuffer)?.nanoseconds
+        let hostTime = HostNanoseconds(presentationTimeOf: sampleBuffer)
 
         guard let pcmBuffer = createPCMBuffer(from: sampleBuffer) else {
             return
@@ -112,9 +126,12 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
                 standardFormatWithSampleRate: pcmBuffer.format.sampleRate,
                 channels: 1
             )
+            conversion = monoFormat.map {
+                GatedAudioConversion(converter: nil, targetFormat: $0, gate: gate)
+            }
         }
 
-        guard let fileURL, let monoFormat else {
+        guard let fileURL, let monoFormat, let conversion else {
             lock.unlock()
             return
         }
@@ -149,8 +166,22 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
             }
         }
 
-        streamer.write(buffer: monoBuffer, hostTimeNanos: bufferHostNanos)
-        liveAudioContinuation?.yield(LiveAudioChunk(samples: monoSamples, source: .app, sampleRate: format.sampleRate, hostTime: bufferHostNanos.map { HostNanoseconds(nanoseconds: $0) }))
+        conversion.process(monoBuffer, hostTime: hostTime) { event in
+            switch event {
+            case .audio(let audio):
+                streamer.write(buffer: audio.buffer, hostTimeNanos: audio.hostTime?.nanoseconds)
+                guard let liveHostTime = audio.hostTime else { return }
+                liveAudioContinuation?.yield(LiveAudioChunk(
+                    samples: AudioDownmixer.toMono(buffer: audio.buffer),
+                    source: .app,
+                    sampleRate: format.sampleRate,
+                    hostTime: liveHostTime,
+                    rawHostTime: audio.rawHostTime
+                ))
+            case .pauseMarker(let number):
+                liveAudioContinuation?.yield(.pauseMarker(number, source: .app))
+            }
+        }
     }
 
     private func createPCMBuffer(from sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {
@@ -232,8 +263,14 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
         var didCaptureFirstHostTime = false
 
         lock.lock()
-        if firstBufferHostTime == nil, let hostTime = HostNanoseconds(presentationTimeOf: sampleBuffer) {
-            firstBufferHostTime = hostTime
+        if firstBufferHostTime == nil,
+           let hostTime = HostNanoseconds(presentationTimeOf: sampleBuffer),
+           let firstKept = gate.firstKeptHostTime(
+               startingAt: hostTime,
+               frameCount: CMSampleBufferGetNumSamples(sampleBuffer),
+               sampleRate: sampleBuffer.sampleRate
+           ) {
+            firstBufferHostTime = firstKept
             didCaptureFirstHostTime = true
         }
         callback = onFirstBufferHostTime

@@ -688,6 +688,7 @@ struct AppShellView: View {
             selection: selectedSession,
             availability: commandAvailability,
             isPlaying: audioPlayerViewModel.isPlaying,
+            isRecordingPaused: appState.newSessionViewModel.isPaused,
             isEditingText: textEditingObserver.isEditingText,
             isRawMarkdownShown: isRawMarkdownShown,
             actions: MainWindowActions(
@@ -719,6 +720,7 @@ struct AppShellView: View {
                 delete: { requestDeletion() },
                 startRecording: { startRecording() },
                 stopRecording: { stopRecording() },
+                pauseResumeRecording: { pauseOrResumeRecording() },
                 playPause: { togglePlayback() },
                 find: { find() },
                 toggleRawMarkdown: { isRawMarkdownShown.toggle() }
@@ -746,7 +748,8 @@ struct AppShellView: View {
             hasSpliceGroup: (selectedTranscribableSession as? RecordingSession)?.spliceGroupID != nil,
             hasBusySpliceMember: selectedGroupHasBusyMember,
             isSessionReserved: selectedTranscribableSession.map { SpliceReservations.shared.isReserved($0) } ?? false,
-            isTransformationRunning: selectedGroupHasRunningTransformation
+            isTransformationRunning: selectedGroupHasRunningTransformation,
+            canPauseOrResumeRecording: appState.captureCoordinator.phase.canPauseOrResume
         )
     }
 
@@ -869,6 +872,12 @@ struct AppShellView: View {
     private func stopRecording() {
         Task {
             _ = await appState.captureCoordinator.stop(context: modelContext)
+        }
+    }
+
+    private func pauseOrResumeRecording() {
+        Task {
+            _ = await appState.captureCoordinator.pauseOrResume()
         }
     }
 

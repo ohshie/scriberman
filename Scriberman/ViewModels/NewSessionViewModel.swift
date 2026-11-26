@@ -52,6 +52,28 @@ final class NewSessionViewModel {
     var settingsViewModel: SettingsViewModel?
 
     var state: State = .idle
+
+    // MARK: - Pause
+
+    /// True while the recording is paused. `state` stays `.recording`, so the sleep, quit and menu
+    /// checks on it keep treating a paused recording as one under way.
+    private(set) var isPaused = false
+    /// Set when a resume fails, which leaves the recording paused. Cleared by the next resume and
+    /// when the recording ends.
+    private(set) var resumeFailureMessage: String?
+    nonisolated static let resumeFailedMessage = "Recording could not be resumed."
+    /// How often a pause checks for the first microphone audio while it waits for it.
+    var pauseWaitPollInterval: Duration = .milliseconds(20)
+    /// When the current pause began, by `clock`.
+    private var pauseStartedAt: Date?
+    /// Paused time before the current pause, by `clock`.
+    private var completedPausesDuration: TimeInterval = 0
+    /// When the recording was last resumed, by the idle prompt's clock.
+    private var resumedAt: Date?
+    /// True once the microphone has written audio during this recording.
+    private var hasMicAudio = false
+    /// True once the start check passed on app audio while the microphone had written nothing.
+    private var startCheckPassedOnAppAudioAlone = false
     // Separate wave inputs (design D4): the mic wave must not bounce when
     // only app audio is loud, so the wave gets each source's level individually.
     /// The levels sit outside observation: the wave reads them on each frame it draws,
@@ -276,12 +298,83 @@ final class NewSessionViewModel {
         meterLevels.mic = 0
         meterLevels.app = 0
         state = .idle
+        clearPauseState()
         dismissIdlePrompt()
         isIdlePromptApplicable = false
         idlePromptMachine = IdlePromptStateMachine()
         captureHealthMonitor = CaptureHealthMonitor(configuration: captureHealthConfiguration)
         lastCaptureHealthEvaluationAt = nil
         lastCaptureHealthEffect = .none
+    }
+
+    /// Forgets the pause state of the recording that ended.
+    private func clearPauseState() {
+        isPaused = false
+        resumeFailureMessage = nil
+        pauseStartedAt = nil
+        completedPausesDuration = 0
+        resumedAt = nil
+        hasMicAudio = false
+        startCheckPassedOnAppAudioAlone = false
+    }
+
+    /// Waits until the microphone has written audio, so a pause cannot make a start look dead.
+    /// The wait also ends when the start check has passed on app audio alone, or under the
+    /// recorder fallback, which has no frame count. False when the recording ended or the waiting
+    /// task was cancelled.
+    func waitForFirstMicAudio() async -> Bool {
+        while !Task.isCancelled {
+            guard !isIdle, await recordingService.isRecording(), !Task.isCancelled else { return false }
+            if hasMicAudio || startCheckPassedOnAppAudioAlone { return true }
+            let counts = await recordingService.captureFrameCounts()
+            guard !Task.isCancelled else { return false }
+            guard let micFrames = counts.mic else { return true }
+            if micFrames > 0 {
+                hasMicAudio = true
+                return true
+            }
+            try? await Task.sleep(for: pauseWaitPollInterval)
+        }
+        return false
+    }
+
+    /// Pauses capture. True when the recording is paused.
+    func pauseCapture() async -> Bool {
+        guard await recordingService.pauseRecording(), !isIdle else { return false }
+        if !isPaused {
+            isPaused = true
+            pauseStartedAt = clock()
+        }
+        return true
+    }
+
+    /// Resumes capture. True when the recording runs. A failed resume leaves it paused and sets
+    /// `resumeFailureMessage`.
+    func resumeCapture() async -> Bool {
+        guard await recordingService.resumeRecording() else {
+            if !isIdle {
+                resumeFailureMessage = Self.resumeFailedMessage
+            }
+            return false
+        }
+        guard isPaused else { return true }
+        if let pauseStartedAt {
+            completedPausesDuration += max(0, clock().timeIntervalSince(pauseStartedAt))
+        }
+        pauseStartedAt = nil
+        isPaused = false
+        resumeFailureMessage = nil
+        let now = Date()
+        resumedAt = now
+        // Nothing is written while paused, so the pause is not a stall. The restart budget stays.
+        captureHealthMonitor.restartStallClocks(at: now)
+        return true
+    }
+
+    /// Recorded time: wall time since the start, less the time spent paused.
+    private func recordedSeconds(since startedAt: Date, now: Date) -> TimeInterval {
+        let currentPause = pauseStartedAt.map { max(0, now.timeIntervalSince($0)) } ?? 0
+        return max(0, now.timeIntervalSince(startedAt) - completedPausesDuration - currentPause)
     }
 
     /// Tears the prompt down. Safe to call when it is not showing.
@@ -489,6 +582,7 @@ final class NewSessionViewModel {
             }
 
             recordingStartedAt = clock()
+            clearPauseState()
             activeRecordingSessionID = recordingSessionID
             unsavedSegmentIDs = []
             unsavedTranscriptSegmentCount = 0
@@ -602,6 +696,7 @@ final class NewSessionViewModel {
         let sessionID = await recordingService.stopRecording() ?? activeRecordingSessionID
         let liveResult = await drainLiveRecordingSession()
         activeRecordingSessionID = nil
+        clearPauseState()
         // Tear the idle prompt down however the session ends (panel, UI button, menu bar,
         // app lifecycle), not just via reset().
         dismissIdlePrompt()
@@ -779,6 +874,7 @@ final class NewSessionViewModel {
 
             var counts = await recordingService.captureFrameCounts()
             if RecordingStartVerifier.verdict(micFrames: counts.mic, appFrames: counts.app) != .dead {
+                notePassedStartCheck(micFrames: counts.mic)
                 return
             }
 
@@ -790,6 +886,7 @@ final class NewSessionViewModel {
                 guard !Task.isCancelled else { return }
                 counts = await recordingService.captureFrameCounts()
                 if RecordingStartVerifier.verdict(micFrames: counts.mic, appFrames: counts.app) != .dead {
+                    notePassedStartCheck(micFrames: counts.mic)
                     return
                 }
             }
@@ -801,6 +898,15 @@ final class NewSessionViewModel {
                 counts: counts,
                 restartAttempted: didRestart
             )
+        }
+    }
+
+    /// Records what a passed start check saw, for a pause waiting for microphone audio.
+    private func notePassedStartCheck(micFrames: Int64?) {
+        if let micFrames, micFrames > 0 {
+            hasMicAudio = true
+        } else if micFrames == 0 {
+            startCheckPassedOnAppAudioAlone = true
         }
     }
 
@@ -834,6 +940,7 @@ final class NewSessionViewModel {
         recordingMonitorTask = nil
         activeRecordingSessionID = nil
         recordingStartedAt = nil
+        clearPauseState()
         meterLevels.mic = 0
         meterLevels.app = 0
         dismissIdlePrompt()
@@ -878,21 +985,26 @@ final class NewSessionViewModel {
                         errorMessage = pendingError.localizedDescription
                     }
                     state = .idle
+                    clearPauseState()
                     break
                 }
 
-                let levels = await recordingService.audioLevels()
+                // The wave rests while paused, whatever the service last measured.
+                let levels = isPaused ? (mic: Float(0), app: Float(0)) : await recordingService.audioLevels()
                 meterLevels.mic = levels.mic
                 meterLevels.app = levels.app
                 let now = clock()
                 let startedAt = recordingStartedAt ?? now
-                let wholeSeconds = now.timeIntervalSince(startedAt).rounded(.down)
+                let wholeSeconds = recordedSeconds(since: startedAt, now: now).rounded(.down)
                 if wholeSeconds != elapsedTime {
                     elapsedTime = wholeSeconds
                 }
 
                 await evaluateIdlePrompt(recordingStartedAt: startedAt)
-                await evaluateCaptureHealth(workspace: workspace, context: context)
+                // Nothing is written while paused, so health is not judged then.
+                if !isPaused {
+                    await evaluateCaptureHealth(workspace: workspace, context: context)
+                }
 
                 try? await Task.sleep(for: .milliseconds(50))
             }
@@ -944,6 +1056,8 @@ final class NewSessionViewModel {
         guard !isRecoveringCapture else { return }
 
         let snapshot = await recordingService.captureHealthSnapshot()
+        // A pause that began while the snapshot was taken.
+        guard !isPaused else { return }
         guard let sessionID = activeRecordingSessionID else {
             _ = captureHealthMonitor.update(now: now, snapshot: snapshot, isRecording: false)
             lastCaptureHealthEffect = .none
@@ -1044,7 +1158,8 @@ final class NewSessionViewModel {
         let snapshot = IdleActivitySnapshot(
             appAudio: timestamps.app,
             micAudio: timestamps.mic,
-            userInput: userInput
+            userInput: userInput,
+            resumedAt: resumedAt
         )
 
         let effect = idlePromptMachine.update(

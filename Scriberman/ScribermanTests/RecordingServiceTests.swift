@@ -36,7 +36,7 @@ final class RecordingServiceTests {
         await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
         let emit = try #require(fixture.micController.onBuffer)
         let time = HostNanoseconds(nanoseconds: 2_000_000_000)
-        emit([1, 2], 48_000, time)
+        emit(.audio(samples: [1, 2], sampleRate: 48_000, hostTime: time, rawHostTime: time))
         _ = await fixture.service.stopRecording()
         var iterator = audio.stream.makeAsyncIterator()
         let chunk = try #require(await iterator.next())
@@ -1326,6 +1326,68 @@ final class RecordingServiceTests {
 
     // MARK: - Interrupted-capture marker
 
+    private func makeScreenPauseService(
+        workspace: Workspace,
+        screenSession: MockScreenCaptureSession
+    ) async throws -> RecordingService {
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        let factoryProbe = ScreenCaptureSessionFactoryProbe(session: screenSession)
+        return RecordingService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            micCaptureController: MockMicCaptureController(),
+            mixdownCoordinator: MockRecordingMixdownCoordinator(),
+            screenVideoMuxer: MockScreenVideoMuxer(),
+            permissionChecker: {},
+            scopedAccessStarter: { _ in true },
+            scopedAccessStopper: { _ in },
+            screenCaptureSessionFactory: { factoryProbe.makeSession() }
+        )
+    }
+
+    @Test
+    func testScreenCaptureFollowsTheRecordingsPauseClock() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        let screenSession = MockScreenCaptureSession()
+        let service = try await makeScreenPauseService(workspace: workspace, screenSession: screenSession)
+
+        _ = try await service.startRecording(in: workspace, captureDisplayID: 42, title: "Session")
+        let clock = try #require(screenSession.startedPauseClock)
+        #expect(clock.isPaused == false)
+
+        #expect(await service.pauseRecording())
+        #expect(clock.isPaused)
+        #expect(screenSession.pauseCount == 1)
+        #expect(await service.resumeRecording())
+        #expect(clock.isPaused == false)
+        #expect(screenSession.resumeCount == 1)
+        _ = await service.stopRecording()
+    }
+
+    @Test
+    func testAPauseDuringScreenCaptureStartReachesTheScreenSession() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        let screenSession = MockScreenCaptureSession()
+        let service = try await makeScreenPauseService(workspace: workspace, screenSession: screenSession)
+        screenSession.onStart = { _ = await service.pauseRecording() }
+
+        _ = try await service.startRecording(in: workspace, captureDisplayID: 42, title: "Session")
+
+        #expect(await service.isPaused())
+        #expect(screenSession.pauseCount == 1)
+        _ = await service.stopRecording()
+    }
+
     private func makeServiceForStop(
         workspace: Workspace,
         container: ModelContainer
@@ -2010,14 +2072,20 @@ private final class MockScreenCaptureSession: ScreenCaptureSessionControlling, @
     var videoStartHostTime: HostNanoseconds?
     var startError: Error?
     private(set) var startedVideoURL: URL?
+    private(set) var startedPauseClock: RecordingPauseClock?
     private(set) var stopCallCount = 0
+    private(set) var pauseCount = 0
+    private(set) var resumeCount = 0
+    var onStart: (@Sendable () async -> Void)?
     private var stopBlocker: MockScreenCaptureStopBlocker?
 
-    func start(displayID _: CGDirectDisplayID, videoURL: URL) async throws {
+    func start(displayID _: CGDirectDisplayID, videoURL: URL, pauseClock: RecordingPauseClock) async throws {
         if let startError {
             throw startError
         }
         startedVideoURL = videoURL
+        startedPauseClock = pauseClock
+        await onStart?()
         try FileManager.default.createDirectory(
             at: videoURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -2032,6 +2100,14 @@ private final class MockScreenCaptureSession: ScreenCaptureSessionControlling, @
             await stopBlocker.markStopStarted()
             await stopBlocker.waitUntilReleased()
         }
+    }
+
+    func recordingDidPause() {
+        pauseCount += 1
+    }
+
+    func recordingDidResume() {
+        resumeCount += 1
     }
 
     func emitError(_ error: Error) {
@@ -2186,7 +2262,7 @@ private final class MockMicCaptureController: MicCaptureControlling, @unchecked 
     var startCaptureError: Error?
     var startCaptureErrors: [Error] = []
     private(set) var startCaptureCalls: [StartCall] = []
-    var onBuffer: (@Sendable ([Float], Double, HostNanoseconds?) -> Void)?
+    var onBuffer: MicBufferHandler?
     private(set) var stopCaptureCallCount = 0
     var isRunning = false
 
@@ -2195,10 +2271,11 @@ private final class MockMicCaptureController: MicCaptureControlling, @unchecked 
         targetFormat: AVAudioFormat,
         micFileURL _: URL,
         micStreamer _: AudioFileStreamer,
+        gate _: CaptureAudioGate,
         voiceProcessingEnabled _: Bool,
         applyVoiceProcessing _: @Sendable (AVAudioInputNode, Bool) -> Void,
         onFirstHostTime _: @escaping @Sendable (HostNanoseconds) -> Void,
-        onBuffer: @escaping @Sendable ([Float], Double, HostNanoseconds?) -> Void
+        onBuffer: @escaping MicBufferHandler
     ) throws {
         if !startCaptureErrors.isEmpty {
             throw startCaptureErrors.removeFirst()
