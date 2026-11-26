@@ -80,6 +80,8 @@ protocol MicCaptureControlling: AnyObject {
 
 final class AVAudioEngineMicCaptureController: MicCaptureControlling {
     private var audioEngine: AVAudioEngine?
+    /// Counts starts, so log lines tell one capture's buffers from the next one's.
+    private var captureGeneration = 0
 
     func startCapture(
         deviceID: AudioDeviceID?,
@@ -93,6 +95,7 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
         onBuffer: @escaping MicBufferHandler
     ) throws {
         stopCapture()
+        captureGeneration += 1
 
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
@@ -113,6 +116,7 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
             targetFormat: targetFormat,
             micStreamer: micStreamer,
             gate: gate,
+            captureGeneration: captureGeneration,
             onFirstHostTime: onFirstHostTime,
             onBuffer: onBuffer
         )
@@ -122,7 +126,11 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
             guard self != nil else {
                 return
             }
-            tap.process(buffer, hostTime: Self.hostTime(of: audioTime))
+            tap.process(
+                buffer,
+                hostTime: Self.hostTime(of: audioTime),
+                sampleTime: audioTime.isSampleTimeValid ? Double(audioTime.sampleTime) : nil
+            )
         }
 
         engine.prepare()
@@ -179,41 +187,68 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
 /// What an engine microphone tap does with its buffers: convert, cut paused audio, write and
 /// deliver. Separate from the engine so it can be fed without hardware.
 ///
+/// The converter follows each buffer's own format. A route change can hand the tap buffers at the
+/// new device's rate; a converter built for the old rate rejects them (finding 11).
+///
 /// @unchecked Sendable: used only from the tap's callback thread.
 final class EngineMicTap: @unchecked Sendable {
-    private let conversion: GatedAudioConversion
+    private static let logger = Logger(subsystem: "Scriberman", category: "RecordingService")
+    /// Buffers logged at the start of a capture and after a format change or a timing mismatch.
+    private static let loggedBuffersPerEvent = 10
+
+    private let targetFormat: AVAudioFormat
     private let micStreamer: AudioFileStreamer
     private let gate: CaptureAudioGate
     private let onFirstHostTime: @Sendable (HostNanoseconds) -> Void
     private let onBuffer: MicBufferHandler
+    private let captureGeneration: Int
+    private var conversion: GatedAudioConversion
+    private var converterSourceFormat: AVAudioFormat
+    private var diagnostics = BufferDiagnostics()
 
     init(
         inputFormat: AVAudioFormat,
         targetFormat: AVAudioFormat,
         micStreamer: AudioFileStreamer,
         gate: CaptureAudioGate,
+        captureGeneration: Int = 0,
         onFirstHostTime: @escaping @Sendable (HostNanoseconds) -> Void,
         onBuffer: @escaping MicBufferHandler
     ) throws {
-        var converter: AVAudioConverter?
-        let matchesTarget = inputFormat.sampleRate == targetFormat.sampleRate
-            && inputFormat.channelCount == targetFormat.channelCount
-            && inputFormat.commonFormat == targetFormat.commonFormat
-            && inputFormat.isInterleaved == targetFormat.isInterleaved
-        if !matchesTarget {
-            converter = AVAudioConverter(from: inputFormat, to: targetFormat)
-            guard converter != nil else {
-                throw RecordingError.failedToStart("Unable to create mic audio converter.")
-            }
+        guard let conversion = Self.makeConversion(from: inputFormat, to: targetFormat, gate: gate) else {
+            throw RecordingError.failedToStart("Unable to create mic audio converter.")
         }
-        self.conversion = GatedAudioConversion(converter: converter, targetFormat: targetFormat, gate: gate)
+        self.conversion = conversion
+        self.converterSourceFormat = inputFormat
+        self.targetFormat = targetFormat
         self.micStreamer = micStreamer
         self.gate = gate
+        self.captureGeneration = captureGeneration
         self.onFirstHostTime = onFirstHostTime
         self.onBuffer = onBuffer
     }
 
-    func process(_ buffer: AVAudioPCMBuffer, hostTime: HostNanoseconds?) {
+    /// A conversion from `source` to `target`, with no converter when they match. Nil when no
+    /// converter can be made.
+    private static func makeConversion(
+        from source: AVAudioFormat,
+        to target: AVAudioFormat,
+        gate: CaptureAudioGate
+    ) -> GatedAudioConversion? {
+        let matchesTarget = source.sampleRate == target.sampleRate
+            && source.channelCount == target.channelCount
+            && source.commonFormat == target.commonFormat
+            && source.isInterleaved == target.isInterleaved
+        if matchesTarget {
+            return GatedAudioConversion(converter: nil, targetFormat: target, gate: gate)
+        }
+        return AVAudioConverter(from: source, to: target).map {
+            GatedAudioConversion(converter: $0, targetFormat: target, gate: gate)
+        }
+    }
+
+    /// - Parameter sampleTime: the tap's sample time for the buffer, for diagnostics only.
+    func process(_ buffer: AVAudioPCMBuffer, hostTime: HostNanoseconds?, sampleTime: Double? = nil) {
         gate.recordArrival()
         if let hostTime, let firstKept = gate.firstKeptHostTime(
             startingAt: hostTime,
@@ -222,9 +257,27 @@ final class EngineMicTap: @unchecked Sendable {
         ) {
             onFirstHostTime(firstKept)
         }
+
+        let formatChanged = buffer.format != converterSourceFormat
+        if formatChanged {
+            Self.logger.notice(
+                "Engine mic tap format changed (generation \(self.captureGeneration, privacy: .public)): \(Self.describe(self.converterSourceFormat), privacy: .public) -> \(Self.describe(buffer.format), privacy: .public)"
+            )
+            guard let replacement = Self.makeConversion(from: buffer.format, to: targetFormat, gate: gate) else {
+                Self.logger.error(
+                    "Engine mic tap dropped a buffer (generation \(self.captureGeneration, privacy: .public)): no converter from \(Self.describe(buffer.format), privacy: .public)"
+                )
+                return
+            }
+            conversion = replacement
+            converterSourceFormat = buffer.format
+        }
+
+        var outputFrames = 0
         conversion.process(buffer, hostTime: hostTime) { event in
             switch event {
             case .audio(let audio):
+                outputFrames += Int(audio.buffer.frameLength)
                 micStreamer.write(buffer: audio.buffer, hostTimeNanos: audio.hostTime?.nanoseconds)
                 guard let adjusted = audio.hostTime, let raw = audio.rawHostTime else { return }
                 onBuffer(.audio(
@@ -237,6 +290,75 @@ final class EngineMicTap: @unchecked Sendable {
                 onBuffer(.pauseMarker(number))
             }
         }
+        logDiagnostics(buffer, hostTime: hostTime, sampleTime: sampleTime, outputFrames: outputFrames, formatChanged: formatChanged)
+    }
+
+    /// Logs a buffer at the start of a capture, after a format change, and when the time between
+    /// buffers disagrees with the previous buffer's length at its labelled rate.
+    private func logDiagnostics(
+        _ buffer: AVAudioPCMBuffer,
+        hostTime: HostNanoseconds?,
+        sampleTime: Double?,
+        outputFrames: Int,
+        formatChanged: Bool
+    ) {
+        let inputFrames = Int(buffer.frameLength)
+        let rate = buffer.format.sampleRate
+        let previous = diagnostics.previous
+        diagnostics.previous = .init(hostTime: hostTime, sampleTime: sampleTime, frames: inputFrames, sampleRate: rate)
+        diagnostics.buffersSeen += 1
+
+        var hostDeltaMs: Double?
+        var expectedDeltaMs: Double?
+        if let previous, let hostTime, let previousHost = previous.hostTime, previous.sampleRate > 0 {
+            hostDeltaMs = (Double(hostTime.nanoseconds) - Double(previousHost.nanoseconds)) / 1e6
+            expectedDeltaMs = Double(previous.frames) / previous.sampleRate * 1000
+        }
+        var sampleDelta: Double?
+        if let sampleTime, let previousSampleTime = previous?.sampleTime {
+            sampleDelta = sampleTime - previousSampleTime
+        }
+
+        // A gap between buffers is an outage, not a mismatch; only a shorter interval than the
+        // labelled length is: the buffers hold audio faster than real time.
+        let mismatch = hostDeltaMs.flatMap { host in
+            expectedDeltaMs.map { expected in expected > 0 && host < expected * 0.75 }
+        } ?? false
+
+        if diagnostics.buffersSeen == 1 || formatChanged {
+            diagnostics.remainingLogged = Self.loggedBuffersPerEvent
+        } else if mismatch && !diagnostics.lastWasMismatch {
+            diagnostics.remainingLogged = Self.loggedBuffersPerEvent
+        }
+        diagnostics.lastWasMismatch = mismatch
+        guard diagnostics.remainingLogged > 0 else { return }
+        diagnostics.remainingLogged -= 1
+
+        let converter = Self.describe(converterSourceFormat)
+        Self.logger.notice(
+            "Engine mic buffer (generation \(self.captureGeneration, privacy: .public)): format=\(Self.describe(buffer.format), privacy: .public) converter=\(converter, privacy: .public) in=\(inputFrames, privacy: .public) out=\(outputFrames, privacy: .public) hostDeltaMs=\(Self.describe(hostDeltaMs), privacy: .public) expectedMs=\(Self.describe(expectedDeltaMs), privacy: .public) sampleDelta=\(Self.describe(sampleDelta), privacy: .public) mismatch=\(mismatch, privacy: .public)"
+        )
+    }
+
+    private static func describe(_ format: AVAudioFormat) -> String {
+        "\(Int(format.sampleRate))Hz/\(format.channelCount)ch"
+    }
+
+    private static func describe(_ value: Double?) -> String {
+        value.map { String(format: "%.2f", $0) } ?? "none"
+    }
+
+    private struct BufferDiagnostics {
+        struct Buffer {
+            let hostTime: HostNanoseconds?
+            let sampleTime: Double?
+            let frames: Int
+            let sampleRate: Double
+        }
+        var previous: Buffer?
+        var buffersSeen = 0
+        var remainingLogged = 0
+        var lastWasMismatch = false
     }
 }
 
