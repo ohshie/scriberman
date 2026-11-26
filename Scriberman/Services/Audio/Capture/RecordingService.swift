@@ -529,6 +529,10 @@ actor RecordingService: RecordingServiceProtocol {
     /// target is ignored.
     private var micTarget: MicCaptureTarget?
     private var micTargetNumber = 0
+    /// The latest removal of the captured mic or switch to another device, for the capture-health
+    /// grace period. Capture-health restarts are not transitions.
+    private var lastMicTransition: CaptureHealthMonitor.MicTransition?
+    private var micTransitionCount = 0
     /// The device the unified stream's microphone UID resolved to when it was configured. A device
     /// that left and came back under the same UID gets a new id; the stream then delivers nothing
     /// until it is moved away and back (spec, test 4, steps 7 and 8).
@@ -950,12 +954,16 @@ actor RecordingService: RecordingServiceProtocol {
     /// reported to the user and written to the session log.
     func captureHealthSnapshot() async -> CaptureHealthMonitor.Snapshot {
         let counts = await captureFrameCounts()
-        return CaptureHealthMonitor.Snapshot(
+        var snapshot = CaptureHealthMonitor.Snapshot(
             micFrames: counts.mic,
             appFrames: counts.app,
             streamFailureCount: captureStreamFailureCount,
             handledStreamFailureCount: handledStreamFailureCount
         )
+        snapshot.lastMicTransition = lastMicTransition
+        snapshot.micWriteFailures = counts.micWriteFailures
+        snapshot.appWriteFailures = counts.appWriteFailures
+        return snapshot
     }
 
     /// Starts audio capture for a recording: unified ScreenCaptureKit when enabled and an app was
@@ -1997,9 +2005,17 @@ actor RecordingService: RecordingServiceProtocol {
     }
 
     private func logMicSwitchRequested(path: String, target: String?, reason: MicSwitchReason) {
+        if reason != .restart {
+            noteMicTransition()
+        }
         logger.notice(
             "Mic switch requested: path=\(path, privacy: .public) target=\(target ?? "<default>", privacy: .public) reason=\(reason.rawValue, privacy: .public)"
         )
+    }
+
+    private func noteMicTransition() {
+        micTransitionCount += 1
+        lastMicTransition = CaptureHealthMonitor.MicTransition(number: micTransitionCount, at: now())
     }
 
     /// Records what capture is aimed at now, and logs the first buffer that arrives for it.
@@ -2047,6 +2063,7 @@ actor RecordingService: RecordingServiceProtocol {
             reason = .removal
             if loggedRemovedMicUID != capturedUID {
                 loggedRemovedMicUID = capturedUID
+                noteMicTransition()
                 logger.notice(
                     "Captured mic removed: path=\(path, privacy: .public) device=\(capturedUID, privacy: .public)"
                 )
@@ -2115,6 +2132,7 @@ actor RecordingService: RecordingServiceProtocol {
         appStreamNumber = nil
         loggedRemovedMicUID = nil
         isPreferredMicAbsent = false
+        lastMicTransition = nil
         micTarget = nil
         micTargetNumber += 1
         micTransitionTail = nil

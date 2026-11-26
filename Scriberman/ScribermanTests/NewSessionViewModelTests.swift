@@ -1897,6 +1897,58 @@ struct NewSessionViewModelTests {
         #expect(presentations.contains(true))
     }
 
+    /// The failure log of a recording stopped by capture health says so, with that recording's own
+    /// write-failure counts.
+    @Test
+    @MainActor
+    func testExhaustedRestartsWriteARestartsExhaustedFailureLogWithRealCounts() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        enableRecovery(fixture, consecutiveRestartLimit: 1)
+        var snapshot = CaptureHealthMonitor.Snapshot(micFrames: 512, appFrames: 7_495_680)
+        snapshot.micWriteFailures = 4
+        snapshot.appWriteFailures = 2
+        fixture.recordingService.captureHealthSnapshotQueue = [snapshot]
+        var written: [SessionFailureLogWriter.Failure] = []
+        fixture.viewModel.writeSessionFailureLog = { failure, _ in written.append(failure) }
+
+        _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
+        await waitUntil { fixture.viewModel.didFailToStartRecording }
+
+        #expect(written.count == 1)
+        let failure = written.first
+        #expect(failure?.kind == .restartsExhausted)
+        #expect(failure?.micFrames == 512)
+        #expect(failure?.appFrames == 7_495_680)
+        #expect(failure?.micWriteFailures == 4)
+        #expect(failure?.appWriteFailures == 2)
+        #expect(failure?.restartAttempted == true)
+    }
+
+    @Test
+    @MainActor
+    func testFailedStartWritesAStartVerificationFailureLogWithRealCounts() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.viewModel.startVerificationDelay = .milliseconds(1)
+        fixture.recordingService.frameCountQueue = [(mic: 0, app: nil)]
+        fixture.recordingService.writeFailureCounts = (mic: 3, app: 1)
+        var written: [SessionFailureLogWriter.Failure] = []
+        fixture.viewModel.writeSessionFailureLog = { failure, _ in written.append(failure) }
+
+        _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
+        await waitUntil { fixture.viewModel.didFailToStartRecording }
+
+        #expect(written.count == 1)
+        let failure = written.first
+        #expect(failure?.kind == .startVerification)
+        #expect(failure?.micFrames == 0)
+        #expect(failure?.appFrames == nil)
+        #expect(failure?.micWriteFailures == 3)
+        #expect(failure?.appWriteFailures == 1)
+        #expect(failure?.restartAttempted == true)
+    }
+
     /// A restart that will not start is not a recovery: the budget keeps counting and the
     /// recording is eventually stopped rather than left running dead.
     @Test

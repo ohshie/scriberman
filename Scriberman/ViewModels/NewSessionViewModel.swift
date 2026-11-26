@@ -109,7 +109,10 @@ final class NewSessionViewModel {
     private var unsavedSegmentIDs: Set<UUID> = []
     private let saveContext: @MainActor (ModelContext) throws -> Void
     private var startVerificationTask: Task<Void, Never>?
-    private let sessionFailureLogWriter = SessionFailureLogWriter()
+    /// Writes a session's failure log. Replaceable so tests can see what each failure path passes.
+    var writeSessionFailureLog: (SessionFailureLogWriter.Failure, Workspace) -> Void = { failure, workspace in
+        SessionFailureLogWriter().write(failure, in: workspace)
+    }
     private let logger = Logger(subsystem: "Scriberman", category: "NewSessionViewModel")
     var availableDevices: [AudioInputDevice] {
         audioDeviceService.availableDevices
@@ -939,8 +942,9 @@ final class NewSessionViewModel {
         let startedAt = recordingStartedAt ?? Date()
         let lastError = await recordingService.consumePendingError()?.localizedDescription
 
-        sessionFailureLogWriter.write(
+        writeSessionFailureLog(
             SessionFailureLogWriter.Failure(
+                kind: .startVerification,
                 sessionID: sessionID,
                 startedAt: startedAt,
                 micFrames: counts.mic,
@@ -950,7 +954,7 @@ final class NewSessionViewModel {
                 restartAttempted: restartAttempted,
                 lastError: lastError
             ),
-            in: workspace
+            workspace
         )
 
         _ = await recordingService.stopRecording()
@@ -1084,6 +1088,7 @@ final class NewSessionViewModel {
         }
         let effect = captureHealthMonitor.update(now: now, snapshot: snapshot, isRecording: true)
         lastCaptureHealthEffect = effect
+        logCaptureHealthGraceEvent(snapshot: snapshot)
 
         guard effect != .none else { return }
         let mic = snapshot.micFrames.map(String.init) ?? "unavailable"
@@ -1127,6 +1132,26 @@ final class NewSessionViewModel {
         }
     }
 
+    private func logCaptureHealthGraceEvent(snapshot: CaptureHealthMonitor.Snapshot) {
+        guard let event = captureHealthMonitor.lastGraceEvent else { return }
+        let mic = snapshot.micFrames.map(String.init) ?? "unavailable"
+        let transition = snapshot.lastMicTransition.map { String($0.number) } ?? "none"
+        switch event {
+        case .started:
+            logger.notice(
+                "Capture health grace period started: mic stalled after a mic transition. transition=\(transition, privacy: .public) seconds=\(CaptureHealthMonitor.gracePeriod, privacy: .public) micFrames=\(mic, privacy: .public)"
+            )
+        case .recovered:
+            logger.notice(
+                "Capture health grace period outcome: recovered, mic buffers arrived. transition=\(transition, privacy: .public) micFrames=\(mic, privacy: .public)"
+            )
+        case .expired:
+            logger.warning(
+                "Capture health grace period outcome: expired without mic buffers; handling as dead capture. transition=\(transition, privacy: .public) micFrames=\(mic, privacy: .public)"
+            )
+        }
+    }
+
     /// Ends a recording whose capture could not be recovered.
     ///
     /// Unlike a failed *start*, this recording captured audio, so it is finalized through the normal
@@ -1143,18 +1168,19 @@ final class NewSessionViewModel {
 
         let startedAt = recordingStartedAt ?? Date()
         let lastError = await recordingService.consumePendingError()
-        sessionFailureLogWriter.write(
+        writeSessionFailureLog(
             SessionFailureLogWriter.Failure(
+                kind: .restartsExhausted,
                 sessionID: sessionID,
                 startedAt: startedAt,
                 micFrames: snapshot.micFrames,
                 appFrames: snapshot.appFrames,
-                micWriteFailures: 0,
-                appWriteFailures: 0,
+                micWriteFailures: snapshot.micWriteFailures,
+                appWriteFailures: snapshot.appWriteFailures,
                 restartAttempted: captureHealthMonitor.restartsIssued > 0,
                 lastError: lastError?.diagnosticDetail ?? lastError?.localizedDescription
             ),
-            in: workspace
+            workspace
         )
 
         _ = await stopRecording(context: context)

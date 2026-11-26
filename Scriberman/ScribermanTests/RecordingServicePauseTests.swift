@@ -1582,6 +1582,30 @@ struct RecordingServicePauseTests {
         if withApp { #expect(try samples(fixture.session(id).appAudioURL) == expected) }
     }
 
+    @Test(arguments: [true, false])
+    func removalsAndSwitchesAreReportedToCaptureHealthButItsOwnRestartsAreNot(unified: Bool) async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.remove() }
+        _ = try await fixture.start(
+            appProcessID: unified ? 1 : nil, unified: unified, micDeviceID: 2, preferredMic: "device-b"
+        )
+        let atStart = await fixture.service.captureHealthSnapshot().lastMicTransition
+
+        fixture.hardware.unplug("device-b")
+        await fixture.service.simulateHardwareChangeForTesting()
+        let afterRemoval = try #require(await fixture.service.captureHealthSnapshot().lastMicTransition)
+        #expect(afterRemoval.number > (atStart?.number ?? 0))
+
+        #expect(await fixture.service.restartAudioCaptureInPlace())
+        #expect(await fixture.service.captureHealthSnapshot().lastMicTransition == afterRemoval)
+
+        fixture.hardware.plug("device-b", id: 4)
+        await fixture.service.simulateHardwareChangeForTesting()
+        let afterReturn = try #require(await fixture.service.captureHealthSnapshot().lastMicTransition)
+        #expect(afterReturn.number > afterRemoval.number)
+        _ = await fixture.service.stopRecording()
+    }
+
     /// Polls `condition` for up to 5 s.
     private func eventually(_ condition: () async -> Bool) async -> Bool {
         let deadline = Date().addingTimeInterval(5)

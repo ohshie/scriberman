@@ -23,9 +23,12 @@ struct CaptureHealthMonitorTests {
     private func snapshot(
         mic: Int64?,
         app: Int64? = nil,
-        failures: Int = 0
+        failures: Int = 0,
+        transition: CaptureHealthMonitor.MicTransition? = nil
     ) -> CaptureHealthMonitor.Snapshot {
-        CaptureHealthMonitor.Snapshot(micFrames: mic, appFrames: app, streamFailureCount: failures)
+        var snapshot = CaptureHealthMonitor.Snapshot(micFrames: mic, appFrames: app, streamFailureCount: failures)
+        snapshot.lastMicTransition = transition
+        return snapshot
     }
 
     // MARK: - Baseline and healthy capture
@@ -347,6 +350,183 @@ struct CaptureHealthMonitorTests {
         )
         #expect(effect == .fail)
         #expect(monitor.restartsIssued == 4)
+    }
+
+    /// Test 1 on hardware: app frames kept advancing, so every mic restart looked like a recovery
+    /// and the recording spent the whole total budget before it stopped.
+    @Test
+    func testDeadMicWithLiveAppAudioFailsAfterTheConsecutiveLimit() {
+        var monitor = CaptureHealthMonitor(
+            configuration: config(stallThreshold: 3, consecutiveRestartLimit: 3, totalRestartLimit: 10)
+        )
+        var app: Int64 = 960
+        _ = monitor.update(now: start, snapshot: snapshot(mic: 960, app: app), isRecording: true)
+
+        var elapsed: TimeInterval = 0
+        for attempt in 1...3 {
+            elapsed += 4
+            app += 192_000
+            let effect = monitor.update(
+                now: start.addingTimeInterval(elapsed),
+                snapshot: snapshot(mic: 960, app: app),
+                isRecording: true
+            )
+            #expect(effect == .restart, "attempt \(attempt) should restart")
+        }
+
+        elapsed += 4
+        app += 192_000
+        let effect = monitor.update(
+            now: start.addingTimeInterval(elapsed),
+            snapshot: snapshot(mic: 960, app: app),
+            isRecording: true
+        )
+        #expect(effect == .fail)
+        #expect(monitor.restartsIssued == 3)
+    }
+
+    // MARK: - Grace period after a mic transition
+
+    /// The mic last advanced at `start`, its device was removed 0.5 s later, and the stall is due at
+    /// `start + 4`. Returns the monitor after that tick.
+    private func monitorStalledAfterRemoval(
+        transition: CaptureHealthMonitor.MicTransition,
+        stallEffect: inout CaptureHealthMonitor.Effect
+    ) -> CaptureHealthMonitor {
+        var monitor = CaptureHealthMonitor(configuration: config(stallThreshold: 3))
+        _ = monitor.update(now: start, snapshot: snapshot(mic: 960, app: 960), isRecording: true)
+        stallEffect = monitor.update(
+            now: start.addingTimeInterval(4),
+            snapshot: snapshot(mic: 960, app: 192_000, transition: transition),
+            isRecording: true
+        )
+        return monitor
+    }
+
+    @Test
+    func testMicStallRightAfterATransitionStartsAGracePeriodInsteadOfARestart() {
+        var effect = CaptureHealthMonitor.Effect.none
+        let monitor = monitorStalledAfterRemoval(
+            transition: .init(number: 1, at: start.addingTimeInterval(0.5)),
+            stallEffect: &effect
+        )
+        #expect(effect == .none)
+        #expect(monitor.lastGraceEvent == .started)
+        #expect(monitor.restartsIssued == 0)
+    }
+
+    @Test
+    func testGracePeriodWithoutMicBuffersEndsInARestart() {
+        var effect = CaptureHealthMonitor.Effect.none
+        var monitor = monitorStalledAfterRemoval(
+            transition: .init(number: 1, at: start.addingTimeInterval(0.5)),
+            stallEffect: &effect
+        )
+        let transition = CaptureHealthMonitor.MicTransition(number: 1, at: start.addingTimeInterval(0.5))
+
+        for tick in [5.0, 6, 7, 8, 9] {
+            let inside = monitor.update(
+                now: start.addingTimeInterval(tick),
+                snapshot: snapshot(mic: 960, app: 192_000 + Int64(tick) * 48_000, transition: transition),
+                isRecording: true
+            )
+            #expect(inside == .none, "tick \(tick) is inside the grace period")
+        }
+
+        let after = monitor.update(
+            now: start.addingTimeInterval(9.5),
+            snapshot: snapshot(mic: 960, app: 700_000, transition: transition),
+            isRecording: true
+        )
+        #expect(after == .restart)
+        #expect(monitor.lastGraceEvent == .expired)
+    }
+
+    @Test
+    func testMicBuffersInsideTheGracePeriodCountAsRecovery() {
+        var effect = CaptureHealthMonitor.Effect.none
+        let transition = CaptureHealthMonitor.MicTransition(number: 1, at: start.addingTimeInterval(0.5))
+        var monitor = monitorStalledAfterRemoval(transition: transition, stallEffect: &effect)
+
+        let recovered = monitor.update(
+            now: start.addingTimeInterval(6),
+            snapshot: snapshot(mic: 48_960, app: 300_000, transition: transition),
+            isRecording: true
+        )
+        #expect(recovered == .none)
+        #expect(monitor.lastGraceEvent == .recovered)
+
+        // The new device keeps delivering past where the grace period would have run out.
+        for tick in 7...20 {
+            let healthy = monitor.update(
+                now: start.addingTimeInterval(Double(tick)),
+                snapshot: snapshot(mic: 48_960 + Int64(tick) * 48_000, app: 300_000 + Int64(tick) * 48_000, transition: transition),
+                isRecording: true
+            )
+            #expect(healthy == .none, "tick \(tick)")
+        }
+        #expect(monitor.restartsIssued == 0)
+    }
+
+    @Test
+    func testAGracePeriodIsUsedOncePerTransition() {
+        var effect = CaptureHealthMonitor.Effect.none
+        let transition = CaptureHealthMonitor.MicTransition(number: 1, at: start.addingTimeInterval(0.5))
+        var monitor = monitorStalledAfterRemoval(transition: transition, stallEffect: &effect)
+        _ = monitor.update(
+            now: start.addingTimeInterval(6),
+            snapshot: snapshot(mic: 48_960, app: 300_000, transition: transition),
+            isRecording: true
+        )
+
+        // The new device stalls too, with no further transition: a plain restart.
+        let stalledAgain = monitor.update(
+            now: start.addingTimeInterval(9.5),
+            snapshot: snapshot(mic: 48_960, app: 500_000, transition: transition),
+            isRecording: true
+        )
+        #expect(stalledAgain == .restart)
+        #expect(monitor.lastGraceEvent == nil)
+    }
+
+    @Test
+    func testAStallThatBeganLongBeforeTheTransitionGetsNoGracePeriod() {
+        var effect = CaptureHealthMonitor.Effect.none
+        _ = monitorStalledAfterRemoval(
+            transition: .init(number: 1, at: start.addingTimeInterval(2.5)),
+            stallEffect: &effect
+        )
+        #expect(effect == .restart)
+    }
+
+    @Test
+    func testAStreamFailureInsideTheGracePeriodStillRestartsAtOnce() {
+        var effect = CaptureHealthMonitor.Effect.none
+        let transition = CaptureHealthMonitor.MicTransition(number: 1, at: start.addingTimeInterval(0.5))
+        var monitor = monitorStalledAfterRemoval(transition: transition, stallEffect: &effect)
+
+        let failed = monitor.update(
+            now: start.addingTimeInterval(5),
+            snapshot: snapshot(mic: 960, app: 250_000, failures: 1, transition: transition),
+            isRecording: true
+        )
+        #expect(failed == .restart)
+    }
+
+    @Test
+    func testAPauseDuringTheGracePeriodDoesNotCountAgainstIt() {
+        var effect = CaptureHealthMonitor.Effect.none
+        let transition = CaptureHealthMonitor.MicTransition(number: 1, at: start.addingTimeInterval(0.5))
+        var monitor = monitorStalledAfterRemoval(transition: transition, stallEffect: &effect)
+
+        // Paused at 5, resumed at 60.
+        monitor.restartStallClocks(at: start.addingTimeInterval(60))
+        let afterResume = monitor.update(
+            now: start.addingTimeInterval(61),
+            snapshot: snapshot(mic: 960, app: 300_000, transition: transition),
+            isRecording: true
+        )
+        #expect(afterResume == .none)
     }
 
     // MARK: - Lifecycle

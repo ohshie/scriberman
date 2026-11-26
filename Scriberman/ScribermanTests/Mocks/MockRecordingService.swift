@@ -52,11 +52,12 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
     /// restart" without timing games.
     var frameCountQueue: [(mic: Int64?, app: Int64?)] = [(mic: 512, app: nil)]
     private(set) var frameCountCallCount = 0
+    var writeFailureCounts: (mic: Int, app: Int) = (0, 0)
 
     func captureFrameCounts() async -> (mic: Int64?, app: Int64?, micWriteFailures: Int, appWriteFailures: Int) {
         frameCountCallCount += 1
         let counts = frameCountQueue.count > 1 ? frameCountQueue.removeFirst() : (frameCountQueue.first ?? (mic: 512, app: nil))
-        return (counts.mic, counts.app, 0, 0)
+        return (counts.mic, counts.app, writeFailureCounts.mic, writeFailureCounts.app)
     }
 
     /// Snapshots returned by `captureHealthSnapshot()`. Deliberately separate state from
