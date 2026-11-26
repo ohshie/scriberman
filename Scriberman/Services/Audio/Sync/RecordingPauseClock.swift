@@ -48,6 +48,35 @@ struct RecordingPauseTimeline: Sendable {
         return HostNanoseconds(nanoseconds: time - removed)
     }
 
+    /// For a raw time inside a pause, the adjusted time at which that pause ends. Nil for a time
+    /// outside every pause or at or after the close.
+    func adjustedResumeTime(forPaused raw: HostNanoseconds) -> HostNanoseconds? {
+        let time = raw.nanoseconds
+        if let closedAt, time >= closedAt { return nil }
+        var removed: UInt64 = 0
+        for pause in pauses where pause.start <= time {
+            guard let end = pause.end, end <= time else {
+                return HostNanoseconds(nanoseconds: pause.start - removed)
+            }
+            removed += end - pause.start
+        }
+        return nil
+    }
+
+    /// The close in adjusted time: the close without the pauses before it, or the start of the
+    /// pause it fell in. Nil while the clock is open.
+    var adjustedCloseTime: HostNanoseconds? {
+        guard let closedAt else { return nil }
+        var removed: UInt64 = 0
+        for pause in pauses where pause.start <= closedAt {
+            guard let end = pause.end, end <= closedAt else {
+                return HostNanoseconds(nanoseconds: pause.start - removed)
+            }
+            removed += end - pause.start
+        }
+        return HostNanoseconds(nanoseconds: closedAt - removed)
+    }
+
     /// Paused seconds before `time`. An open pause counts up to `time`, or up to the close.
     func pausedSeconds(until time: HostNanoseconds) -> Double {
         let limit = min(time.nanoseconds, closedAt ?? .max)

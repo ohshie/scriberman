@@ -1039,9 +1039,14 @@ actor RecordingService: RecordingServiceProtocol {
                 do {
                     try await screenCaptureSession.start(
                         displayID: captureDisplayID,
-                        videoURL: screenTmpVideoURL
+                        videoURL: screenTmpVideoURL,
+                        pauseClock: captureGates.clock
                     )
                     self.screenCaptureSession = screenCaptureSession
+                    // A pause taken while the stream started was not reported to it.
+                    if captureGates.clock.isPaused {
+                        screenCaptureSession.recordingDidPause()
+                    }
                 } catch {
                     logger.warning(
                         "Screen capture failed to start; continuing without video. error=\(error.localizedDescription, privacy: .public)"
@@ -1328,7 +1333,9 @@ actor RecordingService: RecordingServiceProtocol {
     /// The `AVAudioRecorder` fallback has no buffers to discard, so it is refused.
     func pauseRecording() -> Bool {
         guard isRecordingValue, audioRecorder == nil else { return false }
-        captureGates.clock.pause(at: hostNow)
+        if captureGates.clock.pause(at: hostNow) {
+            screenCaptureSession?.recordingDidPause()
+        }
         return true
     }
 
@@ -1337,6 +1344,7 @@ actor RecordingService: RecordingServiceProtocol {
     func resumeRecording() async -> Bool {
         guard isRecordingValue else { return false }
         guard captureGates.clock.resume(at: hostNow) else { return true }
+        screenCaptureSession?.recordingDidResume()
         // A source that delivered nothing past the pause start has not marked it yet. Callbacks
         // already queued go first, so the marker follows any audio they still carry.
         // A pause that starts during the wait is not this one: the queues may still hold audio
