@@ -1999,7 +1999,9 @@ actor RecordingService: RecordingServiceProtocol {
         guard let allDevices = try? hardware.allDeviceIDs() else {
             return nil
         }
-        return allDevices.first(where: { hardware.deviceUID(deviceID: $0) == deviceUID })
+        return allDevices.first(where: {
+            hardware.deviceUID(deviceID: $0) == deviceUID && hardware.isUsableMicrophone(deviceID: $0)
+        })
     }
 
     private func registerMicHardwareListeners() {

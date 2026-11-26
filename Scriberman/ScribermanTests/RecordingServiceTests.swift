@@ -2021,6 +2021,93 @@ final class RecordingServiceTests {
         #expect(!state.hasRecoveryRetryTask)
     }
 
+    // MARK: - Capture targeting
+
+    @Test
+    func engineCaptureTargetsTheDesiredMicWhileItIsUsable() async throws {
+        let fixture = try await makeRecoveryFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        fixture.hardware.devices = [(1, "BuiltInMicrophoneDevice"), (2, "airpods:input")]
+
+        try await startEngineCaptureAfterConfigurationChange(fixture, desiredMicDeviceUID: "airpods:input")
+
+        #expect(fixture.micController.startCaptureCalls.last?.deviceID == 2)
+    }
+
+    @Test
+    func engineCaptureFallsBackToTheSystemInputWhenTheDesiredMicIsDead() async throws {
+        let fixture = try await makeRecoveryFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        fixture.hardware.devices = [(1, "BuiltInMicrophoneDevice"), (2, "airpods:input")]
+        fixture.hardware.deadDeviceIDs = [2]
+
+        try await startEngineCaptureAfterConfigurationChange(fixture, desiredMicDeviceUID: "airpods:input")
+
+        let call = try #require(fixture.micController.startCaptureCalls.last)
+        #expect(call.deviceID == nil)
+    }
+
+    @Test
+    func engineCaptureNeverTargetsAPrivateAggregateOrAnOutputOnlyDevice() async throws {
+        let fixture = try await makeRecoveryFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        fixture.hardware.devices = [(1, "BuiltInMicrophoneDevice"), (2, "CADefaultDeviceAggregate-74099-0"), (3, "BuiltInSpeakerDevice")]
+        fixture.hardware.privateAggregateIDs = [2]
+        fixture.hardware.outputOnlyDeviceIDs = [3]
+
+        try await startEngineCaptureAfterConfigurationChange(fixture, desiredMicDeviceUID: "CADefaultDeviceAggregate-74099-0")
+        try await startEngineCaptureAfterConfigurationChange(fixture, desiredMicDeviceUID: "BuiltInSpeakerDevice")
+
+        #expect(fixture.micController.startCaptureCalls.map(\.deviceID) == [nil, nil])
+    }
+
+    /// Every device is offered exactly when capture would target it.
+    @Test
+    func theMicListAndCaptureTargetingAgree() async throws {
+        let fixture = try await makeRecoveryFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        fixture.hardware.devices = [
+            (1, "BuiltInMicrophoneDevice"), (2, "airpods:input"), (3, "CADefaultDeviceAggregate-74099-0"), (4, "BuiltInSpeakerDevice")
+        ]
+        fixture.hardware.deadDeviceIDs = [2]
+        fixture.hardware.privateAggregateIDs = [3]
+        fixture.hardware.outputOnlyDeviceIDs = [4]
+        let suiteName = "RecordingServiceTests.\(UUID().uuidString)"
+        defer { UserDefaults().removePersistentDomain(forName: suiteName) }
+        let deviceService = await MainActor.run {
+            AudioDeviceService(
+                hardware: fixture.hardware,
+                userDefaults: UserDefaults(suiteName: suiteName)!,
+                notificationCenter: NotificationCenter()
+            )
+        }
+        let offered = await MainActor.run { Set(deviceService.availableDevices.map(\.uid)) }
+
+        var targeted: Set<String> = []
+        for (id, uid) in fixture.hardware.devices {
+            try await startEngineCaptureAfterConfigurationChange(fixture, desiredMicDeviceUID: uid)
+            if fixture.micController.startCaptureCalls.last?.deviceID == id {
+                targeted.insert(uid)
+            }
+        }
+
+        #expect(offered == ["BuiltInMicrophoneDevice"])
+        #expect(targeted == offered)
+    }
+
+    private func startEngineCaptureAfterConfigurationChange(
+        _ fixture: (service: RecordingService, workspace: Workspace, hardware: MockRecoveryAudioDeviceHardware, micController: MockMicCaptureController),
+        desiredMicDeviceUID: String
+    ) async throws {
+        await fixture.service.setRecordingStateForTesting(isRecording: true, liveAudioContinuation: nil)
+        await fixture.service.setMicRecoveryStateForTesting(
+            desiredMicDeviceUID: desiredMicDeviceUID,
+            micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav")
+        )
+        fixture.micController.isRunning = false
+        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
+    }
+
     private func makeRecoveryFixture() async throws -> (
         service: RecordingService,
         workspace: Workspace,
@@ -2302,13 +2389,16 @@ private final class MockMicCaptureController: MicCaptureControlling, @unchecked 
 
 private final class MockRecoveryAudioDeviceHardware: AudioDeviceHardwareProviding, @unchecked Sendable {
     var devices: [(id: AudioDeviceID, uid: String)] = []
+    var deadDeviceIDs: Set<AudioDeviceID> = []
+    var privateAggregateIDs: Set<AudioDeviceID> = []
+    var outputOnlyDeviceIDs: Set<AudioDeviceID> = []
 
     func allDeviceIDs() throws -> [AudioDeviceID] {
         devices.map(\.id)
     }
 
-    func inputChannelCount(deviceID _: AudioDeviceID) -> Int {
-        1
+    func inputChannelCount(deviceID: AudioDeviceID) -> Int {
+        outputOnlyDeviceIDs.contains(deviceID) ? 0 : 1
     }
 
     func deviceUID(deviceID: AudioDeviceID) -> String? {
@@ -2321,6 +2411,14 @@ private final class MockRecoveryAudioDeviceHardware: AudioDeviceHardwareProvidin
 
     func defaultInputDeviceID() -> AudioDeviceID? {
         devices.first?.id
+    }
+
+    func isAlive(deviceID: AudioDeviceID) -> Bool {
+        !deadDeviceIDs.contains(deviceID)
+    }
+
+    func isPrivateAggregate(deviceID: AudioDeviceID) -> Bool {
+        privateAggregateIDs.contains(deviceID)
     }
 }
 

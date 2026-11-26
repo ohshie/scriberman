@@ -203,6 +203,8 @@ struct RecordingServicePauseTests {
         func deviceUID(deviceID: AudioDeviceID) -> String? { devices.first { $0.id == deviceID }?.uid }
         func deviceName(deviceID _: AudioDeviceID) -> String? { "Fake" }
         func defaultInputDeviceID() -> AudioDeviceID? { devices.first?.id }
+        func isAlive(deviceID _: AudioDeviceID) -> Bool { true }
+        func isPrivateAggregate(deviceID _: AudioDeviceID) -> Bool { false }
     }
 
     private final class FakeRecorder: MicRecorderFallback, @unchecked Sendable {

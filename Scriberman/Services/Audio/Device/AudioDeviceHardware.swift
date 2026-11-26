@@ -10,6 +10,22 @@ protocol AudioDeviceHardwareProviding {
     func deviceUID(deviceID: AudioDeviceID) -> String?
     func deviceName(deviceID: AudioDeviceID) -> String?
     func defaultInputDeviceID() -> AudioDeviceID?
+    /// `kAudioDevicePropertyDeviceIsAlive`. False once the device is unusable, or when it is gone.
+    func isAlive(deviceID: AudioDeviceID) -> Bool
+    /// An aggregate device whose composition has `kAudioAggregateDeviceIsPrivateKey` set: visible
+    /// only to the process that created it. macOS creates one, `CADefaultDeviceAggregate-<pid>-<n>`,
+    /// for this application's own audio engine.
+    func isPrivateAggregate(deviceID: AudioDeviceID) -> Bool
+}
+
+extension AudioDeviceHardwareProviding {
+    /// Whether the device can be offered and captured as a microphone. Device enumeration and
+    /// capture targeting both decide with this, so a device is never targeted that the list hides.
+    func isUsableMicrophone(deviceID: AudioDeviceID) -> Bool {
+        inputChannelCount(deviceID: deviceID) > 0
+            && isAlive(deviceID: deviceID)
+            && !isPrivateAggregate(deviceID: deviceID)
+    }
 }
 
 struct CoreAudioDeviceHardware: AudioDeviceHardwareProviding {
@@ -175,5 +191,50 @@ struct CoreAudioDeviceHardware: AudioDeviceHardwareProviding {
         }
 
         return deviceID
+    }
+
+    func isAlive(deviceID: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsAlive,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var isAlive: UInt32 = 0
+        var dataSize = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &dataSize, &isAlive)
+        return status == noErr && isAlive != 0
+    }
+
+    func isPrivateAggregate(deviceID: AudioDeviceID) -> Bool {
+        var transportAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var transportType: UInt32 = 0
+        var transportSize = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(deviceID, &transportAddress, 0, nil, &transportSize, &transportType) == noErr,
+              transportType == kAudioDeviceTransportTypeAggregate
+        else {
+            return false
+        }
+
+        var compositionAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioAggregateDevicePropertyComposition,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var composition: CFDictionary?
+        var compositionSize = UInt32(MemoryLayout<CFDictionary?>.size)
+        let status = withUnsafeMutablePointer(to: &composition) { compositionPointer in
+            AudioObjectGetPropertyData(deviceID, &compositionAddress, 0, nil, &compositionSize, compositionPointer)
+        }
+        guard status == noErr,
+              let composition = composition as? [String: Any],
+              let isPrivate = composition[kAudioAggregateDeviceIsPrivateKey] as? NSNumber
+        else {
+            return false
+        }
+        return isPrivate.intValue != 0
     }
 }

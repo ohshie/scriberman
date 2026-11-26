@@ -363,6 +363,57 @@ final class AudioDeviceServiceTests {
 
         #expect(service.selectedDevice?.uid == "uid-3")
     }
+
+    // MARK: - Usability
+
+    @Test
+    func deadDeviceIsNotOffered() {
+        var airPods = MockAudioDevice(id: 2, uid: "airpods:input", name: "AirPods", hasInput: true)
+        airPods.isAlive = false
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "BuiltInMicrophoneDevice", name: "MacBook Pro Microphone", hasInput: true),
+            airPods
+        ]
+        hardware.defaultInputID = 1
+
+        service = AudioDeviceService(hardware: hardware, userDefaults: userDefaults, notificationCenter: notificationCenter)
+
+        #expect(service.availableDevices.map(\.uid) == ["BuiltInMicrophoneDevice"])
+    }
+
+    @Test
+    func privateAggregateIsNotOfferedButAPublicAggregateIs() {
+        var defaultAggregate = MockAudioDevice(
+            id: 3, uid: "CADefaultDeviceAggregate-74099-0", name: "CADefaultDeviceAggregate-74099-0", hasInput: true
+        )
+        defaultAggregate.isPrivateAggregate = true
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "BuiltInMicrophoneDevice", name: "MacBook Pro Microphone", hasInput: true),
+            MockAudioDevice(id: 2, uid: "user-aggregate", name: "Studio Aggregate", hasInput: true),
+            defaultAggregate
+        ]
+        hardware.defaultInputID = 1
+
+        service = AudioDeviceService(hardware: hardware, userDefaults: userDefaults, notificationCenter: notificationCenter)
+
+        #expect(Set(service.availableDevices.map(\.uid)) == ["BuiltInMicrophoneDevice", "user-aggregate"])
+    }
+
+    @Test
+    func aDeviceThatDiesLeavesTheListOnTheNextRefresh() {
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "BuiltInMicrophoneDevice", name: "MacBook Pro Microphone", hasInput: true),
+            MockAudioDevice(id: 2, uid: "airpods:input", name: "AirPods", hasInput: true)
+        ]
+        hardware.defaultInputID = 1
+        service = AudioDeviceService(hardware: hardware, userDefaults: userDefaults, notificationCenter: notificationCenter)
+        #expect(service.availableDevices.map(\.uid).contains("airpods:input"))
+
+        hardware.devices[1].isAlive = false
+        service.refreshDevices()
+
+        #expect(service.availableDevices.map(\.uid) == ["BuiltInMicrophoneDevice"])
+    }
 }
 
 private struct MockAudioDevice {
@@ -372,6 +423,8 @@ private struct MockAudioDevice {
     /// What the device can capture. Zero is an output-only device — speakers, a display — which is
     /// what used to reach the picker and record nothing.
     let inputChannels: Int
+    var isAlive = true
+    var isPrivateAggregate = false
 
     init(id: AudioDeviceID, uid: String, name: String, hasInput: Bool) {
         self.init(id: id, uid: uid, name: name, inputChannels: hasInput ? 1 : 0)
@@ -407,5 +460,13 @@ private final class MockAudioDeviceHardware: AudioDeviceHardwareProviding {
 
     func defaultInputDeviceID() -> AudioDeviceID? {
         defaultInputID
+    }
+
+    func isAlive(deviceID: AudioDeviceID) -> Bool {
+        devices.first(where: { $0.id == deviceID })?.isAlive ?? false
+    }
+
+    func isPrivateAggregate(deviceID: AudioDeviceID) -> Bool {
+        devices.first(where: { $0.id == deviceID })?.isPrivateAggregate ?? false
     }
 }
