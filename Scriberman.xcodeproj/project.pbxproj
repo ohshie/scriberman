@@ -160,6 +160,7 @@
 		7A1C0E5B1B2F4A0C8D3E5F05 /* CaptureHealthMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1C0E5B1B2F4A0C8D3E5F06 /* CaptureHealthMonitorTests.swift */; };
 		FB783E190717FC28AD5B812D /* RecordingPauseMixdownTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0717FC28AD5B812DB06DC019 /* RecordingPauseMixdownTests.swift */; };
 		C0C0A05E0000000000000001 /* CaptureCoordinatorPauseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0A05E0000000000000002 /* CaptureCoordinatorPauseTests.swift */; };
+		C0C0A07E0000000000000001 /* ExtensionAPIPauseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0A07E0000000000000002 /* ExtensionAPIPauseTests.swift */; };
 		D9CF35C354716E87F44C0D10 /* RecordingServicePauseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54716E87F44C0D10A6266637 /* RecordingServicePauseTests.swift */; };
 		F9C76F833547AEBB5D6CA6CE /* CaptureAudioGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3547AEBB5D6CA6CE9693C73A /* CaptureAudioGateTests.swift */; };
 		CA80F1561C6DCD967A96A2D5 /* RecordingPauseClockTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C6DCD967A96A2D5780944C9 /* RecordingPauseClockTests.swift */; };
@@ -558,6 +559,7 @@
 		7A1C0E5B1B2F4A0C8D3E5F06 /* CaptureHealthMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/CaptureHealthMonitorTests.swift"; sourceTree = SOURCE_ROOT; };
 		0717FC28AD5B812DB06DC019 /* RecordingPauseMixdownTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/RecordingPauseMixdownTests.swift"; sourceTree = SOURCE_ROOT; };
 		C0C0A05E0000000000000002 /* CaptureCoordinatorPauseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/CaptureCoordinatorPauseTests.swift"; sourceTree = SOURCE_ROOT; };
+		C0C0A07E0000000000000002 /* ExtensionAPIPauseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/ExtensionAPIPauseTests.swift"; sourceTree = SOURCE_ROOT; };
 		54716E87F44C0D10A6266637 /* RecordingServicePauseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/RecordingServicePauseTests.swift"; sourceTree = SOURCE_ROOT; };
 		3547AEBB5D6CA6CE9693C73A /* CaptureAudioGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/CaptureAudioGateTests.swift"; sourceTree = SOURCE_ROOT; };
 		1C6DCD967A96A2D5780944C9 /* RecordingPauseClockTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scriberman/ScribermanTests/RecordingPauseClockTests.swift"; sourceTree = SOURCE_ROOT; };
@@ -911,6 +913,7 @@
 				7A1C0E5B1B2F4A0C8D3E5F06 /* CaptureHealthMonitorTests.swift */,
 				0717FC28AD5B812DB06DC019 /* RecordingPauseMixdownTests.swift */,
 				C0C0A05E0000000000000002 /* CaptureCoordinatorPauseTests.swift */,
+				C0C0A07E0000000000000002 /* ExtensionAPIPauseTests.swift */,
 				54716E87F44C0D10A6266637 /* RecordingServicePauseTests.swift */,
 				3547AEBB5D6CA6CE9693C73A /* CaptureAudioGateTests.swift */,
 				1C6DCD967A96A2D5780944C9 /* RecordingPauseClockTests.swift */,
@@ -1904,6 +1907,7 @@
 				7A1C0E5B1B2F4A0C8D3E5F05 /* CaptureHealthMonitorTests.swift in Sources */,
 				FB783E190717FC28AD5B812D /* RecordingPauseMixdownTests.swift in Sources */,
 				C0C0A05E0000000000000001 /* CaptureCoordinatorPauseTests.swift in Sources */,
+				C0C0A07E0000000000000001 /* ExtensionAPIPauseTests.swift in Sources */,
 				D9CF35C354716E87F44C0D10 /* RecordingServicePauseTests.swift in Sources */,
 				F9C76F833547AEBB5D6CA6CE /* CaptureAudioGateTests.swift in Sources */,
 				CA80F1561C6DCD967A96A2D5 /* RecordingPauseClockTests.swift in Sources */,

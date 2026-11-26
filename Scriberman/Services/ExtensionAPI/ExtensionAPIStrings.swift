@@ -92,6 +92,7 @@ extension ExtensionAPIErrorCode {
         case .importNotRecorded: "The file was received, but the import could not be recorded."
         case .captureFailed: "Recording could not start for another reason."
         case .saveFailed: "Scriberman could not save the change. Nothing was changed."
+        case .resumeFailed: NewSessionViewModel.resumeFailedMessage
         }
     }
 }
