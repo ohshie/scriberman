@@ -125,7 +125,7 @@ final class ExtensionAPIRecording {
         if let title = request.title, title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return ExtensionAPIHandler.error(.invalidRequest, status: 400)
         }
-        guard coordinator.phase == .recording, let current = coordinator.current else {
+        guard [.recording, .paused].contains(coordinator.phase), let current = coordinator.current else {
             return ExtensionAPIHandler.error(.notRecording, status: 409)
         }
         // Fetched now, so a session deleted since the request began is not found.
@@ -288,7 +288,7 @@ final class ExtensionAPIRecording {
         switch phase {
         case .idle: "idle"
         case .starting: "starting"
-        case .recording: "recording"
+        case .recording, .paused: "recording"
         case .stopping: "stopping"
         }
     }

@@ -1371,4 +1371,82 @@ struct RecordingServicePauseTests {
         let id = try #require(await service.stopRecording())
         #expect(try fixture.session(id).captureInterruptionCount == nil)
     }
+
+    // MARK: - Failures resume handled
+
+    /// Waits until the service has counted `count` stream failures, which arrive through a task.
+    private func waitForStreamFailures(_ count: Int, on service: RecordingService) async {
+        let deadline = Date().addingTimeInterval(5)
+        while await service.captureHealthSnapshot().streamFailureCount < count, Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    @Test
+    func aFailureResumeHandledIsAcknowledgedAndALaterOneIsNot() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.remove() }
+        _ = try await fixture.start(appProcessID: 1)
+        let original = try #require(fixture.captures.unified.last)
+        try fixture.sendUnified(Self.before, to: original)
+        _ = await fixture.service.pauseRecording()
+        original.handleStreamStoppedForTesting(StubFailure())
+        await waitForStreamFailures(1, on: fixture.service)
+
+        #expect(await fixture.service.resumeRecording())
+        let afterResume = await fixture.service.captureHealthSnapshot()
+        #expect(afterResume.streamFailureCount == 1)
+        #expect(afterResume.handledStreamFailureCount == 1)
+        #expect(await fixture.service.consumePendingError() == nil)
+
+        try #require(fixture.captures.unified.last).handleStreamStoppedForTesting(StubFailure())
+        await waitForStreamFailures(2, on: fixture.service)
+        let later = await fixture.service.captureHealthSnapshot()
+        #expect(later.handledStreamFailureCount == 1)
+        #expect(await fixture.service.consumePendingError() != nil)
+        _ = await fixture.service.stopRecording()
+    }
+
+    @Test
+    func aFailureDuringARecordingThatIsNotPausedIsNotAcknowledged() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.remove() }
+        _ = try await fixture.start(appProcessID: 1)
+        try #require(fixture.captures.unified.last).handleStreamStoppedForTesting(StubFailure())
+        await waitForStreamFailures(1, on: fixture.service)
+
+        // Not paused: the resume changes nothing and handles nothing.
+        #expect(await fixture.service.resumeRecording())
+        #expect(await fixture.service.captureHealthSnapshot().handledStreamFailureCount == 0)
+        _ = await fixture.service.stopRecording()
+    }
+
+    // MARK: - Dictation
+
+    @Test
+    @MainActor
+    func dictationStaysBlockedWhilePaused() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.remove() }
+        _ = try await fixture.start()
+        #expect(await fixture.service.pauseRecording())
+        let capture = CountingDictationCapture()
+        let dictation = DictationService(recordingService: fixture.service, captureSession: capture, insertText: { _ in .insertedDirectly })
+
+        await dictation.start(deviceID: nil)
+
+        #expect(dictation.state == .idle)
+        #expect(await capture.startCalls == 0)
+        _ = await fixture.service.stopRecording()
+    }
+
+    private actor CountingDictationCapture: DictationCapturing {
+        private(set) var startCalls = 0
+        func start(deviceID _: AudioDeviceID?) async throws -> AsyncThrowingStream<[Float], Error> {
+            startCalls += 1
+            return AsyncThrowingStream { $0.finish() }
+        }
+        func stop() async {}
+        func setLevelHandler(_: @escaping @Sendable (Float) -> Void) async {}
+    }
 }

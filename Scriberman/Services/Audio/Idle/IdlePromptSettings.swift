@@ -48,10 +48,13 @@ struct IdleActivitySnapshot: Equatable, Sendable {
     var appAudio: Date?
     var micAudio: Date?
     var userInput: Date?
+    /// When the recording was last resumed, which counts as activity for every watched source.
+    var resumedAt: Date?
 
-    init(appAudio: Date? = nil, micAudio: Date? = nil, userInput: Date? = nil) {
+    init(appAudio: Date? = nil, micAudio: Date? = nil, userInput: Date? = nil, resumedAt: Date? = nil) {
         self.appAudio = appAudio
         self.micAudio = micAudio
         self.userInput = userInput
+        self.resumedAt = resumedAt
     }
 }

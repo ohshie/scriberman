@@ -346,6 +346,9 @@ actor RecordingService: RecordingServiceProtocol {
     /// the capture-health monitor as direct evidence of death, rather than inferred from
     /// stalled counters. Reset when a recording starts.
     private var captureStreamFailureCount = 0
+    /// How many of `captureStreamFailureCount` a resume has dealt with by checking and restarting
+    /// capture, so the capture-health monitor does not act on them again.
+    private var handledStreamFailureCount = 0
     /// How many times capture was restarted mid-recording. Persisted onto the session at stop so
     /// an interrupted recording is discoverable when reviewed, not only in the log.
     private(set) var captureRestartCount = 0
@@ -752,7 +755,8 @@ actor RecordingService: RecordingServiceProtocol {
         return CaptureHealthMonitor.Snapshot(
             micFrames: counts.mic,
             appFrames: counts.app,
-            streamFailureCount: captureStreamFailureCount
+            streamFailureCount: captureStreamFailureCount,
+            handledStreamFailureCount: handledStreamFailureCount
         )
     }
 
@@ -1110,6 +1114,7 @@ actor RecordingService: RecordingServiceProtocol {
             self.audioLevelValue = 0
             self.pendingError = nil
             self.captureStreamFailureCount = 0
+            self.handledStreamFailureCount = 0
             self.captureRestartCount = 0
             self.activeCapturedAppName = capturedAppName
             self.pendingTitle = title
@@ -1464,6 +1469,7 @@ actor RecordingService: RecordingServiceProtocol {
             logger.error("Resume failed: the recorder fallback did not restart. The recording stays paused.")
             return false
         }
+        acknowledgeStreamFailuresHandledByResume()
         guard captureGates.clock.resume(at: hostNow) else { return true }
         screenCaptureSession?.recordingDidResume()
         // A source that delivered nothing past the pause start has not marked it yet. Callbacks
@@ -1480,6 +1486,16 @@ actor RecordingService: RecordingServiceProtocol {
             gates: gates, to: continuation, mic: true, app: includesApp, through: endedPause
         )
         return true
+    }
+
+    /// Every stream failure reported so far was checked by this resume and its source restarted,
+    /// or left out when only legacy app audio could not restart. Its error is spent with it.
+    private func acknowledgeStreamFailuresHandledByResume() {
+        guard captureStreamFailureCount > handledStreamFailureCount else { return }
+        handledStreamFailureCount = captureStreamFailureCount
+        if case .captureInterrupted = pendingError {
+            pendingError = nil
+        }
     }
 
     /// Restarts microphone capture if it died during the pause. False when it is dead and could not

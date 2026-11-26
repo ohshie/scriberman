@@ -30,16 +30,30 @@ struct CaptureStart {
     let capture: CaptureSources
 }
 
-/// The one place recordings are started and stopped, shared by the window, the menu-bar item,
-/// app lifecycle and the extension API, so they cannot start two recordings or stop one twice.
+/// The one place recordings are started, paused, resumed and stopped, shared by the window, the
+/// menu-bar item, app lifecycle and the extension API, so they cannot start two recordings or stop
+/// one twice.
 @MainActor
 @Observable
 final class CaptureCoordinator {
     enum Phase: Equatable {
         case idle
         case starting
+        /// Also while a pause waits for the first microphone audio.
         case recording
+        /// Also while a resume runs.
+        case paused
         case stopping
+    }
+
+    /// Why a pause or resume did not happen.
+    enum TransitionError: Error, Equatable {
+        /// No recording is running or paused: idle, starting, stopping, or it ended during a pause's wait.
+        case notRecording
+        /// A resume or stop cancelled the pause while it waited for the first microphone audio.
+        case cancelled
+        /// Capture could not be restarted. The recording stays paused.
+        case resumeFailed
     }
 
     enum StartOrigin {
@@ -86,6 +100,9 @@ final class CaptureCoordinator {
     @ObservationIgnored private var startTask: Task<Void, Never>?
     @ObservationIgnored private var startResult: Result<CaptureStart, StartError>?
     @ObservationIgnored private var stopTask: Task<UUID?, Never>?
+    /// The pause in flight, including its wait for the first microphone audio.
+    @ObservationIgnored private var pauseTask: Task<Result<Void, TransitionError>, Never>?
+    @ObservationIgnored private var resumeTask: Task<Result<Void, TransitionError>, Never>?
 
     init(
         viewModel: NewSessionViewModel,
@@ -105,13 +122,21 @@ final class CaptureCoordinator {
         if let transition {
             return transition
         }
-        return viewModel.isIdle ? .idle : .recording
+        if viewModel.isIdle {
+            return .idle
+        }
+        return viewModel.isPaused ? .paused : .recording
+    }
+
+    /// True while a recording runs or is paused, with no start or stop under way.
+    private var isRecordingOrPaused: Bool {
+        transition == nil && !viewModel.isIdle
     }
 
     /// The recording under way, or nil while idle or starting.
     var current: CurrentSession? {
         switch phase {
-        case .recording, .stopping:
+        case .recording, .paused, .stopping:
             return startedSession
         case .idle, .starting:
             return nil
@@ -143,8 +168,9 @@ final class CaptureCoordinator {
         }
     }
 
-    /// Stops the recording under way and returns its session. A stop while stopping joins that
-    /// stop; a stop while starting waits for the start first.
+    /// Stops the recording under way, paused or not, and returns its session. A stop while
+    /// stopping joins that stop; a stop while starting waits for the start first. A stop cancels a
+    /// pause waiting for microphone audio, and waits for a resume.
     func stop(context: ModelContext) async -> RecordingSession? {
         if let startTask {
             await startTask.value
@@ -154,14 +180,70 @@ final class CaptureCoordinator {
         }
 
         transition = .stopping
+        let pausing = pauseTask
+        pausing?.cancel()
+        let resuming = resumeTask
         let task = Task { [viewModel] in
-            await viewModel.stopRecording(context: context)?.id
+            _ = await pausing?.value
+            _ = await resuming?.value
+            return await viewModel.stopRecording(context: context)?.id
         }
         stopTask = task
         let id = await task.value
         stopTask = nil
         transition = nil
         return session(id, in: context)
+    }
+
+    /// Pauses the recording. Succeeds when it is paused, including when it already was. Waits for
+    /// the first microphone audio first; a resume or stop during that wait cancels it. A pause
+    /// during a resume waits for it, then pauses. Refused unless a recording runs or is paused.
+    func pause() async -> Result<Void, TransitionError> {
+        if let resumeTask {
+            _ = await resumeTask.value
+        }
+        guard isRecordingOrPaused else { return .failure(.notRecording) }
+        if viewModel.isPaused {
+            return .success(())
+        }
+        if let pauseTask {
+            return await pauseTask.value
+        }
+
+        // Cleared by the task itself, so a request made after it ends never joins it.
+        let task = Task { [weak self, viewModel] () -> Result<Void, TransitionError> in
+            defer { self?.pauseTask = nil }
+            guard await viewModel.waitForFirstMicAudio() else {
+                return .failure(Task.isCancelled ? .cancelled : .notRecording)
+            }
+            guard !Task.isCancelled else { return .failure(.cancelled) }
+            return await viewModel.pauseCapture() ? .success(()) : .failure(.notRecording)
+        }
+        pauseTask = task
+        return await task.value
+    }
+
+    /// Resumes the recording. Succeeds when it runs, including when it was not paused. Cancels a
+    /// pause that is still waiting for microphone audio. A resume during a resume joins it. A
+    /// failed resume leaves the recording paused. Refused unless a recording runs or is paused.
+    func resume() async -> Result<Void, TransitionError> {
+        guard isRecordingOrPaused else { return .failure(.notRecording) }
+        if let pauseTask {
+            pauseTask.cancel()
+            _ = await pauseTask.value
+        }
+        if let resumeTask {
+            return await resumeTask.value
+        }
+        guard isRecordingOrPaused else { return .failure(.notRecording) }
+        guard viewModel.isPaused else { return .success(()) }
+
+        let task = Task { [weak self, viewModel] () -> Result<Void, TransitionError> in
+            defer { self?.resumeTask = nil }
+            return await viewModel.resumeCapture() ? .success(()) : .failure(.resumeFailed)
+        }
+        resumeTask = task
+        return await task.value
     }
 
     private func run(
