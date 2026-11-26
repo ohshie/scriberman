@@ -44,6 +44,11 @@ final class CaptureCoordinator {
         /// Also while a resume runs.
         case paused
         case stopping
+
+        /// A recording runs or is paused, so pause and resume can act.
+        var canPauseOrResume: Bool {
+            self == .recording || self == .paused
+        }
     }
 
     /// Why a pause or resume did not happen.
@@ -244,6 +249,11 @@ final class CaptureCoordinator {
         }
         resumeTask = task
         return await task.value
+    }
+
+    /// Resumes a paused recording, otherwise pauses it. The app's pause/resume controls call this.
+    func pauseOrResume() async -> Result<Void, TransitionError> {
+        viewModel.isPaused ? await resume() : await pause()
     }
 
     private func run(

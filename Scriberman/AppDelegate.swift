@@ -292,7 +292,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             appState.appAudioService.refreshRunningApps()
             addIdleItems(to: menu)
         case .recording:
-            addRecordingItems(to: menu, duration: appState.newSessionViewModel.elapsedTime)
+            for item in Self.recordingMenuItems(
+                duration: appState.newSessionViewModel.elapsedTime,
+                isPaused: appState.newSessionViewModel.isPaused,
+                canPauseOrResume: appState.captureCoordinator.phase.canPauseOrResume,
+                target: self
+            ) {
+                menu.addItem(item)
+            }
+            menu.addItem(.separator())
+            addOpenAndQuitItems(to: menu)
         }
     }
 
@@ -313,21 +322,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         addOpenAndQuitItems(to: menu)
     }
 
-    private func addRecordingItems(to menu: NSMenu, duration: TimeInterval) {
-        let durationItem = NSMenuItem(title: "Recording: \(TimeFormatter.displayFormat(seconds: Float(duration)))", action: nil, keyEquivalent: "")
+    /// The time line, pause or resume, and Stop Recording, for a recording that runs or is paused.
+    /// While paused the time line shows the frozen time.
+    static func recordingMenuItems(
+        duration: TimeInterval,
+        isPaused: Bool,
+        canPauseOrResume: Bool,
+        target: AnyObject?
+    ) -> [NSMenuItem] {
+        let time = TimeFormatter.displayFormat(seconds: Float(duration))
+        let durationItem = NSMenuItem(
+            title: isPaused ? "Paused: \(time)" : "Recording: \(time)",
+            action: nil,
+            keyEquivalent: ""
+        )
         durationItem.isEnabled = false
-        menu.addItem(durationItem)
+
+        let pauseItem = NSMenuItem(
+            title: ControlsCommands.pauseResumeTitle(isPaused: isPaused),
+            action: canPauseOrResume ? #selector(pauseOrResumeRecordingFromStatusItem) : nil,
+            keyEquivalent: ""
+        )
+        pauseItem.target = target
+        pauseItem.isEnabled = canPauseOrResume
 
         let stopItem = NSMenuItem(
             title: "Stop Recording",
             action: #selector(stopRecordingFromStatusItem),
             keyEquivalent: ""
         )
-        stopItem.target = self
-        menu.addItem(stopItem)
+        stopItem.target = target
 
-        menu.addItem(.separator())
-        addOpenAndQuitItems(to: menu)
+        return [durationItem, pauseItem, stopItem]
     }
 
     private func addOpenAndQuitItems(to menu: NSMenu) {
@@ -417,6 +443,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc
     private func startQuickRecordingFromStatusItem() {
         startQuickRecording()
+    }
+
+    @objc
+    private func pauseOrResumeRecordingFromStatusItem() {
+        guard let appState else {
+            logger.error("pauseOrResumeRecordingFromStatusItem missing appState")
+            return
+        }
+
+        Task {
+            _ = await appState.captureCoordinator.pauseOrResume()
+        }
     }
 
     @objc

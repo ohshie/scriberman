@@ -30,6 +30,11 @@ struct ActiveRecordingDetailView: View {
         self.onTitleNotSaved = onTitleNotSaved
     }
 
+    /// The pause button's shape and caption: Pause while the recording runs, Resume while paused.
+    static func pauseButton(isPaused: Bool) -> (innerShape: HeroCircleButton.InnerShape, caption: String) {
+        isPaused ? (.circle, "Resume") : (.pauseBars, "Pause")
+    }
+
     /// Marks the end of the content, so following the transcript scrolls to the foot of the view.
     private static let bottomAnchor = "recording-view-bottom"
 
@@ -112,21 +117,43 @@ struct ActiveRecordingDetailView: View {
         // grows, including while following is suspended. A plain inset: a safe-area bar extends the
         // scroll edge effect under Stop, and that area lit up under the pointer.
         .safeAreaInset(edge: .bottom) {
-            HStack {
-                Spacer()
-                HeroCircleButton(
-                    innerShape: .roundedSquare,
-                    tint: .red,
-                    caption: "Stop"
-                ) {
-                    Task {
-                        _ = await coordinator.stop(context: modelContext)
-                    }
+            VStack(spacing: 10) {
+                if let resumeFailureMessage = viewModel.resumeFailureMessage {
+                    Text(resumeFailureMessage)
+                        .font(.callout)
+                        .foregroundStyle(.red)
                 }
-                Spacer()
+                HStack(spacing: 40) {
+                    Spacer()
+                    pauseResumeButton
+                    HeroCircleButton(
+                        innerShape: .roundedSquare,
+                        tint: .red,
+                        caption: "Stop"
+                    ) {
+                        Task {
+                            _ = await coordinator.stop(context: modelContext)
+                        }
+                    }
+                    Spacer()
+                }
             }
             .padding(.vertical, 16)
         }
+        }
+    }
+
+    private var pauseResumeButton: some View {
+        let button = Self.pauseButton(isPaused: viewModel.isPaused)
+        return HeroCircleButton(
+            innerShape: button.innerShape,
+            tint: viewModel.isPaused ? .red : .primary,
+            caption: button.caption,
+            isEnabled: coordinator.phase.canPauseOrResume
+        ) {
+            Task {
+                _ = await coordinator.pauseOrResume()
+            }
         }
     }
 

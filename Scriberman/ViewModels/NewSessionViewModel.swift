@@ -989,7 +989,8 @@ final class NewSessionViewModel {
                     break
                 }
 
-                let levels = await recordingService.audioLevels()
+                // The wave rests while paused, whatever the service last measured.
+                let levels = isPaused ? (mic: Float(0), app: Float(0)) : await recordingService.audioLevels()
                 meterLevels.mic = levels.mic
                 meterLevels.app = levels.app
                 let now = clock()

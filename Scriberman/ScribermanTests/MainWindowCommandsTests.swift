@@ -84,6 +84,12 @@ struct ControlsCommandsTests {
     }
 
     @Test
+    func pauseResumeIsTitledForWhatItWillDo() {
+        #expect(ControlsCommands.pauseResumeTitle(isPaused: false) == "Pause Recording")
+        #expect(ControlsCommands.pauseResumeTitle(isPaused: true) == "Resume Recording")
+    }
+
+    @Test
     func rawMarkdownIsTitledForWhatItWillDo() {
         #expect(RawMarkdownCommands.title(isShown: false) == "Show Raw Markdown")
         #expect(RawMarkdownCommands.title(isShown: true) == "Hide Raw Markdown")
@@ -126,6 +132,35 @@ struct ControlsAndFindMenuBarTests {
         #expect(stop.keyEquivalentModifierMask == [.command, .shift])
         // Nothing can play, so Space is left to whatever has focus.
         #expect(play.keyEquivalent.isEmpty)
+    }
+
+    @Test
+    func pauseRecordingSitsBetweenStartAndStopWithShiftCommandP() async throws {
+        let controls = try await topMenu("Controls")
+        let titles = controls.items.map(\.title)
+        let start = try #require(titles.firstIndex(of: "Start Recording"))
+        let pause = try #require(titles.firstIndex(of: "Pause Recording"))
+        let stop = try #require(titles.firstIndex(of: "Stop Recording"))
+        #expect(start + 1 == pause)
+        #expect(pause + 1 == stop)
+        let item = controls.items[pause]
+        #expect(item.keyEquivalent == "p")
+        #expect(item.keyEquivalentModifierMask == [.command, .shift])
+    }
+
+    /// Shift-Command-P belongs to Pause Recording alone, system items included.
+    @Test
+    func noOtherMenuItemUsesShiftCommandP() async throws {
+        _ = try await topMenu("Controls")
+        func items(_ menu: NSMenu) -> [NSMenuItem] {
+            menu.items.flatMap { [$0] + ($0.submenu.map(items) ?? []) }
+        }
+        let mainMenu = try #require(NSApp.mainMenu)
+        let users = items(mainMenu).filter {
+            $0.keyEquivalent.lowercased() == "p"
+                && $0.keyEquivalentModifierMask.intersection(.deviceIndependentFlagsMask) == [.command, .shift]
+        }
+        #expect(users.map(\.title) == ["Pause Recording"])
     }
 
     @Test
@@ -271,5 +306,59 @@ struct ControlsAndFindCommandsSourceTests {
             contentsOf: testsDirectory.appendingPathComponent(relativePathFromTests),
             encoding: .utf8
         )
+    }
+}
+
+/// The menu-bar item's lines while a recording runs or is paused.
+@MainActor
+struct StatusMenuRecordingItemsTests {
+    private func items(duration: TimeInterval = 754, isPaused: Bool, canPauseOrResume: Bool = true) -> [NSMenuItem] {
+        AppDelegate.recordingMenuItems(
+            duration: duration,
+            isPaused: isPaused,
+            canPauseOrResume: canPauseOrResume,
+            target: nil
+        )
+    }
+
+    @Test
+    func runningShowsRecordingTimeThenPauseAboveStop() {
+        let items = items(isPaused: false)
+        #expect(items.map(\.title) == ["Recording: 12:34", "Pause Recording", "Stop Recording"])
+        #expect(!items[0].isEnabled)
+        #expect(items[1].action == NSSelectorFromString("pauseOrResumeRecordingFromStatusItem"))
+        #expect(items[2].action == NSSelectorFromString("stopRecordingFromStatusItem"))
+    }
+
+    @Test
+    func pausedShowsTheFrozenTimeThenResumeAboveStop() {
+        let items = items(isPaused: true)
+        #expect(items.map(\.title) == ["Paused: 12:34", "Resume Recording", "Stop Recording"])
+        #expect(!items[0].isEnabled)
+        #expect(items[1].action == NSSelectorFromString("pauseOrResumeRecordingFromStatusItem"))
+    }
+
+    @Test(arguments: [false, true])
+    func pauseResumeIsEnabledOnlyWhenTheRecordingCanBePaused(canPauseOrResume: Bool) {
+        let items = items(isPaused: false, canPauseOrResume: canPauseOrResume)
+        #expect(items[1].isEnabled == canPauseOrResume)
+        #expect(items[2].isEnabled)
+    }
+}
+
+/// The recording view's pause button, beside Stop.
+struct RecordingViewPauseButtonTests {
+    @Test
+    func runningOffersPauseWithTheBarsShape() {
+        let button = ActiveRecordingDetailView.pauseButton(isPaused: false)
+        #expect(button.caption == "Pause")
+        #expect(button.innerShape == .pauseBars)
+    }
+
+    @Test
+    func pausedOffersResumeWithTheRecordShape() {
+        let button = ActiveRecordingDetailView.pauseButton(isPaused: true)
+        #expect(button.caption == "Resume")
+        #expect(button.innerShape == .circle)
     }
 }

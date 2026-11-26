@@ -9,6 +9,8 @@ struct MainWindowCommandContext {
     let selection: JobsViewModel.SessionListItem?
     let availability: SessionCommandAvailability
     let isPlaying: Bool
+    /// The running recording is paused, so the pause item resumes it.
+    var isRecordingPaused = false
     /// Editable text holds the window's keyboard, so single-key shortcuts must leave the key to it.
     let isEditingText: Bool
     /// The transcript shows as Markdown text rather than passages.
@@ -35,6 +37,8 @@ struct MainWindowActions {
     let delete: () -> Void
     let startRecording: () -> Void
     let stopRecording: () -> Void
+    /// Pauses the running recording, or resumes the paused one.
+    let pauseResumeRecording: () -> Void
     let playPause: () -> Void
     let find: () -> Void
     let toggleRawMarkdown: () -> Void
@@ -106,6 +110,12 @@ struct ControlsCommands: Commands {
             .keyboardShortcut("r", modifiers: [.command, .shift])
             .disabled(!mainWindow.availability.isEnabled(.startRecording))
 
+            Button(Self.pauseResumeTitle(isPaused: mainWindow?.isRecordingPaused ?? false)) {
+                mainWindow?.actions.pauseResumeRecording()
+            }
+            .keyboardShortcut("p", modifiers: [.command, .shift])
+            .disabled(!mainWindow.availability.isEnabled(.pauseResumeRecording))
+
             Button("Stop Recording") {
                 mainWindow?.actions.stopRecording()
             }
@@ -123,6 +133,11 @@ struct ControlsCommands: Commands {
             ))
             .disabled(!mainWindow.availability.isEnabled(.playPause))
         }
+    }
+
+    /// The pause/resume item's title, also used by the menu-bar item.
+    static func pauseResumeTitle(isPaused: Bool) -> String {
+        isPaused ? "Resume Recording" : "Pause Recording"
     }
 
     static func playPauseTitle(isPlaying: Bool) -> String {

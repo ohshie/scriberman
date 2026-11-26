@@ -8,6 +8,7 @@ struct SessionCommandAvailability: Equatable {
         case importFile
         case startRecording
         case stopRecording
+        case pauseResumeRecording
         case playPause
         case find
         case transcribe
@@ -60,10 +61,15 @@ struct SessionCommandAvailability: Equatable {
         hasSpliceGroup: Bool = false,
         hasBusySpliceMember: Bool = false,
         isSessionReserved: Bool = false,
-        isTransformationRunning: Bool = false
+        isTransformationRunning: Bool = false,
+        /// A recording runs or is paused, with no start or stop under way.
+        canPauseOrResumeRecording: Bool = false
     ) {
         var commands: Set<Command> = [.importFile]
         commands.insert(isRecordingRunning ? .stopRecording : .startRecording)
+        if canPauseOrResumeRecording {
+            commands.insert(.pauseResumeRecording)
+        }
         if hasFindTarget {
             commands.insert(.find)
         }

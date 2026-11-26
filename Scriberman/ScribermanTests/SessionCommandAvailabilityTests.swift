@@ -155,6 +155,23 @@ struct SessionCommandAvailabilityTests {
     }
 
     @Test(arguments: rows)
+    func pauseResumeIsOffUnlessTheRecordingCanBePaused(_ row: Row) {
+        #expect(!row.availability.isEnabled(.pauseResumeRecording))
+    }
+
+    @Test(arguments: [false, true])
+    func pauseResumeFollowsWhetherTheRecordingCanBePaused(canPauseOrResume: Bool) {
+        let availability = SessionCommandAvailability(
+            selection: .recording(.recording), isRecordingRunning: true, isTranscriptShown: false,
+            hasLoadedAudio: false, hasFindTarget: true, isSelectionInActiveWorkspace: true,
+            canPauseOrResumeRecording: canPauseOrResume
+        )
+        #expect(availability.isEnabled(.pauseResumeRecording) == canPauseOrResume)
+        #expect(availability.enabledCommands.subtracting([.pauseResumeRecording])
+            == [.importFile, .stopRecording, .find])
+    }
+
+    @Test(arguments: rows)
     func playPauseIsEnabledOnlyWithAudioLoaded(_ row: Row) {
         var withoutAudio = row
         withoutAudio.hasLoadedAudio = false

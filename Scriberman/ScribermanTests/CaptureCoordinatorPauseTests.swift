@@ -513,6 +513,65 @@ struct CaptureCoordinatorPauseTests {
         #expect(fixture.viewModel.elapsedTime == 15)
     }
 
+    // MARK: - Meters
+
+    @Test
+    func meterLevelsReadZeroWhilePaused() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        fixture.recordingService.audioLevelsOverride = (mic: 0.6, app: 0.4)
+        try await fixture.start(app: true)
+        await waitUntil { fixture.viewModel.meterLevels.mic > 0 }
+        #expect(fixture.viewModel.meterLevels.mic > 0)
+
+        _ = await fixture.coordinator.pause()
+        await settle()
+        #expect(fixture.viewModel.meterLevels.mic == 0)
+        #expect(fixture.viewModel.meterLevels.app == 0)
+
+        _ = await fixture.coordinator.resume()
+        await waitUntil { fixture.viewModel.meterLevels.mic > 0 }
+        #expect(fixture.viewModel.meterLevels.mic > 0)
+    }
+
+    // MARK: - Toggle
+
+    /// The app's pause/resume controls are one toggle: it pauses a running recording and resumes a
+    /// paused one.
+    @Test
+    func toggleAlternatesBetweenPauseAndResume() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        try await fixture.start()
+
+        #expect(await fixture.coordinator.pauseOrResume().succeeded)
+        #expect(fixture.coordinator.phase == .paused)
+        #expect(await fixture.coordinator.pauseOrResume().succeeded)
+        #expect(fixture.coordinator.phase == .recording)
+        #expect(fixture.recordingService.pauseCallCount == 1)
+        #expect(fixture.recordingService.resumeCallCount == 1)
+    }
+
+    @Test
+    func toggleIsRefusedWithNoRecording() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        #expect(await fixture.coordinator.pauseOrResume().failure == .notRecording)
+    }
+
+    // MARK: - Phase
+
+    @Test(arguments: [
+        (CaptureCoordinator.Phase.idle, false),
+        (.starting, false),
+        (.recording, true),
+        (.paused, true),
+        (.stopping, false),
+    ])
+    func onlyARunningOrPausedRecordingCanBePausedOrResumed(phase: CaptureCoordinator.Phase, expected: Bool) {
+        #expect(phase.canPauseOrResume == expected)
+    }
+
     // MARK: - Capture health
 
     private func enableCaptureHealth(_ fixture: Fixture, stallThreshold: TimeInterval) {
