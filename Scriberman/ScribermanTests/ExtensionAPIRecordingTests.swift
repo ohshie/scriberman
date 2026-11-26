@@ -51,6 +51,8 @@ struct ExtensionAPIRecordingTests {
                 configurations: ModelConfiguration(isStoredInMemoryOnly: true)
             )
             context = ModelContext(container)
+            // The sessions routes read the store the recordings are saved in.
+            api.sessionContainer = container
             recordingService.persistsSessionsIn = container
             recordingService.isRecordingOverride = true
 

@@ -39,6 +39,8 @@ enum ExtensionAPIErrorCode: String, Sendable, CaseIterable {
     case captureFailed = "capture_failed"
     /// The store refused a change; nothing was changed.
     case saveFailed = "save_failed"
+    /// Capture could not be restarted. The recording stays paused.
+    case resumeFailed = "resume_failed"
 }
 
 /// What `admit` decided from the head alone.
@@ -300,7 +302,8 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
             let prompts = await loadPrompts()
             if let revoked = revocationResponse(for: signing) { return revoked }
             return Self.json(PromptList(prompts: prompts.map { .init(id: $0.id.uuidString, name: $0.name) }))
-        case .status, .captureOptions, .quickStart, .startRecording, .stopRecording, .updateCurrentRecording:
+        case .status, .captureOptions, .quickStart, .startRecording, .stopRecording, .pauseRecording, .resumeRecording,
+             .updateCurrentRecording:
             guard let recording else { return Self.error(.notFoundRoute, status: 404) }
             return await respond(to: route, recording: recording, body: body, signing: signing)
         case .calendarSuggestions, .startFromCalendar:
@@ -338,6 +341,8 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         case .quickStart: response = await recording.quickStart()
         case .startRecording: response = await recording.start(body: body)
         case .stopRecording: response = await recording.stop()
+        case .pauseRecording: response = await recording.pause()
+        case .resumeRecording: response = await recording.resume()
         case .updateCurrentRecording: response = recording.updateCurrent(body: body)
         default: return Self.error(.notFoundRoute, status: 404)
         }
@@ -854,6 +859,8 @@ enum ExtensionAPIRoute: Equatable, Sendable, CaseIterable {
     case calendarSuggestions
     case startFromCalendar
     case stopRecording
+    case pauseRecording
+    case resumeRecording
     case updateCurrentRecording
     case sessions
     case latestSession
@@ -881,8 +888,8 @@ enum ExtensionAPIRoute: Equatable, Sendable, CaseIterable {
             "GET"
         case .updateCurrentRecording:
             "PATCH"
-        case .pair, .quickStart, .startRecording, .startFromCalendar, .stopRecording, .openSession, .exportSession,
-             .revealSession, .runTransformation, .imports:
+        case .pair, .quickStart, .startRecording, .startFromCalendar, .stopRecording, .pauseRecording,
+             .resumeRecording, .openSession, .exportSession, .revealSession, .runTransformation, .imports:
             "POST"
         }
     }
@@ -898,6 +905,8 @@ enum ExtensionAPIRoute: Equatable, Sendable, CaseIterable {
         case .calendarSuggestions: ["calendar", "suggestions"]
         case .startFromCalendar: ["recordings", "from-calendar"]
         case .stopRecording: ["recordings", "stop"]
+        case .pauseRecording: ["recordings", "pause"]
+        case .resumeRecording: ["recordings", "resume"]
         case .updateCurrentRecording: ["recordings", "current"]
         case .sessions: ["sessions"]
         case .latestSession: ["sessions", "latest"]

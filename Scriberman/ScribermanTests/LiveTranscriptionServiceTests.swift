@@ -2943,3 +2943,31 @@ private actor StatefulScriptedVAD: LiveVADStreamingProcessing {
         return LiveVADProcessingResult(state: newState, isTriggered: next.0, eventKind: next.1)
     }
 }
+
+extension LivePauseEndToEndTests {
+    /// A live transcription service set up as in
+    /// `speechFromAPauseIsInNeitherTheLiveNorTheSavedTranscript`, and the capture events of speech,
+    /// a pause filled with the sentinel, speech, then a stop during a second pause. Its ASR answers
+    /// "sentinel" for audio that holds the sentinel and "speech" for any other.
+    static func serviceWithSpeechAroundAPause() async throws -> (service: LiveTranscriptionService, events: [LiveAudioChunk]) {
+        let pauses = [(start: 1.0, end: 2.0), (start: 3.0, end: 5.0)]
+        let bursts = [Burst(start: 0.2, end: 0.95, level: 0.6), Burst(start: 2.05, end: 2.9, level: 0.6)]
+        let captured = try await capture(seconds: 5, pauses: pauses, bursts: bursts, stopAt: 4)
+
+        let covering = TurnDiarizerChunk(probabilities: Array(repeating: 0, count: 1_000 * 2), frameCount: 1_000)
+        let diarizer = ScriptedTurnDiarizer(numSpeakers: 2, feedResponses: [.success([covering])])
+        let service = LiveTranscriptionService(speakerEmbeddingStore: nil)
+        await service.setStoredConfigForTesting(.defaults)
+        await service.setAsrManagerForTesting(AsrManager(config: ASRConfig()))
+        await service.setTurnDiarizersForTesting([.app: diarizer])
+        await service.setVADProcessorForTesting(StateAmplitudeVAD())
+        let sentinel = Self.sentinel
+        await service.setAsrTranscribeHookForTesting { samples, _, _ in
+            ASRResult(
+                text: samples.contains { abs($0) > sentinel - 0.04 } ? "sentinel" : "speech",
+                confidence: 1, duration: TimeInterval(samples.count) / 16_000, processingTime: 0.1
+            )
+        }
+        return (service, captured.events)
+    }
+}

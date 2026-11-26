@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 import SwiftData
 
-/// The status, capture-options, start and stop routes. Every start and stop goes through the
+/// The status, capture-options, start, stop, pause and resume routes. Every start and stop goes through the
 /// capture coordinator; after one, the session is requested in the window as the menu-bar
 /// commands do.
 @MainActor
@@ -103,6 +103,35 @@ final class ExtensionAPIRecording {
         }
         requestSession(.recording(session.id))
         return ExtensionAPIHandler.json(StopBody(session: SessionBody(session)))
+    }
+
+    /// `POST /v1/recordings/pause`: pauses the recording through the capture coordinator, which
+    /// joins a pause under way and succeeds when it is already paused.
+    func pause() async -> HTTPResponse {
+        transitioned(await coordinator.pause())
+    }
+
+    /// `POST /v1/recordings/resume`: resumes the recording through the capture coordinator, which
+    /// joins a resume under way and succeeds when it is not paused. A failed resume leaves it paused.
+    func resume() async -> HTTPResponse {
+        transitioned(await coordinator.resume())
+    }
+
+    private func transitioned(_ result: Result<Void, CaptureCoordinator.TransitionError>) -> HTTPResponse {
+        switch result {
+        case .success:
+            guard let current = coordinator.current else {
+                return ExtensionAPIHandler.error(.notRecording, status: 409)
+            }
+            guard let session = try? RecordingSession.fetch(id: current.id, in: context) else {
+                return ExtensionAPIHandler.error(.notFound, status: 404)
+            }
+            return ExtensionAPIHandler.json(TransitionBody(session: SessionBody(session)))
+        case .failure(.notRecording), .failure(.cancelled):
+            return ExtensionAPIHandler.error(.notRecording, status: 409)
+        case .failure(.resumeFailed):
+            return ExtensionAPIHandler.error(.resumeFailed, status: 500)
+        }
     }
 
     // MARK: - Update
@@ -288,7 +317,8 @@ final class ExtensionAPIRecording {
         switch phase {
         case .idle: "idle"
         case .starting: "starting"
-        case .recording, .paused: "recording"
+        case .recording: "recording"
+        case .paused: "paused"
         case .stopping: "stopping"
         }
     }
@@ -367,6 +397,11 @@ final class ExtensionAPIRecording {
     }
 
     private struct StopBody: Encodable {
+        let session: SessionBody
+    }
+
+    /// The body of a pause or resume, the same as a stop's.
+    private struct TransitionBody: Encodable {
         let session: SessionBody
     }
 

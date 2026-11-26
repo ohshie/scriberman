@@ -61,7 +61,7 @@ final class NewSessionViewModel {
     /// Set when a resume fails, which leaves the recording paused. Cleared by the next resume and
     /// when the recording ends.
     private(set) var resumeFailureMessage: String?
-    static let resumeFailedMessage = "Recording could not be resumed."
+    nonisolated static let resumeFailedMessage = "Recording could not be resumed."
     /// How often a pause checks for the first microphone audio while it waits for it.
     var pauseWaitPollInterval: Duration = .milliseconds(20)
     /// When the current pause began, by `clock`.
