@@ -373,6 +373,13 @@ protocol MicRecorderFallback: AnyObject {
 
 extension AVAudioRecorder: MicRecorderFallback {}
 
+/// The microphone capture is aimed at. `deviceUID` nil is the system default. `firstBufferHostTime`
+/// is when the first buffer arrived after capture was aimed at it, nil until then.
+struct MicCaptureTarget: Equatable, Sendable {
+    let deviceUID: String?
+    var firstBufferHostTime: HostNanoseconds?
+}
+
 typealias SendableAudioObjectPropertyListenerBlock =
     @Sendable @convention(block) (UInt32, UnsafePointer<AudioObjectPropertyAddress>) -> Void
 
@@ -498,8 +505,34 @@ actor RecordingService: RecordingServiceProtocol {
     private var restartInPlaceTask: Task<Bool, Never>?
     /// The resume in flight. Pause and resume requests made during it wait for it.
     private var resumeTask: Task<Bool, Never>?
-    /// True while a microphone update on the unified stream runs.
-    private var isRetargetingUnifiedMic = false
+    /// The last microphone transition queued: a capture target update, a unified capture restart
+    /// or an engine recovery. Each one waits for the one queued before it.
+    private var micTransitionTail: Task<Void, Never>?
+    /// Transitions queued and not finished, by number.
+    private var micTransitionsInFlight: Set<Int> = []
+    private var nextMicTransitionNumber = 0
+    /// A capture target update queued and not started yet. A request made before it starts shares
+    /// it, since it reads the target when it runs.
+    private var queuedMicRetarget: Task<Void, Never>?
+    /// Numbers every capture stream, so a callback from a replaced or stopped stream is told apart
+    /// from one from the recording's current stream.
+    private var nextCaptureStreamNumber = 0
+    private var unifiedStreamNumber: Int?
+    private var appStreamNumber: Int?
+    /// The UID engine capture was started on; nil for the system default.
+    private var currentCaptureDeviceUID: String?
+    /// The removed microphone already logged, so a removal is logged once.
+    private var loggedRemovedMicUID: String?
+    /// True while the preferred microphone is absent, so its return is logged.
+    private var isPreferredMicAbsent = false
+    /// The microphone capture is aimed at, numbered so a late first-buffer notice for an earlier
+    /// target is ignored.
+    private var micTarget: MicCaptureTarget?
+    private var micTargetNumber = 0
+    /// The device the unified stream's microphone UID resolved to when it was configured. A device
+    /// that left and came back under the same UID gets a new id; the stream then delivers nothing
+    /// until it is moved away and back (spec, test 4, steps 7 and 8).
+    private var unifiedConfiguredMicDeviceID: AudioDeviceID?
     private var liveAudioClock: LiveCaptureClock?
     /// The recording's pause clock and source gates. Made once per recording, kept by every
     /// capture restart.
@@ -723,9 +756,11 @@ actor RecordingService: RecordingServiceProtocol {
         isRecoveringMicCapture: Bool = false,
         recorderFallbackActive: Bool = false,
         currentCaptureDeviceID: AudioDeviceID? = nil,
-        hasRecoveryRetryTask: Bool = false
+        hasRecoveryRetryTask: Bool = false,
+        fallbackMicDeviceUID: String? = nil
     ) {
         self.desiredMicDeviceUID = desiredMicDeviceUID
+        self.fallbackMicDeviceUID = fallbackMicDeviceUID
         self.micFileURL = micFileURL
         self.isRecoveringMicCapture = isRecoveringMicCapture
         self.recorderFallbackActiveForTesting = recorderFallbackActive
@@ -756,6 +791,7 @@ actor RecordingService: RecordingServiceProtocol {
 
     func setUnifiedCaptureSessionForTesting(_ session: UnifiedCaptureSession?) {
         self.unifiedCaptureSession = session
+        self.unifiedConfiguredMicDeviceID = resolveDeviceID(for: session?.currentMicDeviceUID)
     }
 
     func simulateHardwareChangeForTesting() async {
@@ -875,6 +911,38 @@ actor RecordingService: RecordingServiceProtocol {
         captureStreamFailureCount += 1
     }
 
+    /// Records a failure reported by stream `streamNumber`. A callback from a stream that was
+    /// replaced or stopped is ignored, so it is never counted against the current capture.
+    func reportCaptureStreamFailure(_ error: any Error, fromStream streamNumber: Int) {
+        guard isRecordingValue, streamNumber == unifiedStreamNumber || streamNumber == appStreamNumber else {
+            logger.notice(
+                "Ignored a stale capture stream callback: stream=\(streamNumber, privacy: .public) currentUnified=\(self.unifiedStreamNumber.map(String.init) ?? "none", privacy: .public) currentApp=\(self.appStreamNumber.map(String.init) ?? "none", privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+            )
+            return
+        }
+        reportCaptureStreamFailure(error)
+    }
+
+    /// Numbers a new capture stream and routes its failures, tagged with that number, to
+    /// `reportCaptureStreamFailure(_:fromStream:)`.
+    private func reportStreamFailures(of session: UnifiedCaptureSession) -> Int {
+        nextCaptureStreamNumber += 1
+        let streamNumber = nextCaptureStreamNumber
+        session.onStreamStopped = { [weak self] error in
+            Task { [weak self] in await self?.reportCaptureStreamFailure(error, fromStream: streamNumber) }
+        }
+        return streamNumber
+    }
+
+    private func reportStreamFailures(of session: AppAudioCaptureSession) -> Int {
+        nextCaptureStreamNumber += 1
+        let streamNumber = nextCaptureStreamNumber
+        session.onStreamStopped = { [weak self] error in
+            Task { [weak self] in await self?.reportCaptureStreamFailure(error, fromStream: streamNumber) }
+        }
+        return streamNumber
+    }
+
     /// Everything the capture-health monitor needs, gathered in one actor hop.
     ///
     /// `streamFailureCount` is deliberately not consuming, unlike `consumePendingError()`: the
@@ -919,13 +987,19 @@ actor RecordingService: RecordingServiceProtocol {
                     },
                     gates: captureGates
                 )
-                unified.onStreamStopped = { [weak self] error in
-                    Task { [weak self] in await self?.reportCaptureStreamFailure(error) }
+                let streamNumber = reportStreamFailures(of: unified)
+                unifiedStreamNumber = streamNumber
+                do {
+                    try await startCaptureSession(.unified(unified))
+                } catch {
+                    if unifiedStreamNumber == streamNumber { unifiedStreamNumber = nil }
+                    throw error
                 }
-                try await startCaptureSession(.unified(unified))
                 self.unifiedCaptureSession = unified
+                self.unifiedConfiguredMicDeviceID = resolveDeviceID(for: unified.currentMicDeviceUID)
                 self.appAudioURL = appFileURL
                 self.micCaptureStartedAt = hostNow()
+                publishMicTarget(unified.currentMicDeviceUID)
                 unifiedStarted = true
             } catch {
                 logger.warning("Unified capture failed to start; falling back to legacy capture. error=\(error.localizedDescription, privacy: .public)")
@@ -948,10 +1022,14 @@ actor RecordingService: RecordingServiceProtocol {
                 liveAudioContinuation: liveAudioContinuation,
                 gate: captureGates.app
             )
-            appSession.onStreamStopped = { [weak self] error in
-                Task { [weak self] in await self?.reportCaptureStreamFailure(error) }
+            let streamNumber = reportStreamFailures(of: appSession)
+            appStreamNumber = streamNumber
+            do {
+                try await startCaptureSession(.appAudio(appSession))
+            } catch {
+                if appStreamNumber == streamNumber { appStreamNumber = nil }
+                throw error
             }
-            try await startCaptureSession(.appAudio(appSession))
             self.appAudioCaptureSession = appSession
             self.appAudioURL = appFileURL
         } else {
@@ -1054,7 +1132,7 @@ actor RecordingService: RecordingServiceProtocol {
             return await restartInPlaceTask.value
         }
         guard isRecordingValue else { return false }
-        let task = Task { await self.performRestartInPlace() }
+        let task = enqueueMicTransition { [weak self] in await self?.performRestartInPlace() ?? false }
         restartInPlaceTask = task
         let restarted = await task.value
         if restartInPlaceTask == task {
@@ -1073,7 +1151,7 @@ actor RecordingService: RecordingServiceProtocol {
         // recovery in `mic-capture-resilience` — which likewise does not re-prepare the writer.
         guard let existing = unifiedCaptureSession else {
             logger.notice("Mid-session restart delegating to engine-path mic recovery.")
-            return await performMicRecovery()
+            return await recoverMicCapture(reason: .restart)
         }
 
         let startedAt = Date()
@@ -1084,12 +1162,14 @@ actor RecordingService: RecordingServiceProtocol {
         }
         Self.sendStartedPauseMarkers(gates: captureGates, to: liveAudioContinuation, mic: true, app: true)
         let reused = existing.streamers
+        let targetUID = micCaptureTargetUID()
+        logMicSwitchRequested(path: "unified", target: targetUID, reason: .restart)
 
         let replacement = UnifiedCaptureSession(
             micFileURL: micFileURL,
             appFileURL: activeAppFileURL,
             processID: activeAppProcessID ?? 0,
-            micDeviceUID: existing.currentMicDeviceUID,
+            micDeviceUID: targetUID,
             liveAudioContinuation: liveAudioContinuation,
             onMicFirstHostTime: { [weak self, clock = liveAudioClock] hostTime in
                 clock?.observe(hostTime)
@@ -1103,9 +1183,7 @@ actor RecordingService: RecordingServiceProtocol {
             preparedStreamers: existing.preparedStreamers,
             gates: captureGates
         )
-        replacement.onStreamStopped = { [weak self] error in
-            Task { [weak self] in await self?.reportCaptureStreamFailure(error) }
-        }
+        let streamNumber = reportStreamFailures(of: replacement)
 
         do {
             try await startCaptureSession(.unified(replacement))
@@ -1123,7 +1201,10 @@ actor RecordingService: RecordingServiceProtocol {
         }
 
         unifiedCaptureSession = replacement
+        unifiedStreamNumber = streamNumber
+        unifiedConfiguredMicDeviceID = resolveDeviceID(for: targetUID)
         micCaptureStartedAt = hostNow()
+        publishMicTarget(targetUID)
         captureRestartCount += 1
         let elapsedMs = Date().timeIntervalSince(startedAt) * 1_000
         logger.notice(
@@ -1143,6 +1224,8 @@ actor RecordingService: RecordingServiceProtocol {
             await appAudioCaptureSession.stop()
         }
         appAudioCaptureSession = nil
+        unifiedStreamNumber = nil
+        appStreamNumber = nil
         stopMicCapture()
         audioRecorder?.stop()
         audioRecorder = nil
@@ -1229,6 +1312,7 @@ actor RecordingService: RecordingServiceProtocol {
             }
             desiredMicDeviceUID = preferredMicDeviceUID ?? fallbackMicDeviceUID
             routeRefusedMicDeviceID = nil
+            isPreferredMicAbsent = desiredMicDeviceUID != nil && resolveDeviceID(for: desiredMicDeviceUID) == nil
             // Phase 2: for mic+app recordings, capture both from one ScreenCaptureKit stream
             // (shared clock) when enabled. Falls back to the legacy AVAudioEngine + separate
             // SCStream path on any failure.
@@ -1304,6 +1388,9 @@ actor RecordingService: RecordingServiceProtocol {
             )
             registerMicHardwareListeners()
             didStart = true
+            // A device removed or returned while capture started is not seen by the listeners,
+            // which start only now.
+            await requestMicRetarget(reason: .start)
             return session.id
         } catch {
             stopMicCapture()
@@ -1592,12 +1679,17 @@ actor RecordingService: RecordingServiceProtocol {
 
     private func performResume() async -> Bool {
         let generation = recordingGeneration
-        guard await restartDeadMicrophone(generation: generation), isCurrentRecording(generation) else {
-            logger.error("Resume failed: microphone capture could not be restarted. The recording stays paused.")
-            return false
-        }
-        await restartDeadLegacyAppStream(generation: generation)
-        guard isCurrentRecording(generation) else { return false }
+        // A microphone switch still running, or requested while this resume restarts capture,
+        // finishes before the clocks reopen. One that failed makes the microphone count as dead.
+        repeat {
+            await waitForMicTransitions()
+            guard await restartDeadMicrophone(generation: generation), isCurrentRecording(generation) else {
+                logger.error("Resume failed: microphone capture could not be restarted. The recording stays paused.")
+                return false
+            }
+            await restartDeadLegacyAppStream(generation: generation)
+            guard isCurrentRecording(generation) else { return false }
+        } while !micTransitionsInFlight.isEmpty
         // Recorded again only now, so it captures nothing while the clock is still paused.
         if let audioRecorder, !audioRecorder.record() {
             logger.error("Resume failed: the recorder fallback did not restart. The recording stays paused.")
@@ -1642,9 +1734,10 @@ actor RecordingService: RecordingServiceProtocol {
         if let unified = unifiedCaptureSession {
             let streamStopped = !unified.isStreamLive
             let stalled = isMicrophoneStalled()
-            guard streamStopped || stalled else { return true }
+            let switchFailed = unifiedMicNeedsSwitch(unified)
+            guard streamStopped || stalled || switchFailed else { return true }
             logger.notice(
-                "Resume restarting unified capture. streamStopped=\(streamStopped, privacy: .public) micStalled=\(stalled, privacy: .public)"
+                "Resume restarting unified capture. streamStopped=\(streamStopped, privacy: .public) micStalled=\(stalled, privacy: .public) micSwitchFailed=\(switchFailed, privacy: .public)"
             )
             return await restartAudioCaptureInPlace()
         }
@@ -1655,7 +1748,7 @@ actor RecordingService: RecordingServiceProtocol {
         logger.notice(
             "Resume restarting engine microphone. engineStopped=\(engineStopped, privacy: .public) micStalled=\(stalled, privacy: .public)"
         )
-        let restarted = await performMicRecovery()
+        let restarted = await performMicRecovery(reason: .resume)
         guard restarted, isCurrentRecording(generation) else { return false }
         micRecoveryRetryTask?.cancel()
         micRecoveryRetryTask = nil
@@ -1704,9 +1797,7 @@ actor RecordingService: RecordingServiceProtocol {
             gate: captureGates.app,
             reusingPreparedOutput: existing.outputHandler.isOutputPrepared
         )
-        replacement.onStreamStopped = { [weak self] error in
-            Task { [weak self] in await self?.reportCaptureStreamFailure(error) }
-        }
+        let streamNumber = reportStreamFailures(of: replacement)
         do {
             try await startCaptureSession(.appAudio(replacement))
         } catch {
@@ -1718,6 +1809,7 @@ actor RecordingService: RecordingServiceProtocol {
             return false
         }
         appAudioCaptureSession = replacement
+        appStreamNumber = streamNumber
         captureRestartCount += 1
         logger.notice("App audio stream restarted (restart #\(self.captureRestartCount, privacy: .public)).")
         return true
@@ -1768,26 +1860,133 @@ actor RecordingService: RecordingServiceProtocol {
         }
         self.desiredMicDeviceUID = desiredDeviceUID
         routeRefusedMicDeviceID = nil
-        // Unified ScreenCaptureKit capture owns the mic device, so the swap is applied to the
-        // running stream instead of by restarting engine capture. A failed update leaves capture
-        // on the previous device; the next CoreAudio hardware event re-attempts it, so the engine
-        // path's retry loop is deliberately not started here.
-        if unifiedCaptureSession != nil {
-            await applyDesiredMicToUnifiedCapture(onlyIfPresent: false)
-            return
-        }
         // The recorder fallback writes the microphone file itself, so the engine can't take over
         // without writing over it.
-        guard !isRecorderFallbackActive else {
+        guard unifiedCaptureSession != nil || !isRecorderFallbackActive else {
             logger.notice("Mic retarget ignored: the recorder fallback keeps recording on the system input.")
             return
         }
-        // A recovery in flight reads the device after its last suspension, so it picks this one up.
-        guard !isRecoveringMicCapture else {
+        await requestMicRetarget(reason: .retarget)
+    }
+
+    // MARK: - Microphone transitions
+
+    /// Why a microphone switch was requested. Logged only.
+    private enum MicSwitchReason: String {
+        case start, retarget, removal, preferredReturned, returnedUnderSameUID, hardwareChange
+        case restart, configurationChange, retry, resume
+    }
+
+    /// Queues `body` behind every microphone transition queued before it, so target updates,
+    /// unified restarts and engine recoveries run one at a time in request order.
+    private func enqueueMicTransition<T: Sendable>(
+        _ body: @escaping @Sendable () async -> T
+    ) -> Task<T, Never> {
+        nextMicTransitionNumber += 1
+        let number = nextMicTransitionNumber
+        micTransitionsInFlight.insert(number)
+        let previous = micTransitionTail
+        let task = Task { () -> T in
+            await previous?.value
+            let result = await body()
+            self.micTransitionsInFlight.remove(number)
+            return result
+        }
+        micTransitionTail = Task { _ = await task.value }
+        return task
+    }
+
+    /// Returns once no microphone transition is queued or running.
+    private func waitForMicTransitions() async {
+        while !micTransitionsInFlight.isEmpty, let tail = micTransitionTail {
+            await tail.value
+        }
+    }
+
+    /// Moves capture to the target rule's device, after every transition queued before. A request
+    /// made before a queued update starts shares that update.
+    private func requestMicRetarget(reason: MicSwitchReason) async {
+        if let queuedMicRetarget {
+            await queuedMicRetarget.value
             return
         }
         let generation = recordingGeneration
-        let didRecover = await performMicRecovery()
+        let task = enqueueMicTransition { [weak self] () -> Void in
+            await self?.performMicRetarget(generation: generation, reason: reason)
+        }
+        queuedMicRetarget = task
+        await task.value
+    }
+
+    private func performMicRetarget(generation: Int, reason: MicSwitchReason) async {
+        queuedMicRetarget = nil
+        guard isCurrentRecording(generation) else { return }
+        if unifiedCaptureSession != nil {
+            await applyMicTargetToUnifiedCapture(generation: generation, reason: reason)
+            return
+        }
+        guard !isRecorderFallbackActive else { return }
+        await applyMicTargetToEngine(generation: generation, reason: reason)
+    }
+
+    /// True when the unified stream is not on the target rule's device, or is on a device that
+    /// left and came back under the same UID.
+    private func unifiedMicNeedsSwitch(_ session: UnifiedCaptureSession) -> Bool {
+        session.currentMicDeviceUID != micCaptureTargetUID() || configuredMicDeviceReturned(session)
+    }
+
+    private func configuredMicDeviceReturned(_ session: UnifiedCaptureSession) -> Bool {
+        guard let configured = session.currentMicDeviceUID else { return false }
+        return resolveDeviceID(for: configured) != unifiedConfiguredMicDeviceID
+    }
+
+    /// Moves the unified stream's microphone to the capture target by updating the running stream,
+    /// without a restart. The target is read again after every update, so a newer target is
+    /// applied after an older one and an update that is no longer current is not published.
+    ///
+    /// When the configured device left and came back under the same UID, the stream is moved to the
+    /// system default first: re-applying the same UID delivers nothing.
+    private func applyMicTargetToUnifiedCapture(generation: Int, reason: MicSwitchReason) async {
+        while isCurrentRecording(generation), let session = unifiedCaptureSession {
+            let target = micCaptureTargetUID()
+            let returnedUnderSameUID = session.currentMicDeviceUID == target && configuredMicDeviceReturned(session)
+            guard session.currentMicDeviceUID != target || returnedUnderSameUID else { return }
+            if returnedUnderSameUID {
+                logMicSwitchRequested(path: "unified", target: nil, reason: .returnedUnderSameUID)
+                guard await session.retargetMic(deviceUID: nil) else { return }
+                if unifiedCaptureSession === session { unifiedConfiguredMicDeviceID = nil }
+                continue
+            }
+            logMicSwitchRequested(path: "unified", target: target, reason: reason)
+            let updated = await session.retargetMic(deviceUID: target)
+            guard isCurrentRecording(generation), unifiedCaptureSession === session else { return }
+            guard updated else {
+                // Rejected: capture stays where it was. A later hardware event or the capture-health
+                // restart moves it.
+                if micCaptureTargetUID() == target { return }
+                continue
+            }
+            unifiedConfiguredMicDeviceID = resolveDeviceID(for: target)
+            // Buffers already queued come from the previous device.
+            await session.drainSampleCallbacks()
+            guard isCurrentRecording(generation), unifiedCaptureSession === session else { return }
+            if micCaptureTargetUID() == target {
+                publishMicTarget(target)
+            }
+        }
+    }
+
+    /// Restarts engine capture on the target rule's device when it is not the device in use,
+    /// including when the device in use was removed while the engine still reports running.
+    private func applyMicTargetToEngine(generation: Int, reason: MicSwitchReason) async {
+        let target = micCaptureTargetUID()
+        guard resolveDeviceID(for: target) != currentCaptureDeviceID
+                || currentCaptureDeviceUID != (resolveDeviceID(for: target) == nil ? nil : target)
+        else {
+            return
+        }
+        logMicSwitchRequested(path: "engine", target: target, reason: reason)
+        let didRecover = await recoverMicCapture(reason: reason)
         guard isCurrentRecording(generation) else { return }
         if didRecover {
             micRecoveryRetryTask?.cancel()
@@ -1797,28 +1996,73 @@ actor RecordingService: RecordingServiceProtocol {
         scheduleMicRecoveryRetry()
     }
 
-    /// Moves the unified stream's microphone to `desiredMicDeviceUID`. One update runs at a time; a
-    /// device requested while it runs is applied after it, so an older request never ends up
-    /// replacing a newer one. With `onlyIfPresent`, a device that is not connected is not applied.
-    private func applyDesiredMicToUnifiedCapture(onlyIfPresent: Bool) async {
-        guard !isRetargetingUnifiedMic else { return }
-        isRetargetingUnifiedMic = true
-        defer { isRetargetingUnifiedMic = false }
-        let generation = recordingGeneration
-        while isCurrentRecording(generation) {
-            if let restartInPlaceTask {
-                _ = await restartInPlaceTask.value
-                continue
-            }
-            guard let session = unifiedCaptureSession else { return }
-            let requested = desiredMicDeviceUID
-            guard session.currentMicDeviceUID != requested else { return }
-            if onlyIfPresent {
-                guard let requested, resolveDeviceID(for: requested) != nil else { return }
-            }
-            let updated = await session.retargetMic(deviceUID: requested)
-            if !updated, desiredMicDeviceUID == requested { return }
+    private func logMicSwitchRequested(path: String, target: String?, reason: MicSwitchReason) {
+        logger.notice(
+            "Mic switch requested: path=\(path, privacy: .public) target=\(target ?? "<default>", privacy: .public) reason=\(reason.rawValue, privacy: .public)"
+        )
+    }
+
+    /// Records what capture is aimed at now, and logs the first buffer that arrives for it.
+    private func publishMicTarget(_ deviceUID: String?) {
+        micTargetNumber += 1
+        let number = micTargetNumber
+        micTarget = MicCaptureTarget(deviceUID: deviceUID)
+        captureGates.mic.observeNextArrival { [weak self] hostTime in
+            Task { [weak self] in await self?.micTargetDeliveredFirstBuffer(number, at: hostTime) }
         }
+    }
+
+    private func micTargetDeliveredFirstBuffer(_ number: Int, at hostTime: HostNanoseconds) {
+        guard number == micTargetNumber, var target = micTarget, target.firstBufferHostTime == nil else { return }
+        target.firstBufferHostTime = hostTime
+        micTarget = target
+        logger.notice(
+            "First mic buffer from the new device: device=\(target.deviceUID ?? "<default>", privacy: .public) hostTime=\(hostTime, privacy: .public)"
+        )
+    }
+
+    /// The microphone capture is aimed at, and when its first buffer arrived. Nil when no
+    /// recording runs and under the recorder fallback, whose device is not known.
+    func micCaptureTarget() -> MicCaptureTarget? {
+        micTarget
+    }
+
+    /// Logs a removal of the captured microphone and a return of the preferred one, and says which
+    /// of the two this hardware change is.
+    private func noteMicDeviceChanges() -> MicSwitchReason {
+        var reason = MicSwitchReason.hardwareChange
+        let path: String
+        let capturedUID: String?
+        let capturedDeviceGone: Bool
+        if let unified = unifiedCaptureSession {
+            path = "unified"
+            capturedUID = unified.currentMicDeviceUID
+            capturedDeviceGone = capturedUID != nil && resolveDeviceID(for: capturedUID) == nil
+        } else {
+            path = "engine"
+            capturedUID = currentCaptureDeviceUID
+            capturedDeviceGone = capturedUID != nil && resolveDeviceID(for: capturedUID) != currentCaptureDeviceID
+        }
+        if capturedDeviceGone, let capturedUID {
+            reason = .removal
+            if loggedRemovedMicUID != capturedUID {
+                loggedRemovedMicUID = capturedUID
+                logger.notice(
+                    "Captured mic removed: path=\(path, privacy: .public) device=\(capturedUID, privacy: .public)"
+                )
+            }
+        }
+        if let desired = desiredMicDeviceUID {
+            if resolveDeviceID(for: desired) == nil {
+                isPreferredMicAbsent = true
+            } else if isPreferredMicAbsent {
+                isPreferredMicAbsent = false
+                if loggedRemovedMicUID == desired { loggedRemovedMicUID = nil }
+                reason = .preferredReturned
+                logger.notice("Preferred mic back: path=\(path, privacy: .public) device=\(desired, privacy: .public)")
+            }
+        }
+        return reason
     }
 
     private func makeSessionTitle(createdAt: Date) -> String {
@@ -1865,6 +2109,17 @@ actor RecordingService: RecordingServiceProtocol {
         fallbackMicDeviceUID = nil
         routeRefusedMicDeviceID = nil
         currentCaptureDeviceID = nil
+        currentCaptureDeviceUID = nil
+        unifiedConfiguredMicDeviceID = nil
+        unifiedStreamNumber = nil
+        appStreamNumber = nil
+        loggedRemovedMicUID = nil
+        isPreferredMicAbsent = false
+        micTarget = nil
+        micTargetNumber += 1
+        micTransitionTail = nil
+        micTransitionsInFlight = []
+        queuedMicRetarget = nil
         micFileURL = nil
         isRecoveringMicCapture = false
         micRecoveryTask = nil
@@ -1923,7 +2178,7 @@ actor RecordingService: RecordingServiceProtocol {
         }
 
         let generation = recordingGeneration
-        let didRecover = await performMicRecovery()
+        let didRecover = await performMicRecovery(reason: .configurationChange)
         guard isCurrentRecording(generation) else { return }
 
         guard !didRecover else {
@@ -1940,39 +2195,16 @@ actor RecordingService: RecordingServiceProtocol {
         guard isRecordingValue else {
             return
         }
-        // Under unified capture the preferred mic is restored by updating the running stream.
-        // Same preconditions as the engine path below: the desired device must actually be
-        // present, and must differ from the one currently being captured.
-        if unifiedCaptureSession != nil {
-            await applyDesiredMicToUnifiedCapture(onlyIfPresent: true)
+        // The recorder fallback records the system input and ignores device changes (decision 10).
+        guard unifiedCaptureSession != nil || !isRecorderFallbackActive else {
             return
         }
-        guard !isRecoveringMicCapture else {
-            return
-        }
-        guard !isRecorderFallbackActive else {
-            return
-        }
-        let desiredDeviceID = resolveDeviceID(for: desiredMicDeviceUID)
-        if let routeRefusedMicDeviceID, routeRefusedMicDeviceID != desiredDeviceID {
+        // The device that refused explicit routing is tried again once it has left the list.
+        if let routeRefusedMicDeviceID, routeRefusedMicDeviceID != resolveDeviceID(for: desiredMicDeviceUID) {
             self.routeRefusedMicDeviceID = nil
         }
-        guard let desiredDeviceID,
-              desiredDeviceID != routeRefusedMicDeviceID,
-              currentCaptureDeviceID != desiredDeviceID
-        else {
-            return
-        }
-
-        let generation = recordingGeneration
-        let didRecover = await performMicRecovery()
-        guard isCurrentRecording(generation) else { return }
-        if didRecover {
-            micRecoveryRetryTask?.cancel()
-            micRecoveryRetryTask = nil
-            return
-        }
-        scheduleMicRecoveryRetry()
+        let reason = noteMicDeviceChanges()
+        await requestMicRetarget(reason: reason)
     }
 
     private func startRecorderFallback(to fileURL: URL) throws {
@@ -1993,6 +2225,8 @@ actor RecordingService: RecordingServiceProtocol {
         stopMicCapture()
         self.audioEngine = nil
         self.audioRecorder = recorder
+        micTargetNumber += 1
+        micTarget = nil
     }
 
     /// Starts engine capture on `desiredMicDeviceUID`, read after the last suspension so a newer
@@ -2007,7 +2241,8 @@ actor RecordingService: RecordingServiceProtocol {
         guard isCurrentOrStartingRecording(generation) else {
             throw CaptureStartAbandoned()
         }
-        let deviceID = resolveDeviceID(for: micCaptureTargetUID())
+        let targetUID = micCaptureTargetUID()
+        let deviceID = resolveDeviceID(for: targetUID)
         try micCaptureController.startCapture(
             deviceID: deviceID,
             targetFormat: micTargetFormat,
@@ -2042,13 +2277,16 @@ actor RecordingService: RecordingServiceProtocol {
         self.audioRecorder = nil
         self.audioEngine = nil
         self.currentCaptureDeviceID = deviceID
+        self.currentCaptureDeviceUID = deviceID == nil ? nil : targetUID
         self.micFileURL = micFileURL
         self.micCaptureStartedAt = hostNow()
+        publishMicTarget(currentCaptureDeviceUID)
     }
 
     private func stopMicCapture() {
         micCaptureController.stopCapture()
         currentCaptureDeviceID = nil
+        currentCaptureDeviceUID = nil
         audioEngine = nil
     }
 
@@ -2056,12 +2294,15 @@ actor RecordingService: RecordingServiceProtocol {
         stopMicCapture()
     }
 
-    /// Restarts engine capture, or waits for the restart already running and returns its result.
-    private func performMicRecovery() async -> Bool {
+    /// Restarts engine capture after every transition queued before it, or waits for the restart
+    /// already queued and returns its result.
+    private func performMicRecovery(reason: MicSwitchReason) async -> Bool {
         if let micRecoveryTask {
             return await micRecoveryTask.value
         }
-        let task = Task { await self.recoverMicCapture() }
+        let task = enqueueMicTransition { [weak self] in
+            await self?.recoverMicCapture(reason: reason) ?? false
+        }
         micRecoveryTask = task
         isRecoveringMicCapture = true
         let recovered = await task.value
@@ -2072,7 +2313,9 @@ actor RecordingService: RecordingServiceProtocol {
         return recovered
     }
 
-    private func recoverMicCapture() async -> Bool {
+    /// Stops engine capture and starts it on the target rule's device. Runs inside a queued
+    /// transition; callers outside one use `performMicRecovery(reason:)`.
+    private func recoverMicCapture(reason: MicSwitchReason) async -> Bool {
         guard let micFileURL else {
             return false
         }
@@ -2084,12 +2327,18 @@ actor RecordingService: RecordingServiceProtocol {
         }
         teardownEngineForRecovery()
         Self.sendStartedPauseMarkers(gates: captureGates, to: liveAudioContinuation, mic: true, app: false)
+        let recovered: Bool
         do {
             try await startMicCapture(micFileURL: micFileURL, liveContinuation: liveAudioContinuation)
-            return true
+            recovered = true
         } catch {
-            return false
+            recovered = false
         }
+        let device = recovered ? currentCaptureDeviceUID : micCaptureTargetUID()
+        logger.notice(
+            "Engine mic recovery attempt: reason=\(reason.rawValue, privacy: .public) device=\(device ?? "<default>", privacy: .public) result=\(recovered ? "started" : "failed", privacy: .public)"
+        )
+        return recovered
     }
 
     private func scheduleMicRecoveryRetry() {
@@ -2123,7 +2372,7 @@ actor RecordingService: RecordingServiceProtocol {
             return true
         }
         let generation = recordingGeneration
-        let didRecover = await performMicRecovery()
+        let didRecover = await performMicRecovery(reason: .retry)
         guard isCurrentRecording(generation) else { return false }
         if didRecover {
             micRecoveryRetryTask?.cancel()
@@ -2133,14 +2382,19 @@ actor RecordingService: RecordingServiceProtocol {
         return true
     }
 
-    /// The preferred device while it is usable and has not refused the route, otherwise the
-    /// fallback device. `nil` is the system default.
+    /// The one target rule for every capture transition: the preferred device while it is usable
+    /// and has not refused the route, otherwise the device the recording started on while that is
+    /// usable, otherwise the system default (`nil`). Callers read it after their last suspension.
     private func micCaptureTargetUID() -> String? {
         if let desiredDeviceID = resolveDeviceID(for: desiredMicDeviceUID),
            desiredDeviceID != routeRefusedMicDeviceID {
             return desiredMicDeviceUID
         }
-        return fallbackMicDeviceUID
+        if let fallbackDeviceID = resolveDeviceID(for: fallbackMicDeviceUID),
+           fallbackDeviceID != routeRefusedMicDeviceID {
+            return fallbackMicDeviceUID
+        }
+        return nil
     }
 
     private func resolveDeviceID(for deviceUID: String?) -> AudioDeviceID? {

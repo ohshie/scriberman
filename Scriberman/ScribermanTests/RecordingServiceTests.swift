@@ -2082,7 +2082,8 @@ final class RecordingServiceTests {
     func testHardwareChangeDoesNotRetargetWhenPreferredMicIsAbsent() async throws {
         let fixture = try await makeRecoveryFixture()
         defer { removeWorkspace(at: fixture.workspace.rootURL) }
-        // The preferred device is not among the currently available devices.
+        // The preferred device is not among the currently available devices; the recording started
+        // on device-a, which is still usable.
         fixture.hardware.devices = [(id: 1, uid: "device-a")]
 
         let unified = makeUnifiedSession(micDeviceUID: "device-a")
@@ -2091,7 +2092,8 @@ final class RecordingServiceTests {
         await fixture.service.setRecordingStateForTesting(isRecording: true)
         await fixture.service.setMicRecoveryStateForTesting(
             desiredMicDeviceUID: "device-b",
-            micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav")
+            micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav"),
+            fallbackMicDeviceUID: "device-a"
         )
         await fixture.service.setUnifiedCaptureSessionForTesting(unified)
 

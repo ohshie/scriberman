@@ -16,6 +16,7 @@ final class CaptureAudioGate: @unchecked Sendable {
     private let lock = NSLock()
     private var _arrivalCount: Int64 = 0
     private var _lastArrivalHostTime: HostNanoseconds?
+    private var nextArrivalObserver: (@Sendable (HostNanoseconds) -> Void)?
     /// Held while a handler hands out a buffer's audio and markers, and while markers are sent on
     /// request, so a marker never lands between audio it must follow.
     private let deliveryLock = NSLock()
@@ -39,10 +40,20 @@ final class CaptureAudioGate: @unchecked Sendable {
 
     func recordArrival() {
         let now = hostNow()
-        lock.withLock {
+        let observer = lock.withLock {
             _arrivalCount += 1
             _lastArrivalHostTime = now
+            let observer = nextArrivalObserver
+            nextArrivalObserver = nil
+            return observer
         }
+        observer?(now)
+    }
+
+    /// Calls `observer` once, with its arrival time, for the next raw buffer delivered. Replaces an
+    /// observer that has not been called yet.
+    func observeNextArrival(_ observer: @escaping @Sendable (HostNanoseconds) -> Void) {
+        lock.withLock { nextArrivalObserver = observer }
     }
 
     /// Sends the marker of every pause that has started, up to pause number `limit`, and is not yet
