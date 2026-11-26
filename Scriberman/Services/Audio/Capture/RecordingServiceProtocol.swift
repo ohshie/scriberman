@@ -58,4 +58,6 @@ protocol RecordingServiceProtocol: Sendable {
     func resumeRecording() async -> Bool
     /// True while a recording is paused. `isRecording()` stays true.
     func isPaused() async -> Bool
+    /// The microphone the recording is capturing. Nil when no recording runs.
+    func capturedMicrophone() async -> CapturedMicrophone?
 }

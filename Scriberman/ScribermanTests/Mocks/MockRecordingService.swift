@@ -210,6 +210,12 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
     func isPaused() async -> Bool {
         isPausedValue
     }
+
+    var capturedMicrophoneOverride: CapturedMicrophone?
+
+    func capturedMicrophone() async -> CapturedMicrophone? {
+        capturedMicrophoneOverride
+    }
 }
 
 /// Holds whoever calls `pass()` until `open()`. `waitUntilHolding()` returns once someone waits.

@@ -380,6 +380,24 @@ struct MicCaptureTarget: Equatable, Sendable {
     var firstBufferHostTime: HostNanoseconds?
 }
 
+/// A microphone that delivered audio, resolved when its first buffer arrived.
+struct CapturedMicDevice: Equatable, Sendable {
+    let uid: String
+    let name: String
+    /// True when capture was aimed at the system default, which was this device then.
+    let isSystemDefault: Bool
+}
+
+/// The microphone a recording is capturing, as reported to the recording view and the API.
+enum CapturedMicrophone: Equatable, Sendable {
+    /// Capture delivers audio from this device.
+    case capturing(CapturedMicDevice)
+    /// Capture is moving to another device, or has not delivered audio from it yet.
+    case switching
+    /// The device is not known: the recorder fallback records the system input.
+    case unknown
+}
+
 typealias SendableAudioObjectPropertyListenerBlock =
     @Sendable @convention(block) (UInt32, UnsafePointer<AudioObjectPropertyAddress>) -> Void
 
@@ -529,6 +547,13 @@ actor RecordingService: RecordingServiceProtocol {
     /// target is ignored.
     private var micTarget: MicCaptureTarget?
     private var micTargetNumber = 0
+    /// The device the current target resolved to when its first buffer arrived.
+    private var capturedMicDevice: CapturedMicDevice?
+    /// True from a switch request until capture is aimed at a new target, or the switch failed
+    /// and left capture where it was.
+    private var isMicSwitchUnsettled = false
+    /// The device last captured when the current pause began; reported until the pause ends.
+    private var micDeviceCapturedAtPause: CapturedMicDevice?
     /// The device the unified stream's microphone UID resolved to when it was configured. A device
     /// that left and came back under the same UID gets a new id; the stream then delivers nothing
     /// until it is moved away and back (spec, test 4, steps 7 and 8).
@@ -1163,7 +1188,7 @@ actor RecordingService: RecordingServiceProtocol {
         Self.sendStartedPauseMarkers(gates: captureGates, to: liveAudioContinuation, mic: true, app: true)
         let reused = existing.streamers
         let targetUID = micCaptureTargetUID()
-        logMicSwitchRequested(path: "unified", target: targetUID, reason: .restart)
+        noteMicSwitchRequested(path: "unified", target: targetUID, reason: .restart)
 
         let replacement = UnifiedCaptureSession(
             micFileURL: micFileURL,
@@ -1650,6 +1675,7 @@ actor RecordingService: RecordingServiceProtocol {
         }
         guard isRecordingValue else { return false }
         if captureGates.clock.pause(at: hostNow) {
+            micDeviceCapturedAtPause = capturedMicDevice
             audioRecorder?.pause()
             screenCaptureSession?.recordingDidPause()
         }
@@ -1952,18 +1978,24 @@ actor RecordingService: RecordingServiceProtocol {
             let returnedUnderSameUID = session.currentMicDeviceUID == target && configuredMicDeviceReturned(session)
             guard session.currentMicDeviceUID != target || returnedUnderSameUID else { return }
             if returnedUnderSameUID {
-                logMicSwitchRequested(path: "unified", target: nil, reason: .returnedUnderSameUID)
-                guard await session.retargetMic(deviceUID: nil) else { return }
+                noteMicSwitchRequested(path: "unified", target: nil, reason: .returnedUnderSameUID)
+                guard await session.retargetMic(deviceUID: nil) else {
+                    settleRejectedMicSwitch(session)
+                    return
+                }
                 if unifiedCaptureSession === session { unifiedConfiguredMicDeviceID = nil }
                 continue
             }
-            logMicSwitchRequested(path: "unified", target: target, reason: reason)
+            noteMicSwitchRequested(path: "unified", target: target, reason: reason)
             let updated = await session.retargetMic(deviceUID: target)
             guard isCurrentRecording(generation), unifiedCaptureSession === session else { return }
             guard updated else {
                 // Rejected: capture stays where it was. A later hardware event or the capture-health
                 // restart moves it.
-                if micCaptureTargetUID() == target { return }
+                if micCaptureTargetUID() == target {
+                    settleRejectedMicSwitch(session)
+                    return
+                }
                 continue
             }
             unifiedConfiguredMicDeviceID = resolveDeviceID(for: target)
@@ -1976,6 +2008,16 @@ actor RecordingService: RecordingServiceProtocol {
         }
     }
 
+    /// After a rejected update: when the stream is still on the device last reported, capture did
+    /// not move, so that device is reported again. Otherwise it stays switching.
+    private func settleRejectedMicSwitch(_ session: UnifiedCaptureSession) {
+        guard let micTarget,
+              session.currentMicDeviceUID == micTarget.deviceUID,
+              !configuredMicDeviceReturned(session)
+        else { return }
+        isMicSwitchUnsettled = false
+    }
+
     /// Restarts engine capture on the target rule's device when it is not the device in use,
     /// including when the device in use was removed while the engine still reports running.
     private func applyMicTargetToEngine(generation: Int, reason: MicSwitchReason) async {
@@ -1985,7 +2027,7 @@ actor RecordingService: RecordingServiceProtocol {
         else {
             return
         }
-        logMicSwitchRequested(path: "engine", target: target, reason: reason)
+        noteMicSwitchRequested(path: "engine", target: target, reason: reason)
         let didRecover = await recoverMicCapture(reason: reason)
         guard isCurrentRecording(generation) else { return }
         if didRecover {
@@ -1996,7 +2038,9 @@ actor RecordingService: RecordingServiceProtocol {
         scheduleMicRecoveryRetry()
     }
 
-    private func logMicSwitchRequested(path: String, target: String?, reason: MicSwitchReason) {
+    /// Logs a switch and reports capture as switching until the new target's first buffer.
+    private func noteMicSwitchRequested(path: String, target: String?, reason: MicSwitchReason) {
+        isMicSwitchUnsettled = true
         logger.notice(
             "Mic switch requested: path=\(path, privacy: .public) target=\(target ?? "<default>", privacy: .public) reason=\(reason.rawValue, privacy: .public)"
         )
@@ -2007,6 +2051,7 @@ actor RecordingService: RecordingServiceProtocol {
         micTargetNumber += 1
         let number = micTargetNumber
         micTarget = MicCaptureTarget(deviceUID: deviceUID)
+        isMicSwitchUnsettled = false
         captureGates.mic.observeNextArrival { [weak self] hostTime in
             Task { [weak self] in await self?.micTargetDeliveredFirstBuffer(number, at: hostTime) }
         }
@@ -2016,6 +2061,7 @@ actor RecordingService: RecordingServiceProtocol {
         guard number == micTargetNumber, var target = micTarget, target.firstBufferHostTime == nil else { return }
         target.firstBufferHostTime = hostTime
         micTarget = target
+        capturedMicDevice = resolveCapturedMicDevice(for: target.deviceUID)
         logger.notice(
             "First mic buffer from the new device: device=\(target.deviceUID ?? "<default>", privacy: .public) hostTime=\(hostTime, privacy: .public)"
         )
@@ -2025,6 +2071,30 @@ actor RecordingService: RecordingServiceProtocol {
     /// recording runs and under the recorder fallback, whose device is not known.
     func micCaptureTarget() -> MicCaptureTarget? {
         micTarget
+    }
+
+    /// The microphone being captured. Nil when no recording runs.
+    func capturedMicrophone() -> CapturedMicrophone? {
+        guard isRecordingValue else { return nil }
+        if isRecorderFallbackActive { return .unknown }
+        if captureGates.clock.isPaused, let micDeviceCapturedAtPause {
+            return .capturing(micDeviceCapturedAtPause)
+        }
+        guard !isMicSwitchUnsettled, micTarget?.firstBufferHostTime != nil, let capturedMicDevice else {
+            return .switching
+        }
+        return .capturing(capturedMicDevice)
+    }
+
+    /// The device behind a capture target now: the UID's device, or the system default input for
+    /// a nil UID.
+    private func resolveCapturedMicDevice(for deviceUID: String?) -> CapturedMicDevice? {
+        let deviceID = deviceUID == nil ? hardware.defaultInputDeviceID() : resolveDeviceID(for: deviceUID)
+        guard let deviceID,
+              let uid = hardware.deviceUID(deviceID: deviceID),
+              let name = hardware.deviceName(deviceID: deviceID)
+        else { return nil }
+        return CapturedMicDevice(uid: uid, name: name, isSystemDefault: deviceUID == nil)
     }
 
     /// Logs a removal of the captured microphone and a return of the preferred one, and says which
@@ -2117,6 +2187,9 @@ actor RecordingService: RecordingServiceProtocol {
         isPreferredMicAbsent = false
         micTarget = nil
         micTargetNumber += 1
+        capturedMicDevice = nil
+        isMicSwitchUnsettled = false
+        micDeviceCapturedAtPause = nil
         micTransitionTail = nil
         micTransitionsInFlight = []
         queuedMicRetarget = nil
