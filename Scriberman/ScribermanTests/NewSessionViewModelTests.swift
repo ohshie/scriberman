@@ -413,6 +413,37 @@ struct NewSessionViewModelTests {
     }
 
     @Test
+    func monitorFollowsTheCapturedMicrophoneAndForgetsItWhenTheRecordingEnds() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.permissionService.micStatus = .granted
+        fixture.recordingService.isRecordingOverride = true
+        fixture.recordingService.capturedMicrophoneOverride = .switching
+
+        await fixture.viewModel.startRecording(title: "Session", context: fixture.context)
+        await waitUntil { fixture.viewModel.capturedMicrophone == .switching }
+        #expect(fixture.viewModel.capturedMicrophone == .switching)
+        #expect(!fixture.viewModel.hasCapturedMicrophone)
+
+        let builtIn = CapturedMicrophone.capturing(
+            CapturedMicDevice(uid: "built-in", name: "Built-in Microphone", isSystemDefault: true)
+        )
+        fixture.recordingService.capturedMicrophoneOverride = builtIn
+        await waitUntil { fixture.viewModel.capturedMicrophone == builtIn }
+        #expect(fixture.viewModel.capturedMicrophone == builtIn)
+        #expect(fixture.viewModel.hasCapturedMicrophone)
+
+        fixture.recordingService.capturedMicrophoneOverride = .switching
+        await waitUntil { fixture.viewModel.capturedMicrophone == .switching }
+        #expect(fixture.viewModel.hasCapturedMicrophone)
+
+        fixture.recordingService.isRecordingOverride = false
+        await waitUntil { fixture.viewModel.state == .idle }
+        #expect(fixture.viewModel.capturedMicrophone == nil)
+        #expect(!fixture.viewModel.hasCapturedMicrophone)
+    }
+
+    @Test
     func resetReturnsTheLevelBoxToZero() async {
         let fixture = makeFixture()
         defer { fixture.cleanup() }

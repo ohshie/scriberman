@@ -61,6 +61,20 @@ final class NewSessionViewModel {
     /// Set when a resume fails, which leaves the recording paused. Cleared by the next resume and
     /// when the recording ends.
     private(set) var resumeFailureMessage: String?
+
+    // MARK: - Captured microphone
+
+    /// The microphone the recording is capturing, from the recording monitor. Nil outside a
+    /// recording.
+    var capturedMicrophone: CapturedMicrophone? {
+        state == .recording ? monitoredCapturedMicrophone : nil
+    }
+    private var monitoredCapturedMicrophone: CapturedMicrophone?
+    /// True once the recording has captured microphone audio from a known device.
+    var hasCapturedMicrophone: Bool {
+        state == .recording && monitoredHasCapturedMicrophone
+    }
+    private var monitoredHasCapturedMicrophone = false
     nonisolated static let resumeFailedMessage = "Recording could not be resumed."
     /// How often a pause checks for the first microphone audio while it waits for it.
     var pauseWaitPollInterval: Duration = .milliseconds(20)
@@ -997,6 +1011,8 @@ final class NewSessionViewModel {
 
     private func startRecordingMonitor(workspace: Workspace, context: ModelContext) {
         recordingMonitorTask?.cancel()
+        monitoredCapturedMicrophone = nil
+        monitoredHasCapturedMicrophone = false
         recordingMonitorTask = Task { [weak self] in
             while let self, !Task.isCancelled {
                 let isRecording = await recordingService.isRecording()
@@ -1016,6 +1032,11 @@ final class NewSessionViewModel {
                 let levels = isPaused ? (mic: Float(0), app: Float(0)) : await recordingService.audioLevels()
                 meterLevels.mic = levels.mic
                 meterLevels.app = levels.app
+                let captured = await recordingService.capturedMicrophone()
+                if captured != monitoredCapturedMicrophone {
+                    monitoredCapturedMicrophone = captured
+                    if case .capturing = captured { monitoredHasCapturedMicrophone = true }
+                }
                 let now = clock()
                 let startedAt = recordingStartedAt ?? now
                 let wholeSeconds = recordedSeconds(since: startedAt, now: now).rounded(.down)

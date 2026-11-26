@@ -35,6 +35,19 @@ struct ActiveRecordingDetailView: View {
         isPaused ? (.circle, "Resume") : (.pauseBars, "Pause")
     }
 
+    /// The Microphone field during a recording: the device being captured. `hasCaptured` tells a
+    /// switch apart from a start that has not captured any microphone audio yet.
+    static func microphoneValue(_ captured: CapturedMicrophone?, hasCaptured: Bool) -> String {
+        switch captured {
+        case .capturing(let device):
+            device.isSystemDefault ? "\(device.name) (default)" : device.name
+        case .unknown:
+            "System input"
+        case .switching, nil:
+            hasCaptured ? "Switching…" : "Starting…"
+        }
+    }
+
     /// Marks the end of the content, so following the transcript scrolls to the foot of the view.
     private static let bottomAnchor = "recording-view-bottom"
 
@@ -75,7 +88,10 @@ struct ActiveRecordingDetailView: View {
                 ], alignment: .leading, spacing: 16) {
                     MetadataCell(
                         title: "Microphone",
-                        value: viewModel.selectedDevice?.name ?? "Default",
+                        value: Self.microphoneValue(
+                            viewModel.capturedMicrophone,
+                            hasCaptured: viewModel.hasCapturedMicrophone
+                        ),
                         systemImage: "mic.fill"
                     )
 

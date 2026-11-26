@@ -136,6 +136,11 @@ final class CaptureCoordinator {
         return viewModel.isPaused ? .paused : .recording
     }
 
+    /// The microphone the current recording is capturing. Nil outside a recording.
+    var capturedMicrophone: CapturedMicrophone? {
+        viewModel.capturedMicrophone
+    }
+
     /// True while a recording runs or is paused, with no start or stop under way.
     private var isRecordingOrPaused: Bool {
         transition == nil && !viewModel.isIdle

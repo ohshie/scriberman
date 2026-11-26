@@ -216,7 +216,7 @@ struct RecordingServicePauseTests {
         func allDeviceIDs() throws -> [AudioDeviceID] { devices.map(\.id) }
         func inputChannelCount(deviceID _: AudioDeviceID) -> Int { 1 }
         func deviceUID(deviceID: AudioDeviceID) -> String? { devices.first { $0.id == deviceID }?.uid }
-        func deviceName(deviceID _: AudioDeviceID) -> String? { "Fake" }
+        func deviceName(deviceID: AudioDeviceID) -> String? { deviceUID(deviceID: deviceID).map { "Name of \($0)" } }
         func defaultInputDeviceID() -> AudioDeviceID? { devices.first?.id }
         func isAlive(deviceID _: AudioDeviceID) -> Bool { true }
         func isPrivateAggregate(deviceID _: AudioDeviceID) -> Bool { false }
@@ -2159,6 +2159,192 @@ struct RecordingServicePauseTests {
         #expect(await service.micCaptureTarget() == MicCaptureTarget(deviceUID: "device-b"))
         _ = await service.stopRecording()
         #expect(await service.micCaptureTarget() == nil)
+    }
+
+    // MARK: Captured microphone (requirement 21)
+
+    @Test(arguments: [true, false])
+    func theFirstBufferMarksTheStartDeviceAsCaptured(unified: Bool) async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.remove() }
+        _ = try await fixture.start(appProcessID: unified ? 1 : nil, micDeviceID: 2, preferredMic: "device-b")
+        let service = fixture.service
+        #expect(await service.capturedMicrophone() == .switching)
+
+        if unified {
+            try fixture.sendUnified(Self.before, to: try #require(fixture.captures.unified.last))
+        } else {
+            try fixture.sendMic(Self.before)
+        }
+
+        #expect(await eventually {
+            await service.capturedMicrophone()
+                == .capturing(CapturedMicDevice(uid: "device-b", name: "Name of device-b", isSystemDefault: false))
+        })
+        _ = await service.stopRecording()
+        #expect(await service.capturedMicrophone() == nil)
+    }
+
+    @Test
+    func aRemovedMicIsNotReportedWhileTheUpdateRuns() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.remove() }
+        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        let service = fixture.service
+        try fixture.sendUnified(Self.before, to: try #require(fixture.captures.unified.last))
+        #expect(await eventually { await service.capturedMicrophone() != .switching })
+
+        let removal = request(.removal, fixture, hold: true)
+        #expect(await fixture.suspender.waitUntilHolding())
+        #expect(await service.capturedMicrophone() == .switching)
+        fixture.suspender.release()
+        await removal.value
+        _ = await service.stopRecording()
+    }
+
+    @Test
+    func aRejectedUpdateKeepsReportingTheDeviceStillCaptured() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.remove() }
+        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        let service = fixture.service
+        try fixture.sendUnified(Self.before, to: try #require(fixture.captures.unified.last))
+        let deviceB = CapturedMicrophone.capturing(
+            CapturedMicDevice(uid: "device-b", name: "Name of device-b", isSystemDefault: false)
+        )
+        #expect(await eventually { await service.capturedMicrophone() == deviceB })
+
+        fixture.captures.refuseUpdates(to: "device-c")
+        await service.retargetMic(desiredDeviceUID: "device-c")
+
+        #expect(fixture.captures.updatedMicDeviceUIDs.isEmpty)
+        #expect(await service.capturedMicrophone() == deviceB)
+        _ = await service.stopRecording()
+    }
+
+    @Test
+    func anUpdateLeftOffTheTargetIsReportedAsSwitching() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.remove() }
+        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        let service = fixture.service
+        try fixture.sendUnified(Self.before, to: try #require(fixture.captures.unified.last))
+        #expect(await eventually { await service.capturedMicrophone() != .switching })
+        fixture.captures.refuseUpdates(to: "device-c")
+
+        let removal = request(.removal, fixture, hold: true)
+        #expect(await fixture.suspender.waitUntilHolding())
+        let retarget = request(.retargetToC, fixture, hold: false)
+        try await Task.sleep(for: .milliseconds(50))
+        fixture.suspender.release()
+        await removal.value
+        await retarget.value
+        try fixture.sendUnified(Self.after, to: try #require(fixture.captures.unified.last))
+        try await Task.sleep(for: .milliseconds(50))
+
+        // The stream is on the default, an update no longer current when it finished (requirement 8).
+        #expect(fixture.captures.updatedMicDeviceUIDs == [nil])
+        #expect(await service.capturedMicrophone() == .switching)
+        _ = await service.stopRecording()
+    }
+
+    private static let capturingB = CapturedMicrophone.capturing(
+        CapturedMicDevice(uid: "device-b", name: "Name of device-b", isSystemDefault: false)
+    )
+    /// The fake's default input is its first device.
+    private static let capturingDefaultA = CapturedMicrophone.capturing(
+        CapturedMicDevice(uid: "device-a", name: "Name of device-a", isSystemDefault: true)
+    )
+
+    @Test(arguments: [true, false])
+    func aRemovalReportsTheDefaultFromItsFirstBufferAndAReturnReportsTheMicAgain(unified: Bool) async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.remove() }
+        _ = try await fixture.start(appProcessID: unified ? 1 : nil, micDeviceID: 2, preferredMic: "device-b")
+        func send(_ value: Float) throws {
+            if unified {
+                try fixture.sendUnified(value, to: try #require(fixture.captures.unified.last))
+            } else {
+                try fixture.sendMic(value)
+            }
+        }
+        let service = fixture.service
+        try send(Self.before)
+        #expect(await eventually { await service.capturedMicrophone() == Self.capturingB })
+
+        fixture.hardware.unplug("device-b")
+        await service.simulateHardwareChangeForTesting()
+        #expect(await service.capturedMicrophone() == .switching)
+        try send(Self.after)
+        #expect(await eventually { await service.capturedMicrophone() == Self.capturingDefaultA })
+
+        fixture.hardware.plug("device-b", id: 4)
+        await service.simulateHardwareChangeForTesting()
+        #expect(await service.capturedMicrophone() == .switching)
+        try send(Self.before)
+        #expect(await eventually { await service.capturedMicrophone() == Self.capturingB })
+        _ = await service.stopRecording()
+    }
+
+    @Test(arguments: [true, false])
+    func aPauseKeepsReportingTheMicCapturedWhenItBegan(unified: Bool) async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.remove() }
+        _ = try await fixture.start(appProcessID: unified ? 1 : nil, micDeviceID: 2, preferredMic: "device-b")
+        func send(_ value: Float) throws {
+            if unified {
+                try fixture.sendUnified(value, to: try #require(fixture.captures.unified.last))
+            } else {
+                try fixture.sendMic(value)
+            }
+        }
+        let service = fixture.service
+        try send(Self.before)
+        #expect(await eventually { await service.capturedMicrophone() == Self.capturingB })
+
+        _ = await service.pauseRecording()
+        fixture.hardware.unplug("device-b")
+        await service.simulateHardwareChangeForTesting()
+        #expect(await service.capturedMicrophone() == Self.capturingB)
+        try send(Self.paused)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await service.capturedMicrophone() == Self.capturingB)
+
+        #expect(await service.resumeRecording())
+        try send(Self.after)
+        #expect(await eventually { await service.capturedMicrophone() == Self.capturingDefaultA })
+        _ = await service.stopRecording()
+    }
+
+    @Test
+    func aPauseBeforeAnyMicAudioDoesNotReportThePreviousRecordingsMic() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.remove() }
+        let service = fixture.service
+        _ = try await fixture.start(micDeviceID: 2, preferredMic: "device-b")
+        try fixture.sendMic(Self.before)
+        #expect(await eventually { await service.capturedMicrophone() == Self.capturingB })
+        _ = await service.stopRecording()
+
+        _ = try await fixture.start(micDeviceID: 3, preferredMic: "device-c")
+        _ = await service.pauseRecording()
+
+        #expect(await service.capturedMicrophone() == .switching)
+        _ = await service.stopRecording()
+    }
+
+    @Test
+    func theRecorderFallbackReportsTheMicAsUnknown() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.remove() }
+        fixture.mic.failingStarts = 2
+        _ = try await fixture.start(micDeviceID: 2, preferredMic: "device-b")
+        #expect(fixture.recorder.recordCalls == 1)
+
+        #expect(await fixture.service.capturedMicrophone() == .unknown)
+        _ = await fixture.service.pauseRecording()
+        #expect(await fixture.service.capturedMicrophone() == .unknown)
+        _ = await fixture.service.stopRecording()
     }
 
     // MARK: - Dictation

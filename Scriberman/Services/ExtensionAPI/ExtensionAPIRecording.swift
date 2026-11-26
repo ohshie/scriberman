@@ -48,7 +48,9 @@ final class ExtensionAPIRecording {
         return ExtensionAPIHandler.json(StatusBody(
             state: Self.stateName(coordinator.phase),
             session: session.map(SessionBody.init),
-            capture: session == nil ? nil : current.map { CaptureBody($0.capture) }
+            capture: session == nil ? nil : current.map {
+                CaptureBody($0.capture, capturedMicrophone: coordinator.capturedMicrophone)
+            }
         ))
     }
 
@@ -357,6 +359,18 @@ final class ExtensionAPIRecording {
 
         init(_ sources: CaptureSources) {
             microphoneUid = sources.microphoneUID
+            appBundleId = sources.appBundleID
+            displayId = sources.displayID
+        }
+
+        /// What a running recording captures: the microphone is the device being captured, nil
+        /// while capture switches or when the device is not known.
+        init(_ sources: CaptureSources, capturedMicrophone: CapturedMicrophone?) {
+            if case .capturing(let device) = capturedMicrophone {
+                microphoneUid = device.uid
+            } else {
+                microphoneUid = nil
+            }
             appBundleId = sources.appBundleID
             displayId = sources.displayID
         }
