@@ -122,4 +122,39 @@ struct RecordingPauseClockTests {
         #expect(frames(clock, start: 1_000) == [0..<2_400])
         #expect(frames(clock, start: 1_050) == [])
     }
+
+    @Test
+    func resumeTimeOfAPausedTimeIsWhereThatPauseEnds() {
+        let clock = RecordingPauseClock()
+        clock.pause { ms(1_000) }
+        #expect(clock.timeline.adjustedResumeTime(forPaused: ms(1_500)) == ms(1_000))
+        clock.resume { ms(3_000) }
+        clock.pause { ms(5_000) }
+        clock.resume { ms(5_500) }
+
+        #expect(clock.timeline.adjustedResumeTime(forPaused: ms(999)) == nil)
+        #expect(clock.timeline.adjustedResumeTime(forPaused: ms(1_000)) == ms(1_000))
+        #expect(clock.timeline.adjustedResumeTime(forPaused: ms(2_999)) == ms(1_000))
+        #expect(clock.timeline.adjustedResumeTime(forPaused: ms(3_000)) == nil)
+        #expect(clock.timeline.adjustedResumeTime(forPaused: ms(5_200)) == ms(3_000))
+        clock.close { ms(6_000) }
+        #expect(clock.timeline.adjustedResumeTime(forPaused: ms(6_000)) == nil)
+    }
+
+    @Test
+    func closeInAdjustedTime() {
+        let clock = RecordingPauseClock()
+        #expect(clock.timeline.adjustedCloseTime == nil)
+        clock.pause { ms(1_000) }
+        clock.resume { ms(3_000) }
+        clock.close { ms(4_000) }
+        #expect(clock.timeline.adjustedCloseTime == ms(2_000))
+
+        let pausedAtClose = RecordingPauseClock()
+        pausedAtClose.pause { ms(1_000) }
+        pausedAtClose.resume { ms(3_000) }
+        pausedAtClose.pause { ms(5_000) }
+        pausedAtClose.close { ms(9_000) }
+        #expect(pausedAtClose.timeline.adjustedCloseTime == ms(3_000))
+    }
 }

@@ -14,8 +14,11 @@ protocol ScreenCaptureStreaming: AnyObject {
 extension SCStream: ScreenCaptureStreaming {}
 
 // @unchecked Sendable: `sampleQueue` owns every mutable property. Stream callbacks arrive on it, and
-// `start()`, `stop()`, the timeout task and the public accessors reach the state only through
-// `sampleQueue.sync`. `process(_:generation:)` is only ever called on `sampleQueue`.
+// `start()`, `stop()`, the pause notifications, the timeout task and the public accessors reach the
+// state only through `sampleQueue.sync`. `process(_:generation:)` is only ever called on `sampleQueue`.
+//
+// Frames follow the recording's pause clock: a frame captured inside a pause is not written, and a
+// later frame is written at its adjusted time.
 final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendable {
     typealias DisplayProvider = @Sendable () async throws -> [CapturableDisplay]
     typealias StreamFactory = (
@@ -33,8 +36,25 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
         let makeFilter: () -> SCContentFilter
     }
 
+    /// The newest complete frame captured during a pause, and where it goes if the display does
+    /// not change after the pause.
+    private struct HeldFrame {
+        let sampleBuffer: CMSampleBuffer
+        let resumeTime: HostNanoseconds
+        /// Set by an idle frame captured after the resume. The frame is then written as soon as
+        /// the input takes it.
+        var isReleased = false
+    }
+
+    private enum AppendResult {
+        case written
+        case notReady
+        case dropped
+    }
+
     private let displayProvider: DisplayProvider
     private let streamFactory: StreamFactory
+    private let frameDeliveryTimeout: Duration
     private let sampleQueue = DispatchQueue(label: "com.scriberman.screen-video.stream")
     private let logger = Logger(subsystem: "Scriberman", category: "ScreenCaptureSession")
 
@@ -44,6 +64,12 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
     private var assetWriter: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
     private var lastFramePresentationTime: CMTime?
+    /// Adjusted time of the last written frame. Written times strictly increase.
+    private var lastWrittenTime: HostNanoseconds?
+    private var pauseClock = RecordingPauseClock()
+    private var heldFrame: HeldFrame?
+    private var isHeldFrameRetryScheduled = false
+    private var displayID: CGDirectDisplayID = 0
     private var videoURL: URL?
     private var hasStartedWriting = false
     private var frameCount = 0
@@ -54,6 +80,7 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
     private var storedVideoStartHostTime: HostNanoseconds?
 #if DEBUG
     private var beforeAppend: (@Sendable () -> Void)?
+    private var inputReadyOverride: (@Sendable () -> Bool)?
 #endif
 
     var onError: (@Sendable (Error) -> Void)? {
@@ -61,14 +88,19 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
         set { sampleQueue.sync { storedOnError = newValue } }
     }
 
-    /// Presentation time of the first frame written to the movie, which is the movie's time zero.
+    /// Adjusted time of the first frame written to the movie, which is the movie's time zero.
     var videoStartHostTime: HostNanoseconds? {
         sampleQueue.sync { storedVideoStartHostTime }
     }
 
-    init(displayProvider: @escaping DisplayProvider, streamFactory: @escaping StreamFactory = ScreenCaptureSession.makeStream) {
+    init(
+        displayProvider: @escaping DisplayProvider,
+        streamFactory: @escaping StreamFactory = ScreenCaptureSession.makeStream,
+        frameDeliveryTimeout: Duration = .seconds(5)
+    ) {
         self.displayProvider = displayProvider
         self.streamFactory = streamFactory
+        self.frameDeliveryTimeout = frameDeliveryTimeout
         super.init()
     }
 
@@ -76,7 +108,7 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
         self.init(displayProvider: Self.defaultDisplayProvider)
     }
 
-    func start(displayID: CGDirectDisplayID, videoURL: URL) async throws {
+    func start(displayID: CGDirectDisplayID, videoURL: URL, pauseClock: RecordingPauseClock) async throws {
         let displays = try await displayProvider()
         guard let display = displays.first(where: { $0.displayID == displayID }) else {
             throw RecordingError.failedToStart("Selected display is not available for screen capture.")
@@ -118,8 +150,12 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
             assetWriter = writer
             videoInput = input
             self.videoURL = videoURL
+            self.pauseClock = pauseClock
+            self.displayID = displayID
             storedVideoStartHostTime = nil
             lastFramePresentationTime = nil
+            lastWrittenTime = nil
+            heldFrame = nil
             hasStartedWriting = false
             frameCount = 0
             return generation
@@ -140,34 +176,60 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
             throw error
         }
 
-        let timeoutTask = Task { [weak self, displayID] in
+        sampleQueue.sync {
+            self.stream = stream
+            streamOutput = output
+            if generation == startedGeneration, !pauseClock.isPaused {
+                armFrameDeliveryTimeout()
+            }
+        }
+    }
+
+    /// The no-frames timeout does not run during a pause.
+    func recordingDidPause() {
+        sampleQueue.sync {
+            frameDeliveryTimeoutTask?.cancel()
+            frameDeliveryTimeoutTask = nil
+        }
+    }
+
+    /// The no-frames timeout starts over if no frame has been written yet.
+    func recordingDidResume() {
+        sampleQueue.sync {
+            guard assetWriter != nil, stream != nil else { return }
+            armFrameDeliveryTimeout()
+        }
+    }
+
+    /// Runs on `sampleQueue`. Replaces any running timeout. Does nothing once a frame is written.
+    private func armFrameDeliveryTimeout() {
+        frameDeliveryTimeoutTask?.cancel()
+        frameDeliveryTimeoutTask = nil
+        guard !hasStartedWriting else { return }
+        let armedGeneration = generation
+        let timeout = frameDeliveryTimeout
+        let displayID = displayID
+        frameDeliveryTimeoutTask = Task { [weak self] in
             do {
-                try await Task.sleep(nanoseconds: 5_000_000_000)
+                try await Task.sleep(for: timeout)
             } catch {
                 return
             }
             guard let self, !Task.isCancelled else { return }
+            // A pause that was not reported still holds the timeout; resume arms a new one.
             let onError: (@Sendable (Error) -> Void)? = self.sampleQueue.sync {
-                guard self.generation == startedGeneration, !self.hasStartedWriting else { return nil }
+                guard self.generation == armedGeneration, !self.hasStartedWriting, !self.pauseClock.isPaused else {
+                    return nil
+                }
                 return self.storedOnError
             }
             guard let onError else { return }
             self.logger.error(
-                "Screen capture produced no frames within 5s for displayID=\(displayID, privacy: .public)"
+                "Screen capture produced no frames within \(String(describing: timeout), privacy: .public) for displayID=\(displayID, privacy: .public)"
             )
             onError(RecordingError.failedToStart(
                 "Screen capture produced no video frames. The display may be off, disconnected, or not capturable."
             ))
-        }
-
-        sampleQueue.sync {
-            self.stream = stream
-            streamOutput = output
-            if generation == startedGeneration, !hasStartedWriting {
-                frameDeliveryTimeoutTask = timeoutTask
-            } else {
-                timeoutTask.cancel()
-            }
         }
     }
 
@@ -199,10 +261,11 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
             }
 
             defer { clearWriterState() }
+            // A frame kept from a pause that no idle frame released is not written.
             if hasStartedWriting {
                 videoInput.markAsFinished()
-                if let lastFramePresentationTime, lastFramePresentationTime.isValid {
-                    assetWriter.endSession(atSourceTime: lastFramePresentationTime)
+                if let endTime = sessionEndTime() {
+                    assetWriter.endSession(atSourceTime: endTime)
                 }
                 return assetWriter
             }
@@ -235,55 +298,181 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
         }
         // An idle or incomplete frame proves nothing about the writer, so it must not start the
         // session, set the anchor or cancel the no-frame timeout.
-        guard Self.isCompleteFrame(sampleBuffer) else {
-            return
-        }
-        guard let assetWriter, let videoInput else {
+        guard let status = Self.frameStatus(sampleBuffer),
+              let captureTime = HostNanoseconds(presentationTimeOf: sampleBuffer),
+              assetWriter != nil
+        else {
             return
         }
 
-        let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        let timeline = pauseClock.timeline
+        guard let adjustedTime = timeline.adjusted(captureTime) else {
+            if status == .complete, let resumeTime = timeline.adjustedResumeTime(forPaused: captureTime) {
+                heldFrame = HeldFrame(sampleBuffer: sampleBuffer, resumeTime: resumeTime)
+            }
+            return
+        }
+
+        if let held = heldFrame, adjustedTime >= held.resumeTime {
+            switch status {
+            case .complete:
+                heldFrame = nil
+            case .idle:
+                heldFrame?.isReleased = true
+                writeHeldFrame()
+            default:
+                break
+            }
+        }
+
+        guard status == .complete else {
+            return
+        }
+        append(sampleBuffer, at: adjustedTime, retimed: timeline.hasPauses)
+    }
+
+    /// Runs on `sampleQueue`. Writes a released held frame at its resume time, or tries again
+    /// shortly when the input is not ready.
+    private func writeHeldFrame() {
+        guard let held = heldFrame, held.isReleased else {
+            return
+        }
+        switch append(held.sampleBuffer, at: held.resumeTime, retimed: true) {
+        case .written, .dropped:
+            heldFrame = nil
+        case .notReady:
+            scheduleHeldFrameRetry()
+        }
+    }
+
+    /// Runs on `sampleQueue`.
+    private func scheduleHeldFrameRetry() {
+        guard !isHeldFrameRetryScheduled else {
+            return
+        }
+        isHeldFrameRetryScheduled = true
+        let scheduledGeneration = generation
+        sampleQueue.asyncAfter(deadline: .now() + .milliseconds(20)) { [weak self] in
+            guard let self else { return }
+            self.isHeldFrameRetryScheduled = false
+            guard self.generation == scheduledGeneration else { return }
+            self.writeHeldFrame()
+        }
+    }
+
+    /// Runs on `sampleQueue`. Appends a complete frame at `time`, an adjusted time. With `retimed`
+    /// the frame is copied with `time` as its presentation time.
+    @discardableResult
+    private func append(_ sampleBuffer: CMSampleBuffer, at time: HostNanoseconds, retimed: Bool) -> AppendResult {
+        guard let assetWriter, let videoInput else {
+            return .dropped
+        }
+        if let lastWrittenTime, time <= lastWrittenTime {
+            return .dropped
+        }
+        let frame: CMSampleBuffer
+        if retimed {
+            guard let copy = Self.copy(sampleBuffer, presentingAt: time) else {
+                logger.error("Failed to retime screen frame")
+                return .dropped
+            }
+            frame = copy
+        } else {
+            frame = sampleBuffer
+        }
+        let presentationTime = CMSampleBufferGetPresentationTimeStamp(frame)
+
         if !hasStartedWriting {
             guard assetWriter.startWriting() else {
                 logger.error(
                     "Failed to start screen video writer: status=\(assetWriter.status.rawValue, privacy: .public) error=\(assetWriter.error?.localizedDescription ?? "unknown", privacy: .public)"
                 )
                 storedOnError?(assetWriter.error ?? RecordingError.failedToStart("Video writer failed to start."))
-                return
+                return .dropped
             }
             assetWriter.startSession(atSourceTime: presentationTime)
             hasStartedWriting = true
-            storedVideoStartHostTime = HostNanoseconds(presentationTimeOf: sampleBuffer)
+            storedVideoStartHostTime = time
             frameDeliveryTimeoutTask?.cancel()
             frameDeliveryTimeoutTask = nil
         }
 
-        guard videoInput.isReadyForMoreMediaData else {
-            return
+        guard isInputReady(videoInput) else {
+            return .notReady
         }
 
 #if DEBUG
         beforeAppend?()
 #endif
-        guard videoInput.append(sampleBuffer) else {
+        guard videoInput.append(frame) else {
             logger.error("Failed to append screen frame: \(assetWriter.error?.localizedDescription ?? "unknown", privacy: .public)")
-            return
+            return .dropped
         }
 
         frameCount += 1
         lastFramePresentationTime = presentationTime
+        lastWrittenTime = time
+        return .written
     }
 
-    static func isCompleteFrame(_ sampleBuffer: CMSampleBuffer) -> Bool {
+    private func isInputReady(_ videoInput: AVAssetWriterInput) -> Bool {
+#if DEBUG
+        if let inputReadyOverride {
+            return inputReadyOverride()
+        }
+#endif
+        return videoInput.isReadyForMoreMediaData
+    }
+
+    /// Runs on `sampleQueue`. The adjusted stop time, so a static picture lasts to the end, or the
+    /// last frame when the clock was not closed.
+    private func sessionEndTime() -> CMTime? {
+        let lastFrame = lastFramePresentationTime.flatMap { $0.isValid ? $0 : nil }
+        guard let close = pauseClock.timeline.adjustedCloseTime else {
+            return lastFrame
+        }
+        let closeTime = Self.cmTime(close)
+        guard let lastFrame else {
+            return closeTime
+        }
+        return CMTimeMaximum(closeTime, lastFrame)
+    }
+
+    private static func cmTime(_ time: HostNanoseconds) -> CMTime {
+        CMTime(value: CMTimeValue(clamping: time.nanoseconds), timescale: CMTimeScale(NSEC_PER_SEC))
+    }
+
+    private static func copy(_ sampleBuffer: CMSampleBuffer, presentingAt time: HostNanoseconds) -> CMSampleBuffer? {
+        var timing = CMSampleTimingInfo(
+            duration: CMSampleBufferGetDuration(sampleBuffer),
+            presentationTimeStamp: cmTime(time),
+            decodeTimeStamp: .invalid
+        )
+        var copy: CMSampleBuffer?
+        let status = CMSampleBufferCreateCopyWithNewTiming(
+            allocator: kCFAllocatorDefault,
+            sampleBuffer: sampleBuffer,
+            sampleTimingEntryCount: 1,
+            sampleTimingArray: &timing,
+            sampleBufferOut: &copy
+        )
+        return status == noErr ? copy : nil
+    }
+
+    /// The ScreenCaptureKit status of a valid frame, or nil when it has none.
+    static func frameStatus(_ sampleBuffer: CMSampleBuffer) -> SCFrameStatus? {
         guard CMSampleBufferIsValid(sampleBuffer),
               let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
                 as? [[SCStreamFrameInfo: Any]],
-              let statusRawValue = attachments.first?[.status] as? Int,
-              let status = SCFrameStatus(rawValue: statusRawValue)
+              let statusRawValue = attachments.first?[.status] as? Int
         else {
-            return false
+            return nil
         }
-        return status == .complete
+        return SCFrameStatus(rawValue: statusRawValue)
+    }
+
+    static func isCompleteFrame(_ sampleBuffer: CMSampleBuffer) -> Bool {
+        frameStatus(sampleBuffer) == .complete
     }
 
     /// Runs on `sampleQueue`.
@@ -292,6 +481,8 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
         videoInput = nil
         videoURL = nil
         lastFramePresentationTime = nil
+        lastWrittenTime = nil
+        heldFrame = nil
         hasStartedWriting = false
         frameCount = 0
     }
@@ -358,6 +549,11 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
         sampleQueue.async { [self] in
             process(buffer, generation: generation)
         }
+    }
+
+    /// Stands in for the writer input's readiness.
+    func setInputReadyForTesting(_ isReady: (@Sendable () -> Bool)?) {
+        sampleQueue.sync { inputReadyOverride = isReady }
     }
 
     func setBeforeAppendForTesting(_ hook: (@Sendable () -> Void)?) {
