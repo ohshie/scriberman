@@ -220,24 +220,134 @@ final class AudioDeviceServiceTests {
         #expect(userDefaults.string(forKey: "selectedMicUID") == nil)
     }
 
-    @Test
+    // MARK: - Saved preference and current selection
 
-    func testMissingSavedUIDClearsPersistenceAndFallsBackToDefaultInput() {
+    @Test
+    func launchWithTheSavedMicAbsentSelectsTheDefaultAndKeepsThePreference() {
         hardware.devices = [
             MockAudioDevice(id: 1, uid: "uid-1", name: "Default Mic", hasInput: true),
             MockAudioDevice(id: 2, uid: "uid-2", name: "Second Mic", hasInput: true)
         ]
         hardware.defaultInputID = 1
-        userDefaults.set("missing-uid", forKey: "selectedMicUID")
+        userDefaults.set("airpods", forKey: "selectedMicUID")
 
-        service = AudioDeviceService(
-            hardware: hardware,
-            userDefaults: userDefaults,
-            notificationCenter: notificationCenter
-        )
+        service = AudioDeviceService(hardware: hardware, userDefaults: userDefaults, notificationCenter: notificationCenter)
 
         #expect(service.selectedDevice?.uid == "uid-1")
+        #expect(service.preferredDeviceUID == "airpods")
+        #expect(userDefaults.string(forKey: "selectedMicUID") == "airpods")
+    }
+
+    @Test
+    func theSavedMicIsSelectedWhenItAppearsAfterLaunch() {
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "uid-1", name: "Default Mic", hasInput: true)
+        ]
+        hardware.defaultInputID = 1
+        userDefaults.set("airpods", forKey: "selectedMicUID")
+        service = AudioDeviceService(hardware: hardware, userDefaults: userDefaults, notificationCenter: notificationCenter)
+
+        hardware.devices.append(MockAudioDevice(id: 2, uid: "airpods", name: "AirPods", hasInput: true))
+        service.refreshDevices()
+
+        #expect(service.selectedDevice?.uid == "airpods")
+        #expect(userDefaults.string(forKey: "selectedMicUID") == "airpods")
+    }
+
+    @Test
+    func anExplicitPickWhileTheSavedMicIsAbsentReplacesThePreference() {
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "uid-1", name: "Default Mic", hasInput: true),
+            MockAudioDevice(id: 3, uid: "usb", name: "USB Mic", hasInput: true)
+        ]
+        hardware.defaultInputID = 1
+        userDefaults.set("airpods", forKey: "selectedMicUID")
+        service = AudioDeviceService(hardware: hardware, userDefaults: userDefaults, notificationCenter: notificationCenter)
+
+        service.selectedDevice = service.availableDevices.first(where: { $0.uid == "usb" })
+        hardware.devices.append(MockAudioDevice(id: 2, uid: "airpods", name: "AirPods", hasInput: true))
+        service.refreshDevices()
+
+        #expect(service.selectedDevice?.uid == "usb")
+        #expect(service.preferredDeviceUID == "usb")
+        #expect(userDefaults.string(forKey: "selectedMicUID") == "usb")
+    }
+
+    @Test
+    func aFallbackAfterTheSelectedMicIsRemovedKeepsThePreference() {
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "uid-1", name: "Built-in Mic", hasInput: true),
+            MockAudioDevice(id: 2, uid: "airpods", name: "AirPods", hasInput: true)
+        ]
+        hardware.defaultInputID = 1
+        service = AudioDeviceService(hardware: hardware, userDefaults: userDefaults, notificationCenter: notificationCenter)
+        service.selectedDevice = service.availableDevices.first(where: { $0.uid == "airpods" })
+
+        hardware.devices.removeLast()
+        service.refreshDevices()
+
+        #expect(service.selectedDevice?.uid == "uid-1")
+        #expect(service.preferredDeviceUID == "airpods")
+        #expect(userDefaults.string(forKey: "selectedMicUID") == "airpods")
+    }
+
+    @Test
+    func theSavedMicReturnsAfterARelaunchDuringItsAbsence() {
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "uid-1", name: "Built-in Mic", hasInput: true),
+            MockAudioDevice(id: 2, uid: "airpods", name: "AirPods", hasInput: true)
+        ]
+        hardware.defaultInputID = 1
+        service = AudioDeviceService(hardware: hardware, userDefaults: userDefaults, notificationCenter: notificationCenter)
+        service.selectedDevice = service.availableDevices.first(where: { $0.uid == "airpods" })
+        hardware.devices.removeLast()
+        service.refreshDevices()
+        service = nil
+
+        service = AudioDeviceService(hardware: hardware, userDefaults: userDefaults, notificationCenter: notificationCenter)
+        #expect(service.selectedDevice?.uid == "uid-1")
+        hardware.devices.append(MockAudioDevice(id: 2, uid: "airpods", name: "AirPods", hasInput: true))
+        service.refreshDevices()
+
+        #expect(service.selectedDevice?.uid == "airpods")
+    }
+
+    @Test
+    func aSavedPrivateAggregateIsClearedAndTheDefaultSelected() {
+        var aggregate = MockAudioDevice(
+            id: 3, uid: "CADefaultDeviceAggregate-74099-0", name: "CADefaultDeviceAggregate-74099-0", hasInput: true
+        )
+        aggregate.isPrivateAggregate = true
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "uid-1", name: "Built-in Mic", hasInput: true),
+            aggregate
+        ]
+        hardware.defaultInputID = 1
+        userDefaults.set("CADefaultDeviceAggregate-74099-0", forKey: "selectedMicUID")
+
+        service = AudioDeviceService(hardware: hardware, userDefaults: userDefaults, notificationCenter: notificationCenter)
+
+        #expect(service.selectedDevice?.uid == "uid-1")
+        #expect(service.preferredDeviceUID == nil)
         #expect(userDefaults.string(forKey: "selectedMicUID") == nil)
+    }
+
+    /// A device that reports it is not alive is going away: that is absence, so the preference stays.
+    @Test
+    func aSavedMicThatIsListedButNotAliveIsKept() {
+        var airPods = MockAudioDevice(id: 2, uid: "airpods", name: "AirPods", hasInput: true)
+        airPods.isAlive = false
+        hardware.devices = [
+            MockAudioDevice(id: 1, uid: "uid-1", name: "Built-in Mic", hasInput: true),
+            airPods
+        ]
+        hardware.defaultInputID = 1
+        userDefaults.set("airpods", forKey: "selectedMicUID")
+
+        service = AudioDeviceService(hardware: hardware, userDefaults: userDefaults, notificationCenter: notificationCenter)
+
+        #expect(service.selectedDevice?.uid == "uid-1")
+        #expect(userDefaults.string(forKey: "selectedMicUID") == "airpods")
     }
 
     @Test

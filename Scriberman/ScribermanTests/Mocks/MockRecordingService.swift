@@ -11,7 +11,7 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
     var startThrowSequence: [RecordingError] = []
     var startReturns: UUID = UUID()
     var stopReturns: UUID?
-    var startCalls: [(workspace: Workspace, micDeviceID: AudioDeviceID?, captureDisplayID: CGDirectDisplayID?, capturedAppName: String?, appProcessID: pid_t?, title: String?, audioSyncFlags: AudioSyncFlags)] = []
+    var startCalls: [(workspace: Workspace, micDeviceID: AudioDeviceID?, preferredMicDeviceUID: String?, captureDisplayID: CGDirectDisplayID?, capturedAppName: String?, appProcessID: pid_t?, title: String?, audioSyncFlags: AudioSyncFlags)] = []
     var retargetMicCalls: [String?] = []
     var pendingError: RecordingError?
 
@@ -105,6 +105,7 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
     func startRecording(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID?,
+        preferredMicDeviceUID: String?,
         captureDisplayID: CGDirectDisplayID?,
         capturedAppName: String?,
         appProcessID: pid_t?,
@@ -119,6 +120,7 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
         startCalls.append((
             workspace: workspace,
             micDeviceID: micDeviceID,
+            preferredMicDeviceUID: preferredMicDeviceUID,
             captureDisplayID: captureDisplayID,
             capturedAppName: capturedAppName,
             appProcessID: appProcessID,

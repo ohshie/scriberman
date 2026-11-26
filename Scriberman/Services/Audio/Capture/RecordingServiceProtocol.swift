@@ -36,6 +36,7 @@ protocol RecordingServiceProtocol: Sendable {
     func startRecording(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID?,
+        preferredMicDeviceUID: String?,
         captureDisplayID: CGDirectDisplayID?,
         capturedAppName: String?,
         appProcessID: pid_t?,

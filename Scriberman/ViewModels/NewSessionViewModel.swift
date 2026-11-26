@@ -461,7 +461,8 @@ final class NewSessionViewModel {
             title: title,
             microphone: selectedDevice,
             app: recordAppAudio ? selectedApp : nil,
-            displayID: effectiveCaptureDisplayID
+            displayID: effectiveCaptureDisplayID,
+            preferredMicrophoneUID: audioDeviceService.preferredDeviceUID
         )
     }
 
@@ -493,6 +494,7 @@ final class NewSessionViewModel {
             let captureDisplayID = choice.displayID
             let selectedApp = resolvedApp(for: choice.app, windowSelectionBeforeRefresh: windowSelectionBeforeRefresh)
             let selectedDevice = choice.microphone
+            let preferredMicUID = choice.preferredMicrophoneUID ?? selectedDevice?.uid
 
             if let selectedApp {
                 selectedCapturedAppName = selectedApp.name
@@ -510,6 +512,7 @@ final class NewSessionViewModel {
                 recordingSessionID = try await startRecordingAttempt(
                     in: workspace,
                     micDeviceID: selectedMicDeviceID,
+                    preferredMicDeviceUID: preferredMicUID,
                     captureDisplayID: captureDisplayID,
                     capturedAppName: selectedCapturedAppName,
                     appProcessID: selectedAppProcessID,
@@ -526,6 +529,7 @@ final class NewSessionViewModel {
                     recordingSessionID = try await startRecordingAttempt(
                         in: workspace,
                         micDeviceID: selectedMicDeviceID,
+                        preferredMicDeviceUID: preferredMicUID,
                         captureDisplayID: captureDisplayID,
                         capturedAppName: nil,
                         appProcessID: nil,
@@ -543,6 +547,7 @@ final class NewSessionViewModel {
                     recordingSessionID = try await startRecordingAttempt(
                         in: workspace,
                         micDeviceID: nil,
+                        preferredMicDeviceUID: preferredMicUID,
                         captureDisplayID: captureDisplayID,
                         capturedAppName: nil,
                         appProcessID: nil,
@@ -574,7 +579,7 @@ final class NewSessionViewModel {
                 appAudioService.incrementUsage(for: selectedApp.bundleID)
             }
 
-            menuBarSettings?.lastUsedMicUID = selectedDevice?.uid
+            menuBarSettings?.lastUsedMicUID = preferredMicUID
             menuBarSettings?.lastUsedAppBundleID = selectedApp?.bundleID
 
             if let fallbackMessage {
@@ -640,8 +645,20 @@ final class NewSessionViewModel {
         app: CapturedApp?,
         context: ModelContext
     ) async -> RecordingSession? {
+        await startRecording(quickStartChoice(micDeviceUID: micDeviceUID, app: app, title: title), context: context)?.session
+    }
+
+    /// Applies `micDeviceUID` and `app` as the window's selections and returns the choice to record.
+    /// A `micDeviceUID` that is absent is not picked, so the saved preference stays; the recording
+    /// starts on the system default and carries it as its preferred microphone.
+    func quickStartChoice(micDeviceUID: String?, app: CapturedApp?, title: String) -> CaptureChoice {
         applySelections(micDeviceUID: micDeviceUID, app: app)
-        return await startRecording(title: title, context: context)
+        var choice = windowChoice(title: title)
+        if let micDeviceUID, choice.microphone?.uid != micDeviceUID {
+            choice.microphone = nil
+            choice.preferredMicrophoneUID = micDeviceUID
+        }
+        return choice
     }
 
     /// Sets the window's selections to `micDeviceUID` and `app`, with no screen, as the menu-bar
@@ -651,7 +668,9 @@ final class NewSessionViewModel {
         appAudioService.refreshRunningApps()
 
         if let micDeviceUID {
-            selectedDevice = availableDevices.first(where: { $0.uid == micDeviceUID })
+            if let device = availableDevices.first(where: { $0.uid == micDeviceUID }) {
+                selectedDevice = device
+            }
         } else {
             selectedDevice = nil
         }
@@ -1213,6 +1232,7 @@ final class NewSessionViewModel {
     private func startRecordingAttempt(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID?,
+        preferredMicDeviceUID: String?,
         captureDisplayID: CGDirectDisplayID?,
         capturedAppName: String?,
         appProcessID: pid_t?,
@@ -1224,6 +1244,7 @@ final class NewSessionViewModel {
             let id = try await recordingService.startRecording(
                 in: workspace,
                 micDeviceID: micDeviceID,
+                preferredMicDeviceUID: preferredMicDeviceUID,
                 captureDisplayID: captureDisplayID,
                 capturedAppName: capturedAppName,
                 appProcessID: appProcessID,

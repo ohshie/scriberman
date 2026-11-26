@@ -777,6 +777,43 @@ struct NewSessionViewModelTests {
     }
 
     @Test
+    func startingWhileThePreferredMicIsAbsentCarriesItSeparatelyFromTheStartDevice() async throws {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
+        defer { cleanup() }
+        _ = (workspaceService, appAudioService)
+        permissionService.micStatus = .granted
+        let builtIn = AudioInputDevice(id: 1, uid: "builtin", name: "Built-in Mic")
+        audioDeviceService.availableDevices = [builtIn]
+        audioDeviceService.selectedDevice = builtIn
+        audioDeviceService.preferredDeviceUID = "airpods"
+
+        await viewModel.startRecording(title: "Session", context: context)
+
+        let call = try #require(recordingService.startCalls.first)
+        #expect(call.micDeviceID == 1)
+        #expect(call.preferredMicDeviceUID == "airpods")
+        #expect(menuBarSettings.lastUsedMicUID == "airpods")
+    }
+
+    @Test
+    func aStartRetriedOnTheDefaultInputKeepsThePreferredMic() async throws {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
+        defer { cleanup() }
+        _ = (workspaceService, appAudioService)
+        permissionService.micStatus = .granted
+        let device = AudioInputDevice(id: 7, uid: "uid-7", name: "Desk Mic")
+        audioDeviceService.availableDevices = [device]
+        viewModel.selectedDevice = device
+        recordingService.startThrowSequence = [.failedToStart("explicit route")]
+
+        await viewModel.startRecording(title: "Session", context: context)
+
+        #expect(recordingService.startCalls.map(\.micDeviceID) == [7, nil])
+        #expect(recordingService.startCalls.map(\.preferredMicDeviceUID) == ["uid-7", "uid-7"])
+        #expect(menuBarSettings.lastUsedMicUID == "uid-7")
+    }
+
+    @Test
     func testStartRecordingClearsLastUsedAppWhenNoAppSelected() async {
         let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }

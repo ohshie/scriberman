@@ -442,7 +442,15 @@ actor RecordingService: RecordingServiceProtocol {
     private var appStartHostTime: HostNanoseconds?
     private var videoStartHostTime: HostNanoseconds?
     private var activeCaptureDisplayID: CGDirectDisplayID?
+    /// The microphone the recording prefers. Kept while it is absent or refuses the route, so
+    /// capture moves to it when it becomes usable.
     private var desiredMicDeviceUID: String?
+    /// The device capture uses while the preferred one is not usable: the device the recording
+    /// started on, or `nil` for the system default.
+    private var fallbackMicDeviceUID: String?
+    /// The preferred device that refused explicit routing at start. It is not targeted again until
+    /// it has left the device list and returned.
+    private var routeRefusedMicDeviceID: AudioDeviceID?
     private var currentCaptureDeviceID: AudioDeviceID?
     private var micFileURL: URL?
     private let micTargetFormat = AVAudioFormat(
@@ -899,7 +907,7 @@ actor RecordingService: RecordingServiceProtocol {
                     micFileURL: micFileURL,
                     appFileURL: appFileURL,
                     processID: appProcessID,
-                    micDeviceUID: desiredMicDeviceUID,
+                    micDeviceUID: micCaptureTargetUID(),
                     liveAudioContinuation: liveAudioContinuation,
                     onMicFirstHostTime: { [weak self, clock = liveAudioClock] hostTime in
                         clock?.observe(hostTime)
@@ -962,7 +970,8 @@ actor RecordingService: RecordingServiceProtocol {
                 logger.warning(
                     "Mic capture failed for selected device; retrying on default input. error=\(error.localizedDescription, privacy: .public)"
                 )
-                desiredMicDeviceUID = nil
+                routeRefusedMicDeviceID = resolveDeviceID(for: desiredMicDeviceUID)
+                fallbackMicDeviceUID = nil
                 do {
                     try await startMicCapture(micFileURL: micFileURL, liveContinuation: liveAudioContinuation)
                 } catch is CaptureStartAbandoned {
@@ -1144,6 +1153,7 @@ actor RecordingService: RecordingServiceProtocol {
     func startRecording(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID? = nil,
+        preferredMicDeviceUID: String? = nil,
         captureDisplayID: CGDirectDisplayID? = nil,
         capturedAppName: String? = nil,
         appProcessID: pid_t? = nil,
@@ -1213,10 +1223,12 @@ actor RecordingService: RecordingServiceProtocol {
             micRecoveryRetryTask?.cancel()
             micRecoveryRetryTask = nil
             if let micDeviceID, micDeviceID != 0 {
-                desiredMicDeviceUID = hardware.deviceUID(deviceID: micDeviceID)
+                fallbackMicDeviceUID = hardware.deviceUID(deviceID: micDeviceID)
             } else {
-                desiredMicDeviceUID = nil
+                fallbackMicDeviceUID = nil
             }
+            desiredMicDeviceUID = preferredMicDeviceUID ?? fallbackMicDeviceUID
+            routeRefusedMicDeviceID = nil
             // Phase 2: for mic+app recordings, capture both from one ScreenCaptureKit stream
             // (shared clock) when enabled. Falls back to the legacy AVAudioEngine + separate
             // SCStream path on any failure.
@@ -1755,6 +1767,7 @@ actor RecordingService: RecordingServiceProtocol {
             return
         }
         self.desiredMicDeviceUID = desiredDeviceUID
+        routeRefusedMicDeviceID = nil
         // Unified ScreenCaptureKit capture owns the mic device, so the swap is applied to the
         // running stream instead of by restarting engine capture. A failed update leaves capture
         // on the previous device; the next CoreAudio hardware event re-attempts it, so the engine
@@ -1849,6 +1862,8 @@ actor RecordingService: RecordingServiceProtocol {
         shouldSkipScreenMux = false
         activeCaptureDisplayID = nil
         desiredMicDeviceUID = nil
+        fallbackMicDeviceUID = nil
+        routeRefusedMicDeviceID = nil
         currentCaptureDeviceID = nil
         micFileURL = nil
         isRecoveringMicCapture = false
@@ -1938,8 +1953,12 @@ actor RecordingService: RecordingServiceProtocol {
         guard !isRecorderFallbackActive else {
             return
         }
-        guard let desiredMicDeviceUID,
-              let desiredDeviceID = resolveDeviceID(for: desiredMicDeviceUID),
+        let desiredDeviceID = resolveDeviceID(for: desiredMicDeviceUID)
+        if let routeRefusedMicDeviceID, routeRefusedMicDeviceID != desiredDeviceID {
+            self.routeRefusedMicDeviceID = nil
+        }
+        guard let desiredDeviceID,
+              desiredDeviceID != routeRefusedMicDeviceID,
               currentCaptureDeviceID != desiredDeviceID
         else {
             return
@@ -1988,7 +2007,7 @@ actor RecordingService: RecordingServiceProtocol {
         guard isCurrentOrStartingRecording(generation) else {
             throw CaptureStartAbandoned()
         }
-        let deviceID = resolveDeviceID(for: desiredMicDeviceUID)
+        let deviceID = resolveDeviceID(for: micCaptureTargetUID())
         try micCaptureController.startCapture(
             deviceID: deviceID,
             targetFormat: micTargetFormat,
@@ -2112,6 +2131,16 @@ actor RecordingService: RecordingServiceProtocol {
             return false
         }
         return true
+    }
+
+    /// The preferred device while it is usable and has not refused the route, otherwise the
+    /// fallback device. `nil` is the system default.
+    private func micCaptureTargetUID() -> String? {
+        if let desiredDeviceID = resolveDeviceID(for: desiredMicDeviceUID),
+           desiredDeviceID != routeRefusedMicDeviceID {
+            return desiredMicDeviceUID
+        }
+        return fallbackMicDeviceUID
     }
 
     private func resolveDeviceID(for deviceUID: String?) -> AudioDeviceID? {

@@ -15,6 +15,9 @@ struct CaptureChoice {
     /// `nil` records no screen.
     var displayID: CGDirectDisplayID?
     var tagIDs: [UUID] = []
+    /// The microphone the recording prefers, when it differs from `microphone` because that is a
+    /// fallback for an absent device. `nil` prefers `microphone`.
+    var preferredMicrophoneUID: String?
 }
 
 /// What a started recording actually captures, after any fallback.
@@ -168,8 +171,7 @@ final class CaptureCoordinator {
         let app = viewModel.runningApps.first { $0.bundleID == menuBarSettings.lastUsedAppBundleID }
 
         return await run(origin: origin, context: context) { [viewModel] in
-            viewModel.applySelections(micDeviceUID: micDeviceUID, app: app)
-            return viewModel.windowChoice(title: Self.quickStartTitle)
+            viewModel.quickStartChoice(micDeviceUID: micDeviceUID, app: app, title: Self.quickStartTitle)
         }
     }
 

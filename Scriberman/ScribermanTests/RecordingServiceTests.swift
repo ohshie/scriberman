@@ -1240,6 +1240,113 @@ final class RecordingServiceTests {
         #expect(fixture.micController.startCaptureCalls.last?.deviceID == 22)
     }
 
+    // MARK: - Preferred mic carried separately from the start device
+
+    @Test
+    func aRecordingStartedOnTheDefaultSwitchesToThePreferredMicWhenItAppears() async throws {
+        let fixture = try await makeStartFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        fixture.hardware.devices = [(id: 11, uid: "builtin")]
+
+        _ = try await fixture.service.startRecording(
+            in: fixture.workspace,
+            micDeviceID: 11,
+            preferredMicDeviceUID: "airpods",
+            title: "Session",
+            audioSyncFlags: .shippedDefaults
+        )
+        #expect(fixture.micController.startCaptureCalls.map(\.deviceID) == [11])
+
+        fixture.hardware.devices.append((id: 22, uid: "airpods"))
+        await fixture.service.simulateHardwareChangeForTesting()
+
+        #expect(fixture.micController.startCaptureCalls.last?.deviceID == 22)
+        _ = await fixture.service.stopRecording()
+    }
+
+    @Test
+    func aFailedExplicitRouteStartKeepsThePreferredMicAndRecordsOnTheDefault() async throws {
+        let fixture = try await makeStartFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        fixture.hardware.devices = [(id: 11, uid: "builtin"), (id: 22, uid: "airpods")]
+        fixture.micController.startCaptureErrors = [RecordingError.failedToStart("explicit route")]
+
+        _ = try await fixture.service.startRecording(
+            in: fixture.workspace,
+            micDeviceID: 22,
+            preferredMicDeviceUID: "airpods",
+            title: "Session",
+            audioSyncFlags: .shippedDefaults
+        )
+
+        #expect(fixture.micController.startCaptureCalls.map(\.deviceID) == [nil])
+        let state = await fixture.service.recoveryDebugStateForTesting()
+        #expect(state.desiredMicDeviceUID == "airpods")
+        #expect(state.currentCaptureDeviceID == nil)
+        _ = await fixture.service.stopRecording()
+    }
+
+    /// The device that refused the route is still there, so retrying it on every hardware event
+    /// would tear down working capture each time. It is tried again once it has left and returned.
+    @Test
+    func aMicThatRefusedTheRouteIsRetriedOnlyAfterItReturns() async throws {
+        let fixture = try await makeStartFixture()
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        fixture.hardware.devices = [(id: 11, uid: "builtin"), (id: 22, uid: "airpods")]
+        fixture.micController.startCaptureErrors = [RecordingError.failedToStart("explicit route")]
+        _ = try await fixture.service.startRecording(
+            in: fixture.workspace,
+            micDeviceID: 22,
+            preferredMicDeviceUID: "airpods",
+            title: "Session",
+            audioSyncFlags: .shippedDefaults
+        )
+
+        await fixture.service.simulateHardwareChangeForTesting()
+        #expect(fixture.micController.startCaptureCalls.map(\.deviceID) == [nil])
+
+        fixture.hardware.devices = [(id: 11, uid: "builtin")]
+        await fixture.service.simulateHardwareChangeForTesting()
+        fixture.hardware.devices = [(id: 11, uid: "builtin"), (id: 22, uid: "airpods")]
+        await fixture.service.simulateHardwareChangeForTesting()
+
+        #expect(fixture.micController.startCaptureCalls.map(\.deviceID) == [nil, 22])
+        _ = await fixture.service.stopRecording()
+    }
+
+    private func makeStartFixture() async throws -> (
+        service: RecordingService,
+        workspace: Workspace,
+        hardware: MockRecoveryAudioDeviceHardware,
+        micController: MockMicCaptureController
+    ) {
+        let workspace = makeWorkspace()
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            SpeakerProfile.self, RecordingTag.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let hardware = MockRecoveryAudioDeviceHardware()
+        let micController = MockMicCaptureController()
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        let service = RecordingService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            hardware: hardware,
+            micCaptureController: micController,
+            mixdownCoordinator: MockRecordingMixdownCoordinator(),
+            screenVideoMuxer: MockScreenVideoMuxer(),
+            permissionChecker: {},
+            scopedAccessStarter: { _ in true },
+            scopedAccessStopper: { _ in }
+        )
+        return (service, workspace, hardware, micController)
+    }
+
     // MARK: - Default tag at creation
 
     @Test
