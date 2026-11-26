@@ -745,3 +745,87 @@ struct CaptureAudioGateTests {
         Self.expectMarkers(events, [PauseSpan(start: 20, end: 60), PauseSpan(start: 80, end: 100)])
     }
 }
+
+/// The engine tap across an input route change whose new device runs at another rate (finding 11):
+/// the AirPods input ran at 24 kHz, the built-in mic at 48 kHz.
+///
+/// The signal is a ramp of capture time, so a written sample's value says when it was captured.
+struct EngineMicTapRouteChangeTests {
+    private static let startNanos: UInt64 = 10_000_000_000
+    /// Sample value per second of capture time.
+    private static let slope: Float = 0.5
+
+    private final class Rig {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let url: URL
+        let streamer = AudioFileStreamer(label: "mic")
+        let tap: EngineMicTap
+
+        init(inputRate: Double) throws {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            url = root.appendingPathComponent("mic.wav")
+            let target = try #require(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1))
+            try streamer.prepare(url: url, format: target)
+            tap = try EngineMicTap(
+                inputFormat: try #require(AVAudioFormat(standardFormatWithSampleRate: inputRate, channels: 1)),
+                targetFormat: target,
+                micStreamer: streamer,
+                gate: CaptureAudioGate(),
+                onFirstHostTime: { _ in },
+                onBuffer: { _ in }
+            )
+        }
+
+        deinit { try? FileManager.default.removeItem(at: root) }
+
+        /// Feeds `seconds` of 20 ms buffers at `rate`, starting `offset` seconds into the capture.
+        func feed(rate: Double, from offset: Double, seconds: Double) throws {
+            let perBuffer = Int(rate / 50)
+            for index in 0..<Int((seconds * 50).rounded()) {
+                let first = offset + Double(index) / 50
+                let values = (0..<perBuffer).map { Float(first + Double($0) / rate) * EngineMicTapRouteChangeTests.slope }
+                let host = HostNanoseconds(nanoseconds: EngineMicTapRouteChangeTests.startNanos + UInt64((first * 1e9).rounded()))
+                tap.process(try CaptureAudioGateTests.makePCM(values, sampleRate: rate), hostTime: host)
+            }
+        }
+
+        func finish() throws -> (samples: [Float], segments: [AudioCaptureSegment]) {
+            streamer.close()
+            let sidecar = try #require(AudioFileStreamer.loadTimingSidecar(for: url))
+            return (try CaptureAudioGateTests.readSamples(url), sidecar.segments)
+        }
+    }
+
+    @Test func formatChangeMidRecordingKeepsFramesTimingAndContent() throws {
+        let rig = try Rig(inputRate: 24_000)
+        try rig.feed(rate: 24_000, from: 0, seconds: 0.5)
+        try rig.feed(rate: 48_000, from: 0.5, seconds: 0.5)
+        let (samples, segments) = try rig.finish()
+
+        // The sidecar describes exactly the frames the file has.
+        #expect(segments.reduce(0) { $0 + $1.frameCount } == samples.count)
+        // One second captured is one second written, within 20 ms.
+        #expect(abs(samples.count - 48_000) <= 960)
+
+        // Each segment sits where its content was captured, within 20 ms. Content is read a few
+        // frames in, past the converter's priming.
+        var offset = 0
+        for segment in segments {
+            defer { offset += segment.frameCount }
+            guard segment.frameCount > 16 else { continue }
+            let contentSeconds = Double(samples[offset + 8] / Self.slope) - 8.0 / 48_000
+            let hostSeconds = Double(segment.startHostTimeNanos - Self.startNanos) / 1e9
+            #expect(abs(hostSeconds - contentSeconds) <= 0.020, "segment at \(hostSeconds) s holds audio from \(contentSeconds) s")
+        }
+
+        // Audio from after the change is neither missing nor repeated.
+        let after = samples.filter { $0 > 0.5 * Self.slope + 0.005 }.count
+        #expect(abs(after - 24_000) <= 960)
+
+        // Placed on the timeline, the file overlaps itself by jitter trims only.
+        let timeline = SynchronizedAudioTimeline.reconstruct(
+            samples: samples, segments: segments, referenceHostTimeNanos: Self.startNanos, sampleRate: 48_000
+        )
+        #expect(timeline.overlapFrames <= 48)
+    }
+}
