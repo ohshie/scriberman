@@ -86,6 +86,13 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
         hasPrepared = true
     }
 
+    /// True once the writer is open: prepared on the first buffer, or adopted from a predecessor.
+    var isOutputPrepared: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return hasPrepared
+    }
+
     func closeOutput() {
         streamer.close()
     }

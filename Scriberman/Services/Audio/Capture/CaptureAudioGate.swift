@@ -8,28 +8,41 @@ import Foundation
 /// has sent all its audio from before that pause. Each is sent once, in order, whichever handler or
 /// caller sends it.
 ///
-/// @unchecked Sendable: the counter is guarded by `lock`, the marker count by `deliveryLock`;
-/// `clock` synchronizes itself.
+/// @unchecked Sendable: the counter and arrival time are guarded by `lock`, the marker count by
+/// `deliveryLock`; `clock` synchronizes itself.
 final class CaptureAudioGate: @unchecked Sendable {
     let clock: RecordingPauseClock
+    private let hostNow: @Sendable () -> HostNanoseconds
     private let lock = NSLock()
     private var _arrivalCount: Int64 = 0
+    private var _lastArrivalHostTime: HostNanoseconds?
     /// Held while a handler hands out a buffer's audio and markers, and while markers are sent on
     /// request, so a marker never lands between audio it must follow.
     private let deliveryLock = NSLock()
     /// Pauses whose marker has been sent.
     private var markedPauseCount = 0
 
-    init(clock: RecordingPauseClock = RecordingPauseClock()) {
+    init(
+        clock: RecordingPauseClock = RecordingPauseClock(),
+        hostNow: @escaping @Sendable () -> HostNanoseconds = { HostNanoseconds(machTicks: mach_absolute_time()) }
+    ) {
         self.clock = clock
+        self.hostNow = hostNow
     }
 
     /// Raw buffers delivered by the capture framework, counted before anything is cut. Unlike
     /// `framesWritten` this advances during a pause.
     var arrivalCount: Int64 { lock.withLock { _arrivalCount } }
 
+    /// When the last raw buffer was delivered, by the host clock. Nil before the first one.
+    var lastArrivalHostTime: HostNanoseconds? { lock.withLock { _lastArrivalHostTime } }
+
     func recordArrival() {
-        lock.withLock { _arrivalCount += 1 }
+        let now = hostNow()
+        lock.withLock {
+            _arrivalCount += 1
+            _lastArrivalHostTime = now
+        }
     }
 
     /// Sends the marker of every pause that has started, up to pause number `limit`, and is not yet
@@ -99,10 +112,13 @@ struct RecordingCaptureGates: Sendable {
     let mic: CaptureAudioGate
     let app: CaptureAudioGate
 
-    init(clock: RecordingPauseClock = RecordingPauseClock()) {
+    init(
+        clock: RecordingPauseClock = RecordingPauseClock(),
+        hostNow: @escaping @Sendable () -> HostNanoseconds = { HostNanoseconds(machTicks: mach_absolute_time()) }
+    ) {
         self.clock = clock
-        self.mic = CaptureAudioGate(clock: clock)
-        self.app = CaptureAudioGate(clock: clock)
+        self.mic = CaptureAudioGate(clock: clock, hostNow: hostNow)
+        self.app = CaptureAudioGate(clock: clock, hostNow: hostNow)
     }
 }
 

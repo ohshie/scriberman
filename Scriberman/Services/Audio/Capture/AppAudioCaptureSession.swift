@@ -10,6 +10,9 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Senda
     let outputHandler: AppAudioStreamOutputHandler
     private let sampleQueue = DispatchQueue(label: "com.scriberman.app-audio.stream")
     private let notificationCenter: NotificationCenter
+    /// True when the session adopted a writer that is already open, so `start()` must not prepare
+    /// it again.
+    private let reusesPreparedOutput: Bool
     private let logger = Logger(subsystem: "Scriberman", category: "AppAudioCaptureSession")
     /// Guards `_stream`, which is read and cleared from the nonisolated `SCStreamDelegate`
     /// callback as well as from the async start/stop context.
@@ -38,6 +41,9 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Senda
         return existing
     }
 
+    /// False once the stream has stopped on its own (or been stopped), true while it runs.
+    var isStreamLive: Bool { stream != nil }
+
     /// Invoked for every error the stream delegate receives, TCC denials included, so the owning
     /// recording can react instead of the failure ending in a log line. Set by `RecordingService`.
     var onStreamStopped: (@Sendable (any Error) -> Void)?
@@ -62,11 +68,13 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Senda
         liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation? = nil,
         notificationCenter: NotificationCenter = .default,
         streamer: AudioFileStreamer = AudioFileStreamer(label: "app"),
-        gate: CaptureAudioGate = CaptureAudioGate()
+        gate: CaptureAudioGate = CaptureAudioGate(),
+        reusingPreparedOutput: Bool = false
     ) {
         self.fileURL = fileURL
         self.processID = processID
         self.notificationCenter = notificationCenter
+        self.reusesPreparedOutput = reusingPreparedOutput
         self.outputHandler = AppAudioStreamOutputHandler(
             liveAudioContinuation: liveAudioContinuation,
             streamer: streamer,
@@ -74,6 +82,11 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Senda
         )
         outputHandler.onFirstBufferHostTime = onFirstBufferHostTime
         super.init()
+        // A restart keeps writing into the file the previous session opened. Preparing it again
+        // would truncate it.
+        if reusingPreparedOutput {
+            outputHandler.adoptPreparedOutput(url: fileURL)
+        }
     }
 
     func start() async throws {
@@ -96,7 +109,9 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Senda
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
         configuration.queueDepth = 3
 
-        outputHandler.configureOutput(url: fileURL)
+        if !reusesPreparedOutput {
+            outputHandler.configureOutput(url: fileURL)
+        }
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try stream.addStreamOutput(
             outputHandler,

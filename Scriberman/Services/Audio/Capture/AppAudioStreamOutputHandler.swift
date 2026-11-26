@@ -75,6 +75,13 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
         self.hasPrepared = false
     }
 
+    /// True once the writer is open: prepared on the first buffer, or adopted from a predecessor.
+    var isOutputPrepared: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return hasPrepared
+    }
+
     func closeOutput() {
         streamer.close()
     }
