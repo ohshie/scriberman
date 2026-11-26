@@ -9,6 +9,9 @@ struct LiveAudioChunk: Sendable {
     let hostTime: HostNanoseconds?
     /// Capture time as the hardware reported it. Comparable with the current host time.
     let rawHostTime: HostNanoseconds?
+    /// Set on a marker, which carries no audio: the source has sent all its audio from before
+    /// pause number `pauseNumber`. Pauses are numbered from 1.
+    let pauseNumber: Int?
 
     /// `rawHostTime` defaults to `hostTime`, which is right for audio with no pause before it.
     init(
@@ -23,6 +26,20 @@ struct LiveAudioChunk: Sendable {
         self.sampleRate = sampleRate
         self.hostTime = hostTime
         self.rawHostTime = rawHostTime ?? hostTime
+        self.pauseNumber = nil
+    }
+
+    private init(pauseNumber: Int, source: AudioSource) {
+        self.samples = []
+        self.source = source
+        self.sampleRate = 0
+        self.hostTime = nil
+        self.rawHostTime = nil
+        self.pauseNumber = pauseNumber
+    }
+
+    static func pauseMarker(_ number: Int, source: AudioSource) -> LiveAudioChunk {
+        LiveAudioChunk(pauseNumber: number, source: source)
     }
 }
 

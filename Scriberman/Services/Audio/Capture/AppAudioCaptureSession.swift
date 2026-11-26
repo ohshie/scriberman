@@ -155,7 +155,8 @@ final class AppAudioCaptureSession: NSObject, SCStreamDelegate, @unchecked Senda
         await drainSampleCallbacks()
     }
 
-    private func drainSampleCallbacks() async {
+    /// Returns once every sample callback already queued has run.
+    func drainSampleCallbacks() async {
         await withCheckedContinuation { continuation in
             sampleQueue.async { continuation.resume() }
         }

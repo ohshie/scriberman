@@ -36,7 +36,7 @@ final class RecordingServiceTests {
         await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
         let emit = try #require(fixture.micController.onBuffer)
         let time = HostNanoseconds(nanoseconds: 2_000_000_000)
-        emit([1, 2], 48_000, time, time)
+        emit(.audio(samples: [1, 2], sampleRate: 48_000, hostTime: time, rawHostTime: time))
         _ = await fixture.service.stopRecording()
         var iterator = audio.stream.makeAsyncIterator()
         let chunk = try #require(await iterator.next())

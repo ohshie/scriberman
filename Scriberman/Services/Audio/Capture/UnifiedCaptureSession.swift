@@ -236,7 +236,8 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
         await drainSampleCallbacks()
     }
 
-    private func drainSampleCallbacks() async {
+    /// Returns once every sample callback already queued has run.
+    func drainSampleCallbacks() async {
         await withCheckedContinuation { continuation in
             appQueue.async { continuation.resume() }
         }

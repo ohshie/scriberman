@@ -10,6 +10,8 @@ struct RecordingPauseTimeline: Sendable {
     struct KeptRange: Equatable, Sendable {
         let frames: Range<Int>
         let removedNanos: UInt64
+        /// Pauses that ended before these frames were captured.
+        var pausesBefore = 0
     }
 
     fileprivate struct Pause: Sendable {
@@ -21,6 +23,9 @@ struct RecordingPauseTimeline: Sendable {
     fileprivate var closedAt: UInt64?
 
     var hasPauses: Bool { !pauses.isEmpty }
+
+    /// Raw start of each pause so far, in order. Pause number `n` starts at `pauseStarts[n - 1]`.
+    var pauseStarts: [UInt64] { pauses.map(\.start) }
 
     /// True while nothing can be cut: no pause so far and not closed.
     var admitsEverything: Bool { pauses.isEmpty && closedAt == nil }
@@ -70,9 +75,10 @@ struct RecordingPauseTimeline: Sendable {
         var ranges: [KeptRange] = []
         var cursor = 0
         var removed: UInt64 = 0
+        var ended = 0
         func keep(upTo end: Int) {
             guard end > cursor else { return }
-            ranges.append(KeptRange(frames: cursor..<end, removedNanos: removed))
+            ranges.append(KeptRange(frames: cursor..<end, removedNanos: removed, pausesBefore: ended))
         }
 
         let limit = closedAt.map(frame(at:)) ?? frameCount
@@ -81,6 +87,7 @@ struct RecordingPauseTimeline: Sendable {
             guard let end = pause.end else { return ranges }
             cursor = max(cursor, frame(at: end))
             removed += end - pause.start
+            ended += 1
         }
         keep(upTo: limit)
         return ranges

@@ -51,8 +51,15 @@ extension Notification.Name {
     static let appAudioCaptureAccessDenied = Notification.Name("appAudioCaptureAccessDenied")
 }
 
-/// Kept microphone samples, their rate, and the adjusted and raw host time of the first one.
-typealias MicBufferHandler = @Sendable ([Float], Double, HostNanoseconds, HostNanoseconds) -> Void
+/// What an engine microphone tap sends to live transcription.
+enum MicCaptureOutput: Sendable {
+    /// Kept samples, their rate, and the adjusted and raw host time of the first one.
+    case audio(samples: [Float], sampleRate: Double, hostTime: HostNanoseconds, rawHostTime: HostNanoseconds)
+    /// All audio from before pause number `n` has been sent.
+    case pauseMarker(Int)
+}
+
+typealias MicBufferHandler = @Sendable (MicCaptureOutput) -> Void
 
 protocol MicCaptureControlling: AnyObject {
     func startCapture(
@@ -215,10 +222,20 @@ final class EngineMicTap: @unchecked Sendable {
         ) {
             onFirstHostTime(firstKept)
         }
-        for audio in conversion.process(buffer, hostTime: hostTime) {
-            micStreamer.write(buffer: audio.buffer, hostTimeNanos: audio.hostTime?.nanoseconds)
-            guard let adjusted = audio.hostTime, let raw = audio.rawHostTime else { continue }
-            onBuffer(AudioDownmixer.toMono(buffer: audio.buffer), audio.buffer.format.sampleRate, adjusted, raw)
+        conversion.process(buffer, hostTime: hostTime) { event in
+            switch event {
+            case .audio(let audio):
+                micStreamer.write(buffer: audio.buffer, hostTimeNanos: audio.hostTime?.nanoseconds)
+                guard let adjusted = audio.hostTime, let raw = audio.rawHostTime else { return }
+                onBuffer(.audio(
+                    samples: AudioDownmixer.toMono(buffer: audio.buffer),
+                    sampleRate: audio.buffer.format.sampleRate,
+                    hostTime: adjusted,
+                    rawHostTime: raw
+                ))
+            case .pauseMarker(let number):
+                onBuffer(.pauseMarker(number))
+            }
         }
     }
 }
@@ -854,6 +871,7 @@ actor RecordingService: RecordingServiceProtocol {
         let startedAt = Date()
         let framesBefore = (mic: existing.micFramesWritten, app: existing.appFramesWritten)
         await existing.stopStreamPreservingOutput()
+        Self.sendStartedPauseMarkers(gates: captureGates, to: liveAudioContinuation, mic: true, app: true)
         let reused = existing.streamers
 
         let replacement = UnifiedCaptureSession(
@@ -1149,6 +1167,9 @@ actor RecordingService: RecordingServiceProtocol {
         await activeScreenCaptureSession?.stop()
         captureVideoStartHostTimeIfNeeded(activeScreenCaptureSession?.videoStartHostTime)
 
+        Self.sendStartedPauseMarkers(
+            gates: captureGates, to: liveAudioContinuation, mic: true, app: appAudioURL != nil
+        )
         liveAudioContinuation?.finish()
         liveAudioContinuation = nil
 
@@ -1313,10 +1334,42 @@ actor RecordingService: RecordingServiceProtocol {
 
     /// Ends the pause. Assumes the capture sources are alive. True when the recording is running,
     /// including when it was not paused.
-    func resumeRecording() -> Bool {
+    func resumeRecording() async -> Bool {
         guard isRecordingValue else { return false }
-        captureGates.clock.resume(at: hostNow)
+        guard captureGates.clock.resume(at: hostNow) else { return true }
+        // A source that delivered nothing past the pause start has not marked it yet. Callbacks
+        // already queued go first, so the marker follows any audio they still carry.
+        // A pause that starts during the wait is not this one: the queues may still hold audio
+        // from before it.
+        let gates = captureGates
+        let continuation = liveAudioContinuation
+        let includesApp = appAudioURL != nil
+        let endedPause = gates.clock.timeline.pauseStarts.count
+        await unifiedCaptureSession?.drainSampleCallbacks()
+        await appAudioCaptureSession?.drainSampleCallbacks()
+        Self.sendStartedPauseMarkers(
+            gates: gates, to: continuation, mic: true, app: includesApp, through: endedPause
+        )
         return true
+    }
+
+    /// Sends each source's marker for every pause that has started and that the source has not
+    /// marked from its own buffers. For a capture replacement and the stop, which follow a drained
+    /// or stopped delivery path, and the resume.
+    private static func sendStartedPauseMarkers(
+        gates: RecordingCaptureGates,
+        to continuation: AsyncStream<LiveAudioChunk>.Continuation?,
+        mic: Bool,
+        app: Bool,
+        through limit: Int = .max
+    ) {
+        guard let continuation else { return }
+        if mic {
+            gates.mic.sendStartedPauseMarkers(through: limit) { continuation.yield(.pauseMarker($0, source: .mic)) }
+        }
+        if app {
+            gates.app.sendStartedPauseMarkers(through: limit) { continuation.yield(.pauseMarker($0, source: .app)) }
+        }
     }
 
     /// True while a recording is paused. `isRecording()` stays true.
@@ -1565,14 +1618,19 @@ actor RecordingService: RecordingServiceProtocol {
                     await self?.captureMicStartHostTimeIfNeeded(hostTime)
                 }
             },
-            onBuffer: { samples, sampleRate, hostTime, rawHostTime in
-                liveContinuation?.yield(LiveAudioChunk(
-                    samples: samples,
-                    source: .mic,
-                    sampleRate: sampleRate,
-                    hostTime: hostTime,
-                    rawHostTime: rawHostTime
-                ))
+            onBuffer: { output in
+                switch output {
+                case let .audio(samples, sampleRate, hostTime, rawHostTime):
+                    liveContinuation?.yield(LiveAudioChunk(
+                        samples: samples,
+                        source: .mic,
+                        sampleRate: sampleRate,
+                        hostTime: hostTime,
+                        rawHostTime: rawHostTime
+                    ))
+                case let .pauseMarker(number):
+                    liveContinuation?.yield(.pauseMarker(number, source: .mic))
+                }
             }
         )
         self.audioRecorder = nil
@@ -1596,6 +1654,7 @@ actor RecordingService: RecordingServiceProtocol {
             return false
         }
         teardownEngineForRecovery()
+        Self.sendStartedPauseMarkers(gates: captureGates, to: liveAudioContinuation, mic: true, app: false)
         do {
             try await startMicCapture(
                 deviceUID: desiredMicDeviceUID,

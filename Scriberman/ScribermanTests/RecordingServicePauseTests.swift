@@ -504,4 +504,148 @@ struct RecordingServicePauseTests {
         let id = try #require(await fixture.service.stopRecording())
         #expect(try fixture.session(id).partiallyCoveredSources == ["mic"])
     }
+
+    // MARK: - Pause markers
+
+    /// Everything the service sends to live transcription, read while the recording runs.
+    private final class LiveEvents: @unchecked Sendable {
+        private let lock = NSLock()
+        private var events: [LiveAudioChunk] = []
+        private var task: Task<Void, Never>?
+
+        init(_ stream: AsyncStream<LiveAudioChunk>) {
+            task = Task { [weak self] in
+                for await event in stream { self?.lock.withLock { self?.events.append(event) } }
+            }
+        }
+
+        var all: [LiveAudioChunk] { lock.withLock { events } }
+
+        func markers(_ source: AudioSource) -> [Int] {
+            all.filter { $0.source == source }.compactMap(\.pauseNumber)
+        }
+
+        /// Waits until `source` has sent `count` markers, or times out.
+        func waitForMarkers(_ source: AudioSource, count: Int) async -> [Int] {
+            let deadline = Date().addingTimeInterval(5)
+            while markers(source).count < count, Date() < deadline {
+                try? await Task.sleep(for: .milliseconds(5))
+            }
+            return markers(source)
+        }
+
+        func finished() async -> [LiveAudioChunk] {
+            await task?.value
+            return all
+        }
+    }
+
+    /// Kinds of the source's events in order: "audio" or the marker number.
+    private func sequence(_ events: [LiveAudioChunk], _ source: AudioSource) -> [String] {
+        events.filter { $0.source == source }.map { $0.pauseNumber.map(String.init) ?? "audio" }
+    }
+
+    @Test
+    func aSourceThatDeliversNothingDuringAPauseIsMarkedAtResume() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.remove() }
+        let live = LiveEvents(fixture.audio.stream)
+        _ = try await fixture.start(appProcessID: 1)
+        let session = try #require(fixture.captures.unified.last)
+        try fixture.sendUnified(Self.before, to: session)
+        _ = await fixture.service.pauseRecording()
+        // Only the microphone keeps delivering.
+        session.micHandler.processSampleBufferForTesting(
+            try CaptureAudioGateTests.makeSampleBuffer(fixture.value20ms(Self.paused), sampleRate: 48_000, hostTime: fixture.time.host)
+        )
+        fixture.time.advance(ms: 20)
+        #expect(await live.waitForMarkers(.mic, count: 1) == [1])
+        #expect(live.markers(.app).isEmpty)
+
+        _ = await fixture.service.resumeRecording()
+        #expect(await live.waitForMarkers(.app, count: 1) == [1])
+        try fixture.sendUnified(Self.after, to: session)
+        _ = await fixture.service.stopRecording()
+        let events = await live.finished()
+        #expect(sequence(events, .mic) == ["audio", "1", "audio"])
+        #expect(sequence(events, .app) == ["audio", "1", "audio"])
+    }
+
+    @Test
+    func sourcesThatDeliverNothingAreMarkedAtAStopWhilePaused() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.remove() }
+        let live = LiveEvents(fixture.audio.stream)
+        _ = try await fixture.start(appProcessID: 1)
+        try fixture.sendUnified(Self.before, to: try #require(fixture.captures.unified.last))
+        _ = await fixture.service.pauseRecording()
+        _ = await fixture.service.stopRecording()
+        let events = await live.finished()
+        #expect(sequence(events, .mic) == ["audio", "1"])
+        #expect(sequence(events, .app) == ["audio", "1"])
+    }
+
+    @Test
+    func aRestartInPlaceDuringAPauseMarksBothSources() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.remove() }
+        let live = LiveEvents(fixture.audio.stream)
+        _ = try await fixture.start(appProcessID: 1)
+        try fixture.sendUnified(Self.before, to: try #require(fixture.captures.unified.last))
+        _ = await fixture.service.pauseRecording()
+        #expect(await fixture.service.restartAudioCaptureInPlace())
+        #expect(await live.waitForMarkers(.mic, count: 1) == [1])
+        #expect(await live.waitForMarkers(.app, count: 1) == [1])
+
+        try fixture.sendUnified(Self.paused, to: try #require(fixture.captures.unified.last))
+        _ = await fixture.service.resumeRecording()
+        try fixture.sendUnified(Self.after, to: try #require(fixture.captures.unified.last))
+        _ = await fixture.service.stopRecording()
+        let events = await live.finished()
+        #expect(sequence(events, .mic) == ["audio", "1", "audio"])
+        #expect(sequence(events, .app) == ["audio", "1", "audio"])
+    }
+
+    @Test
+    func anEngineRecoveryDuringAPauseMarksTheMicrophone() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.remove() }
+        let live = LiveEvents(fixture.audio.stream)
+        _ = try await fixture.start()
+        try fixture.sendMic(Self.before)
+        _ = await fixture.service.pauseRecording()
+        fixture.mic.die()
+        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
+        #expect(fixture.mic.taps.count == 2)
+        #expect(await live.waitForMarkers(.mic, count: 1) == [1])
+
+        try fixture.sendMic(Self.paused)
+        _ = await fixture.service.resumeRecording()
+        try fixture.sendMic(Self.after)
+        _ = await fixture.service.stopRecording()
+        let events = await live.finished()
+        #expect(sequence(events, .mic) == ["audio", "1", "audio"])
+        #expect(!events.contains { $0.source == .app })
+    }
+
+    @Test
+    func theEngineMicrophoneMarksAPauseFromItsOwnBuffers() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.remove() }
+        let live = LiveEvents(fixture.audio.stream)
+        _ = try await fixture.start()
+        try fixture.sendMic(Self.before)
+        _ = await fixture.service.pauseRecording()
+        try fixture.sendMic(Self.paused)
+        #expect(await live.waitForMarkers(.mic, count: 1) == [1])
+        _ = await fixture.service.resumeRecording()
+        try fixture.sendMic(Self.after)
+        _ = await fixture.service.pauseRecording()
+        try fixture.sendMic(Self.paused)
+        _ = await fixture.service.resumeRecording()
+        try fixture.sendMic(Self.after)
+        _ = await fixture.service.stopRecording()
+        let events = await live.finished()
+        #expect(sequence(events, .mic) == ["audio", "1", "audio", "2", "audio"])
+    }
 }

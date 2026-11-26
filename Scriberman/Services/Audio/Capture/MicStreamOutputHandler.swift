@@ -149,18 +149,23 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
         }
         lock.unlock()
 
-        for audio in conversion.process(nativeBuffer, hostTime: hostTime) {
-            streamer.write(buffer: audio.buffer, hostTimeNanos: audio.hostTime?.nanoseconds)
-            guard let liveHostTime = audio.hostTime else { continue }
-            let monoSamples = AudioDownmixer.toMono(buffer: audio.buffer)
-            if !monoSamples.isEmpty {
-                liveAudioContinuation?.yield(LiveAudioChunk(
-                    samples: monoSamples,
-                    source: .mic,
-                    sampleRate: targetFormat.sampleRate,
-                    hostTime: liveHostTime,
-                    rawHostTime: audio.rawHostTime
-                ))
+        conversion.process(nativeBuffer, hostTime: hostTime) { event in
+            switch event {
+            case .audio(let audio):
+                streamer.write(buffer: audio.buffer, hostTimeNanos: audio.hostTime?.nanoseconds)
+                guard let liveHostTime = audio.hostTime else { return }
+                let monoSamples = AudioDownmixer.toMono(buffer: audio.buffer)
+                if !monoSamples.isEmpty {
+                    liveAudioContinuation?.yield(LiveAudioChunk(
+                        samples: monoSamples,
+                        source: .mic,
+                        sampleRate: targetFormat.sampleRate,
+                        hostTime: liveHostTime,
+                        rawHostTime: audio.rawHostTime
+                    ))
+                }
+            case .pauseMarker(let number):
+                liveAudioContinuation?.yield(.pauseMarker(number, source: .mic))
             }
         }
     }

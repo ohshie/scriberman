@@ -4,11 +4,21 @@ import Foundation
 /// One source's view of the recording's pause clock. It belongs to the recording, so every handler
 /// the source gets during that recording uses the same one.
 ///
-/// @unchecked Sendable: the counter is guarded by `lock`; `clock` synchronizes itself.
+/// It also numbers the source's pause markers. A marker tells live transcription that the source
+/// has sent all its audio from before that pause. Each is sent once, in order, whichever handler or
+/// caller sends it.
+///
+/// @unchecked Sendable: the counter is guarded by `lock`, the marker count by `deliveryLock`;
+/// `clock` synchronizes itself.
 final class CaptureAudioGate: @unchecked Sendable {
     let clock: RecordingPauseClock
     private let lock = NSLock()
     private var _arrivalCount: Int64 = 0
+    /// Held while a handler hands out a buffer's audio and markers, and while markers are sent on
+    /// request, so a marker never lands between audio it must follow.
+    private let deliveryLock = NSLock()
+    /// Pauses whose marker has been sent.
+    private var markedPauseCount = 0
 
     init(clock: RecordingPauseClock = RecordingPauseClock()) {
         self.clock = clock
@@ -20,6 +30,49 @@ final class CaptureAudioGate: @unchecked Sendable {
 
     func recordArrival() {
         lock.withLock { _arrivalCount += 1 }
+    }
+
+    /// Sends the marker of every pause that has started, up to pause number `limit`, and is not yet
+    /// marked. Used when the source may not deliver another buffer past the pause: at resume, at a
+    /// capture replacement and at stop.
+    func sendStartedPauseMarkers(through limit: Int = .max, _ send: (Int) -> Void) {
+        deliveryLock.withLock {
+            let started = min(clock.timeline.pauseStarts.count, limit)
+            while markedPauseCount < started {
+                markedPauseCount += 1
+                send(markedPauseCount)
+            }
+        }
+    }
+
+    /// Hands a buffer's kept audio to `send` in capture order, with the marker of each pause whose
+    /// earlier audio has now all come out.
+    ///
+    /// A marker goes before the first piece captured after its pause. Otherwise it goes last, once
+    /// `emittedThroughNanos` (the raw time up to which the source's audio has come out of its
+    /// converter) has reached the pause. `timeline` is the snapshot the buffer was cut against.
+    fileprivate func deliver(
+        _ audio: [GatedAudio],
+        emittedThroughNanos: Int64?,
+        timeline: RecordingPauseTimeline,
+        to send: (GatedAudioEvent) -> Void
+    ) {
+        deliveryLock.withLock {
+            func mark(through number: Int) {
+                while markedPauseCount < number {
+                    markedPauseCount += 1
+                    send(.pauseMarker(markedPauseCount))
+                }
+            }
+            for piece in audio {
+                if let pausesBefore = piece.pausesBefore { mark(through: pausesBefore) }
+                send(.audio(piece))
+            }
+            if let emittedThroughNanos, emittedThroughNanos >= 0 {
+                let started = timeline.pauseStarts.filter { $0 <= UInt64(emittedThroughNanos) }.count
+                mark(through: started)
+            }
+        }
     }
 
     /// Adjusted time of the first kept sample of a raw buffer, or nil when none is kept.
@@ -53,6 +106,13 @@ struct RecordingCaptureGates: Sendable {
     }
 }
 
+/// What a source hands to its file writer and to live transcription.
+enum GatedAudioEvent {
+    case audio(GatedAudio)
+    /// All of the source's audio from before pause number `n` has been handed out.
+    case pauseMarker(Int)
+}
+
 /// Audio that passed the gate.
 struct GatedAudio {
     let buffer: AVAudioPCMBuffer
@@ -60,6 +120,9 @@ struct GatedAudio {
     /// the file writer counts and drops, and which must not reach live transcription.
     let hostTime: HostNanoseconds?
     let rawHostTime: HostNanoseconds?
+    /// Pauses that ended before the first frame was captured. Nil without a host time. The raw time
+    /// does not tell: frames a converter held are stamped with the next input buffer's time.
+    var pausesBefore: Int?
 }
 
 /// Converts one capture source's buffers and cuts paused audio out of the result.
@@ -78,6 +141,7 @@ final class GatedAudioConversion {
     private var outputFrames: Int64 = 0
     /// Raw end time of the previous input buffer. Nil when there was none or it had no host time.
     private var previousEndNanos: Int64?
+    private var previousInputRate: Double?
 
     /// `converter` is nil for a source that already delivers `targetFormat`.
     init(converter: AVAudioConverter?, targetFormat: AVAudioFormat, gate: CaptureAudioGate) {
@@ -86,11 +150,31 @@ final class GatedAudioConversion {
         self.gate = gate
     }
 
-    func process(_ input: AVAudioPCMBuffer, hostTime: HostNanoseconds?) -> [GatedAudio] {
+    /// Converts and cuts one buffer, then hands its kept audio and the source's due pause markers to
+    /// `send`, in order.
+    func process(_ input: AVAudioPCMBuffer, hostTime: HostNanoseconds?, send: (GatedAudioEvent) -> Void) {
         let timeline = gate.clock.timeline
-        guard let hostTime else {
-            return processWithoutHostTime(input, timeline: timeline)
+        let audio: [GatedAudio]
+        if let hostTime {
+            audio = cut(input, hostTime: hostTime, timeline: timeline)
+        } else {
+            audio = processWithoutHostTime(input, timeline: timeline)
         }
+        gate.deliver(audio, emittedThroughNanos: emittedThroughNanos, timeline: timeline, to: send)
+    }
+
+    /// Raw time up to which this source's audio has come out of the converter: the end of the last
+    /// buffer, less what the converter still holds. Nil after a buffer without a host time.
+    private var emittedThroughNanos: Int64? {
+        guard let previousEndNanos, let previousInputRate else { return nil }
+        return Self.nanos(previousEndNanos, plusFrames: -heldFrames(inputRate: previousInputRate), sampleRate: targetFormat.sampleRate)
+    }
+
+    private func cut(
+        _ input: AVAudioPCMBuffer,
+        hostTime: HostNanoseconds,
+        timeline: RecordingPauseTimeline
+    ) -> [GatedAudio] {
 
         let start = Int64(clamping: hostTime.nanoseconds)
         let inputRate = input.format.sampleRate
@@ -98,6 +182,7 @@ final class GatedAudioConversion {
         let held = heldFrames(inputRate: inputRate)
         let heldEnd = previousEndNanos ?? start
         previousEndNanos = Self.nanos(start, plusFrames: Double(frameCount), sampleRate: inputRate)
+        previousInputRate = inputRate
 
         let keptInput = timeline.keptRanges(startNanos: start, frameCount: frameCount, sampleRate: inputRate)
         guard let output = convert(converter == nil ? input : silencing(input, outside: keptInput)) else {
@@ -106,7 +191,7 @@ final class GatedAudioConversion {
 
         // A recording without pauses is stamped with the capture time as delivered.
         if timeline.admitsEverything {
-            return [GatedAudio(buffer: output, hostTime: hostTime, rawHostTime: hostTime)]
+            return [GatedAudio(buffer: output, hostTime: hostTime, rawHostTime: hostTime, pausesBefore: 0)]
         }
 
         let outputCount = Int(output.frameLength)
@@ -121,7 +206,8 @@ final class GatedAudioConversion {
         ).map {
             RecordingPauseTimeline.KeptRange(
                 frames: ($0.frames.lowerBound + heldCount)..<($0.frames.upperBound + heldCount),
-                removedNanos: $0.removedNanos
+                removedNanos: $0.removedNanos,
+                pausesBefore: $0.pausesBefore
             )
         }
 
@@ -129,18 +215,19 @@ final class GatedAudioConversion {
         var mainPieces = mainRanges[...]
         for piece in heldRanges {
             if piece.frames.upperBound == heldCount, let next = mainPieces.first,
-               next.frames.lowerBound == heldCount, next.removedNanos == piece.removedNanos {
+               next.frames.lowerBound == heldCount, next.removedNanos == piece.removedNanos,
+               next.pausesBefore == piece.pausesBefore {
                 mainPieces = mainPieces.dropFirst()
                 append(
                     piece.frames.lowerBound..<next.frames.upperBound,
-                    removedNanos: piece.removedNanos, of: output, bufferStart: start, to: &result
+                    range: piece, of: output, bufferStart: start, to: &result
                 )
             } else {
-                append(piece.frames, removedNanos: piece.removedNanos, of: output, bufferStart: heldEnd, to: &result)
+                append(piece.frames, range: piece, of: output, bufferStart: heldEnd, to: &result)
             }
         }
         for piece in mainPieces {
-            append(piece.frames, removedNanos: piece.removedNanos, of: output, bufferStart: start, to: &result)
+            append(piece.frames, range: piece, of: output, bufferStart: start, to: &result)
         }
         return result
     }
@@ -161,7 +248,7 @@ final class GatedAudioConversion {
 
     private func append(
         _ frames: Range<Int>,
-        removedNanos: UInt64,
+        range: RecordingPauseTimeline.KeptRange,
         of output: AVAudioPCMBuffer,
         bufferStart: Int64,
         to result: inout [GatedAudio]
@@ -170,7 +257,12 @@ final class GatedAudioConversion {
         let raw = HostNanoseconds(
             startNanos: bufferStart, frame: frames.lowerBound, sampleRate: output.format.sampleRate
         )
-        result.append(GatedAudio(buffer: buffer, hostTime: raw.removing(removedNanos), rawHostTime: raw))
+        result.append(GatedAudio(
+            buffer: buffer,
+            hostTime: raw.removing(range.removedNanos),
+            rawHostTime: raw,
+            pausesBefore: range.pausesBefore
+        ))
     }
 
     /// Output frames the converter has taken in and not yet given out.

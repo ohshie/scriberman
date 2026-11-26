@@ -159,16 +159,21 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
             }
         }
 
-        for audio in conversion.process(monoBuffer, hostTime: hostTime) {
-            streamer.write(buffer: audio.buffer, hostTimeNanos: audio.hostTime?.nanoseconds)
-            guard let liveHostTime = audio.hostTime else { continue }
-            liveAudioContinuation?.yield(LiveAudioChunk(
-                samples: AudioDownmixer.toMono(buffer: audio.buffer),
-                source: .app,
-                sampleRate: format.sampleRate,
-                hostTime: liveHostTime,
-                rawHostTime: audio.rawHostTime
-            ))
+        conversion.process(monoBuffer, hostTime: hostTime) { event in
+            switch event {
+            case .audio(let audio):
+                streamer.write(buffer: audio.buffer, hostTimeNanos: audio.hostTime?.nanoseconds)
+                guard let liveHostTime = audio.hostTime else { return }
+                liveAudioContinuation?.yield(LiveAudioChunk(
+                    samples: AudioDownmixer.toMono(buffer: audio.buffer),
+                    source: .app,
+                    sampleRate: format.sampleRate,
+                    hostTime: liveHostTime,
+                    rawHostTime: audio.rawHostTime
+                ))
+            case .pauseMarker(let number):
+                liveAudioContinuation?.yield(.pauseMarker(number, source: .app))
+            }
         }
     }
 

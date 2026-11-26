@@ -71,9 +71,12 @@ struct CaptureAudioGateTests {
         let url: URL
         let root: URL
         let sampleRate: Double
+        let path: Path
         private let audio = AsyncStream<LiveAudioChunk>.makeStream()
         private let feed: (_ values: [Float], _ sampleRate: Double, _ hostTime: HostNanoseconds?) throws -> Void
         private let anchorBox = AnchorBox()
+        private let received = ChunkBox()
+        private var collector: Task<Void, Never>?
         private let retained: [AnyObject]
 
         final class AnchorBox: @unchecked Sendable {
@@ -83,11 +86,20 @@ struct CaptureAudioGateTests {
             var first: HostNanoseconds? { lock.withLock { times.first } }
         }
 
+        /// Everything the source sent to live transcription, markers included, in order.
+        final class ChunkBox: @unchecked Sendable {
+            private let lock = NSLock()
+            private var chunks: [LiveAudioChunk] = []
+            func add(_ chunk: LiveAudioChunk) { lock.withLock { chunks.append(chunk) } }
+            var all: [LiveAudioChunk] { lock.withLock { chunks } }
+        }
+
         init(_ path: Path, sampleRate: Double = 48_000) throws {
             root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             url = root.appendingPathComponent("audio.wav")
             self.sampleRate = sampleRate
+            self.path = path
             let gate = CaptureAudioGate(clock: clock)
             self.gate = gate
             let streamer = AudioFileStreamer(label: path.rawValue)
@@ -140,10 +152,15 @@ struct CaptureAudioGateTests {
                     micStreamer: streamer,
                     gate: gate,
                     onFirstHostTime: { anchors.add($0) },
-                    onBuffer: { samples, rate, adjusted, raw in
-                        continuation.yield(LiveAudioChunk(
-                            samples: samples, source: .mic, sampleRate: rate, hostTime: adjusted, rawHostTime: raw
-                        ))
+                    onBuffer: { output in
+                        switch output {
+                        case let .audio(samples, rate, adjusted, raw):
+                            continuation.yield(LiveAudioChunk(
+                                samples: samples, source: .mic, sampleRate: rate, hostTime: adjusted, rawHostTime: raw
+                            ))
+                        case let .pauseMarker(number):
+                            continuation.yield(.pauseMarker(number, source: .mic))
+                        }
                     }
                 )
                 feed = { values, rate, time in
@@ -151,9 +168,28 @@ struct CaptureAudioGateTests {
                 }
                 retained = [tap]
             }
+            let stream = audio.stream
+            let box = received
+            collector = Task { for await chunk in stream { box.add(chunk) } }
         }
 
         deinit { try? FileManager.default.removeItem(at: root) }
+
+        /// What reached live transcription so far, once `condition` holds or after a timeout.
+        func events(until condition: ([LiveAudioChunk]) -> Bool) async -> [LiveAudioChunk] {
+            let deadline = Date().addingTimeInterval(5)
+            while !condition(received.all), Date() < deadline {
+                try? await Task.sleep(for: .milliseconds(5))
+            }
+            return received.all
+        }
+
+        /// The service's call at resume, replacement and stop.
+        func sendStartedPauseMarkers() {
+            let continuation = audio.continuation
+            let source = path.source
+            gate.sendStartedPauseMarkers { continuation.yield(.pauseMarker($0, source: source)) }
+        }
 
         var anchor: HostNanoseconds? { anchorBox.first }
 
@@ -166,16 +202,20 @@ struct CaptureAudioGateTests {
             try feed(values, sampleRate, time)
         }
 
-        func finish() async throws -> (samples: [Float], segments: [AudioCaptureSegment], chunks: [LiveAudioChunk]) {
+        /// `chunks` is the audio sent to live transcription; `events` adds the pause markers.
+        func finish() async throws -> (
+            samples: [Float], segments: [AudioCaptureSegment], chunks: [LiveAudioChunk], events: [LiveAudioChunk]
+        ) {
             streamer.close()
             audio.continuation.finish()
-            var chunks: [LiveAudioChunk] = []
-            for await chunk in audio.stream { chunks.append(chunk) }
+            await collector?.value
+            let events = received.all
+            let chunks = events.filter { $0.pauseNumber == nil }
             let sidecar = AudioFileStreamer.loadTimingSidecar(for: url)
             let samples = try CaptureAudioGateTests.readSamples(url)
             // The sidecar describes the frames the file has, whatever was cut.
             #expect((sidecar?.totalFrames ?? 0) == samples.count)
-            return (samples, sidecar?.segments ?? [], chunks)
+            return (samples, sidecar?.segments ?? [], chunks, events)
         }
     }
 
@@ -475,5 +515,233 @@ struct CaptureAudioGateTests {
             now: ms(606_000)
         )
         #expect(reports.isEmpty)
+    }
+
+    @Test
+    func aPauseMarkerIsNeverReportedAsDelayedAudio() {
+        var reports: [Bool] = []
+        var monitor = LiveAudioQueueMonitor { _, delayed, _ in reports.append(delayed) }
+        // Sent at a resume ten minutes after the pause started.
+        monitor.observe(.pauseMarker(1, source: .app), now: ms(605_000))
+        monitor.finish()
+        #expect(reports.isEmpty)
+    }
+
+    // MARK: - Pause markers
+
+    /// Raw interval of each pause, in ms after `startMs`.
+    struct PauseSpan {
+        let start: UInt64
+        let end: UInt64?
+    }
+
+    /// Every marker is numbered in order, is sent once, follows every kept sample captured before
+    /// its pause and precedes every one captured after it.
+    ///
+    /// Frames a converter held are stamped with the next input buffer's time, up to 2 ms after
+    /// their capture, so audio before a marker may end that much past the pause start.
+    static func expectMarkers(
+        _ events: [LiveAudioChunk],
+        _ pauses: [PauseSpan],
+        source: AudioSource? = nil,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) {
+        let events = events.filter { source == nil || $0.source == source }
+        let markers = events.compactMap(\.pauseNumber)
+        #expect(markers == Array(1...pauses.count), sourceLocation: sourceLocation)
+        for (index, event) in events.enumerated() {
+            guard let number = event.pauseNumber, number <= pauses.count else { continue }
+            let pause = pauses[number - 1]
+            let startNanos = (startMs + pause.start) * 1_000_000
+            for audio in events[..<index] where audio.pauseNumber == nil {
+                let raw = audio.rawHostTime?.nanoseconds ?? 0
+                let end = raw + UInt64(Double(audio.samples.count) / audio.sampleRate * 1_000_000_000)
+                #expect(end <= startNanos + 2_000_000, "audio ending at \(end) precedes marker \(number)", sourceLocation: sourceLocation)
+            }
+            guard let pauseEnd = pause.end else { continue }
+            for audio in events[(index + 1)...] where audio.pauseNumber == nil {
+                let raw = audio.rawHostTime?.nanoseconds ?? 0
+                #expect(raw + 1_000 >= (startMs + pauseEnd) * 1_000_000, "audio at \(raw) follows marker \(number)", sourceLocation: sourceLocation)
+            }
+        }
+    }
+
+    @Test(arguments: Path.allCases)
+    func aSourceMarksAPauseAfterItsLastPrePauseSampleWithoutWaitingForResume(path: Path) async throws {
+        let rig = try Rig(path)
+        let perBuffer = 960
+        for index in 0..<15 {
+            if index == 5 { rig.clock.pause { ms(Self.startMs + 107) } }
+            let values = (0..<perBuffer).map { frame -> Float in
+                Double(index) * 20 + Double(frame) / 48 < 107 - 1e-6 ? Self.before : Self.paused
+            }
+            try rig.send(values, at: ms(Self.startMs + UInt64(index) * 20))
+        }
+        let duringPause = await rig.events { $0.contains { $0.pauseNumber != nil } }
+        let marker = try #require(duringPause.firstIndex { $0.pauseNumber == 1 })
+        #expect(duringPause[..<marker].reduce(0) { $0 + $1.samples.count } == 5_136)
+        #expect(duringPause[(marker + 1)...].isEmpty)
+
+        rig.clock.resume { ms(Self.startMs + 307) }
+        for index in 15..<20 {
+            try rig.send(Self.after, at: ms(Self.startMs + UInt64(index) * 20))
+        }
+        let result = try await rig.finish()
+        Self.expectMarkers(result.events, [PauseSpan(start: 107, end: 307)])
+        #expect(result.chunks.allSatisfy { $0.pauseNumber == nil && !$0.samples.isEmpty })
+    }
+
+    /// A resampled microphone gives out the last frames before the pause from the first buffer
+    /// after it. They come before the marker.
+    @Test(arguments: [Path.unifiedMic, .engineMic], [44_100.0, 24_000, 16_000])
+    func framesTheConverterHeldComeBeforeTheMarker(path: Path, rate: Double) async throws {
+        let rig = try Rig(path, sampleRate: rate)
+        for index in 0..<20 {
+            if index == 5 { rig.clock.pause { ms(Self.startMs + 100) } }
+            if index == 15 { rig.clock.resume { ms(Self.startMs + 300) } }
+            try rig.send((5..<15).contains(index) ? Self.paused : Self.before, at: ms(Self.startMs + UInt64(index) * 20))
+        }
+        let result = try await rig.finish()
+        let marker = try #require(result.events.firstIndex { $0.pauseNumber == 1 })
+        #expect(result.events[..<marker].reduce(0) { $0 + $1.samples.count } == 4_800)
+        Self.expectMarkers(result.events, [PauseSpan(start: 100, end: 300)])
+    }
+
+    @Test(arguments: Path.allCases)
+    func repeatedPausesAreMarkedInOrderIncludingOneInsideABuffer(path: Path) async throws {
+        let rig = try Rig(path)
+        let pauses = [PauseSpan(start: 100, end: 140), PauseSpan(start: 205, end: 215), PauseSpan(start: 307, end: 353)]
+        for index in 0..<25 {
+            let bufferStart = UInt64(index) * 20
+            for pause in pauses {
+                if pause.start >= bufferStart, pause.start < bufferStart + 20 { rig.clock.pause { ms(Self.startMs + pause.start) } }
+                if let end = pause.end, end >= bufferStart, end < bufferStart + 20 { rig.clock.resume { ms(Self.startMs + end) } }
+            }
+            try rig.send(Self.before, at: ms(Self.startMs + bufferStart))
+        }
+        let result = try await rig.finish()
+        Self.expectMarkers(result.events, pauses)
+    }
+
+    @Test(arguments: Path.allCases)
+    func lateCallbacksKeepTheMarkersInOrderAndASilentPauseIsMarkedOnRequest(path: Path) async throws {
+        let rig = try Rig(path)
+        let pauses = [100, 200, 300].map { PauseSpan(start: $0, end: $0 + 40) }
+        for pause in pauses {
+            rig.clock.pause { ms(Self.startMs + pause.start) }
+            rig.clock.resume { ms(Self.startMs + pause.end!) }
+        }
+        try rig.send(Self.before, at: ms(Self.startMs + 80))
+        try rig.send(Self.paused, at: ms(Self.startMs + 120))
+        try rig.send(Self.after, at: ms(Self.startMs + 140))
+        try rig.send(Self.paused, at: ms(Self.startMs + 220))
+        try rig.send(Self.after, at: ms(Self.startMs + 240))
+        // Nothing is delivered past the third pause, so the source marks it when asked.
+        rig.sendStartedPauseMarkers()
+        rig.sendStartedPauseMarkers()
+        try rig.send(Self.after, at: ms(Self.startMs + 360))
+        let result = try await rig.finish()
+        Self.expectMarkers(result.events, pauses)
+    }
+
+    @Test(arguments: Path.allCases)
+    func anOpenPauseIsMarkedOnRequestAndOnlyOnce(path: Path) async throws {
+        let rig = try Rig(path)
+        try rig.send(Self.before, at: ms(Self.startMs))
+        rig.clock.pause { ms(Self.startMs + 20) }
+        rig.sendStartedPauseMarkers()
+        try rig.send(Self.paused, at: ms(Self.startMs + 20))
+        rig.clock.close { ms(Self.startMs + 60) }
+        rig.sendStartedPauseMarkers()
+        let result = try await rig.finish()
+        Self.expectMarkers(result.events, [PauseSpan(start: 20, end: nil)])
+    }
+
+    /// Mic and app each run on their own queue and mark the same pauses independently. Pauses are
+    /// set while the queues still have buffers captured before them.
+    @Test
+    func twoQueuesEachMarkEveryPauseInOrder() async throws {
+        let gates = RecordingCaptureGates()
+        let audio = AsyncStream<LiveAudioChunk>.makeStream()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let mic = MicStreamOutputHandler(liveAudioContinuation: audio.continuation, gate: gates.mic)
+        mic.configureOutput(url: root.appendingPathComponent("mic.wav"))
+        let app = AppAudioStreamOutputHandler(liveAudioContinuation: audio.continuation, gate: gates.app)
+        app.configureOutput(url: root.appendingPathComponent("app.wav"))
+        let micQueue = DispatchQueue(label: "test.mic")
+        let appQueue = DispatchQueue(label: "test.app")
+        let micBuffers = try (0..<40).map { try Self.makeSampleBuffer(
+            Array(repeating: Self.before, count: 960), sampleRate: 48_000, hostTime: ms(Self.startMs + UInt64($0) * 20)
+        ) }
+        let appBuffers = try (0..<40).map { try Self.makeSampleBuffer(
+            Array(repeating: Self.before, count: 960), sampleRate: 48_000, hostTime: ms(Self.startMs + UInt64($0) * 20)
+        ) }
+        let feed = SampleBuffers(mic: micBuffers, app: appBuffers)
+        // Each boundary is set before the buffer it falls in is delivered, while the queues may
+        // still hold earlier buffers.
+        let pauses = [PauseSpan(start: 187, end: 260), PauseSpan(start: 400, end: 433), PauseSpan(start: 587, end: 640)]
+        for index in 0..<40 {
+            let now = UInt64(index) * 20
+            for pause in pauses {
+                if (now..<now + 20).contains(pause.start) { gates.clock.pause { ms(Self.startMs + pause.start) } }
+                if let end = pause.end, (now..<now + 20).contains(end) { gates.clock.resume { ms(Self.startMs + end) } }
+            }
+            micQueue.async { mic.processSampleBufferForTesting(feed.mic[index]) }
+            appQueue.async { app.processSampleBufferForTesting(feed.app[index]) }
+            if index.isMultiple(of: 3) { try await Task.sleep(for: .milliseconds(1)) }
+        }
+        micQueue.sync {}
+        appQueue.sync {}
+        mic.closeOutput()
+        app.closeOutput()
+        audio.continuation.finish()
+        var events: [LiveAudioChunk] = []
+        for await event in audio.stream { events.append(event) }
+        Self.expectMarkers(events, pauses, source: .mic)
+        Self.expectMarkers(events, pauses, source: .app)
+    }
+
+    private struct SampleBuffers: @unchecked Sendable {
+        let mic: [CMSampleBuffer]
+        let app: [CMSampleBuffer]
+    }
+
+    /// A restart replaces the handler but keeps the source's gate: the replacement does not repeat
+    /// a marker, and a late callback on the old handler sends none.
+    @Test
+    func aReplacedHandlerDoesNotRepeatOrReorderMarkers() async throws {
+        let gate = CaptureAudioGate()
+        let audio = AsyncStream<LiveAudioChunk>.makeStream()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("mic.wav")
+        let streamer = AudioFileStreamer(label: "mic")
+        let original = MicStreamOutputHandler(liveAudioContinuation: audio.continuation, streamer: streamer, gate: gate)
+        original.configureOutput(url: url)
+        func buffer(_ value: Float, at time: UInt64) throws -> CMSampleBuffer {
+            try Self.makeSampleBuffer(Array(repeating: value, count: 960), sampleRate: 48_000, hostTime: ms(Self.startMs + time))
+        }
+
+        original.processSampleBufferForTesting(try buffer(Self.before, at: 0))
+        gate.clock.pause { ms(Self.startMs + 20) }
+        original.processSampleBufferForTesting(try buffer(Self.paused, at: 20))
+        let replacement = MicStreamOutputHandler(liveAudioContinuation: audio.continuation, streamer: streamer, gate: gate)
+        replacement.adoptPreparedOutput(url: url)
+        replacement.processSampleBufferForTesting(try buffer(Self.paused, at: 40))
+        gate.clock.resume { ms(Self.startMs + 60) }
+        replacement.processSampleBufferForTesting(try buffer(Self.after, at: 60))
+        original.processSampleBufferForTesting(try buffer(Self.paused, at: 40))
+        gate.clock.pause { ms(Self.startMs + 80) }
+        replacement.processSampleBufferForTesting(try buffer(Self.paused, at: 80))
+        gate.clock.resume { ms(Self.startMs + 100) }
+        replacement.processSampleBufferForTesting(try buffer(Self.after, at: 100))
+        streamer.close()
+        audio.continuation.finish()
+        var events: [LiveAudioChunk] = []
+        for await event in audio.stream { events.append(event) }
+        Self.expectMarkers(events, [PauseSpan(start: 20, end: 60), PauseSpan(start: 80, end: 100)])
     }
 }
