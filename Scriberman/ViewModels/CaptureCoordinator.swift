@@ -181,24 +181,25 @@ final class CaptureCoordinator {
     }
 
     /// Stops the recording under way, paused or not, and returns its session. A stop while
-    /// stopping joins that stop; a stop while starting waits for the start first. A stop cancels a
+    /// stopping joins that stop; a stop while starting cancels the start. A stop cancels a
     /// pause waiting for microphone audio, and waits for a resume.
     func stop(context: ModelContext) async -> RecordingSession? {
-        if let startTask {
-            await startTask.value
-        }
         if let stopTask {
             return session(await stopTask.value, in: context)
         }
 
         transition = .stopping
+        let starting = startTask
+        starting?.cancel()
         let pausing = pauseTask
         pausing?.cancel()
         let resuming = resumeTask
         let task = Task { [viewModel] in
             _ = await pausing?.value
             _ = await resuming?.value
-            return await viewModel.stopRecording(context: context)?.id
+            let id = await viewModel.stopRecording(context: context)?.id
+            await starting?.value
+            return id
         }
         stopTask = task
         let id = await task.value
@@ -282,7 +283,7 @@ final class CaptureCoordinator {
         let result = startResult ?? .failure(.notStarted)
         startResult = nil
         startTask = nil
-        transition = nil
+        if transition == .starting { transition = nil }
         return result
     }
 

@@ -535,6 +535,10 @@ final class NewSessionViewModel {
                     appProcessID: selectedAppProcessID,
                     title: choice.title
                 )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch RecordingError.noAudioAtStart {
+                throw RecordingError.noAudioAtStart
             } catch {
                 startError = error
             }
@@ -555,6 +559,10 @@ final class NewSessionViewModel {
                     )
                     startError = nil
                     capturedApp = nil
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch RecordingError.noAudioAtStart {
+                    throw RecordingError.noAudioAtStart
                 } catch {
                     startError = error
                 }
@@ -578,6 +586,10 @@ final class NewSessionViewModel {
                     if fallbackMessage == nil {
                         fallbackMessage = "Selected microphone unavailable. Falling back to system default microphone."
                     }
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch RecordingError.noAudioAtStart {
+                    throw RecordingError.noAudioAtStart
                 } catch {
                     startError = error
                 }
@@ -650,6 +662,9 @@ final class NewSessionViewModel {
                     displayID: isScreenCaptured ? captureDisplayID : nil
                 )
             )
+        } catch is CancellationError {
+            state = .idle
+            return nil
         } catch {
             errorMessage = error.localizedDescription
             state = .idle
@@ -1288,6 +1303,7 @@ final class NewSessionViewModel {
         appProcessID: pid_t?,
         title: String?
     ) async throws -> UUID {
+        try Task.checkCancellation()
         let liveSession = LiveRecordingSession()
         let audioSyncFlags = audioSyncConfig.snapshot()
         do {

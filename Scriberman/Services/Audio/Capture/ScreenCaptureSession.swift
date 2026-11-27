@@ -121,7 +121,7 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
                 call: "shareableContent(video)", device: "display:\(displayID)", until: deadline
             ) { [self] in DisplayList(displays: try await displayProvider()) }.displays
         } catch is BoundedCaptureCall.TimedOut {
-            throw RecordingError.failedToStart("Recording failed to start: no audio.")
+            throw RecordingError.noAudioAtStart
         }
         guard sampleQueue.sync(execute: { generation == startedGeneration }) else { throw CancellationError() }
         guard let display = displays.first(where: { $0.displayID == displayID }) else {
@@ -208,7 +208,7 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
             writer.cancelWriting()
             try? FileManager.default.removeItem(at: videoURL)
             if error is BoundedCaptureCall.TimedOut {
-                throw RecordingError.failedToStart("Recording failed to start: no audio.")
+                throw RecordingError.noAudioAtStart
             }
             throw error
         }

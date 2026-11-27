@@ -270,7 +270,10 @@ final class BlockedCaptureStream: UnifiedCaptureStreaming, @unchecked Sendable {
     private var open = false
     private let lock = NSLock()
     private var blockedCount = 0
+    private var blockedWaiters: [CheckedContinuation<Void, Never>] = []
     private var stops = 0
+    private var updates = 0
+    var updateCount: Int { lock.withLock { updates } }
     init(_ blocked: Call) { self.blocked = blocked }
     var blockedCallCount: Int { lock.withLock { blockedCount } }
     var stopCount: Int { lock.withLock { stops } }
@@ -281,11 +284,25 @@ final class BlockedCaptureStream: UnifiedCaptureStreaming, @unchecked Sendable {
         condition.unlock()
     }
     private func blockThread() {
-        lock.withLock { blockedCount += 1 }
+        let waiters = lock.withLock {
+            blockedCount += 1
+            let waiters = blockedWaiters
+            blockedWaiters.removeAll()
+            return waiters
+        }
+        for waiter in waiters { waiter.resume() }
         condition.lock()
         while !open { condition.wait() }
         condition.unlock()
         lock.withLock { blockedCount -= 1 }
+    }
+    func waitUntilBlocked() async {
+        await withCheckedContinuation { continuation in
+            lock.withLock {
+                if blockedCount > 0 { continuation.resume() }
+                else { blockedWaiters.append(continuation) }
+            }
+        }
     }
     private func wait() async {
         await withCheckedContinuation { continuation in
@@ -293,7 +310,10 @@ final class BlockedCaptureStream: UnifiedCaptureStreaming, @unchecked Sendable {
         }
     }
     func startCapture() async throws { if blocked == .start { await wait() } }
-    func updateConfiguration(_: SCStreamConfiguration) async throws { if blocked == .update { await wait() } }
+    func updateConfiguration(_: SCStreamConfiguration) async throws {
+        lock.withLock { updates += 1 }
+        if blocked == .update { await wait() }
+    }
     func stopCapture() async throws {
         if blocked == .stop { await wait() }
         lock.withLock { stops += 1 }
@@ -318,7 +338,7 @@ struct BoundedCaptureCallTests {
                     try await session.start(stream: stream)
                     Issue.record("A timed out start succeeded")
                 } catch {
-                    #expect(error.localizedDescription.contains("Recording failed to start: no audio."))
+                    #expect(error.localizedDescription == "Recording failed to start: no audio.")
                 }
                 finished.finish()
             }
@@ -349,6 +369,33 @@ struct BoundedCaptureCallTests {
     }
 
     @Test
+    func hungMicSwitchKeepsStreamAndIgnoresLateSuccess() async throws {
+        try await withBlockedStream(.update, unified: false) { session, stream in
+            session.attachStreamForTesting(stream)
+            let finished = CallCompletion()
+            let update = Task {
+                let result = await session.retargetMic(deviceUID: "device-b")
+                finished.finish()
+                return result
+            }
+            try await Task.sleep(for: .seconds(2))
+            #expect(finished.completed)
+            #expect(session.isStreamLive)
+            #expect(stream.stopCount == 0)
+            #expect(session.currentMicDeviceUID == "device-a")
+            #expect(session.configuration.microphoneCaptureDeviceID == "device-a")
+            stream.release()
+            #expect(await update.value == false)
+            #expect(await captureCallEventually { stream.blockedCallCount == 0 })
+            #expect(session.currentMicDeviceUID == "device-a")
+            #expect(session.configuration.microphoneCaptureDeviceID == "device-a")
+            #expect(stream.stopCount == 0)
+            #expect(await session.retargetMic(deviceUID: "device-c") == false)
+            #expect(stream.updateCount == 1)
+        }
+    }
+
+    @Test
     func stopDuringUpdateDoesNotPublishItsLateDevice() async throws {
         try await withBlockedStream(.update, unified: false) { session, stream in
             session.attachStreamForTesting(stream)
@@ -373,7 +420,7 @@ struct BoundedCaptureCallTests {
                     })
                     Issue.record("Late content started a stream")
                 } catch {
-                    #expect(error.localizedDescription == "Failed to start recording: Recording failed to start: no audio.")
+                    #expect(error.localizedDescription == "Recording failed to start: no audio.")
                 }
                 finished.finish()
             }

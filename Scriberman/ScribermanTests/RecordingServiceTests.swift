@@ -29,6 +29,68 @@ final class RecordingServiceTests {
     }
 
     @Test
+    @MainActor
+    func stopDuringStartShowsNothingAndNextStartWorks() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let stream = BlockedCaptureStream(.start)
+        defer { stream.release() }
+        let calls = VPCallCounter()
+        let service = RecordingService(workspaceService: workspaceService, modelContainer: container,
+            hardware: MockRecoveryAudioDeviceHardware(), mixdownCoordinator: MockRecordingMixdownCoordinator(),
+            screenVideoMuxer: MockScreenVideoMuxer(), permissionChecker: {},
+            scopedAccessStarter: { _ in true }, scopedAccessStopper: { _ in },
+            captureSessionStarter: { start in
+                calls.increment()
+                if calls.callCount == 1 {
+                    if case .unified(let session) = start { try await session.start(stream: stream) }
+                } else { try await CaptureStartProbe().start(start) }
+            })
+        let suite = "StopDuringStart-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let viewModel = NewSessionViewModel(workspaceService: workspaceService, recordingService: service,
+            audioDeviceService: MockAudioDeviceService(), appAudioService: MockAppAudioService(),
+            screenCaptureService: MockScreenCaptureService(), permissionService: MockPermissionService(),
+            userDefaults: defaults, audioSyncConfig: AudioSyncConfig(store: defaults))
+        let context = ModelContext(container)
+        var presentations: [Bool] = []
+        var failureLogs = 0
+        viewModel.onRecordingStartFailurePresentationChanged = { presentations.append($0) }
+        viewModel.writeSessionFailureLog = { _, _ in failureLogs += 1 }
+        let choice = CaptureChoice(title: "First", microphone: AudioInputDevice(id: 1, uid: "device-a", name: "Mic"),
+            app: nil, displayID: nil)
+        let coordinator = CaptureCoordinator(viewModel: viewModel, workspaceService: workspaceService,
+            permissionService: MockPermissionService(), menuBarSettings: MenuBarSettings(userDefaults: defaults),
+            modelsReady: { true })
+        let start = Task {
+            if case .success = await coordinator.start(choice, origin: .window, context: context) { return true }
+            return false
+        }
+        await stream.waitUntilBlocked()
+        _ = await coordinator.stop(context: context)
+        #expect(await start.value == false)
+        #expect(viewModel.errorMessage == nil)
+        #expect(!viewModel.didFailToStartRecording)
+        #expect(presentations.isEmpty)
+        #expect(failureLogs == 0)
+        #expect(viewModel.state == .idle)
+        #expect(await service.isRecording() == false)
+        stream.release()
+        #expect(await captureCallEventually { stream.blockedCallCount == 0 && stream.stopCount > 0 })
+        #expect(coordinator.phase == .idle)
+        if case .failure(let error) = await coordinator.start(choice, origin: .window, context: context) {
+            Issue.record("Next start failed: \(error)")
+        }
+        _ = await coordinator.stop(context: context)
+    }
+
+    @Test
     func stopDuringPermissionCheckCancelsStart() async throws {
         let workspace = makeWorkspace()
         defer { removeWorkspace(at: workspace.rootURL) }
@@ -642,7 +704,7 @@ final class RecordingServiceTests {
         do {
             _ = try await service.startRecording(in: workspace, title: "Second")
         } catch {
-            secondError = error
+            secondError = error as? RecordingError
         }
         guard case .alreadyRecording = secondError else {
             Issue.record("Expected alreadyRecording, got \(String(describing: secondError))")
@@ -694,7 +756,7 @@ final class RecordingServiceTests {
         do {
             _ = try await service.startRecording(in: workspace, title: "Fails")
         } catch {
-            firstError = error
+            firstError = error as? RecordingError
         }
         guard case .failedToStart = firstError else {
             Issue.record("Expected failedToStart, got \(String(describing: firstError))")
@@ -1559,7 +1621,7 @@ final class RecordingServiceTests {
 
     // MARK: - Per-recording audio-sync flags
 
-    private func makeFlagFixture(captureDisplayID: CGDirectDisplayID? = nil, writesAudio: Bool = true) async throws -> (
+    private func makeFlagFixture(captureDisplayID: CGDirectDisplayID? = nil, writesAudio: Bool = true, hardware: MockRecoveryAudioDeviceHardware = MockRecoveryAudioDeviceHardware()) async throws -> (
         service: RecordingService,
         container: ModelContainer,
         workspace: Workspace,
@@ -1583,7 +1645,7 @@ final class RecordingServiceTests {
         let service = RecordingService(
             workspaceService: workspaceService,
             modelContainer: container,
-            hardware: MockRecoveryAudioDeviceHardware(),
+            hardware: hardware,
             mixdownCoordinator: mixdownCoordinator,
             screenVideoMuxer: screenVideoMuxer,
             permissionChecker: {},
@@ -1713,6 +1775,54 @@ final class RecordingServiceTests {
             processID: 4321,
             micDeviceUID: micDeviceUID
         )
+    }
+
+    @Test
+    func timedOutMicSwitchAndLaterRequestRestartWithoutWaitingForHungUpdate() async throws {
+        let hardware = MockRecoveryAudioDeviceHardware()
+        hardware.devices = [(id: 1, uid: "device-a"), (id: 2, uid: "device-b"), (id: 3, uid: "device-c")]
+        let fixture = try await makeFlagFixture(hardware: hardware)
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        _ = try await fixture.service.startRecording(in: fixture.workspace)
+        let original = try #require(fixture.captureStarts.sessions.first)
+        let stream = BlockedCaptureStream(.update)
+        defer { stream.release() }
+        original.attachStreamForTesting(stream)
+        // Mark the session before the service receives the next request.
+        #expect(await original.retargetMic(deviceUID: "device-b") == false)
+        let finished = CallCompletion()
+        let request = Task {
+            await fixture.service.retargetMic(desiredDeviceUID: "device-b")
+            finished.finish()
+        }
+        try await Task.sleep(for: .seconds(1))
+        #expect(finished.completed)
+        #expect(fixture.captureStarts.sessions.count == 2)
+        let replacement = try #require(fixture.captureStarts.sessions.last)
+        #expect(replacement !== original)
+        #expect(replacement.currentMicDeviceUID == "device-b")
+        #expect(stream.blockedCallCount == 1)
+        #expect(stream.updateCount == 1)
+        #expect(!original.isStreamLive)
+        await request.value
+
+        // A timeout reached through the service also replaces the stream.
+        replacement.attachStreamForTesting(stream)
+        let switched = CallCompletion()
+        let next = Task {
+            await fixture.service.retargetMic(desiredDeviceUID: "device-c")
+            switched.finish()
+        }
+        try await Task.sleep(for: .seconds(2))
+        #expect(switched.completed)
+        #expect(fixture.captureStarts.sessions.count == 3)
+        #expect(fixture.captureStarts.sessions.last?.currentMicDeviceUID == "device-c")
+        #expect(await fixture.service.isRecording())
+        #expect(await fixture.service.consumePendingError() == nil)
+        stream.release()
+        await next.value
+        #expect(await captureCallEventually { stream.blockedCallCount == 0 })
+        _ = await fixture.service.stopRecording()
     }
 
     @Test
@@ -2153,6 +2263,8 @@ private final class CaptureStartProbe: @unchecked Sendable {
 
     private let lock = NSLock()
     private var recorded: [Kind] = []
+    private var startedSessions: [UnifiedCaptureSession] = []
+    var sessions: [UnifiedCaptureSession] { lock.withLock { startedSessions } }
 
     var kinds: [Kind] {
         lock.withLock { recorded }
@@ -2161,7 +2273,7 @@ private final class CaptureStartProbe: @unchecked Sendable {
     func start(_ start: RecordingService.CaptureSessionStart) async throws {
         switch start {
         case .unified(let session):
-            lock.withLock { recorded.append(.unified) }
+            lock.withLock { recorded.append(.unified); startedSessions.append(session) }
             try await session.start(stream: StubUnifiedStream())
             if writesAudio {
                 let buffer = try CaptureAudioGateTests.makeSampleBuffer(

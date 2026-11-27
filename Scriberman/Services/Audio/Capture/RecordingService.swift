@@ -15,6 +15,7 @@ enum RecordingError: LocalizedError {
     /// kept out of `errorDescription`, whose wording is user-facing and unchanged.
     case captureInterrupted(detail: String?)
     case failedToStart(String)
+    case noAudioAtStart
 
     var errorDescription: String? {
         switch self {
@@ -28,6 +29,8 @@ enum RecordingError: LocalizedError {
             return "Recording stopped because audio capture was interrupted."
         case .failedToStart(let reason):
             return "Failed to start recording: \(reason)"
+        case .noAudioAtStart:
+            return "Recording failed to start: no audio."
         }
     }
 
@@ -39,7 +42,7 @@ enum RecordingError: LocalizedError {
             return detail
         case .failedToStart(let reason):
             return reason
-        case .alreadyRecording, .microphoneDenied, .invalidWorkspaceAccess:
+        case .alreadyRecording, .microphoneDenied, .invalidWorkspaceAccess, .noAudioAtStart:
             return nil
         }
     }
@@ -526,7 +529,7 @@ actor RecordingService: RecordingServiceProtocol {
         unifiedStreamNumber = number
         do {
             try await startSession(unified)
-            guard !startCancellationRequested else { throw CancellationError() }
+            guard !startCancellationRequested, !Task.isCancelled else { throw CancellationError() }
         } catch {
             await unified.stop()
             if unifiedStreamNumber == number { unifiedStreamNumber = nil }
@@ -712,7 +715,7 @@ actor RecordingService: RecordingServiceProtocol {
         liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation? = nil,
         liveAudioClock: LiveCaptureClock? = nil,
         audioSyncFlags: AudioSyncFlags = .shippedDefaults
-    ) async throws(RecordingError) -> UUID {
+    ) async throws -> UUID {
         guard case .idle = lifecycleState else {
             liveAudioContinuation?.finish()
             throw RecordingError.alreadyRecording
@@ -740,9 +743,9 @@ actor RecordingService: RecordingServiceProtocol {
             lifecycleState = .idle
             throw RecordingError.invalidWorkspaceAccess
         }
-        guard !startCancellationRequested else {
+        guard !startCancellationRequested, !Task.isCancelled else {
             lifecycleState = .idle
-            throw .failedToStart("Recording failed to start: no audio.")
+            throw CancellationError()
         }
         do {
             try await permissionChecker()
@@ -751,9 +754,9 @@ actor RecordingService: RecordingServiceProtocol {
             throw RecordingError.failedToStart(error.diagnosticDetail ?? error.localizedDescription)
         }
 
-        guard !startCancellationRequested else {
+        guard !startCancellationRequested, !Task.isCancelled else {
             lifecycleState = .idle
-            throw .failedToStart("Recording failed to start: no audio.")
+            throw CancellationError()
         }
         if !scopedAccessStarter(workspace.rootURL) {
             lifecycleState = .idle
@@ -838,6 +841,8 @@ actor RecordingService: RecordingServiceProtocol {
                     if captureGates.clock.isPaused {
                         screenCaptureSession.recordingDidPause()
                     }
+                } catch is CancellationError {
+                    throw CancellationError()
                 } catch {
                     logger.warning(
                         "Screen capture failed to start; continuing without video. error=\(error.localizedDescription, privacy: .public)"
@@ -848,7 +853,7 @@ actor RecordingService: RecordingServiceProtocol {
                 self.screenCaptureSession = nil
             }
 
-            guard !startCancellationRequested else { throw CancellationError() }
+            guard !startCancellationRequested, !Task.isCancelled else { throw CancellationError() }
             let session = RecordingSession(
                 createdAt: recordingCreatedAt,
                 duration: 0,
@@ -891,11 +896,10 @@ actor RecordingService: RecordingServiceProtocol {
             audioLevelValue = 0
             lifecycleState = .idle
             if error is CancellationError {
-                throw .failedToStart("Recording failed to start: no audio.")
+                throw CancellationError()
             }
             if let recordingError = error as? RecordingError,
-               case .failedToStart(let reason) = recordingError,
-               reason == "Recording failed to start: no audio." { throw recordingError }
+               case .noAudioAtStart = recordingError { throw recordingError }
             throw RecordingError.failedToStart(error.localizedDescription)
         }
     }
@@ -1314,16 +1318,20 @@ actor RecordingService: RecordingServiceProtocol {
     /// Moves capture to the target rule's device, after every transition queued before. A request
     /// made before a queued update starts shares that update.
     private func requestMicRetarget(reason: MicSwitchReason) async {
+        let generation = recordingGeneration
         if let queuedMicRetarget {
             await queuedMicRetarget.value
-            return
+        } else {
+            let task = enqueueMicTransition { [weak self] () -> Void in
+                await self?.performMicRetarget(generation: generation, reason: reason)
+            }
+            queuedMicRetarget = task
+            await task.value
         }
-        let generation = recordingGeneration
-        let task = enqueueMicTransition { [weak self] () -> Void in
-            await self?.performMicRetarget(generation: generation, reason: reason)
+        // Restart only after leaving the transition queue: the restart uses that queue too.
+        if isCurrentRecording(generation), unifiedCaptureSession?.micSwitchTimedOut == true {
+            _ = await restartAudioCaptureInPlace()
         }
-        queuedMicRetarget = task
-        await task.value
     }
 
     private func performMicRetarget(generation: Int, reason: MicSwitchReason) async {

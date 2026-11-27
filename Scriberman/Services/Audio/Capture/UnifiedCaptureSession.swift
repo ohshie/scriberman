@@ -37,6 +37,8 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
     private let streamLock = NSLock()
     private var _stream: (any UnifiedCaptureStreaming)?
     private var retired = false
+    private var switchTimedOut = false
+    var micSwitchTimedOut: Bool { streamLock.withLock { switchTimedOut } }
 
     private var stream: (any UnifiedCaptureStreaming)? {
         streamLock.lock()
@@ -165,7 +167,7 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
             )
             try await start(stream: reference.stream, deadline: deadline)
         } catch is BoundedCaptureCall.TimedOut {
-            throw RecordingError.failedToStart("Recording failed to start: no audio.")
+            throw RecordingError.noAudioAtStart
         }
     }
 
@@ -238,9 +240,9 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
                 }
                 return
             } catch {
-                startEnd("error \(error.localizedDescription)")
+                startEnd(error is CancellationError ? "cancelled" : "error \(error.localizedDescription)")
                 if error is BoundedCaptureCall.TimedOut {
-                    throw RecordingError.failedToStart("Recording failed to start: no audio.")
+                    throw RecordingError.noAudioAtStart
                 }
                 if error is CancellationError {
                     invalidateOutputs()
@@ -257,7 +259,7 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
                         onAbandon: { [self] in invalidateOutputs() }
                     ) { try await reference.stream.stopCapture() }
                 } catch is BoundedCaptureCall.TimedOut {
-                    throw RecordingError.failedToStart("Recording failed to start: no audio.")
+                    throw RecordingError.noAudioAtStart
                 } catch {
                     throw RecordingError.failedToStart("\(lastError!.localizedDescription) Capture cleanup failed: \(error.localizedDescription)")
                 }
@@ -305,6 +307,7 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
     /// Returns `false` when the stream is not running or the update was rejected; in that case the
     /// retained configuration is committed only after a successful response from the current stream.
     func retargetMic(deviceUID: String?) async -> Bool {
+        guard !micSwitchTimedOut else { return false }
         guard let stream else {
             logger.warning(
                 "Mic retarget requested with no running stream. deviceUID=\(deviceUID ?? "<default>", privacy: .public)"
@@ -316,7 +319,12 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
         update.microphoneCaptureDeviceID = deviceUID
         let updateEnd = CaptureTrace.begin("streamUpdate", "device=\(deviceUID ?? "<default>")")
         do {
-            try await stream.updateConfiguration(update)
+            let reference = CaptureStreamReference(stream: stream)
+            let configurationReference = CaptureConfigurationReference(configuration: update)
+            try await BoundedCaptureCall.run(
+                call: "updateConfiguration", device: deviceUID,
+                until: ContinuousClock.now + BoundedCaptureCall.switchLimit
+            ) { try await reference.stream.updateConfiguration(configurationReference.configuration) }
             let accepted = streamLock.withLock {
                 guard !retired, _stream === stream else { return false }
                 configuredMicDeviceUID = deviceUID
@@ -330,6 +338,7 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
             )
             return true
         } catch {
+            if error is BoundedCaptureCall.TimedOut { streamLock.withLock { switchTimedOut = true } }
             updateEnd("error \(error.localizedDescription)")
             logger.error(
                 "Mic retarget failed; continuing on previous device. deviceUID=\(deviceUID ?? "<default>", privacy: .public) error=\(error.localizedDescription, privacy: .public)"
