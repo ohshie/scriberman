@@ -19,11 +19,6 @@ struct DevFeaturesSettingsView: View {
             caption: "Aligns mic and app audio by capture timestamps when mixing."
         ),
         FlagCopy(
-            flag: \.unifiedCapture,
-            title: "Unified capture",
-            caption: "Records mic and app audio from one stream. macOS 15 or later."
-        ),
-        FlagCopy(
             flag: \.captureHealthRecovery,
             title: "Capture health recovery",
             caption: "Restarts capture if it stops during a recording."

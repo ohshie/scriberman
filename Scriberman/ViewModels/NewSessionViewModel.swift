@@ -535,11 +535,16 @@ final class NewSessionViewModel {
                     appProcessID: selectedAppProcessID,
                     title: choice.title
                 )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch RecordingError.noAudioAtStart {
+                throw RecordingError.noAudioAtStart
             } catch {
                 startError = error
             }
 
-            if startError != nil, selectedAppProcessID != nil {
+            if let error = startError, selectedAppProcessID != nil {
+                logger.warning("App audio start failed; retrying as microphone-only. error=\(error.localizedDescription, privacy: .public)")
                 fallbackMessage = "App audio capture unavailable. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording."
 
                 do {
@@ -554,12 +559,17 @@ final class NewSessionViewModel {
                     )
                     startError = nil
                     capturedApp = nil
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch RecordingError.noAudioAtStart {
+                    throw RecordingError.noAudioAtStart
                 } catch {
                     startError = error
                 }
             }
 
-            if startError != nil, selectedMicDeviceID != nil {
+            if let error = startError, selectedMicDeviceID != nil {
+                logger.warning("Selected microphone start failed; retrying on system default. error=\(error.localizedDescription, privacy: .public)")
                 do {
                     recordingSessionID = try await startRecordingAttempt(
                         in: workspace,
@@ -576,6 +586,10 @@ final class NewSessionViewModel {
                     if fallbackMessage == nil {
                         fallbackMessage = "Selected microphone unavailable. Falling back to system default microphone."
                     }
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch RecordingError.noAudioAtStart {
+                    throw RecordingError.noAudioAtStart
                 } catch {
                     startError = error
                 }
@@ -648,6 +662,9 @@ final class NewSessionViewModel {
                     displayID: isScreenCaptured ? captureDisplayID : nil
                 )
             )
+        } catch is CancellationError {
+            state = .idle
+            return nil
         } catch {
             errorMessage = error.localizedDescription
             state = .idle
@@ -1034,6 +1051,7 @@ final class NewSessionViewModel {
                 meterLevels.app = levels.app
                 let captured = await recordingService.capturedMicrophone()
                 if captured != monitoredCapturedMicrophone {
+                    CaptureTrace.log("uiCapturedMic", "state=\(String(describing: captured))")
                     monitoredCapturedMicrophone = captured
                     if case .capturing = captured { monitoredHasCapturedMicrophone = true }
                 }
@@ -1285,6 +1303,7 @@ final class NewSessionViewModel {
         appProcessID: pid_t?,
         title: String?
     ) async throws -> UUID {
+        try Task.checkCancellation()
         let liveSession = LiveRecordingSession()
         let audioSyncFlags = audioSyncConfig.snapshot()
         do {

@@ -12,6 +12,13 @@ import ScreenCaptureKit
 ///
 /// @unchecked Sendable: mutable state is protected by `lock` and the streamer's queue.
 final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendable {
+    // One handler belongs to one stream generation. Retirement waits for an admitted callback
+    // before the writers can be closed or handed to the next generation.
+    private let callbackLock = NSLock()
+    private var retired = false
+
+    func invalidate() { callbackLock.withLock { retired = true } }
+
     private let lock = NSLock()
     /// Injected so a mid-session capture restart can rebuild the stream and its handlers while
     /// continuing to write into the same file, with its accumulated timing segments intact.
@@ -117,6 +124,9 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
 #endif
 
     private func process(_ sampleBuffer: CMSampleBuffer) {
+        callbackLock.lock()
+        defer { callbackLock.unlock() }
+        guard !retired else { return }
         gate.recordArrival()
         guard layoutTracker.admit(sampleBuffer) else {
             return
@@ -159,6 +169,7 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
         conversion.process(nativeBuffer, hostTime: hostTime) { event in
             switch event {
             case .audio(let audio):
+                CaptureTrace.noteConverted(audio.buffer, hostTime: audio.hostTime)
                 streamer.write(buffer: audio.buffer, hostTimeNanos: audio.hostTime?.nanoseconds)
                 guard let liveHostTime = audio.hostTime else { return }
                 let monoSamples = AudioDownmixer.toMono(buffer: audio.buffer)

@@ -1808,19 +1808,17 @@ struct NewSessionViewModelTests {
         let keys = AudioSyncConfig.FlagDefinitions.shipped
 
         fixture.audioSyncStore.set(false, forKey: keys.timelineMixdown.key)
-        fixture.audioSyncStore.set(true, forKey: keys.unifiedCapture.key)
         fixture.audioSyncStore.set(false, forKey: keys.captureHealthRecovery.key)
         _ = await fixture.viewModel.startRecording(title: "first", context: fixture.context)
         _ = await fixture.viewModel.stopRecording(context: fixture.context)
 
         fixture.audioSyncStore.set(true, forKey: keys.timelineMixdown.key)
-        fixture.audioSyncStore.set(false, forKey: keys.unifiedCapture.key)
         fixture.audioSyncStore.set(true, forKey: keys.captureHealthRecovery.key)
         _ = await fixture.viewModel.startRecording(title: "second", context: fixture.context)
 
         #expect(fixture.recordingService.startCalls.map(\.audioSyncFlags) == [
-            AudioSyncFlags(isTimelineMixdownEnabled: false, isUnifiedCaptureEnabled: true, isCaptureHealthRecoveryEnabled: false),
-            AudioSyncFlags(isTimelineMixdownEnabled: true, isUnifiedCaptureEnabled: false, isCaptureHealthRecoveryEnabled: true)
+            AudioSyncFlags(isTimelineMixdownEnabled: false, isCaptureHealthRecoveryEnabled: false),
+            AudioSyncFlags(isTimelineMixdownEnabled: true, isCaptureHealthRecoveryEnabled: true)
         ])
     }
 
