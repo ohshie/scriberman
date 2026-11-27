@@ -519,74 +519,17 @@ final class NewSessionViewModel {
             }
 
             let selectedMicDeviceID = selectedDevice?.id
-            var capturedApp = selectedApp
-            var capturedMicrophone = selectedDevice
-            var startError: Error?
-            var recordingSessionID: UUID?
-            var fallbackMessage: String?
-
-            do {
-                recordingSessionID = try await startRecordingAttempt(
-                    in: workspace,
-                    micDeviceID: selectedMicDeviceID,
-                    preferredMicDeviceUID: preferredMicUID,
-                    captureDisplayID: captureDisplayID,
-                    capturedAppName: selectedCapturedAppName,
-                    appProcessID: selectedAppProcessID,
-                    title: choice.title
-                )
-            } catch {
-                startError = error
-            }
-
-            if startError != nil, selectedAppProcessID != nil {
-                fallbackMessage = "App audio capture unavailable. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording."
-
-                do {
-                    recordingSessionID = try await startRecordingAttempt(
-                        in: workspace,
-                        micDeviceID: selectedMicDeviceID,
-                        preferredMicDeviceUID: preferredMicUID,
-                        captureDisplayID: captureDisplayID,
-                        capturedAppName: nil,
-                        appProcessID: nil,
-                        title: choice.title
-                    )
-                    startError = nil
-                    capturedApp = nil
-                } catch {
-                    startError = error
-                }
-            }
-
-            if startError != nil, selectedMicDeviceID != nil {
-                do {
-                    recordingSessionID = try await startRecordingAttempt(
-                        in: workspace,
-                        micDeviceID: nil,
-                        preferredMicDeviceUID: preferredMicUID,
-                        captureDisplayID: captureDisplayID,
-                        capturedAppName: nil,
-                        appProcessID: nil,
-                        title: choice.title
-                    )
-                    startError = nil
-                    capturedApp = nil
-                    capturedMicrophone = nil
-                    if fallbackMessage == nil {
-                        fallbackMessage = "Selected microphone unavailable. Falling back to system default microphone."
-                    }
-                } catch {
-                    startError = error
-                }
-            }
-
-            if let startError {
-                throw startError
-            }
-            guard let recordingSessionID else {
-                throw RecordingError.failedToStart("Recording session could not be created.")
-            }
+            let capturedApp = selectedApp
+            let capturedMicrophone = selectedDevice
+            let recordingSessionID = try await startRecordingAttempt(
+                in: workspace,
+                micDeviceID: selectedMicDeviceID,
+                preferredMicDeviceUID: preferredMicUID,
+                captureDisplayID: captureDisplayID,
+                capturedAppName: selectedCapturedAppName,
+                appProcessID: selectedAppProcessID,
+                title: choice.title
+            )
 
             if let selectedDevice {
                 audioDeviceService.incrementUsage(for: selectedDevice.uid)
@@ -598,10 +541,6 @@ final class NewSessionViewModel {
 
             menuBarSettings?.lastUsedMicUID = preferredMicUID
             menuBarSettings?.lastUsedAppBundleID = selectedApp?.bundleID
-
-            if let fallbackMessage {
-                errorMessage = fallbackMessage
-            }
 
             recordingStartedAt = clock()
             clearPauseState()
@@ -1034,6 +973,7 @@ final class NewSessionViewModel {
                 meterLevels.app = levels.app
                 let captured = await recordingService.capturedMicrophone()
                 if captured != monitoredCapturedMicrophone {
+                    CaptureTrace.log("uiCapturedMic", "state=\(String(describing: captured))")
                     monitoredCapturedMicrophone = captured
                     if case .capturing = captured { monitoredHasCapturedMicrophone = true }
                 }

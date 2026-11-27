@@ -17,32 +17,14 @@ final class RecordingServiceTests {
     func stopFinishesLiveAudioWithMissingSession(isRecording: Bool) async throws {
         let container = try ModelContainer(for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true))
-        let settings = await MainActor.run { AppAudioSettings() }
-        let service = RecordingService(workspaceService: MockWorkspaceService(), modelContainer: container, appAudioSettings: settings)
+        let service = RecordingService(workspaceService: MockWorkspaceService(), modelContainer: container,
+            hardware: MockRecoveryAudioDeviceHardware(),
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
+        )
         let audio = AsyncStream<LiveAudioChunk>.makeStream()
         await service.setRecordingStateForTesting(isRecording: isRecording, liveAudioContinuation: audio.continuation)
         #expect(await service.stopRecording() == nil)
         var iterator = audio.stream.makeAsyncIterator()
-        #expect(await iterator.next() == nil)
-    }
-
-    @Test
-    func engineMicPathPreservesCaptureTime() async throws {
-        let fixture = try await makeRecoveryFixture()
-        defer { removeWorkspace(at: fixture.workspace.rootURL) }
-        let audio = AsyncStream<LiveAudioChunk>.makeStream()
-        await fixture.service.setRecordingStateForTesting(isRecording: true, liveAudioContinuation: audio.continuation)
-        await fixture.service.setMicRecoveryStateForTesting(desiredMicDeviceUID: nil, micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav"))
-        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
-        let emit = try #require(fixture.micController.onBuffer)
-        let time = HostNanoseconds(nanoseconds: 2_000_000_000)
-        emit(.audio(samples: [1, 2], sampleRate: 48_000, hostTime: time, rawHostTime: time))
-        _ = await fixture.service.stopRecording()
-        var iterator = audio.stream.makeAsyncIterator()
-        let chunk = try #require(await iterator.next())
-        #expect(chunk.hostTime == time)
-        #expect(chunk.source == .mic)
-        #expect(chunk.samples == [1, 2])
         #expect(await iterator.next() == nil)
     }
 
@@ -150,11 +132,11 @@ final class RecordingServiceTests {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let workspaceService = MockWorkspaceService()
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         let service = RecordingService(
             workspaceService: workspaceService,
             modelContainer: container,
-            appAudioSettings: appAudioSettings
+            hardware: MockRecoveryAudioDeviceHardware(),
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
 
         let context = ModelContext(container)
@@ -199,11 +181,11 @@ final class RecordingServiceTests {
             for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         let service = RecordingService(
             workspaceService: MockWorkspaceService(),
             modelContainer: container,
-            appAudioSettings: appAudioSettings
+            hardware: MockRecoveryAudioDeviceHardware(),
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
 
         let result = await service.stopRecording()
@@ -217,11 +199,11 @@ final class RecordingServiceTests {
             for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         let service = RecordingService(
             workspaceService: MockWorkspaceService(),
             modelContainer: container,
-            appAudioSettings: appAudioSettings
+            hardware: MockRecoveryAudioDeviceHardware(),
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
 
         await service.captureMicStartHostTimeIfNeeded(HostNanoseconds(nanoseconds: 1_000))
@@ -246,8 +228,6 @@ final class RecordingServiceTests {
         )
         let workspaceService = MockWorkspaceService()
         workspaceService.requireWritableResult = .success(workspace)
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
-        let micController = MockMicCaptureController()
         let mixdownCoordinator = MockRecordingMixdownCoordinator()
         let screenVideoMuxer = MockScreenVideoMuxer()
         let screenSession = MockScreenCaptureSession()
@@ -256,14 +236,14 @@ final class RecordingServiceTests {
         let service = RecordingService(
             workspaceService: workspaceService,
             modelContainer: container,
-            appAudioSettings: appAudioSettings,
-            micCaptureController: micController,
+            hardware: MockRecoveryAudioDeviceHardware(),
             mixdownCoordinator: mixdownCoordinator,
             screenVideoMuxer: screenVideoMuxer,
             permissionChecker: {},
             scopedAccessStarter: { _ in true },
             scopedAccessStopper: { _ in },
-            screenCaptureSessionFactory: { factoryProbe.makeSession() }
+            screenCaptureSessionFactory: { factoryProbe.makeSession() },
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
 
         _ = try await service.startRecording(
@@ -291,8 +271,6 @@ final class RecordingServiceTests {
         )
         let workspaceService = MockWorkspaceService()
         workspaceService.requireWritableResult = .success(workspace)
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
-        let micController = MockMicCaptureController()
         let mixdownCoordinator = MockRecordingMixdownCoordinator()
         let screenVideoMuxer = MockScreenVideoMuxer()
         let screenSession = MockScreenCaptureSession()
@@ -302,14 +280,14 @@ final class RecordingServiceTests {
         let service = RecordingService(
             workspaceService: workspaceService,
             modelContainer: container,
-            appAudioSettings: appAudioSettings,
-            micCaptureController: micController,
+            hardware: MockRecoveryAudioDeviceHardware(),
             mixdownCoordinator: mixdownCoordinator,
             screenVideoMuxer: screenVideoMuxer,
             permissionChecker: {},
             scopedAccessStarter: { _ in true },
             scopedAccessStopper: { _ in },
-            screenCaptureSessionFactory: { factoryProbe.makeSession() }
+            screenCaptureSessionFactory: { factoryProbe.makeSession() },
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
 
         _ = try await service.startRecording(
@@ -343,14 +321,6 @@ final class RecordingServiceTests {
     }
 
     @Test
-    func testEngineTapHostTimeConvertsToNanoseconds() {
-        let ticks = AVAudioTime.hostTime(forSeconds: 2.5)
-
-        #expect(AVAudioEngineMicCaptureController.hostTime(of: AVAudioTime(hostTime: ticks)) == HostNanoseconds(nanoseconds: 2_500_000_000))
-        #expect(AVAudioEngineMicCaptureController.hostTime(of: AVAudioTime(hostTime: 0)) == nil)
-    }
-
-    @Test
     func testAudioAnchorIsTheEarlierStartTime() {
         let mic = HostNanoseconds(nanoseconds: 2_000_000_000)
         let app = HostNanoseconds(nanoseconds: 1_500_000_000)
@@ -372,19 +342,18 @@ final class RecordingServiceTests {
         )
         let workspaceService = MockWorkspaceService()
         workspaceService.requireWritableResult = .success(workspace)
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
 
         let service = RecordingService(
             workspaceService: workspaceService,
             modelContainer: container,
-            appAudioSettings: appAudioSettings,
-            micCaptureController: MockMicCaptureController(),
+            hardware: MockRecoveryAudioDeviceHardware(),
             mixdownCoordinator: MockRecordingMixdownCoordinator(),
             screenVideoMuxer: MockScreenVideoMuxer(),
             permissionChecker: {},
             scopedAccessStarter: { _ in true },
             scopedAccessStopper: { _ in },
-            now: { Self.march28At1430 }
+            now: { Self.march28At1430 },
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
 
         let firstID = try await service.startRecording(in: workspace, title: "First")
@@ -427,7 +396,6 @@ final class RecordingServiceTests {
         )
         let workspaceService = MockWorkspaceService()
         workspaceService.requireWritableResult = .success(workspace)
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         let mixdownCoordinator = MockRecordingMixdownCoordinator()
         let screenSession = MockScreenCaptureSession()
         let stopBlocker = MockScreenCaptureStopBlocker()
@@ -437,14 +405,14 @@ final class RecordingServiceTests {
         let service = RecordingService(
             workspaceService: workspaceService,
             modelContainer: container,
-            appAudioSettings: appAudioSettings,
-            micCaptureController: MockMicCaptureController(),
+            hardware: MockRecoveryAudioDeviceHardware(),
             mixdownCoordinator: mixdownCoordinator,
             screenVideoMuxer: MockScreenVideoMuxer(),
             permissionChecker: {},
             scopedAccessStarter: { _ in true },
             scopedAccessStopper: { _ in },
-            screenCaptureSessionFactory: { factoryProbe.makeSession() }
+            screenCaptureSessionFactory: { factoryProbe.makeSession() },
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
 
         _ = try await service.startRecording(
@@ -486,14 +454,12 @@ final class RecordingServiceTests {
         )
         let workspaceService = MockWorkspaceService()
         workspaceService.requireWritableResult = .success(workspace)
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         let permissionGate = MockScreenCaptureStopBlocker()
 
         let service = RecordingService(
             workspaceService: workspaceService,
             modelContainer: container,
-            appAudioSettings: appAudioSettings,
-            micCaptureController: MockMicCaptureController(),
+            hardware: MockRecoveryAudioDeviceHardware(),
             mixdownCoordinator: MockRecordingMixdownCoordinator(),
             screenVideoMuxer: MockScreenVideoMuxer(),
             permissionChecker: {
@@ -501,7 +467,8 @@ final class RecordingServiceTests {
                 await permissionGate.waitUntilReleased()
             },
             scopedAccessStarter: { _ in true },
-            scopedAccessStopper: { _ in }
+            scopedAccessStopper: { _ in },
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
 
         let firstStart = Task { try await service.startRecording(in: workspace, title: "First") }
@@ -538,14 +505,12 @@ final class RecordingServiceTests {
         )
         let workspaceService = MockWorkspaceService()
         workspaceService.requireWritableResult = .success(workspace)
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         let tagCalls = VPCallCounter()
 
         let service = RecordingService(
             workspaceService: workspaceService,
             modelContainer: container,
-            appAudioSettings: appAudioSettings,
-            micCaptureController: MockMicCaptureController(),
+            hardware: MockRecoveryAudioDeviceHardware(),
             mixdownCoordinator: MockRecordingMixdownCoordinator(),
             screenVideoMuxer: MockScreenVideoMuxer(),
             permissionChecker: {},
@@ -557,7 +522,8 @@ final class RecordingServiceTests {
                     throw NSError(domain: "RecordingServiceTests", code: 11)
                 }
                 try TagService().applyDefaultTag(to: session, in: context)
-            }
+            },
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
 
         var firstError: RecordingError?
@@ -589,8 +555,6 @@ final class RecordingServiceTests {
         )
         let workspaceService = MockWorkspaceService()
         workspaceService.requireWritableResult = .success(workspace)
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
-        let micController = MockMicCaptureController()
         let mixdownCoordinator = MockRecordingMixdownCoordinator()
         let screenVideoMuxer = MockScreenVideoMuxer()
         let screenSession = MockScreenCaptureSession()
@@ -600,14 +564,14 @@ final class RecordingServiceTests {
         let service = RecordingService(
             workspaceService: workspaceService,
             modelContainer: container,
-            appAudioSettings: appAudioSettings,
-            micCaptureController: micController,
+            hardware: MockRecoveryAudioDeviceHardware(),
             mixdownCoordinator: mixdownCoordinator,
             screenVideoMuxer: screenVideoMuxer,
             permissionChecker: {},
             scopedAccessStarter: { _ in true },
             scopedAccessStopper: { _ in },
-            screenCaptureSessionFactory: { factoryProbe.makeSession() }
+            screenCaptureSessionFactory: { factoryProbe.makeSession() },
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
 
         _ = try await service.startRecording(
@@ -644,8 +608,6 @@ final class RecordingServiceTests {
         )
         let workspaceService = MockWorkspaceService()
         workspaceService.requireWritableResult = .success(workspace)
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
-        let micController = MockMicCaptureController()
         let mixdownCoordinator = MockRecordingMixdownCoordinator()
         let screenVideoMuxer = MockScreenVideoMuxer()
         let screenSession = MockScreenCaptureSession()
@@ -657,14 +619,14 @@ final class RecordingServiceTests {
         let service = RecordingService(
             workspaceService: workspaceService,
             modelContainer: container,
-            appAudioSettings: appAudioSettings,
-            micCaptureController: micController,
+            hardware: MockRecoveryAudioDeviceHardware(),
             mixdownCoordinator: mixdownCoordinator,
             screenVideoMuxer: screenVideoMuxer,
             permissionChecker: {},
             scopedAccessStarter: { _ in true },
             scopedAccessStopper: { _ in },
-            screenCaptureSessionFactory: { factoryProbe.makeSession() }
+            screenCaptureSessionFactory: { factoryProbe.makeSession() },
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
 
         _ = try await service.startRecording(
@@ -704,8 +666,6 @@ final class RecordingServiceTests {
         )
         let workspaceService = MockWorkspaceService()
         workspaceService.requireWritableResult = .success(workspace)
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
-        let micController = MockMicCaptureController()
         let mixdownCoordinator = MockRecordingMixdownCoordinator()
         let screenVideoMuxer = MockScreenVideoMuxer()
         let screenSession = MockScreenCaptureSession()
@@ -715,14 +675,14 @@ final class RecordingServiceTests {
         let service = RecordingService(
             workspaceService: workspaceService,
             modelContainer: container,
-            appAudioSettings: appAudioSettings,
-            micCaptureController: micController,
+            hardware: MockRecoveryAudioDeviceHardware(),
             mixdownCoordinator: mixdownCoordinator,
             screenVideoMuxer: screenVideoMuxer,
             permissionChecker: {},
             scopedAccessStarter: { _ in true },
             scopedAccessStopper: { _ in },
-            screenCaptureSessionFactory: { factoryProbe.makeSession() }
+            screenCaptureSessionFactory: { factoryProbe.makeSession() },
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
 
         let sessionID = try await service.startRecording(
@@ -754,15 +714,15 @@ final class RecordingServiceTests {
             for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         let screenSession = MockScreenCaptureSession()
         let service = RecordingService(
             workspaceService: MockWorkspaceService(),
             modelContainer: container,
-            appAudioSettings: appAudioSettings,
+            hardware: MockRecoveryAudioDeviceHardware(),
             permissionChecker: {},
             scopedAccessStarter: { _ in true },
-            scopedAccessStopper: { _ in }
+            scopedAccessStopper: { _ in },
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
 
         let createdAt = Date(timeIntervalSince1970: 1_743_171_000)
@@ -807,11 +767,11 @@ final class RecordingServiceTests {
         let workspaceService = MockWorkspaceService()
         workspaceService.requireWritableResult = .success(workspace)
 
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         let service = RecordingService(
             workspaceService: workspaceService,
             modelContainer: container,
-            appAudioSettings: appAudioSettings
+            hardware: MockRecoveryAudioDeviceHardware(),
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
 
         let customTitle = "My Custom Title"
@@ -867,13 +827,13 @@ final class RecordingServiceTests {
             for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(url: storeDirectory.appendingPathComponent("store.sqlite"))
         )
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         let mixdownCoordinator = MockRecordingMixdownCoordinator()
         let service = RecordingService(
             workspaceService: MockWorkspaceService(),
             modelContainer: container,
-            appAudioSettings: appAudioSettings,
-            mixdownCoordinator: mixdownCoordinator
+            hardware: MockRecoveryAudioDeviceHardware(),
+            mixdownCoordinator: mixdownCoordinator,
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
 
         let recordingCreatedAt = Date().addingTimeInterval(-5)
@@ -935,11 +895,11 @@ final class RecordingServiceTests {
             for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         let service = RecordingService(
             workspaceService: MockWorkspaceService(),
             modelContainer: container,
-            appAudioSettings: appAudioSettings
+            hardware: MockRecoveryAudioDeviceHardware(),
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
 
         let recordingCreatedAt = Date(timeIntervalSince1970: 1_743_171_000)
@@ -982,343 +942,10 @@ final class RecordingServiceTests {
         #expect(fetched.title.hasPrefix("Recording "))
     }
 
-    @Test @MainActor
-    func testVoiceProcessingSetterCalledWhenEnabled() async throws {
-        let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
-        )
-        let suiteName = "RecordingServiceTests.vp.\(UUID().uuidString)"
-        let ud = UserDefaults(suiteName: suiteName) ?? .standard
-        ud.removePersistentDomain(forName: suiteName)
-        defer { ud.removePersistentDomain(forName: suiteName) }
-
-        let appAudioSettings = AppAudioSettings(userDefaults: ud)
-        appAudioSettings.voiceProcessingEnabled = true
-
-        let counter = VPCallCounter()
-        let service = RecordingService(
-            workspaceService: MockWorkspaceService(),
-            modelContainer: container,
-            appAudioSettings: appAudioSettings,
-            voiceProcessingPropertySetter: { @Sendable [counter] _ in counter.increment() }
-        )
-
-        let inputNode = unsafeBitCast(NSObject(), to: AVAudioInputNode.self)
-        service.applyVoiceProcessingIfNeeded(to: inputNode, enabled: true)
-        #expect(counter.callCount == 1)
-
-        service.applyVoiceProcessingIfNeeded(to: inputNode, enabled: false)
-        #expect(counter.callCount == 1) // not called again when disabled
-    }
-
-    @Test @MainActor
-    func testVoiceProcessingSetterNotCalledWhenDisabled() async throws {
-        let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
-        )
-        let appAudioSettings = AppAudioSettings()
-        // voiceProcessingEnabled defaults to false
-
-        let counter = VPCallCounter()
-        let service = RecordingService(
-            workspaceService: MockWorkspaceService(),
-            modelContainer: container,
-            appAudioSettings: appAudioSettings,
-            voiceProcessingPropertySetter: { @Sendable [counter] _ in counter.increment() }
-        )
-
-        let inputNode = unsafeBitCast(NSObject(), to: AVAudioInputNode.self)
-        service.applyVoiceProcessingIfNeeded(to: inputNode, enabled: false)
-        #expect(counter.callCount == 0)
-    }
-
-    @Test @MainActor
-    func testVoiceProcessingSetterErrorDoesNotInterruptFlow() async throws {
-        let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
-        )
-        let appAudioSettings = AppAudioSettings()
-        let service = RecordingService(
-            workspaceService: MockWorkspaceService(),
-            modelContainer: container,
-            appAudioSettings: appAudioSettings,
-            voiceProcessingPropertySetter: { @Sendable _ in
-                throw NSError(domain: "test", code: -1, userInfo: nil) // simulate failure
-            }
-        )
-
-        let inputNode = unsafeBitCast(NSObject(), to: AVAudioInputNode.self)
-        // Should not throw or crash; failure is logged and recording continues
-        service.applyVoiceProcessingIfNeeded(to: inputNode, enabled: true)
-        // Reaching here means no crash/throw
-    }
-
-    @Test
-    func testConfigChangeWhileRecordingRecoverySuccessKeepsRecordingAndNoPendingError() async throws {
-        let fixture = try await makeRecoveryFixture()
-        let micURL = fixture.workspace.rootURL.appendingPathComponent("mic.wav")
-
-        await fixture.service.setRecordingStateForTesting(isRecording: true)
-        await fixture.service.setMicRecoveryStateForTesting(
-            desiredMicDeviceUID: nil,
-            micFileURL: micURL
-        )
-        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
-
-        #expect(await fixture.service.isRecording())
-        #expect(await fixture.service.consumePendingError() == nil)
-    }
-
-    @Test
-    func testConfigChangeWhileRecordingRecoveryFailureKeepsRecordingAndSchedulesRetry() async throws {
-        let fixture = try await makeRecoveryFixture()
-        fixture.micController.startCaptureError = RecordingError.failedToStart("forced")
-        let micURL = fixture.workspace.rootURL.appendingPathComponent("mic.wav")
-
-        await fixture.service.setRecordingStateForTesting(isRecording: true)
-        await fixture.service.setMicRecoveryStateForTesting(
-            desiredMicDeviceUID: nil,
-            micFileURL: micURL
-        )
-        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
-
-        #expect(await fixture.service.isRecording())
-        #expect(await fixture.service.consumePendingError() == nil)
-        let debugState = await fixture.service.recoveryDebugStateForTesting()
-        #expect(debugState.hasRecoveryRetryTask)
-    }
-
-    @Test
-    func testConfigChangeWhileRecorderFallbackIsNoOp() async throws {
-        let fixture = try await makeRecoveryFixture()
-        let micURL = fixture.workspace.rootURL.appendingPathComponent("mic.wav")
-
-        await fixture.service.setRecordingStateForTesting(isRecording: true)
-        await fixture.service.setMicRecoveryStateForTesting(
-            desiredMicDeviceUID: nil,
-            micFileURL: micURL,
-            recorderFallbackActive: true
-        )
-        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
-
-        #expect(await fixture.service.consumePendingError() == nil)
-        #expect(fixture.micController.startCaptureCalls.isEmpty)
-    }
-
-    @Test
-    func testReentrantConfigChangeDuringRecoveryIsIgnored() async throws {
-        let fixture = try await makeRecoveryFixture()
-        let micURL = fixture.workspace.rootURL.appendingPathComponent("mic.wav")
-
-        await fixture.service.setRecordingStateForTesting(isRecording: true)
-        await fixture.service.setMicRecoveryStateForTesting(
-            desiredMicDeviceUID: nil,
-            micFileURL: micURL,
-            isRecoveringMicCapture: true
-        )
-        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
-
-        #expect(fixture.micController.startCaptureCalls.isEmpty)
-        #expect(await fixture.service.consumePendingError() == nil)
-    }
-
-    @Test
-    func testMicStartHostTimeNotOverwrittenOnRecovery() async throws {
-        let fixture = try await makeRecoveryFixture()
-        let micURL = fixture.workspace.rootURL.appendingPathComponent("mic.wav")
-
-        await fixture.service.setRecordingStateForTesting(isRecording: true)
-        await fixture.service.setMicRecoveryStateForTesting(
-            desiredMicDeviceUID: nil,
-            micFileURL: micURL
-        )
-        await fixture.service.captureMicStartHostTimeIfNeeded(HostNanoseconds(nanoseconds: 1_000))
-        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
-        await fixture.service.captureMicStartHostTimeIfNeeded(HostNanoseconds(nanoseconds: 2_000))
-
-        #expect(await fixture.service.capturedHostTimes().mic == HostNanoseconds(nanoseconds: 1_000))
-    }
-
-    @Test
-    func testRecoveryResolvesDesiredUIDToMatchingDeviceID() async throws {
-        let fixture = try await makeRecoveryFixture()
-        let micURL = fixture.workspace.rootURL.appendingPathComponent("mic.wav")
-        fixture.hardware.devices = [
-            (id: 11, uid: "uid-a"),
-            (id: 22, uid: "uid-b")
-        ]
-
-        await fixture.service.setRecordingStateForTesting(isRecording: true)
-        await fixture.service.setMicRecoveryStateForTesting(
-            desiredMicDeviceUID: "uid-b",
-            micFileURL: micURL
-        )
-        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
-
-        #expect(fixture.micController.startCaptureCalls.last?.deviceID == 22)
-        #expect(await fixture.service.consumePendingError() == nil)
-    }
-
-    @Test
-    func testRecoveryUIDNotFoundFallsBackToDefaultDevice() async throws {
-        let fixture = try await makeRecoveryFixture()
-        let micURL = fixture.workspace.rootURL.appendingPathComponent("mic.wav")
-        fixture.hardware.devices = [
-            (id: 11, uid: "uid-a")
-        ]
-
-        await fixture.service.setRecordingStateForTesting(isRecording: true)
-        await fixture.service.setMicRecoveryStateForTesting(
-            desiredMicDeviceUID: "uid-missing",
-            micFileURL: micURL
-        )
-        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
-
-        #expect(fixture.micController.startCaptureCalls.last?.deviceID == nil)
-        #expect(await fixture.service.consumePendingError() == nil)
-    }
-
-    @Test
-    func testRetargetMicWhileNotRecordingIsNoOp() async throws {
-        let fixture = try await makeRecoveryFixture()
-
-        await fixture.service.setRecordingStateForTesting(isRecording: false)
-        await fixture.service.retargetMic(desiredDeviceUID: "uid-b")
-
-        #expect(fixture.micController.startCaptureCalls.isEmpty)
-    }
-
-    @Test
-    func testRetargetMicWhileRecordingUpdatesDesiredUIDAndTriggersRecovery() async throws {
-        let fixture = try await makeRecoveryFixture()
-        let micURL = fixture.workspace.rootURL.appendingPathComponent("mic.wav")
-        fixture.hardware.devices = [
-            (id: 11, uid: "uid-a"),
-            (id: 22, uid: "uid-b")
-        ]
-
-        await fixture.service.setRecordingStateForTesting(isRecording: true)
-        await fixture.service.setMicRecoveryStateForTesting(
-            desiredMicDeviceUID: "uid-a",
-            micFileURL: micURL
-        )
-
-        await fixture.service.retargetMic(desiredDeviceUID: "uid-b")
-
-        #expect(fixture.micController.startCaptureCalls.last?.deviceID == 22)
-        let debugState = await fixture.service.recoveryDebugStateForTesting()
-        #expect(debugState.desiredMicDeviceUID == "uid-b")
-    }
-
-    @Test
-    func testRetargetMicRecoveryFailureSchedulesRetryThatCanRecoverLater() async throws {
-        let fixture = try await makeRecoveryFixture()
-        let micURL = fixture.workspace.rootURL.appendingPathComponent("mic.wav")
-        fixture.hardware.devices = [
-            (id: 11, uid: "uid-a"),
-            (id: 22, uid: "uid-b")
-        ]
-        fixture.micController.startCaptureErrors = [RecordingError.failedToStart("forced once")]
-
-        await fixture.service.setRecordingStateForTesting(isRecording: true)
-        await fixture.service.setMicRecoveryStateForTesting(
-            desiredMicDeviceUID: "uid-a",
-            micFileURL: micURL
-        )
-
-        await fixture.service.retargetMic(desiredDeviceUID: "uid-b")
-        var debugState = await fixture.service.recoveryDebugStateForTesting()
-        #expect(debugState.hasRecoveryRetryTask)
-
-        await fixture.service.performMicRecoveryRetryAttemptForTesting()
-
-        debugState = await fixture.service.recoveryDebugStateForTesting()
-        #expect(!debugState.hasRecoveryRetryTask)
-        #expect(fixture.micController.startCaptureCalls.last?.deviceID == 22)
-    }
-
-    // MARK: - Preferred mic carried separately from the start device
-
-    @Test
-    func aRecordingStartedOnTheDefaultSwitchesToThePreferredMicWhenItAppears() async throws {
-        let fixture = try await makeStartFixture()
-        defer { removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [(id: 11, uid: "builtin")]
-
-        _ = try await fixture.service.startRecording(
-            in: fixture.workspace,
-            micDeviceID: 11,
-            preferredMicDeviceUID: "airpods",
-            title: "Session",
-            audioSyncFlags: .shippedDefaults
-        )
-        #expect(fixture.micController.startCaptureCalls.map(\.deviceID) == [11])
-
-        fixture.hardware.devices.append((id: 22, uid: "airpods"))
-        await fixture.service.simulateHardwareChangeForTesting()
-
-        #expect(fixture.micController.startCaptureCalls.last?.deviceID == 22)
-        _ = await fixture.service.stopRecording()
-    }
-
-    @Test
-    func aFailedExplicitRouteStartKeepsThePreferredMicAndRecordsOnTheDefault() async throws {
-        let fixture = try await makeStartFixture()
-        defer { removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [(id: 11, uid: "builtin"), (id: 22, uid: "airpods")]
-        fixture.micController.startCaptureErrors = [RecordingError.failedToStart("explicit route")]
-
-        _ = try await fixture.service.startRecording(
-            in: fixture.workspace,
-            micDeviceID: 22,
-            preferredMicDeviceUID: "airpods",
-            title: "Session",
-            audioSyncFlags: .shippedDefaults
-        )
-
-        #expect(fixture.micController.startCaptureCalls.map(\.deviceID) == [nil])
-        let state = await fixture.service.recoveryDebugStateForTesting()
-        #expect(state.desiredMicDeviceUID == "airpods")
-        #expect(state.currentCaptureDeviceID == nil)
-        _ = await fixture.service.stopRecording()
-    }
-
-    /// The device that refused the route is still there, so retrying it on every hardware event
-    /// would tear down working capture each time. It is tried again once it has left and returned.
-    @Test
-    func aMicThatRefusedTheRouteIsRetriedOnlyAfterItReturns() async throws {
-        let fixture = try await makeStartFixture()
-        defer { removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [(id: 11, uid: "builtin"), (id: 22, uid: "airpods")]
-        fixture.micController.startCaptureErrors = [RecordingError.failedToStart("explicit route")]
-        _ = try await fixture.service.startRecording(
-            in: fixture.workspace,
-            micDeviceID: 22,
-            preferredMicDeviceUID: "airpods",
-            title: "Session",
-            audioSyncFlags: .shippedDefaults
-        )
-
-        await fixture.service.simulateHardwareChangeForTesting()
-        #expect(fixture.micController.startCaptureCalls.map(\.deviceID) == [nil])
-
-        fixture.hardware.devices = [(id: 11, uid: "builtin")]
-        await fixture.service.simulateHardwareChangeForTesting()
-        fixture.hardware.devices = [(id: 11, uid: "builtin"), (id: 22, uid: "airpods")]
-        await fixture.service.simulateHardwareChangeForTesting()
-
-        #expect(fixture.micController.startCaptureCalls.map(\.deviceID) == [nil, 22])
-        _ = await fixture.service.stopRecording()
-    }
-
     private func makeStartFixture() async throws -> (
         service: RecordingService,
         workspace: Workspace,
-        hardware: MockRecoveryAudioDeviceHardware,
-        micController: MockMicCaptureController
+        hardware: MockRecoveryAudioDeviceHardware
     ) {
         let workspace = makeWorkspace()
         try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
@@ -1330,21 +957,18 @@ final class RecordingServiceTests {
         let workspaceService = MockWorkspaceService()
         workspaceService.requireWritableResult = .success(workspace)
         let hardware = MockRecoveryAudioDeviceHardware()
-        let micController = MockMicCaptureController()
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         let service = RecordingService(
             workspaceService: workspaceService,
             modelContainer: container,
-            appAudioSettings: appAudioSettings,
             hardware: hardware,
-            micCaptureController: micController,
             mixdownCoordinator: MockRecordingMixdownCoordinator(),
             screenVideoMuxer: MockScreenVideoMuxer(),
             permissionChecker: {},
             scopedAccessStarter: { _ in true },
-            scopedAccessStopper: { _ in }
+            scopedAccessStopper: { _ in },
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
-        return (service, workspace, hardware, micController)
+        return (service, workspace, hardware)
     }
 
     // MARK: - Default tag at creation
@@ -1444,19 +1068,18 @@ final class RecordingServiceTests {
         )
         let workspaceService = MockWorkspaceService()
         workspaceService.requireWritableResult = .success(workspace)
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         let factoryProbe = ScreenCaptureSessionFactoryProbe(session: screenSession)
         return RecordingService(
             workspaceService: workspaceService,
             modelContainer: container,
-            appAudioSettings: appAudioSettings,
-            micCaptureController: MockMicCaptureController(),
+            hardware: MockRecoveryAudioDeviceHardware(),
             mixdownCoordinator: MockRecordingMixdownCoordinator(),
             screenVideoMuxer: MockScreenVideoMuxer(),
             permissionChecker: {},
             scopedAccessStarter: { _ in true },
             scopedAccessStopper: { _ in },
-            screenCaptureSessionFactory: { factoryProbe.makeSession() }
+            screenCaptureSessionFactory: { factoryProbe.makeSession() },
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
     }
 
@@ -1501,17 +1124,16 @@ final class RecordingServiceTests {
     ) async -> RecordingService {
         let workspaceService = MockWorkspaceService()
         workspaceService.requireWritableResult = .success(workspace)
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         return RecordingService(
             workspaceService: workspaceService,
             modelContainer: container,
-            appAudioSettings: appAudioSettings,
-            micCaptureController: MockMicCaptureController(),
+            hardware: MockRecoveryAudioDeviceHardware(),
             mixdownCoordinator: MockRecordingMixdownCoordinator(),
             screenVideoMuxer: MockScreenVideoMuxer(),
             permissionChecker: {},
             scopedAccessStarter: { _ in true },
-            scopedAccessStopper: { _ in }
+            scopedAccessStopper: { _ in },
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
     }
 
@@ -1773,7 +1395,7 @@ final class RecordingServiceTests {
 
     // MARK: - Per-recording audio-sync flags
 
-    private func makeFlagFixture(captureDisplayID: CGDirectDisplayID? = nil) async throws -> (
+    private func makeFlagFixture(captureDisplayID: CGDirectDisplayID? = nil, writesAudio: Bool = true) async throws -> (
         service: RecordingService,
         container: ModelContainer,
         workspace: Workspace,
@@ -1789,17 +1411,15 @@ final class RecordingServiceTests {
         )
         let workspaceService = MockWorkspaceService()
         workspaceService.requireWritableResult = .success(workspace)
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         let mixdownCoordinator = MockRecordingMixdownCoordinator()
         let screenVideoMuxer = MockScreenVideoMuxer()
         let screenSession = MockScreenCaptureSession()
         screenSession.videoStartHostTime = HostNanoseconds(nanoseconds: 9_000)
-        let captureStarts = CaptureStartProbe()
+        let captureStarts = CaptureStartProbe(writesAudio: writesAudio)
         let service = RecordingService(
             workspaceService: workspaceService,
             modelContainer: container,
-            appAudioSettings: appAudioSettings,
-            micCaptureController: MockMicCaptureController(),
+            hardware: MockRecoveryAudioDeviceHardware(),
             mixdownCoordinator: mixdownCoordinator,
             screenVideoMuxer: screenVideoMuxer,
             permissionChecker: {},
@@ -1811,29 +1431,29 @@ final class RecordingServiceTests {
         return (service, container, workspace, captureStarts, mixdownCoordinator, screenVideoMuxer)
     }
 
-    private func flags(timeline: Bool = true, unified: Bool = true, recovery: Bool = true) -> AudioSyncFlags {
+    private func flags(timeline: Bool = true, recovery: Bool = true) -> AudioSyncFlags {
         AudioSyncFlags(
             isTimelineMixdownEnabled: timeline,
-            isUnifiedCaptureEnabled: unified,
+
             isCaptureHealthRecoveryEnabled: recovery
         )
     }
 
-    @Test(arguments: [true, false])
-    func testCaptureRestartUsesTheCaptureModeTheRecordingStartedWith(unified: Bool) async throws {
-        let fixture = try await makeFlagFixture()
+    @Test
+    func testCaptureRestartUsesUnifiedCapture() async throws {
+        let fixture = try await makeFlagFixture(writesAudio: false)
         defer { removeWorkspace(at: fixture.workspace.rootURL) }
 
         _ = try await fixture.service.startRecording(
             in: fixture.workspace,
             appProcessID: 4321,
             title: "Session",
-            audioSyncFlags: flags(unified: unified)
+            audioSyncFlags: flags()
         )
         let restarted = await fixture.service.restartAudioCapture()
         _ = await fixture.service.stopRecording()
 
-        let expected: CaptureStartProbe.Kind = unified ? .unified : .appAudio
+        let expected: CaptureStartProbe.Kind = .unified
         #expect(restarted)
         #expect(fixture.captureStarts.kinds == [expected, expected])
     }
@@ -1863,7 +1483,7 @@ final class RecordingServiceTests {
     func testRecordingStoresItsFlagSnapshotWhenItStarts() async throws {
         let fixture = try await makeFlagFixture()
         defer { removeWorkspace(at: fixture.workspace.rootURL) }
-        let started = flags(timeline: false, unified: true, recovery: false)
+        let started = flags(timeline: false, recovery: false)
 
         let sessionID = try await fixture.service.startRecording(
             in: fixture.workspace,
@@ -1918,37 +1538,6 @@ final class RecordingServiceTests {
         #expect(counts.app == nil)
     }
 
-    @Test
-    func testFrameCountsReportMicOnLegacyPath() async throws {
-        let fixture = try await makeRecoveryFixture()
-        defer { removeWorkspace(at: fixture.workspace.rootURL) }
-        await fixture.service.setRecordingStateForTesting(isRecording: true)
-
-        let counts = await fixture.service.captureFrameCounts()
-
-        // Legacy path with no app capture: a real count for mic, nothing for app.
-        #expect(counts.mic == 0)
-        #expect(counts.app == nil)
-    }
-
-    @Test
-    func testFrameCountsReportMicUnavailableUnderRecorderFallback() async throws {
-        let fixture = try await makeRecoveryFixture()
-        defer { removeWorkspace(at: fixture.workspace.rootURL) }
-        await fixture.service.setRecordingStateForTesting(isRecording: true)
-        await fixture.service.setMicRecoveryStateForTesting(
-            desiredMicDeviceUID: nil,
-            micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav"),
-            recorderFallbackActive: true
-        )
-
-        let counts = await fixture.service.captureFrameCounts()
-
-        // nil, not 0 — the recorder fallback does not write through AudioFileStreamer, and must
-        // never be mistaken for a dead capture.
-        #expect(counts.mic == nil)
-    }
-
     // MARK: - Mic resilience under unified ScreenCaptureKit capture
 
     private func makeUnifiedSession(micDeviceUID: String?) -> UnifiedCaptureSession {
@@ -1963,7 +1552,7 @@ final class RecordingServiceTests {
     }
 
     @Test
-    func testRetargetMicUnderUnifiedCaptureUpdatesLiveStreamWithoutEngineRecovery() async throws {
+    func testRetargetMicUpdatesLiveStream() async throws {
         let fixture = try await makeRecoveryFixture()
         defer { removeWorkspace(at: fixture.workspace.rootURL) }
         fixture.hardware.devices = [(id: 1, uid: "device-a"), (id: 2, uid: "device-b")]
@@ -1982,12 +1571,6 @@ final class RecordingServiceTests {
 
         #expect(stream.updateCallCount == 1)
         #expect(unified.currentMicDeviceUID == "device-b")
-        let state = await fixture.service.recoveryDebugStateForTesting()
-        #expect(state.desiredMicDeviceUID == "device-b")
-        #expect(!state.isRecoveringMicCapture)
-        // The engine path must not run: no restart, and no retry loop scheduled.
-        #expect(fixture.micController.startCaptureCalls.isEmpty)
-        #expect(!state.hasRecoveryRetryTask)
         #expect(await fixture.service.isRecording())
         #expect(await fixture.service.consumePendingError() == nil)
     }
@@ -2014,8 +1597,6 @@ final class RecordingServiceTests {
         #expect(unified.currentMicDeviceUID == "device-a")
         #expect(await fixture.service.isRecording())
         #expect(await fixture.service.consumePendingError() == nil)
-        let state = await fixture.service.recoveryDebugStateForTesting()
-        #expect(!state.hasRecoveryRetryTask)
     }
 
     @Test
@@ -2054,7 +1635,6 @@ final class RecordingServiceTests {
 
         #expect(stream.updateCallCount == 1)
         #expect(unified.currentMicDeviceUID == "device-b")
-        #expect(fixture.micController.startCaptureCalls.isEmpty)
     }
 
     @Test
@@ -2103,557 +1683,10 @@ final class RecordingServiceTests {
         #expect(unified.currentMicDeviceUID == "device-a")
     }
 
-    @Test
-    func testEngineConfigurationChangeUnderUnifiedCaptureIsANoOp() async throws {
-        let fixture = try await makeRecoveryFixture()
-        defer { removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [(id: 1, uid: "device-a")]
-
-        let unified = makeUnifiedSession(micDeviceUID: "device-a")
-        let stream = StubUnifiedStream()
-        unified.attachStreamForTesting(stream)
-        await fixture.service.setRecordingStateForTesting(isRecording: true)
-        await fixture.service.setMicRecoveryStateForTesting(
-            desiredMicDeviceUID: "device-a",
-            micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav")
-        )
-        await fixture.service.setUnifiedCaptureSessionForTesting(unified)
-
-        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
-
-        // There is no AVAudioEngine to restart on this path.
-        #expect(fixture.micController.startCaptureCalls.isEmpty)
-        #expect(stream.updateCallCount == 0)
-        #expect(await fixture.service.isRecording())
-        #expect(await fixture.service.consumePendingError() == nil)
-        let state = await fixture.service.recoveryDebugStateForTesting()
-        #expect(!state.hasRecoveryRetryTask)
-    }
-
-    // MARK: - Capture targeting
-
-    @Test
-    func engineCaptureTargetsTheDesiredMicWhileItIsUsable() async throws {
-        let fixture = try await makeRecoveryFixture()
-        defer { removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [(1, "BuiltInMicrophoneDevice"), (2, "airpods:input")]
-
-        try await startEngineCaptureAfterConfigurationChange(fixture, desiredMicDeviceUID: "airpods:input")
-
-        #expect(fixture.micController.startCaptureCalls.last?.deviceID == 2)
-    }
-
-    @Test
-    func engineCaptureFallsBackToTheSystemInputWhenTheDesiredMicIsDead() async throws {
-        let fixture = try await makeRecoveryFixture()
-        defer { removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [(1, "BuiltInMicrophoneDevice"), (2, "airpods:input")]
-        fixture.hardware.deadDeviceIDs = [2]
-
-        try await startEngineCaptureAfterConfigurationChange(fixture, desiredMicDeviceUID: "airpods:input")
-
-        let call = try #require(fixture.micController.startCaptureCalls.last)
-        #expect(call.deviceID == nil)
-    }
-
-    @Test
-    func engineCaptureNeverTargetsAPrivateAggregateOrAnOutputOnlyDevice() async throws {
-        let fixture = try await makeRecoveryFixture()
-        defer { removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [(1, "BuiltInMicrophoneDevice"), (2, "CADefaultDeviceAggregate-74099-0"), (3, "BuiltInSpeakerDevice")]
-        fixture.hardware.privateAggregateIDs = [2]
-        fixture.hardware.outputOnlyDeviceIDs = [3]
-
-        try await startEngineCaptureAfterConfigurationChange(fixture, desiredMicDeviceUID: "CADefaultDeviceAggregate-74099-0")
-        try await startEngineCaptureAfterConfigurationChange(fixture, desiredMicDeviceUID: "BuiltInSpeakerDevice")
-
-        #expect(fixture.micController.startCaptureCalls.map(\.deviceID) == [nil, nil])
-    }
-
-    /// Every device is offered exactly when capture would target it.
-    @Test
-    func theMicListAndCaptureTargetingAgree() async throws {
-        let fixture = try await makeRecoveryFixture()
-        defer { removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [
-            (1, "BuiltInMicrophoneDevice"), (2, "airpods:input"), (3, "CADefaultDeviceAggregate-74099-0"), (4, "BuiltInSpeakerDevice")
-        ]
-        fixture.hardware.deadDeviceIDs = [2]
-        fixture.hardware.privateAggregateIDs = [3]
-        fixture.hardware.outputOnlyDeviceIDs = [4]
-        let suiteName = "RecordingServiceTests.\(UUID().uuidString)"
-        defer { UserDefaults().removePersistentDomain(forName: suiteName) }
-        let deviceService = await MainActor.run {
-            AudioDeviceService(
-                hardware: fixture.hardware,
-                userDefaults: UserDefaults(suiteName: suiteName)!,
-                notificationCenter: NotificationCenter()
-            )
-        }
-        let offered = await MainActor.run { Set(deviceService.availableDevices.map(\.uid)) }
-
-        var targeted: Set<String> = []
-        for (id, uid) in fixture.hardware.devices {
-            try await startEngineCaptureAfterConfigurationChange(fixture, desiredMicDeviceUID: uid)
-            if fixture.micController.startCaptureCalls.last?.deviceID == id {
-                targeted.insert(uid)
-            }
-        }
-
-        #expect(offered == ["BuiltInMicrophoneDevice"])
-        #expect(targeted == offered)
-    }
-
-    private func startEngineCaptureAfterConfigurationChange(
-        _ fixture: (service: RecordingService, workspace: Workspace, hardware: MockRecoveryAudioDeviceHardware, micController: MockMicCaptureController),
-        desiredMicDeviceUID: String
-    ) async throws {
-        await fixture.service.setRecordingStateForTesting(isRecording: true, liveAudioContinuation: nil)
-        await fixture.service.setMicRecoveryStateForTesting(
-            desiredMicDeviceUID: desiredMicDeviceUID,
-            micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav")
-        )
-        fixture.micController.isRunning = false
-        await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
-    }
-
-    // MARK: - Input format change during an engine start (ticket 11)
-
-    @Test
-    func anEngineStartWhoseInputChangesFormatBeforeTheTapStartsWithoutAStaleTapFormat() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let target = try #require(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1))
-        let streamer = AudioFileStreamer(label: "mic")
-        try streamer.prepare(url: root.appendingPathComponent("mic.wav"), format: target)
-        defer { streamer.close() }
-        let engine = FormatChangingMicInput(rates: [24_000, 16_000])
-        let controller = AVAudioEngineMicCaptureController(makeEngine: { engine })
-        let delivered = DeliveredRates()
-
-        try controller.startCapture(
-            deviceID: 22,
-            targetFormat: target,
-            micFileURL: root.appendingPathComponent("mic.wav"),
-            micStreamer: streamer,
-            gate: CaptureAudioGate(),
-            voiceProcessingEnabled: false,
-            applyVoiceProcessing: { _, _ in },
-            onFirstHostTime: { _ in },
-            onBuffer: { output in
-                if case .audio(let samples, let rate, _, _) = output, !samples.isEmpty { delivered.add(rate) }
-            }
-        )
-
-        #expect(engine.staleTapFormats.isEmpty, "tap installed with a format the input no longer has")
-        #expect(controller.isCaptureRunning())
-        // Buffers in the input's new format are converted to the target format.
-        let tapBlock = try #require(engine.tapBlock)
-        for index in 0..<5 {
-            let buffer = try CaptureAudioGateTests.makePCM([Float](repeating: 0.1, count: 320), sampleRate: 16_000)
-            tapBlock(buffer, AVAudioTime(hostTime: mach_absolute_time() + UInt64(index) * 1_000))
-        }
-        #expect(delivered.rates.contains(48_000))
-        #expect(!delivered.rates.contains { $0 != 48_000 })
-    }
-
-    @Test
-    func aMicOnlyStartWhoseInputChangesFormatRecordsOnTheEngine() async throws {
-        let fixture = try await makeFormatChangeFixture(startError: nil)
-        defer { removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [(id: 22, uid: "airpods")]
-
-        _ = try await fixture.service.startRecording(
-            in: fixture.workspace, micDeviceID: 22, title: "Session", audioSyncFlags: .shippedDefaults
-        )
-
-        let engines = fixture.engines.made
-        #expect(!engines.isEmpty)
-        #expect(engines.allSatisfy { $0.staleTapFormats.isEmpty }, "tap installed with a format the input no longer has")
-        #expect(engines.last?.isRunning == true)
-        #expect(fixture.recorder.recordCalls == 0)
-        _ = await fixture.service.stopRecording()
-    }
-
-    @Test
-    func aMicOnlyStartWhoseEngineFailsAfterAFormatChangeFallsBackToTheRecorder() async throws {
-        let fixture = try await makeFormatChangeFixture(
-            startError: NSError(domain: NSOSStatusErrorDomain, code: 1_852_797_029)
-        )
-        defer { removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [(id: 22, uid: "airpods")]
-
-        _ = try await fixture.service.startRecording(
-            in: fixture.workspace, micDeviceID: 22, title: "Session", audioSyncFlags: .shippedDefaults
-        )
-
-        let engines = fixture.engines.made
-        #expect(!engines.isEmpty)
-        #expect(engines.allSatisfy { $0.staleTapFormats.isEmpty }, "tap installed with a format the input no longer has")
-        #expect(fixture.recorder.recordCalls == 1)
-        #expect(await fixture.service.isRecording())
-        _ = await fixture.service.stopRecording()
-    }
-
-    private func makeFormatChangeFixture(startError: NSError?) async throws -> (
-        service: RecordingService,
-        workspace: Workspace,
-        hardware: MockRecoveryAudioDeviceHardware,
-        engines: FormatChangingMicInputs,
-        recorder: HangTestRecorder
-    ) {
-        let workspace = makeWorkspace()
-        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
-        let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
-            SpeakerProfile.self, RecordingTag.self,
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
-        )
-        let workspaceService = MockWorkspaceService()
-        workspaceService.requireWritableResult = .success(workspace)
-        let hardware = MockRecoveryAudioDeviceHardware()
-        let engines = FormatChangingMicInputs(startError: startError)
-        let recorder = HangTestRecorder()
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
-        let service = RecordingService(
-            workspaceService: workspaceService,
-            modelContainer: container,
-            appAudioSettings: appAudioSettings,
-            hardware: hardware,
-            micCaptureControllerFactory: { AVAudioEngineMicCaptureController(makeEngine: { engines.make() }) },
-            notificationCenter: NotificationCenter(),
-            mixdownCoordinator: MockRecordingMixdownCoordinator(),
-            screenVideoMuxer: MockScreenVideoMuxer(),
-            permissionChecker: {},
-            scopedAccessStarter: { _ in true },
-            scopedAccessStopper: { _ in },
-            recorderFallbackFactory: { _, _ in recorder },
-            voiceProcessingSetting: { false }
-        )
-        return (service, workspace, hardware, engines, recorder)
-    }
-
-    // MARK: - Hung engine start (ticket 09)
-
-    @Test
-    func aRetargetWhoseEngineStartHangsReturnsAndSchedulesARetry() async throws {
-        try await withHangFixture() { fixture in
-            fixture.hardware.devices = [(id: 11, uid: "uid-a"), (id: 22, uid: "uid-b")]
-            fixture.engines.hangingDeviceIDs = [22]
-            await fixture.service.setRecordingStateForTesting(isRecording: true)
-            await fixture.service.setMicRecoveryStateForTesting(
-                desiredMicDeviceUID: "uid-a",
-                micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav")
-            )
-
-            let finished = await finishes(within: 3) {
-                await fixture.service.retargetMic(desiredDeviceUID: "uid-b")
-            }
-
-            // The service is held by the blocked start until it is released, so ask nothing more.
-            try #require(finished)
-            #expect(await fixture.service.isRecording())
-            #expect(await fixture.service.recoveryDebugStateForTesting().hasRecoveryRetryTask)
-        }
-    }
-
-    @Test
-    func aHungEngineStartThatReturnsLateIsStoppedWithoutTouchingTheCurrentCapture() async throws {
-        try await withHangFixture() { fixture in
-            fixture.hardware.devices = [(id: 11, uid: "uid-a"), (id: 22, uid: "uid-b")]
-            fixture.engines.hangingDeviceIDs = [22]
-            await fixture.service.setRecordingStateForTesting(isRecording: true)
-            await fixture.service.setMicRecoveryStateForTesting(
-                desiredMicDeviceUID: "uid-a",
-                micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav"),
-                fallbackMicDeviceUID: "uid-a"
-            )
-            try #require(await finishes(within: 3) { await fixture.service.retargetMic(desiredDeviceUID: "uid-b") })
-            await fixture.service.performMicRecoveryRetryAttemptForTesting()
-            let hung = try #require(fixture.engines.made.first { $0.hung })
-            let current = try #require(fixture.engines.made.last)
-            #expect(hung !== current)
-            #expect(current.startedDeviceIDs == [11])
-
-            hung.release()
-
-            #expect(await eventually { hung.stopCount > 0 })
-            #expect(current.isRunning)
-            #expect(current.stopCount == 0)
-            #expect(await fixture.service.recoveryDebugStateForTesting().currentCaptureDeviceID == 11)
-            _ = await fixture.service.stopRecording()
-        }
-    }
-
-    @Test
-    func aDeviceWhoseEngineStartHangsIsNotStartedAgainUntilTheCallReturns() async throws {
-        try await withHangFixture() { fixture in
-            fixture.hardware.devices = [(id: 11, uid: "uid-a"), (id: 22, uid: "uid-b")]
-            fixture.engines.hangingDeviceIDs = [22, 0]
-            await fixture.service.setRecordingStateForTesting(isRecording: true)
-            await fixture.service.setMicRecoveryStateForTesting(
-                desiredMicDeviceUID: "uid-b",
-                micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav")
-            )
-
-            for _ in 0..<3 {
-                try #require(await finishes(within: 3) { await fixture.service.performMicRecoveryRetryAttemptForTesting() })
-            }
-
-            #expect(fixture.engines.attemptedDeviceIDs.filter { $0 == 22 }.count == 1)
-            #expect(fixture.engines.attemptedDeviceIDs.filter { $0 == nil }.count == 1)
-            _ = await fixture.service.stopRecording()
-        }
-    }
-
-    @Test
-    func aStopWhileAnEngineRecoveryHangsCompletesAndSavesTheRecording() async throws {
-        try await withHangFixture(engineCallTimeout: .seconds(30)) { fixture in
-            fixture.hardware.devices = [(id: 11, uid: "builtin")]
-            let sessionID = try await fixture.service.startRecording(
-                in: fixture.workspace,
-                micDeviceID: 11,
-                preferredMicDeviceUID: "airpods",
-                title: "Session",
-                audioSyncFlags: .shippedDefaults
-            )
-            fixture.engines.hangingDeviceIDs = [22]
-            fixture.hardware.devices.append((id: 22, uid: "airpods"))
-            let service = fixture.service
-            Task { await service.simulateHardwareChangeForTesting() }
-            try #require(await eventually { fixture.engines.made.contains { $0.hung } })
-
-            let stopped = StopResult()
-            try #require(await finishes(within: 3) { await stopped.set(service.stopRecording()) })
-
-            #expect(await stopped.value == sessionID)
-            let session = try fetchRecordingSession(id: sessionID, from: ModelContext(fixture.container))
-            #expect(session.status == .recorded)
-            let hung = try #require(fixture.engines.made.first { $0.hung })
-            hung.release()
-            #expect(await eventually { hung.stopCount > 0 })
-        }
-    }
-
-    @Test
-    func startCompletesWhenItsTargetRecheckHangsAndCaptureReturnsToTheStartDevice() async throws {
-        try await withHangFixture(engineCallTimeout: .seconds(1)) { fixture in
-            fixture.hardware.devices = [(id: 11, uid: "builtin")]
-            fixture.engines.hangingDeviceIDs = [22]
-            // The preferred mic appears while the start's engine starts, so only the re-check sees it.
-            let hardware = fixture.hardware
-            fixture.engines.onFirstStart = { hardware.devices.append((id: 22, uid: "airpods")) }
-
-            let started = await finishes(within: 4) {
-                _ = try? await fixture.service.startRecording(
-                    in: fixture.workspace,
-                    micDeviceID: 11,
-                    preferredMicDeviceUID: "airpods",
-                    title: "Session",
-                    audioSyncFlags: .shippedDefaults
-                )
-            }
-
-            try #require(started)
-            #expect(await fixture.service.isRecording())
-            #expect(fixture.engines.made.contains { $0.hung })
-            #expect(await eventually {
-                await fixture.service.recoveryDebugStateForTesting().currentCaptureDeviceID == 11
-                    && fixture.engines.made.last?.isRunning == true
-            })
-            _ = await fixture.service.stopRecording()
-        }
-    }
-
-    @Test
-    func aStartWhoseEngineHangsOnThePreferredMicRecordsOnTheDefault() async throws {
-        try await withHangFixture() { fixture in
-            fixture.hardware.devices = [(id: 11, uid: "builtin"), (id: 22, uid: "airpods")]
-            fixture.engines.hangingDeviceIDs = [22]
-
-            let started = await finishes(within: 3) {
-                _ = try? await fixture.service.startRecording(
-                    in: fixture.workspace,
-                    micDeviceID: 22,
-                    preferredMicDeviceUID: "airpods",
-                    title: "Session",
-                    audioSyncFlags: .shippedDefaults
-                )
-            }
-
-            try #require(started)
-            #expect(await fixture.service.isRecording())
-            #expect(fixture.engines.made.last?.startedDeviceIDs == [nil])
-            #expect(fixture.engines.made.last?.isRunning == true)
-            _ = await fixture.service.stopRecording()
-        }
-    }
-
-    @Test
-    func aStartWhoseEngineHangsOnTheDefaultUsesTheRecorderFallback() async throws {
-        try await withHangFixture() { fixture in
-            fixture.hardware.devices = [(id: 11, uid: "builtin")]
-            fixture.engines.hangingDeviceIDs = [0]
-
-            let started = await finishes(within: 3) {
-                _ = try? await fixture.service.startRecording(in: fixture.workspace, title: "Session", audioSyncFlags: .shippedDefaults)
-            }
-
-            try #require(started)
-            #expect(await fixture.service.isRecording())
-            #expect(fixture.recorder.recordCalls == 1)
-            #expect(await fixture.service.capturedMicrophone() == .unknown)
-            _ = await fixture.service.stopRecording()
-        }
-    }
-
-    @Test
-    func aRemovalWhoseDefaultEngineStartHangsReturnsAndSchedulesARetry() async throws {
-        try await withHangFixture() { fixture in
-            fixture.hardware.devices = [(id: 11, uid: "builtin"), (id: 22, uid: "airpods")]
-            _ = try await fixture.service.startRecording(
-                in: fixture.workspace,
-                micDeviceID: 22,
-                preferredMicDeviceUID: "airpods",
-                title: "Session",
-                audioSyncFlags: .shippedDefaults
-            )
-            fixture.engines.hangingDeviceIDs = [0]
-            fixture.hardware.devices = [(id: 11, uid: "builtin")]
-
-            let finished = await finishes(within: 3) { await fixture.service.simulateHardwareChangeForTesting() }
-
-            try #require(finished)
-            #expect(fixture.engines.made.last?.hung == true)
-            #expect(await fixture.service.recoveryDebugStateForTesting().hasRecoveryRetryTask)
-            _ = await fixture.service.stopRecording()
-        }
-    }
-
-    @Test
-    func aResumeWhoseEngineRestartHangsFailsAndKeepsTheRecordingPaused() async throws {
-        try await withHangFixture() { fixture in
-            fixture.hardware.devices = [(id: 11, uid: "builtin")]
-            _ = try await fixture.service.startRecording(
-                in: fixture.workspace,
-                micDeviceID: 11,
-                title: "Session",
-                audioSyncFlags: .shippedDefaults
-            )
-            #expect(await fixture.service.pauseRecording())
-            try #require(fixture.engines.made.last).die()
-            fixture.engines.hangingDeviceIDs = [11]
-
-            let resumed = ResumeResult()
-            try #require(await finishes(within: 3) { await resumed.set(fixture.service.resumeRecording()) })
-
-            #expect(await resumed.value == false)
-            #expect(await fixture.service.isPaused())
-            _ = await fixture.service.stopRecording()
-        }
-    }
-
-    @Test
-    func aStopWhoseEngineStopHangsCompletesAndSavesTheRecording() async throws {
-        try await withHangFixture() { fixture in
-            fixture.hardware.devices = [(id: 11, uid: "builtin")]
-            let sessionID = try await fixture.service.startRecording(
-                in: fixture.workspace,
-                micDeviceID: 11,
-                title: "Session",
-                audioSyncFlags: .shippedDefaults
-            )
-            try #require(fixture.engines.made.last).stopHangs = true
-
-            let stopped = StopResult()
-            try #require(await finishes(within: 3) { await stopped.set(fixture.service.stopRecording()) })
-
-            #expect(await stopped.value == sessionID)
-            let session = try fetchRecordingSession(id: sessionID, from: ModelContext(fixture.container))
-            #expect(session.status == .recorded)
-        }
-    }
-
-    /// Runs `body` with a hang fixture, then always opens every gate the fakes block on, stops
-    /// the recording, and checks that no fake call is still blocked: an abandoned call must return
-    /// and be discarded through the service, not outlive the test on a blocked thread.
-    private func withHangFixture(
-        engineCallTimeout: Duration = .milliseconds(200),
-        _ body: (HangFixture) async throws -> Void
-    ) async throws {
-        let fixture = try await makeHangFixture(engineCallTimeout: engineCallTimeout)
-        var failure: (any Error)?
-        do {
-            try await body(fixture)
-        } catch {
-            failure = error
-        }
-        fixture.engines.releaseAll()
-        _ = await fixture.service.stopRecording()
-        let engines = fixture.engines
-        #expect(await eventually { engines.blockedCallCount == 0 }, "A fake engine call is still blocked")
-        removeWorkspace(at: fixture.workspace.rootURL)
-        if let failure { throw failure }
-    }
-
-    private typealias HangFixture = (
-        service: RecordingService,
-        workspace: Workspace,
-        hardware: MockRecoveryAudioDeviceHardware,
-        engines: HangingEngines,
-        container: ModelContainer,
-        recorder: HangTestRecorder
-    )
-
-    private func makeHangFixture(engineCallTimeout: Duration = .milliseconds(200)) async throws -> (
-        service: RecordingService,
-        workspace: Workspace,
-        hardware: MockRecoveryAudioDeviceHardware,
-        engines: HangingEngines,
-        container: ModelContainer,
-        recorder: HangTestRecorder
-    ) {
-        let workspace = makeWorkspace()
-        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
-        let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
-            SpeakerProfile.self, RecordingTag.self,
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
-        )
-        let workspaceService = MockWorkspaceService()
-        workspaceService.requireWritableResult = .success(workspace)
-        let hardware = MockRecoveryAudioDeviceHardware()
-        let engines = HangingEngines()
-        let recorder = HangTestRecorder()
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
-        let service = RecordingService(
-            workspaceService: workspaceService,
-            modelContainer: container,
-            appAudioSettings: appAudioSettings,
-            hardware: hardware,
-            micCaptureControllerFactory: { engines.make() },
-            engineCallTimeout: engineCallTimeout,
-            // Other tests' engine notifications on the default center would start recoveries here.
-            notificationCenter: NotificationCenter(),
-            mixdownCoordinator: MockRecordingMixdownCoordinator(),
-            screenVideoMuxer: MockScreenVideoMuxer(),
-            permissionChecker: {},
-            scopedAccessStarter: { _ in true },
-            scopedAccessStopper: { _ in },
-            recorderFallbackFactory: { _, _ in recorder },
-            // The default reads the setting on the main actor, which other suites keep busy for
-            // seconds; the time windows here measure the engine call alone.
-            voiceProcessingSetting: { false }
-        )
-        return (service, workspace, hardware, engines, container, recorder)
-    }
-
     private func makeRecoveryFixture() async throws -> (
         service: RecordingService,
         workspace: Workspace,
-        hardware: MockRecoveryAudioDeviceHardware,
-        micController: MockMicCaptureController
+        hardware: MockRecoveryAudioDeviceHardware
     ) {
         let workspace = makeWorkspace()
         try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
@@ -2662,20 +1695,17 @@ final class RecordingServiceTests {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let hardware = MockRecoveryAudioDeviceHardware()
-        let micController = MockMicCaptureController()
-        let appAudioSettings = await MainActor.run { AppAudioSettings() }
         let service = RecordingService(
             workspaceService: MockWorkspaceService(),
             modelContainer: modelContainer,
-            appAudioSettings: appAudioSettings,
             hardware: hardware,
-            micCaptureController: micController
+            captureSessionStarter: { try await CaptureStartProbe().start($0) }
         )
-        return (service, workspace, hardware, micController)
+        return (service, workspace, hardware)
     }
 }
 
-// Thread-safe call counter for voice processing setter tests
+// Thread-safe call counter for injected operations.
 private final class VPCallCounter: @unchecked Sendable {
     private(set) var callCount = 0
     func increment() { callCount += 1 }
@@ -2881,55 +1911,8 @@ private actor MockScreenVideoMuxer: ScreenVideoMuxing {
     }
 }
 
-private final class MockMicCaptureController: MicCaptureControlling, @unchecked Sendable {
-    struct StartCall {
-        let deviceID: AudioDeviceID?
-        let targetSampleRate: Double
-    }
-
-    var startCaptureError: Error?
-    var startCaptureErrors: [Error] = []
-    private(set) var startCaptureCalls: [StartCall] = []
-    var onBuffer: MicBufferHandler?
-    private(set) var stopCaptureCallCount = 0
-    var isRunning = false
-
-    func startCapture(
-        deviceID: AudioDeviceID?,
-        targetFormat: AVAudioFormat,
-        micFileURL _: URL,
-        micStreamer _: AudioFileStreamer,
-        gate _: CaptureAudioGate,
-        voiceProcessingEnabled _: Bool,
-        applyVoiceProcessing _: @Sendable (AVAudioInputNode, Bool) -> Void,
-        onFirstHostTime _: @escaping @Sendable (HostNanoseconds) -> Void,
-        onBuffer: @escaping MicBufferHandler
-    ) throws {
-        if !startCaptureErrors.isEmpty {
-            throw startCaptureErrors.removeFirst()
-        }
-        if let startCaptureError {
-            throw startCaptureError
-        }
-        self.onBuffer = onBuffer
-        startCaptureCalls.append(.init(deviceID: deviceID, targetSampleRate: targetFormat.sampleRate))
-        isRunning = true
-    }
-
-    func stopCapture() {
-        stopCaptureCallCount += 1
-        isRunning = false
-    }
-
-    func retargetDevice(_: AudioDeviceID?) throws {}
-
-    func isCaptureRunning() -> Bool {
-        isRunning
-    }
-}
-
 private final class MockRecoveryAudioDeviceHardware: AudioDeviceHardwareProviding, @unchecked Sendable {
-    var devices: [(id: AudioDeviceID, uid: String)] = []
+    var devices: [(id: AudioDeviceID, uid: String)] = [(1, "device-a")]
     var deadDeviceIDs: Set<AudioDeviceID> = []
     var privateAggregateIDs: Set<AudioDeviceID> = []
     var outputOnlyDeviceIDs: Set<AudioDeviceID> = []
@@ -2998,8 +1981,11 @@ private final class StubUnifiedStream: UnifiedCaptureStreaming, @unchecked Senda
 private final class CaptureStartProbe: @unchecked Sendable {
     enum Kind: Equatable {
         case unified
-        case appAudio
     }
+
+    private let writesAudio: Bool
+
+    init(writesAudio: Bool = true) { self.writesAudio = writesAudio }
 
     private let lock = NSLock()
     private var recorded: [Kind] = []
@@ -3013,308 +1999,14 @@ private final class CaptureStartProbe: @unchecked Sendable {
         case .unified(let session):
             lock.withLock { recorded.append(.unified) }
             try await session.start(stream: StubUnifiedStream())
-        case .appAudio(let session):
-            lock.withLock { recorded.append(.appAudio) }
-            try await session.start(stream: StubUnifiedStream())
-        }
-    }
-}
-
-/// True when `operation` finished within `seconds`. An operation that never returns is left
-/// running; the caller is not held by it.
-private func finishes(within seconds: Double, _ operation: @escaping @Sendable () async -> Void) async -> Bool {
-    let outcome = OnceFlag()
-    return await withCheckedContinuation { continuation in
-        Task {
-            await operation()
-            if outcome.claim() { continuation.resume(returning: true) }
-        }
-        Task {
-            try? await Task.sleep(for: .seconds(seconds))
-            if outcome.claim() { continuation.resume(returning: false) }
-        }
-    }
-}
-
-/// True once `condition` holds, checked every 20 ms for up to `seconds`.
-private func eventually(within seconds: Double = 3, _ condition: @Sendable () async -> Bool) async -> Bool {
-    let deadline = ContinuousClock.now + .seconds(seconds)
-    while ContinuousClock.now < deadline {
-        if await condition() { return true }
-        try? await Task.sleep(for: .milliseconds(20))
-    }
-    return await condition()
-}
-
-private actor StopResult {
-    private(set) var value: UUID?
-    func set(_ value: UUID?) { self.value = value }
-}
-
-private actor ResumeResult {
-    private(set) var value: Bool?
-    func set(_ value: Bool) { self.value = value }
-}
-
-private final class HangTestRecorder: MicRecorderFallback, @unchecked Sendable {
-    private let lock = NSLock()
-    private var _recordCalls = 0
-    var recordCalls: Int { lock.withLock { _recordCalls } }
-    func record() -> Bool {
-        lock.withLock { _recordCalls += 1 }
-        return true
-    }
-    func pause() {}
-    func stop() {}
-    func updateMeters() {}
-    func averagePower(forChannel _: Int) -> Float { -160 }
-}
-
-private final class OnceFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var claimed = false
-
-    func claim() -> Bool {
-        lock.withLock {
-            defer { claimed = true }
-            return !claimed
-        }
-    }
-}
-
-/// Makes a new engine controller for every capture start, the way the app does, and keeps them
-/// so tests can see which ones started, hung, or were stopped.
-private final class HangingEngines: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _hangingDeviceIDs: Set<AudioDeviceID> = []
-    private var _made: [HangingMicController] = []
-    private var _attemptedDeviceIDs: [AudioDeviceID?] = []
-    private var _onFirstStart: (@Sendable () -> Void)?
-    private var _released = false
-
-    /// Starts on these devices block until released. 0 stands for the system default.
-    var hangingDeviceIDs: Set<AudioDeviceID> {
-        get { lock.withLock { _hangingDeviceIDs } }
-        set { lock.withLock { _hangingDeviceIDs = newValue } }
-    }
-
-    var made: [HangingMicController] {
-        lock.withLock { _made }
-    }
-
-    /// Every device a start was called for, in order, whether it returned or not.
-    var attemptedDeviceIDs: [AudioDeviceID?] {
-        lock.withLock { _attemptedDeviceIDs }
-    }
-
-    /// Runs inside the first start, before it returns.
-    var onFirstStart: (@Sendable () -> Void)? {
-        get { lock.withLock { _onFirstStart } }
-        set { lock.withLock { _onFirstStart = newValue } }
-    }
-
-    func make() -> any MicCaptureControlling {
-        let controller = HangingMicController { [weak self] deviceID in
-            guard let self else { return false }
-            let first = self.lock.withLock {
-                self._attemptedDeviceIDs.append(deviceID)
-                defer { self._onFirstStart = nil }
-                return self._onFirstStart
+            if writesAudio {
+                let buffer = try CaptureAudioGateTests.makeSampleBuffer(
+                    Array(repeating: CaptureAudioGateTests.before, count: 960), sampleRate: 48_000,
+                    hostTime: HostNanoseconds(machTicks: mach_absolute_time())
+                )
+                session.micHandler.processSampleBufferForTesting(buffer)
+                if session.hasAppSource { session.appHandler.processSampleBufferForTesting(buffer) }
             }
-            first?()
-            return self.hangingDeviceIDs.contains(deviceID ?? 0)
-        }
-        let released = lock.withLock {
-            _made.append(controller)
-            return _released
-        }
-        if released { controller.release() }
-        return controller
-    }
-
-    /// Opens every controller's gate for good, including controllers made afterwards.
-    func releaseAll() {
-        let controllers = lock.withLock {
-            _released = true
-            return _made
-        }
-        controllers.forEach { $0.release() }
-    }
-
-    /// Calls blocked inside a fake right now, across every controller made.
-    var blockedCallCount: Int {
-        made.reduce(0) { $0 + $1.blockedCallCount }
-    }
-}
-
-/// An engine controller whose start can block inside the call, as `-[AVAudioEngine inputNode]`
-/// did on hardware (spec, test 10).
-private final class HangingMicController: MicCaptureControlling, @unchecked Sendable {
-    private let hangs: @Sendable (AudioDeviceID?) -> Bool
-    private let gate = NSCondition()
-    private var gateOpen = false
-    private let lock = NSLock()
-    private var _startedDeviceIDs: [AudioDeviceID?] = []
-    private var _stopCount = 0
-    private var _running = false
-    private var _hung = false
-    private var _stopHangs = false
-    private var _blockedCallCount = 0
-    private var _onBuffer: MicBufferHandler?
-
-    init(hangs: @escaping @Sendable (AudioDeviceID?) -> Bool) {
-        self.hangs = hangs
-    }
-
-    /// Devices whose start returned.
-    var startedDeviceIDs: [AudioDeviceID?] { lock.withLock { _startedDeviceIDs } }
-    var stopCount: Int { lock.withLock { _stopCount } }
-    var isRunning: Bool { lock.withLock { _running } }
-    /// True when a start blocked.
-    var hung: Bool { lock.withLock { _hung } }
-    var onBuffer: MicBufferHandler? { lock.withLock { _onBuffer } }
-    var blockedCallCount: Int { lock.withLock { _blockedCallCount } }
-    /// Stops block until released.
-    var stopHangs: Bool {
-        get { lock.withLock { _stopHangs } }
-        set { lock.withLock { _stopHangs = newValue } }
-    }
-
-    /// The engine stops on its own, as on a route change.
-    func die() {
-        lock.withLock { _running = false }
-    }
-
-    func startCapture(
-        deviceID: AudioDeviceID?,
-        targetFormat _: AVAudioFormat,
-        micFileURL _: URL,
-        micStreamer _: AudioFileStreamer,
-        gate _: CaptureAudioGate,
-        voiceProcessingEnabled _: Bool,
-        applyVoiceProcessing _: @Sendable (AVAudioInputNode, Bool) -> Void,
-        onFirstHostTime _: @escaping @Sendable (HostNanoseconds) -> Void,
-        onBuffer: @escaping MicBufferHandler
-    ) throws {
-        if hangs(deviceID) {
-            lock.withLock { _hung = true }
-            block()
-        }
-        lock.withLock {
-            _startedDeviceIDs.append(deviceID)
-            _onBuffer = onBuffer
-            _running = true
         }
     }
-
-    func stopCapture() {
-        if stopHangs {
-            block()
-        }
-        lock.withLock {
-            _stopCount += 1
-            _running = false
-        }
-    }
-
-    func retargetDevice(_: AudioDeviceID?) throws {}
-
-    func isCaptureRunning() -> Bool { isRunning }
-
-    /// Opens the gate for good: blocked calls return and later ones do not block.
-    func release() {
-        gate.lock()
-        gateOpen = true
-        gate.broadcast()
-        gate.unlock()
-    }
-
-    private func block() {
-        lock.withLock { _blockedCallCount += 1 }
-        gate.lock()
-        while !gateOpen { gate.wait() }
-        gate.unlock()
-        lock.withLock { _blockedCallCount -= 1 }
-    }
-}
-
-/// An engine input whose format moves to the next rate in `rates` after each read, the way
-/// AirPods switch to their headset mode during a start ("iounit configuration changed"). A tap
-/// installed with a format the input no longer has is recorded where AVFAudio would raise.
-private final class FormatChangingMicInput: MicInputEngine, @unchecked Sendable {
-    private let lock = NSLock()
-    private var rates: [Double]
-    private let startError: NSError?
-    private var _staleTapFormats: [AVAudioFormat] = []
-    private var _tapBlock: AVAudioNodeTapBlock?
-    private var _isRunning = false
-
-    init(rates: [Double], startError: NSError? = nil) {
-        self.rates = rates
-        self.startError = startError
-    }
-
-    var staleTapFormats: [AVAudioFormat] { lock.withLock { _staleTapFormats } }
-    var tapBlock: AVAudioNodeTapBlock? { lock.withLock { _tapBlock } }
-    var isRunning: Bool { lock.withLock { _isRunning } }
-
-    private var liveFormat: AVAudioFormat {
-        AVAudioFormat(standardFormatWithSampleRate: rates[0], channels: 1)!
-    }
-
-    func routeInput(to _: AudioDeviceID) throws {}
-    func applyVoiceProcessing(_: (AVAudioInputNode, Bool) -> Void, enabled _: Bool) {}
-
-    func currentInputFormat() -> AVAudioFormat {
-        lock.withLock {
-            let format = liveFormat
-            if rates.count > 1 { rates.removeFirst() }
-            return format
-        }
-    }
-
-    func installInputTap(bufferSize _: AVAudioFrameCount, format: AVAudioFormat?, block: @escaping AVAudioNodeTapBlock) {
-        lock.withLock {
-            if let format, format != liveFormat { _staleTapFormats.append(format) }
-            _tapBlock = block
-        }
-    }
-
-    func removeInputTap() {
-        lock.withLock { _tapBlock = nil }
-    }
-
-    func start() throws {
-        if let startError { throw startError }
-        lock.withLock { _isRunning = true }
-    }
-
-    func stop() {
-        lock.withLock { _isRunning = false }
-    }
-}
-
-private final class FormatChangingMicInputs: @unchecked Sendable {
-    private let lock = NSLock()
-    private let startError: NSError?
-    private var _made: [FormatChangingMicInput] = []
-
-    init(startError: NSError?) {
-        self.startError = startError
-    }
-
-    var made: [FormatChangingMicInput] { lock.withLock { _made } }
-
-    func make() -> FormatChangingMicInput {
-        let input = FormatChangingMicInput(rates: [24_000, 16_000], startError: startError)
-        lock.withLock { _made.append(input) }
-        return input
-    }
-}
-
-private final class DeliveredRates: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _rates: [Double] = []
-    var rates: [Double] { lock.withLock { _rates } }
-    func add(_ rate: Double) { lock.withLock { _rates.append(rate) } }
 }

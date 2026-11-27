@@ -264,3 +264,35 @@ private final class MockScreenRecordingFunctionalPermissionProvider: ScreenRecor
         return snapshotResult
     }
 }
+
+
+struct RecordingPermissionTests {
+    @Test
+    func screenPermissionDeniedStopsBeforeMicrophoneCheck() async {
+        do {
+            try await RecordingPermissionService.ensureRecordingPermissions(
+                screenPermission: { false },
+                microphonePermission: { Issue.record("Microphone check must follow screen permission") }
+            )
+            Issue.record("Expected permission failure")
+        } catch {
+            #expect(error.localizedDescription == "Recording failed to start: no audio.")
+        }
+    }
+
+    @Test
+    func grantedScreenPermissionStillChecksMicrophone() async {
+        do {
+            try await RecordingPermissionService.ensureRecordingPermissions(
+                screenPermission: { true },
+                microphonePermission: { () async throws(RecordingError) in throw .microphoneDenied }
+            )
+            Issue.record("Expected microphone denial")
+        } catch {
+            guard case .microphoneDenied = error else {
+                Issue.record("Expected microphone denial")
+                return
+            }
+        }
+    }
+}

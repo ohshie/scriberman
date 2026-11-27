@@ -14,9 +14,9 @@ struct CaptureAudioGateTests {
     private static let startMs: UInt64 = 10_000
 
     enum Path: String, CaseIterable, Sendable, CustomTestStringConvertible {
-        case unifiedMic, unifiedApp, engineMic, legacyApp
+        case unifiedMic, unifiedApp
         var testDescription: String { rawValue }
-        var source: AudioSource { self == .unifiedMic || self == .engineMic ? .mic : .app }
+        var source: AudioSource { self == .unifiedMic ? .mic : .app }
     }
 
     private static func ms(_ value: UInt64) -> HostNanoseconds {
@@ -130,43 +130,6 @@ struct CaptureAudioGateTests {
                     )
                 }
                 retained = [handler]
-            case .legacyApp:
-                let session = AppAudioCaptureSession(
-                    fileURL: url, processID: 1, onFirstBufferHostTime: { anchors.add($0) },
-                    liveAudioContinuation: audio.continuation, streamer: streamer, gate: gate
-                )
-                session.outputHandler.configureOutput(url: url)
-                feed = { values, rate, time in
-                    session.outputHandler.processSampleBufferForTesting(
-                        try CaptureAudioGateTests.makeSampleBuffer(values, sampleRate: rate, hostTime: time)
-                    )
-                }
-                retained = [session]
-            case .engineMic:
-                let target = try #require(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1))
-                try streamer.prepare(url: url, format: target)
-                let continuation = audio.continuation
-                let tap = try EngineMicTap(
-                    inputFormat: try #require(AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)),
-                    targetFormat: target,
-                    micStreamer: streamer,
-                    gate: gate,
-                    onFirstHostTime: { anchors.add($0) },
-                    onBuffer: { output in
-                        switch output {
-                        case let .audio(samples, rate, adjusted, raw):
-                            continuation.yield(LiveAudioChunk(
-                                samples: samples, source: .mic, sampleRate: rate, hostTime: adjusted, rawHostTime: raw
-                            ))
-                        case let .pauseMarker(number):
-                            continuation.yield(.pauseMarker(number, source: .mic))
-                        }
-                    }
-                )
-                feed = { values, rate, time in
-                    tap.process(try CaptureAudioGateTests.makePCM(values, sampleRate: rate), hostTime: time)
-                }
-                retained = [tap]
             }
             let stream = audio.stream
             let box = received
@@ -341,7 +304,7 @@ struct CaptureAudioGateTests {
 
     /// A 440 Hz tone outside the pause and full-scale alternating samples inside it: the kept
     /// output must not depend on what was captured during the pause.
-    @Test(arguments: [Path.unifiedMic, .engineMic], [44_100.0, 24_000, 16_000, 96_000])
+    @Test(arguments: [Path.unifiedMic], [44_100.0, 24_000, 16_000, 96_000])
     func nothingCapturedDuringAPauseComesOutOfTheConverter(path: Path, rate: Double) async throws {
         func run(pausedLevel: Float) async throws -> [Float] {
             let rig = try Rig(path, sampleRate: rate)
@@ -380,7 +343,7 @@ struct CaptureAudioGateTests {
         }
     }
 
-    @Test(arguments: [Path.unifiedMic, .engineMic])
+    @Test(arguments: [Path.unifiedMic])
     func aPauseAddsNoGapToAConvertedSource(path: Path) async throws {
         let rig = try Rig(path, sampleRate: 44_100)
         try feedOnePause(rig)
@@ -404,7 +367,7 @@ struct CaptureAudioGateTests {
 
     /// Frames the converter holds across a boundary belong to the side they were captured on. If
     /// they did not, frames captured during the pause would come out as silence after the cut.
-    @Test(arguments: [Path.unifiedMic, .engineMic], [44_100.0, 24_000, 16_000])
+    @Test(arguments: [Path.unifiedMic], [44_100.0, 24_000, 16_000])
     func heldFramesStayOnTheirSideOfTheCut(path: Path, rate: Double) async throws {
         let rig = try Rig(path, sampleRate: rate)
         for index in 0..<20 {
@@ -442,7 +405,7 @@ struct CaptureAudioGateTests {
         #expect(!result.samples.contains(Self.paused))
     }
 
-    @Test(arguments: [Path.unifiedMic, .engineMic])
+    @Test(arguments: [Path.unifiedMic])
     func audioOfATimestamplessBufferDoesNotSurviveInTheConverter(path: Path) async throws {
         func run(level: Float) async throws -> [Float] {
             let rig = try Rig(path, sampleRate: 44_100)
@@ -593,7 +556,7 @@ struct CaptureAudioGateTests {
 
     /// A resampled microphone gives out the last frames before the pause from the first buffer
     /// after it. They come before the marker.
-    @Test(arguments: [Path.unifiedMic, .engineMic], [44_100.0, 24_000, 16_000])
+    @Test(arguments: [Path.unifiedMic], [44_100.0, 24_000, 16_000])
     func framesTheConverterHeldComeBeforeTheMarker(path: Path, rate: Double) async throws {
         let rig = try Rig(path, sampleRate: rate)
         for index in 0..<20 {
@@ -743,89 +706,5 @@ struct CaptureAudioGateTests {
         var events: [LiveAudioChunk] = []
         for await event in audio.stream { events.append(event) }
         Self.expectMarkers(events, [PauseSpan(start: 20, end: 60), PauseSpan(start: 80, end: 100)])
-    }
-}
-
-/// The engine tap across an input route change whose new device runs at another rate (finding 11):
-/// the AirPods input ran at 24 kHz, the built-in mic at 48 kHz.
-///
-/// The signal is a ramp of capture time, so a written sample's value says when it was captured.
-struct EngineMicTapRouteChangeTests {
-    private static let startNanos: UInt64 = 10_000_000_000
-    /// Sample value per second of capture time.
-    private static let slope: Float = 0.5
-
-    private final class Rig {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let url: URL
-        let streamer = AudioFileStreamer(label: "mic")
-        let tap: EngineMicTap
-
-        init(inputRate: Double) throws {
-            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-            url = root.appendingPathComponent("mic.wav")
-            let target = try #require(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1))
-            try streamer.prepare(url: url, format: target)
-            tap = try EngineMicTap(
-                inputFormat: try #require(AVAudioFormat(standardFormatWithSampleRate: inputRate, channels: 1)),
-                targetFormat: target,
-                micStreamer: streamer,
-                gate: CaptureAudioGate(),
-                onFirstHostTime: { _ in },
-                onBuffer: { _ in }
-            )
-        }
-
-        deinit { try? FileManager.default.removeItem(at: root) }
-
-        /// Feeds `seconds` of 20 ms buffers at `rate`, starting `offset` seconds into the capture.
-        func feed(rate: Double, from offset: Double, seconds: Double) throws {
-            let perBuffer = Int(rate / 50)
-            for index in 0..<Int((seconds * 50).rounded()) {
-                let first = offset + Double(index) / 50
-                let values = (0..<perBuffer).map { Float(first + Double($0) / rate) * EngineMicTapRouteChangeTests.slope }
-                let host = HostNanoseconds(nanoseconds: EngineMicTapRouteChangeTests.startNanos + UInt64((first * 1e9).rounded()))
-                tap.process(try CaptureAudioGateTests.makePCM(values, sampleRate: rate), hostTime: host)
-            }
-        }
-
-        func finish() throws -> (samples: [Float], segments: [AudioCaptureSegment]) {
-            streamer.close()
-            let sidecar = try #require(AudioFileStreamer.loadTimingSidecar(for: url))
-            return (try CaptureAudioGateTests.readSamples(url), sidecar.segments)
-        }
-    }
-
-    @Test func formatChangeMidRecordingKeepsFramesTimingAndContent() throws {
-        let rig = try Rig(inputRate: 24_000)
-        try rig.feed(rate: 24_000, from: 0, seconds: 0.5)
-        try rig.feed(rate: 48_000, from: 0.5, seconds: 0.5)
-        let (samples, segments) = try rig.finish()
-
-        // The sidecar describes exactly the frames the file has.
-        #expect(segments.reduce(0) { $0 + $1.frameCount } == samples.count)
-        // One second captured is one second written, within 20 ms.
-        #expect(abs(samples.count - 48_000) <= 960)
-
-        // Each segment sits where its content was captured, within 20 ms. Content is read a few
-        // frames in, past the converter's priming.
-        var offset = 0
-        for segment in segments {
-            defer { offset += segment.frameCount }
-            guard segment.frameCount > 16 else { continue }
-            let contentSeconds = Double(samples[offset + 8] / Self.slope) - 8.0 / 48_000
-            let hostSeconds = Double(segment.startHostTimeNanos - Self.startNanos) / 1e9
-            #expect(abs(hostSeconds - contentSeconds) <= 0.020, "segment at \(hostSeconds) s holds audio from \(contentSeconds) s")
-        }
-
-        // Audio from after the change is neither missing nor repeated.
-        let after = samples.filter { $0 > 0.5 * Self.slope + 0.005 }.count
-        #expect(abs(after - 24_000) <= 960)
-
-        // Placed on the timeline, the file overlaps itself by jitter trims only.
-        let timeline = SynchronizedAudioTimeline.reconstruct(
-            samples: samples, segments: segments, referenceHostTimeNanos: Self.startNanos, sampleRate: 48_000
-        )
-        #expect(timeline.overlapFrames <= 48)
     }
 }

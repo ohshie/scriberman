@@ -1,3 +1,4 @@
+import CoreMedia
 import Foundation
 import ScreenCaptureKit
 import Testing
@@ -6,6 +7,7 @@ import Testing
 /// Stand-in for `SCStream`, which cannot be constructed in tests: it needs live
 /// `SCShareableContent`, a capturable window, and Screen Recording + Microphone TCC grants.
 private final class StubCaptureStream: UnifiedCaptureStreaming, @unchecked Sendable {
+    var outputTypes: [SCStreamOutputType] = []
     var updateError: Error?
     private(set) var updateCallCount = 0
     private(set) var startCallCount = 0
@@ -16,9 +18,10 @@ private final class StubCaptureStream: UnifiedCaptureStreaming, @unchecked Senda
 
     func addStreamOutput(
         _: SCStreamOutput,
-        type _: SCStreamOutputType,
+        type: SCStreamOutputType,
         sampleHandlerQueue _: DispatchQueue?
     ) throws {
+        outputTypes.append(type)
         addOutputCallCount += 1
     }
 
@@ -52,6 +55,32 @@ struct UnifiedCaptureSessionTests {
             micDeviceUID: micDeviceUID
         )
         return (session, root)
+    }
+
+    @Test
+    func micOnlyRegistersOnlyMicrophoneAndKeepsAppOutputAbsent() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = UnifiedCaptureSession(
+            micFileURL: root.appendingPathComponent("mic.wav"),
+            appFileURL: nil, processID: nil, micDeviceUID: "device-a"
+        )
+        let stream = StubCaptureStream()
+        try session.addOutputs(to: stream)
+        #expect(stream.outputTypes == [.microphone])
+        let config = session.configuration
+        #expect(!config.capturesAudio)
+        #expect(config.captureMicrophone)
+        #expect(config.microphoneCaptureDeviceID == "device-a")
+        #expect(config.sampleRate == 48_000)
+        #expect(config.channelCount == 2)
+        #expect(config.width == 2 && config.height == 2)
+        #expect(config.minimumFrameInterval == CMTime(value: 1, timescale: 1))
+        #expect(config.queueDepth == 3)
+        #expect(!session.hasAppSource)
+        #expect(!session.preparedStreamers.app)
+        await session.stop()
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("app.wav").path))
     }
 
     @Test
@@ -142,11 +171,11 @@ struct CaptureStartRetryTests {
         stop: () async -> Void
     ) {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        if unified {
-            let session = UnifiedCaptureSession(micFileURL: root.appendingPathComponent("mic.wav"), appFileURL: root.appendingPathComponent("app.wav"), processID: 1234, micDeviceUID: nil)
-            return ({ try await session.start(stream: $0, retryDelay: .zero) }, { await session.stop() })
-        }
-        let session = AppAudioCaptureSession(fileURL: root.appendingPathComponent("app.wav"), processID: 1234)
+        let session = UnifiedCaptureSession(
+            micFileURL: root.appendingPathComponent("mic.wav"),
+            appFileURL: unified ? root.appendingPathComponent("app.wav") : nil,
+            processID: unified ? 1234 : nil, micDeviceUID: nil
+        )
         return ({ try await session.start(stream: $0, retryDelay: .zero) }, { await session.stop() })
     }
 

@@ -1119,8 +1119,7 @@ final class AppStateTests {
                 modelInstallService: ModelInstallService(workspaceService: workspaceService),
                 recordingService: RecordingService(
                     workspaceService: workspaceService,
-                    modelContainer: modelContainer,
-                    appAudioSettings: appAudioSettings
+                    modelContainer: modelContainer
                 ),
                 transcriptionService: transcriptionService,
                 retranscriptionService: retranscriptionService,

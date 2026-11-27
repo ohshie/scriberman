@@ -159,6 +159,7 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
         conversion.process(nativeBuffer, hostTime: hostTime) { event in
             switch event {
             case .audio(let audio):
+                CaptureTrace.noteConverted(audio.buffer, hostTime: audio.hostTime)
                 streamer.write(buffer: audio.buffer, hostTimeNanos: audio.hostTime?.nanoseconds)
                 guard let liveHostTime = audio.hostTime else { return }
                 let monoSamples = AudioDownmixer.toMono(buffer: audio.buffer)

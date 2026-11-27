@@ -1,5 +1,3 @@
-import AVFoundation
-import AudioToolbox
 import CoreAudio
 import CoreGraphics
 import Foundation
@@ -28,8 +26,8 @@ enum RecordingError: LocalizedError {
             return "Workspace is not currently writable."
         case .captureInterrupted:
             return "Recording stopped because audio capture was interrupted."
-        case .failedToStart(let reason):
-            return "Failed to start recording: \(reason)"
+        case .failedToStart:
+            return "Recording failed to start: no audio."
         }
     }
 
@@ -50,450 +48,6 @@ enum RecordingError: LocalizedError {
 extension Notification.Name {
     static let appAudioCaptureAccessDenied = Notification.Name("appAudioCaptureAccessDenied")
 }
-
-/// What an engine microphone tap sends to live transcription.
-enum MicCaptureOutput: Sendable {
-    /// Kept samples, their rate, and the adjusted and raw host time of the first one.
-    case audio(samples: [Float], sampleRate: Double, hostTime: HostNanoseconds, rawHostTime: HostNanoseconds)
-    /// All audio from before pause number `n` has been sent.
-    case pauseMarker(Int)
-}
-
-typealias MicBufferHandler = @Sendable (MicCaptureOutput) -> Void
-
-protocol MicCaptureControlling: AnyObject {
-    func startCapture(
-        deviceID: AudioDeviceID?,
-        targetFormat: AVAudioFormat,
-        micFileURL: URL,
-        micStreamer: AudioFileStreamer,
-        gate: CaptureAudioGate,
-        voiceProcessingEnabled: Bool,
-        applyVoiceProcessing: @Sendable (AVAudioInputNode, Bool) -> Void,
-        onFirstHostTime: @escaping @Sendable (HostNanoseconds) -> Void,
-        onBuffer: @escaping MicBufferHandler
-    ) throws
-    func stopCapture()
-    func retargetDevice(_ deviceID: AudioDeviceID?) throws
-    func isCaptureRunning() -> Bool
-}
-
-/// The parts of an `AVAudioEngine` that a mic capture uses, behind a protocol so a test can stand
-/// in for the input and change its format during a start.
-protocol MicInputEngine: AnyObject {
-    /// Routes the input unit to `deviceID`.
-    func routeInput(to deviceID: AudioDeviceID) throws
-    func applyVoiceProcessing(_ apply: (AVAudioInputNode, Bool) -> Void, enabled: Bool)
-    /// The input node's current hardware format on bus 0.
-    func currentInputFormat() -> AVAudioFormat
-    /// Installs the tap on the input node's bus 0. A non-nil `format` that no longer matches the
-    /// input makes AVFAudio raise an Objective-C exception, which aborts the app.
-    func installInputTap(bufferSize: AVAudioFrameCount, format: AVAudioFormat?, block: @escaping AVAudioNodeTapBlock)
-    func removeInputTap()
-    /// Prepares and starts the engine.
-    func start() throws
-    func stop()
-    var isRunning: Bool { get }
-}
-
-final class AVAudioEngineMicInput: MicInputEngine {
-    private let engine = AVAudioEngine()
-
-    func routeInput(to deviceID: AudioDeviceID) throws {
-        guard let inputAudioUnit = engine.inputNode.audioUnit else {
-            throw RecordingError.failedToStart("Audio input unit is unavailable.")
-        }
-        var targetDeviceID = deviceID
-        let status = withUnsafePointer(to: &targetDeviceID) { pointer in
-            AudioUnitSetProperty(
-                inputAudioUnit,
-                kAudioOutputUnitProperty_CurrentDevice,
-                kAudioUnitScope_Global,
-                0,
-                pointer,
-                UInt32(MemoryLayout<AudioDeviceID>.size)
-            )
-        }
-        if status != noErr {
-            throw RecordingError.failedToStart("Unable to route microphone input.")
-        }
-    }
-
-    func applyVoiceProcessing(_ apply: (AVAudioInputNode, Bool) -> Void, enabled: Bool) {
-        apply(engine.inputNode, enabled)
-    }
-
-    func currentInputFormat() -> AVAudioFormat {
-        engine.inputNode.inputFormat(forBus: 0)
-    }
-
-    func installInputTap(bufferSize: AVAudioFrameCount, format: AVAudioFormat?, block: @escaping AVAudioNodeTapBlock) {
-        engine.inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: format, block: block)
-    }
-
-    func removeInputTap() {
-        engine.inputNode.removeTap(onBus: 0)
-    }
-
-    func start() throws {
-        engine.prepare()
-        try engine.start()
-    }
-
-    func stop() {
-        engine.stop()
-    }
-
-    var isRunning: Bool { engine.isRunning }
-}
-
-final class AVAudioEngineMicCaptureController: MicCaptureControlling {
-    private let makeEngine: () -> any MicInputEngine
-    private var audioEngine: (any MicInputEngine)?
-    /// Counts starts, so log lines tell one capture's buffers from the next one's.
-    private var captureGeneration = 0
-
-    init(makeEngine: @escaping () -> any MicInputEngine = { AVAudioEngineMicInput() }) {
-        self.makeEngine = makeEngine
-    }
-
-    func startCapture(
-        deviceID: AudioDeviceID?,
-        targetFormat: AVAudioFormat,
-        micFileURL _: URL,
-        micStreamer: AudioFileStreamer,
-        gate: CaptureAudioGate,
-        voiceProcessingEnabled: Bool,
-        applyVoiceProcessing: @Sendable (AVAudioInputNode, Bool) -> Void,
-        onFirstHostTime: @escaping @Sendable (HostNanoseconds) -> Void,
-        onBuffer: @escaping MicBufferHandler
-    ) throws {
-        stopCapture()
-        captureGeneration += 1
-
-        let engine = makeEngine()
-
-        if let deviceID, deviceID != 0 {
-            try engine.routeInput(to: deviceID)
-        }
-
-        engine.applyVoiceProcessing(applyVoiceProcessing, enabled: voiceProcessingEnabled)
-
-        let inputFormat = engine.currentInputFormat()
-        guard inputFormat.sampleRate.isFinite, inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
-            throw RecordingError.failedToStart("Invalid audio input format.")
-        }
-
-        let tap = try EngineMicTap(
-            inputFormat: inputFormat,
-            targetFormat: targetFormat,
-            micStreamer: micStreamer,
-            gate: gate,
-            captureGeneration: captureGeneration,
-            onFirstHostTime: onFirstHostTime,
-            onBuffer: onBuffer
-        )
-
-        engine.removeInputTap()
-        // No format: the tap takes the node's format at install time. `inputFormat` can be stale
-        // by then (AirPods switch to their headset mode during a start), and a tap format that no
-        // longer matches makes AVFAudio raise, which aborts the app (spec, test 14). EngineMicTap
-        // converts each buffer from the buffer's own format.
-        engine.installInputTap(bufferSize: 1_024, format: nil) { [weak self] buffer, audioTime in
-            guard self != nil else {
-                return
-            }
-            tap.process(
-                buffer,
-                hostTime: Self.hostTime(of: audioTime),
-                sampleTime: audioTime.isSampleTimeValid ? Double(audioTime.sampleTime) : nil
-            )
-        }
-
-        try engine.start()
-        audioEngine = engine
-    }
-
-    /// Host time of a tap buffer, or nil when the tap reports none.
-    static func hostTime(of audioTime: AVAudioTime) -> HostNanoseconds? {
-        audioTime.hostTime != 0 ? HostNanoseconds(machTicks: audioTime.hostTime) : nil
-    }
-
-    func stopCapture() {
-        audioEngine?.removeInputTap()
-        audioEngine?.stop()
-        audioEngine = nil
-    }
-
-    func retargetDevice(_ deviceID: AudioDeviceID?) throws {
-        guard let audioEngine, let deviceID, deviceID != 0 else {
-            return
-        }
-        try audioEngine.routeInput(to: deviceID)
-    }
-
-    func isCaptureRunning() -> Bool {
-        audioEngine?.isRunning ?? false
-    }
-}
-
-/// One engine controller, called only on its own serial queue so no call holds the
-/// `RecordingService` actor. Each call is bounded by a timeout. `AVAudioEngine` setup can block
-/// inside Apple's framework for minutes (spec, test 10) and a blocked thread cannot be cancelled,
-/// so a call that times out leaves the queue blocked: the handle is then abandoned and never
-/// called again, and whatever the blocked call produces is torn down when it returns.
-///
-/// @unchecked Sendable: `controller` is touched only on `queue`.
-final class MicCaptureEngineHandle: @unchecked Sendable {
-    private let controller: any MicCaptureControlling
-    private let queue: DispatchQueue
-    /// The device this handle's capture was started on; nil for the system default.
-    let deviceID: AudioDeviceID?
-
-    init(controller: any MicCaptureControlling, deviceID: AudioDeviceID?, number: Int) {
-        self.controller = controller
-        self.deviceID = deviceID
-        self.queue = DispatchQueue(label: "Scriberman.MicCaptureEngine.\(number)")
-    }
-
-    /// Runs `body` on the handle's queue. Nil when it did not return within `timeout`; it then
-    /// keeps running, and the caller abandons the handle.
-    func call<T: Sendable>(
-        timeout: Duration,
-        _ body: @escaping @Sendable (any MicCaptureControlling) throws -> T
-    ) async -> Result<T, any Error>? {
-        await withCheckedContinuation { continuation in
-            let resume = ResumeOnce(continuation)
-            queue.async { [controller] in
-                resume(Result { try body(controller) })
-            }
-            DispatchQueue.global().asyncAfter(deadline: .now() + timeout.timeInterval) {
-                resume(nil)
-            }
-        }
-    }
-
-    /// Stops whatever the blocked call left running once it returns, then calls `onReturn`.
-    /// Queued behind the blocked call, so it never touches a newer handle's capture.
-    func abandon(onReturn: @escaping @Sendable () -> Void) {
-        queue.async { [controller] in
-            controller.stopCapture()
-            onReturn()
-        }
-    }
-
-    private final class ResumeOnce<T: Sendable>: @unchecked Sendable {
-        private let lock = NSLock()
-        private var continuation: CheckedContinuation<T, Never>?
-
-        init(_ continuation: CheckedContinuation<T, Never>) {
-            self.continuation = continuation
-        }
-
-        func callAsFunction(_ value: T) {
-            let pending = lock.withLock {
-                defer { continuation = nil }
-                return continuation
-            }
-            pending?.resume(returning: value)
-        }
-    }
-}
-
-extension Duration {
-    var timeInterval: TimeInterval {
-        Double(components.seconds) + Double(components.attoseconds) / 1e18
-    }
-}
-
-/// What an engine microphone tap does with its buffers: convert, cut paused audio, write and
-/// deliver. Separate from the engine so it can be fed without hardware.
-///
-/// The converter follows each buffer's own format. A route change can hand the tap buffers at the
-/// new device's rate; a converter built for the old rate rejects them (finding 11).
-///
-/// @unchecked Sendable: used only from the tap's callback thread.
-final class EngineMicTap: @unchecked Sendable {
-    private static let logger = Logger(subsystem: "Scriberman", category: "RecordingService")
-    /// Buffers logged at the start of a capture and after a format change or a timing mismatch.
-    private static let loggedBuffersPerEvent = 10
-
-    private let targetFormat: AVAudioFormat
-    private let micStreamer: AudioFileStreamer
-    private let gate: CaptureAudioGate
-    private let onFirstHostTime: @Sendable (HostNanoseconds) -> Void
-    private let onBuffer: MicBufferHandler
-    private let captureGeneration: Int
-    private var conversion: GatedAudioConversion
-    private var converterSourceFormat: AVAudioFormat
-    private var diagnostics = BufferDiagnostics()
-
-    init(
-        inputFormat: AVAudioFormat,
-        targetFormat: AVAudioFormat,
-        micStreamer: AudioFileStreamer,
-        gate: CaptureAudioGate,
-        captureGeneration: Int = 0,
-        onFirstHostTime: @escaping @Sendable (HostNanoseconds) -> Void,
-        onBuffer: @escaping MicBufferHandler
-    ) throws {
-        guard let conversion = Self.makeConversion(from: inputFormat, to: targetFormat, gate: gate) else {
-            throw RecordingError.failedToStart("Unable to create mic audio converter.")
-        }
-        self.conversion = conversion
-        self.converterSourceFormat = inputFormat
-        self.targetFormat = targetFormat
-        self.micStreamer = micStreamer
-        self.gate = gate
-        self.captureGeneration = captureGeneration
-        self.onFirstHostTime = onFirstHostTime
-        self.onBuffer = onBuffer
-    }
-
-    /// A conversion from `source` to `target`, with no converter when they match. Nil when no
-    /// converter can be made.
-    private static func makeConversion(
-        from source: AVAudioFormat,
-        to target: AVAudioFormat,
-        gate: CaptureAudioGate
-    ) -> GatedAudioConversion? {
-        let matchesTarget = source.sampleRate == target.sampleRate
-            && source.channelCount == target.channelCount
-            && source.commonFormat == target.commonFormat
-            && source.isInterleaved == target.isInterleaved
-        if matchesTarget {
-            return GatedAudioConversion(converter: nil, targetFormat: target, gate: gate)
-        }
-        return AVAudioConverter(from: source, to: target).map {
-            GatedAudioConversion(converter: $0, targetFormat: target, gate: gate)
-        }
-    }
-
-    /// - Parameter sampleTime: the tap's sample time for the buffer, for diagnostics only.
-    func process(_ buffer: AVAudioPCMBuffer, hostTime: HostNanoseconds?, sampleTime: Double? = nil) {
-        gate.recordArrival()
-        if let hostTime, let firstKept = gate.firstKeptHostTime(
-            startingAt: hostTime,
-            frameCount: Int(buffer.frameLength),
-            sampleRate: buffer.format.sampleRate
-        ) {
-            onFirstHostTime(firstKept)
-        }
-
-        let formatChanged = buffer.format != converterSourceFormat
-        if formatChanged {
-            Self.logger.notice(
-                "Engine mic tap format changed (generation \(self.captureGeneration, privacy: .public)): \(Self.describe(self.converterSourceFormat), privacy: .public) -> \(Self.describe(buffer.format), privacy: .public)"
-            )
-            guard let replacement = Self.makeConversion(from: buffer.format, to: targetFormat, gate: gate) else {
-                Self.logger.error(
-                    "Engine mic tap dropped a buffer (generation \(self.captureGeneration, privacy: .public)): no converter from \(Self.describe(buffer.format), privacy: .public)"
-                )
-                return
-            }
-            conversion = replacement
-            converterSourceFormat = buffer.format
-        }
-
-        var outputFrames = 0
-        conversion.process(buffer, hostTime: hostTime) { event in
-            switch event {
-            case .audio(let audio):
-                outputFrames += Int(audio.buffer.frameLength)
-                micStreamer.write(buffer: audio.buffer, hostTimeNanos: audio.hostTime?.nanoseconds)
-                guard let adjusted = audio.hostTime, let raw = audio.rawHostTime else { return }
-                onBuffer(.audio(
-                    samples: AudioDownmixer.toMono(buffer: audio.buffer),
-                    sampleRate: audio.buffer.format.sampleRate,
-                    hostTime: adjusted,
-                    rawHostTime: raw
-                ))
-            case .pauseMarker(let number):
-                onBuffer(.pauseMarker(number))
-            }
-        }
-        logDiagnostics(buffer, hostTime: hostTime, sampleTime: sampleTime, outputFrames: outputFrames, formatChanged: formatChanged)
-    }
-
-    /// Logs a buffer at the start of a capture, after a format change, and when the time between
-    /// buffers disagrees with the previous buffer's length at its labelled rate.
-    private func logDiagnostics(
-        _ buffer: AVAudioPCMBuffer,
-        hostTime: HostNanoseconds?,
-        sampleTime: Double?,
-        outputFrames: Int,
-        formatChanged: Bool
-    ) {
-        let inputFrames = Int(buffer.frameLength)
-        let rate = buffer.format.sampleRate
-        let previous = diagnostics.previous
-        diagnostics.previous = .init(hostTime: hostTime, sampleTime: sampleTime, frames: inputFrames, sampleRate: rate)
-        diagnostics.buffersSeen += 1
-
-        var hostDeltaMs: Double?
-        var expectedDeltaMs: Double?
-        if let previous, let hostTime, let previousHost = previous.hostTime, previous.sampleRate > 0 {
-            hostDeltaMs = (Double(hostTime.nanoseconds) - Double(previousHost.nanoseconds)) / 1e6
-            expectedDeltaMs = Double(previous.frames) / previous.sampleRate * 1000
-        }
-        var sampleDelta: Double?
-        if let sampleTime, let previousSampleTime = previous?.sampleTime {
-            sampleDelta = sampleTime - previousSampleTime
-        }
-
-        // A gap between buffers is an outage, not a mismatch; only a shorter interval than the
-        // labelled length is: the buffers hold audio faster than real time.
-        let mismatch = hostDeltaMs.flatMap { host in
-            expectedDeltaMs.map { expected in expected > 0 && host < expected * 0.75 }
-        } ?? false
-
-        if diagnostics.buffersSeen == 1 || formatChanged {
-            diagnostics.remainingLogged = Self.loggedBuffersPerEvent
-        } else if mismatch && !diagnostics.lastWasMismatch {
-            diagnostics.remainingLogged = Self.loggedBuffersPerEvent
-        }
-        diagnostics.lastWasMismatch = mismatch
-        guard diagnostics.remainingLogged > 0 else { return }
-        diagnostics.remainingLogged -= 1
-
-        let converter = Self.describe(converterSourceFormat)
-        Self.logger.notice(
-            "Engine mic buffer (generation \(self.captureGeneration, privacy: .public)): format=\(Self.describe(buffer.format), privacy: .public) converter=\(converter, privacy: .public) in=\(inputFrames, privacy: .public) out=\(outputFrames, privacy: .public) hostDeltaMs=\(Self.describe(hostDeltaMs), privacy: .public) expectedMs=\(Self.describe(expectedDeltaMs), privacy: .public) sampleDelta=\(Self.describe(sampleDelta), privacy: .public) mismatch=\(mismatch, privacy: .public)"
-        )
-    }
-
-    private static func describe(_ format: AVAudioFormat) -> String {
-        "\(Int(format.sampleRate))Hz/\(format.channelCount)ch"
-    }
-
-    private static func describe(_ value: Double?) -> String {
-        value.map { String(format: "%.2f", $0) } ?? "none"
-    }
-
-    private struct BufferDiagnostics {
-        struct Buffer {
-            let hostTime: HostNanoseconds?
-            let sampleTime: Double?
-            let frames: Int
-            let sampleRate: Double
-        }
-        var previous: Buffer?
-        var buffersSeen = 0
-        var remainingLogged = 0
-        var lastWasMismatch = false
-    }
-}
-
-/// The `AVAudioRecorder` microphone fallback, behind a protocol so tests can drive it.
-protocol MicRecorderFallback: AnyObject {
-    func record() -> Bool
-    func pause()
-    func stop()
-    func updateMeters()
-    func averagePower(forChannel channelNumber: Int) -> Float
-}
-
-extension AVAudioRecorder: MicRecorderFallback {}
 
 /// The microphone capture is aimed at. `deviceUID` nil is the system default. `firstBufferHostTime`
 /// is when the first buffer arrived after capture was aimed at it, nil until then.
@@ -516,7 +70,7 @@ enum CapturedMicrophone: Equatable, Sendable {
     case capturing(CapturedMicDevice)
     /// Capture is moving to another device, or has not delivered audio from it yet.
     case switching
-    /// The device is not known: the recorder fallback records the system input.
+    /// The device is not known.
     case unknown
 }
 
@@ -531,29 +85,9 @@ actor RecordingService: RecordingServiceProtocol {
     typealias DefaultTagApplier = @Sendable (RecordingSession, ModelContext) throws -> Void
     typealias DateProvider = @Sendable () -> Date
     typealias HostTimeProvider = @Sendable () -> HostNanoseconds
-    /// Makes the recorder fallback for a file with the given settings.
-    typealias RecorderFallbackFactory = @Sendable (URL, [String: Any]) throws -> any MicRecorderFallback
-    /// Reads whether voice processing is on.
-    typealias VoiceProcessingSetting = @Sendable () async -> Bool
-    /// Makes the engine controller for one capture start.
-    typealias MicCaptureControllerFactory = @Sendable () -> any MicCaptureControlling
-    static let defaultEngineCallTimeout: Duration = .seconds(5)
-
-    /// One controller handed to every start, for tests that inject a single controller.
-    /// @unchecked Sendable: each call to the controller runs on the queue of the start it serves.
-    private final class SharedMicCaptureController: @unchecked Sendable {
-        let controller: any MicCaptureControlling
-        init(_ controller: any MicCaptureControlling) { self.controller = controller }
-    }
-
-    /// Thrown when an engine start did not return within `engineCallTimeout`, or was not tried
-    /// because an earlier call on the same device has not returned.
-    private struct MicEngineCallHung: Error {}
-
     /// A capture session about to start its ScreenCaptureKit stream.
     enum CaptureSessionStart: Sendable {
         case unified(UnifiedCaptureSession)
-        case appAudio(AppAudioCaptureSession)
     }
 
     /// Starts a capture session's stream. Injected so tests can start sessions on stub streams;
@@ -567,34 +101,16 @@ actor RecordingService: RecordingServiceProtocol {
     private let mixdownCoordinator: any RecordingMixdownCoordinating
     private let finalizer: RecordingFinalizer
     private let logger = Logger(subsystem: "Scriberman", category: "RecordingService")
-    private let appAudioSettings: AppAudioSettings
     private let hardware: AudioDeviceHardwareProviding
-    private let makeMicCaptureController: MicCaptureControllerFactory
-    /// How long one engine controller call may take before it is abandoned.
-    private let engineCallTimeout: Duration
-    /// The engine capture running now. Each start gets a new one.
-    private var micCaptureHandle: MicCaptureEngineHandle?
-    private var micCaptureHandleCount = 0
-    /// Devices with an abandoned engine call that has not returned, 0 for the system default. No
-    /// new engine is started on them, so a device that keeps blocking holds one thread at most.
-    private var devicesWithHungEngineCall: Set<AudioDeviceID> = []
     private let permissionChecker: PermissionChecker
     private let scopedAccessStarter: ScopedAccessStarter
     private let scopedAccessStopper: ScopedAccessStopper
     private let makeScreenCaptureSession: ScreenCaptureSessionFactory
-    // Injected for testing; nil uses the real setVoiceProcessingEnabled(_:)
-    private let voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)?
     private let applyDefaultTag: DefaultTagApplier
     private let now: DateProvider
     /// The host clock that pauses and the stop are timed by.
     private let hostNow: HostTimeProvider
     private let startCaptureSession: CaptureSessionStarter
-    private let makeRecorderFallback: RecorderFallbackFactory
-    private let voiceProcessingSetting: VoiceProcessingSetting
-
-    private var audioEngine: AVAudioEngine?
-    private let micStreamer = AudioFileStreamer(label: "mic")
-    private var audioRecorder: (any MicRecorderFallback)?
     private var recordingStartedAt: Date?
     private var recordingCreatedAt: Date?
     /// When the stop closed the pause clock.
@@ -617,27 +133,14 @@ actor RecordingService: RecordingServiceProtocol {
     /// The device capture uses while the preferred one is not usable: the device the recording
     /// started on, or `nil` for the system default.
     private var fallbackMicDeviceUID: String?
-    /// The preferred device that refused explicit routing at start. It is not targeted again until
-    /// it has left the device list and returned.
-    private var routeRefusedMicDeviceID: AudioDeviceID?
-    private var currentCaptureDeviceID: AudioDeviceID?
     private var micFileURL: URL?
-    private let micTargetFormat = AVAudioFormat(
-        commonFormat: .pcmFormatFloat32,
-        sampleRate: 48_000,
-        channels: 1,
-        interleaved: false
-    )!
-    private var isRecoveringMicCapture = false
     private var hasScopedRecordingAccess = false
     private var recordingWorkspaceRootURL: URL?
     private var activeCapturedAppName: String?
     private var pendingTitle: String?
-    private var appAudioCaptureSession: AppAudioCaptureSession?
     private var unifiedCaptureSession: UnifiedCaptureSession?
     /// Retained so the start safety net can repeat a capture start with identical inputs.
-    private var activeAppFileURL: URL?
-    private var activeAppProcessID: pid_t?
+    private var activeAppSource: UnifiedCaptureSession.AppSource?
     private var screenCaptureSession: (any ScreenCaptureSessionControlling)?
     private var shouldSkipScreenMux = false
     private var pendingError: RecordingError?
@@ -655,20 +158,17 @@ actor RecordingService: RecordingServiceProtocol {
     /// Overrides the write-failure total read at stop. Test seam only.
     private var writeFailureOverrideForTesting: Int?
 #endif
-    private var micRecoveryRetryTask: Task<Void, Never>?
     /// Advanced at each recording start. An operation that suspended compares it with the value it
     /// started with, so a late completion never acts on a later recording.
     private var recordingGeneration = 0
     /// When the microphone capture now running was started, by the host clock.
     private var micCaptureStartedAt: HostNanoseconds?
-    /// The engine recovery in flight. A caller that needs its result waits for it.
-    private var micRecoveryTask: Task<Bool, Never>?
     /// The in-place capture restart in flight. A second request waits for it.
     private var restartInPlaceTask: Task<Bool, Never>?
     /// The resume in flight. Pause and resume requests made during it wait for it.
     private var resumeTask: Task<Bool, Never>?
     /// The last microphone transition queued: a capture target update, a unified capture restart
-    /// or an engine recovery. Each one waits for the one queued before it.
+    /// restart. Each one waits for the one queued before it.
     private var micTransitionTail: Task<Void, Never>?
     /// Transitions queued and not finished, by number.
     private var micTransitionsInFlight: Set<Int> = []
@@ -680,9 +180,6 @@ actor RecordingService: RecordingServiceProtocol {
     /// from one from the recording's current stream.
     private var nextCaptureStreamNumber = 0
     private var unifiedStreamNumber: Int?
-    private var appStreamNumber: Int?
-    /// The UID engine capture was started on; nil for the system default.
-    private var currentCaptureDeviceUID: String?
     /// The removed microphone already logged, so a removal is logged once.
     private var loggedRemovedMicUID: String?
     /// True while the preferred microphone is absent, so its return is logged.
@@ -711,8 +208,6 @@ actor RecordingService: RecordingServiceProtocol {
     /// capture restart.
     private var captureGates = RecordingCaptureGates()
     private var liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation?
-    // nonisolated(unsafe): written once in init on the actor; read only in deinit; lifetime matches the actor
-    nonisolated(unsafe) private var engineConfigurationObserver: NSObjectProtocol?
     // nonisolated(unsafe): initialized once and used for CoreAudio C callback registration/removal lifecycle.
     // @Sendable: the macOS 27 SDK takes the listener as `sending`; the block only captures a weak
     // reference to this actor and hops onto it, so sharing it with CoreAudio's queue is safe.
@@ -751,39 +246,23 @@ actor RecordingService: RecordingServiceProtocol {
         }
     }
 
-    private var isRecorderFallbackActive: Bool {
-#if DEBUG
-        audioRecorder != nil || recorderFallbackActiveForTesting
-#else
-        audioRecorder != nil
-#endif
-    }
-
-    /// Thrown when the recording ended or changed while a capture start was suspended.
-    private struct CaptureStartAbandoned: Error {}
     private var audioLevelValue: Float = 0
 #if DEBUG
-    private var recorderFallbackActiveForTesting = false
     private var stopRecordingCallCount = 0
 #endif
 
     init(
         workspaceService: WorkspaceServiceProtocol,
         modelContainer: ModelContainer,
-        appAudioSettings: AppAudioSettings,
         hardware: AudioDeviceHardwareProviding = CoreAudioDeviceHardware(),
-        micCaptureController: MicCaptureControlling? = nil,
-        micCaptureControllerFactory: MicCaptureControllerFactory? = nil,
-        engineCallTimeout: Duration = RecordingService.defaultEngineCallTimeout,
         notificationCenter: NotificationCenter = .default,
         mixdownCoordinator: (any RecordingMixdownCoordinating)? = nil,
         screenVideoMuxer: (any ScreenVideoMuxing)? = nil,
         finalizer: RecordingFinalizer? = nil,
-        permissionChecker: @escaping PermissionChecker = RecordingPermissionService.ensureMicrophonePermission,
+        permissionChecker: @escaping PermissionChecker = RecordingPermissionService.ensureRecordingPermissions,
         scopedAccessStarter: @escaping ScopedAccessStarter = { $0.startAccessingSecurityScopedResource() },
         scopedAccessStopper: @escaping ScopedAccessStopper = { $0.stopAccessingSecurityScopedResource() },
         screenCaptureSessionFactory: @escaping ScreenCaptureSessionFactory = { ScreenCaptureSession() },
-        voiceProcessingPropertySetter: (@Sendable (AVAudioInputNode) throws -> Void)? = nil,
         defaultTagApplier: @escaping DefaultTagApplier = { try TagService().applyDefaultTag(to: $0, in: $1) },
         now: @escaping DateProvider = { Date() },
         hostNow: @escaping HostTimeProvider = { HostNanoseconds(machTicks: mach_absolute_time()) },
@@ -791,40 +270,21 @@ actor RecordingService: RecordingServiceProtocol {
             switch start {
             case .unified(let session):
                 try await session.start()
-            case .appAudio(let session):
-                try await session.start()
             }
-        },
-        recorderFallbackFactory: @escaping RecorderFallbackFactory = { url, settings in
-            let recorder = try AVAudioRecorder(url: url, settings: settings)
-            recorder.isMeteringEnabled = true
-            return recorder
-        },
-        voiceProcessingSetting: VoiceProcessingSetting? = nil
+        }
     ) {
         self.workspaceService = workspaceService
         self.modelContainer = modelContainer
-        self.appAudioSettings = appAudioSettings
         self.hardware = hardware
-        if let micCaptureController {
-            let shared = SharedMicCaptureController(micCaptureController)
-            self.makeMicCaptureController = { shared.controller }
-        } else {
-            self.makeMicCaptureController = micCaptureControllerFactory ?? { AVAudioEngineMicCaptureController() }
-        }
-        self.engineCallTimeout = engineCallTimeout
         self.notificationCenter = notificationCenter
         self.permissionChecker = permissionChecker
         self.scopedAccessStarter = scopedAccessStarter
         self.scopedAccessStopper = scopedAccessStopper
         self.makeScreenCaptureSession = screenCaptureSessionFactory
-        self.voiceProcessingPropertySetter = voiceProcessingPropertySetter
         self.applyDefaultTag = defaultTagApplier
         self.now = now
         self.hostNow = hostNow
         self.startCaptureSession = captureSessionStarter
-        self.makeRecorderFallback = recorderFallbackFactory
-        self.voiceProcessingSetting = voiceProcessingSetting ?? { await MainActor.run { appAudioSettings.voiceProcessingEnabled } }
         self.hardwareListenerQueue = DispatchQueue(label: "Scriberman.RecordingService.HardwareListeners")
         let mixdownCoordinator = mixdownCoordinator ?? RecordingMixdownCoordinator(
             workspaceService: workspaceService,
@@ -844,21 +304,9 @@ actor RecordingService: RecordingServiceProtocol {
             }
         }
 
-        engineConfigurationObserver = notificationCenter.addObserver(
-            forName: .AVAudioEngineConfigurationChange,
-            object: nil,
-            queue: nil
-        ) { [weak self] _ in
-            Task {
-                await self?.handleAudioEngineConfigurationChange()
-            }
-        }
     }
 
     deinit {
-        if let engineConfigurationObserver {
-            notificationCenter.removeObserver(engineConfigurationObserver)
-        }
         if hasRegisteredHardwareListeners,
            let hardwarePropertyListener {
             var devicesAddress = AudioObjectPropertyAddress(
@@ -917,8 +365,9 @@ actor RecordingService: RecordingServiceProtocol {
         self.captureGates = RecordingCaptureGates(hostNow: hostNow)
         self.recordingGeneration += 1
         self.liveAudioContinuation = liveAudioContinuation
-        self.activeAppFileURL = activeAppFileURL
-        self.activeAppProcessID = activeAppProcessID
+        self.activeAppSource = if let activeAppFileURL, let activeAppProcessID {
+            UnifiedCaptureSession.AppSource(fileURL: activeAppFileURL, processID: activeAppProcessID)
+        } else { nil }
         self.lifecycleState = isRecording ? .recording : .idle
         self.recordingIdentifier = recordingIdentifier
         self.recordingWorkspaceRootURL = recordingWorkspaceRootURL
@@ -931,35 +380,12 @@ actor RecordingService: RecordingServiceProtocol {
         self.shouldSkipScreenMux = shouldSkipScreenMux
     }
 
-    func setMicRecoveryStateForTesting(
-        desiredMicDeviceUID: String?,
-        micFileURL: URL?,
-        isRecoveringMicCapture: Bool = false,
-        recorderFallbackActive: Bool = false,
-        currentCaptureDeviceID: AudioDeviceID? = nil,
-        hasRecoveryRetryTask: Bool = false,
-        fallbackMicDeviceUID: String? = nil
-    ) {
+    func setMicRecoveryStateForTesting(desiredMicDeviceUID: String?, micFileURL: URL?, fallbackMicDeviceUID: String? = nil) {
         self.desiredMicDeviceUID = desiredMicDeviceUID
         self.fallbackMicDeviceUID = fallbackMicDeviceUID
         self.micFileURL = micFileURL
-        self.isRecoveringMicCapture = isRecoveringMicCapture
-        self.recorderFallbackActiveForTesting = recorderFallbackActive
-        self.currentCaptureDeviceID = currentCaptureDeviceID
-        if hasRecoveryRetryTask {
-            self.micRecoveryRetryTask = Task {}
-        } else {
-            self.micRecoveryRetryTask?.cancel()
-            self.micRecoveryRetryTask = nil
-        }
     }
 
-    func simulateAudioEngineConfigurationChangeForTesting() async {
-        await handleAudioEngineConfigurationChange()
-    }
-
-    /// Test seam: the count is only advanced by a real mid-session restart, which needs a live
-    /// `SCStream`.
     func setCaptureRestartCountForTesting(_ count: Int) {
         captureRestartCount = count
     }
@@ -979,24 +405,6 @@ actor RecordingService: RecordingServiceProtocol {
         await handleHardwareChange()
     }
 
-    func recoveryDebugStateForTesting() -> (
-        desiredMicDeviceUID: String?,
-        currentCaptureDeviceID: AudioDeviceID?,
-        isRecoveringMicCapture: Bool,
-        hasRecoveryRetryTask: Bool
-    ) {
-        (
-            desiredMicDeviceUID,
-            currentCaptureDeviceID,
-            isRecoveringMicCapture,
-            micRecoveryRetryTask != nil
-        )
-    }
-
-    func performMicRecoveryRetryAttemptForTesting() async {
-        _ = await retryMicCaptureFromRetryLoop()
-    }
-
     func cleanupRecordingStateForTesting(deleteScreenTmpVideo: Bool = true) async {
         await cleanupRecordingState(deleteScreenTmpVideo: deleteScreenTmpVideo)
     }
@@ -1008,13 +416,7 @@ actor RecordingService: RecordingServiceProtocol {
     }
 
     func activityTimestamps() async -> (mic: Date?, app: Date?) {
-        if let unifiedCaptureSession {
-            return (unifiedCaptureSession.micLastActivityAt, unifiedCaptureSession.appLastActivityAt)
-        }
-        // Legacy path. Note the AVAudioRecorder fallback does not route through
-        // AudioFileStreamer, so mic activity is unavailable there and reports nil.
-        let mic = audioRecorder == nil ? micStreamer.lastActivityAt : nil
-        return (mic, appAudioCaptureSession?.lastActivityAt)
+        (unifiedCaptureSession?.micLastActivityAt, appAudioURL == nil ? nil : unifiedCaptureSession?.appLastActivityAt)
     }
 
     /// Frames written per source since capture started, plus write failures.
@@ -1024,56 +426,20 @@ actor RecordingService: RecordingServiceProtocol {
     /// whether or not anyone is speaking, so a silent room reads as healthy. Levels and activity
     /// both require sound above a floor and would fail a recording that simply started quiet.
     ///
-    /// `mic` is `nil` — not zero — under the `AVAudioRecorder` fallback, which does not write
-    /// through `AudioFileStreamer`. Callers must not read that as a dead capture. `app` is `nil`
-    /// when app audio is not being captured at all.
+    /// App counts are absent for a microphone-only recording.
     func captureFrameCounts() async -> (mic: Int64?, app: Int64?, micWriteFailures: Int, appWriteFailures: Int) {
-        if let unifiedCaptureSession {
-            return (
-                unifiedCaptureSession.micFramesWritten,
-                appAudioURL == nil ? nil : unifiedCaptureSession.appFramesWritten,
-                unifiedCaptureSession.micWriteFailureCount,
-                unifiedCaptureSession.appWriteFailureCount
-            )
-        }
-        let mic = isRecorderFallbackActive ? nil : micStreamer.framesWritten
-        return (
-            mic,
-            appAudioCaptureSession?.framesWritten,
-            isRecorderFallbackActive ? 0 : micStreamer.writeFailureCount,
-            appAudioCaptureSession?.writeFailureCount ?? 0
-        )
+        (unifiedCaptureSession?.micFramesWritten ?? 0,
+         appAudioURL == nil ? nil : unifiedCaptureSession?.appFramesWritten,
+         unifiedCaptureSession?.micWriteFailureCount ?? 0,
+         appAudioURL == nil ? 0 : unifiedCaptureSession?.appWriteFailureCount ?? 0)
     }
 
     func audioLevels() async -> (mic: Float, app: Float) {
-        guard !isPaused() else {
-            audioLevelValue = 0
-            return (0, 0)
-        }
-
-        if let unifiedCaptureSession {
-            let mic = unifiedCaptureSession.micAudioLevel
-            let app = unifiedCaptureSession.appAudioLevel
-            audioLevelValue = max(mic, app)
-            return (mic, app)
-        }
-
-        var micLevel: Float = 0
-
-        if let audioRecorder {
-            audioRecorder.updateMeters()
-            let averagePower = audioRecorder.averagePower(forChannel: 0)
-            if averagePower.isFinite {
-                let normalized = powf(10, averagePower / 20)
-                micLevel = max(micLevel, min(max(normalized, 0), 1))
-            }
-        }
-
-        micLevel = max(micLevel, micStreamer.audioLevel)
-        let appLevel = appAudioCaptureSession?.audioLevel ?? 0
-
-        audioLevelValue = max(micLevel, appLevel)
-        return (micLevel, appLevel)
+        guard !isPaused() else { audioLevelValue = 0; return (0, 0) }
+        let mic = unifiedCaptureSession?.micAudioLevel ?? 0
+        let app = appAudioURL == nil ? 0 : unifiedCaptureSession?.appAudioLevel ?? 0
+        audioLevelValue = max(mic, app)
+        return (mic, app)
     }
 
     /// Records that a capture stream stopped on its own during an active recording.
@@ -1095,9 +461,9 @@ actor RecordingService: RecordingServiceProtocol {
     /// Records a failure reported by stream `streamNumber`. A callback from a stream that was
     /// replaced or stopped is ignored, so it is never counted against the current capture.
     func reportCaptureStreamFailure(_ error: any Error, fromStream streamNumber: Int) {
-        guard isRecordingValue, streamNumber == unifiedStreamNumber || streamNumber == appStreamNumber else {
+        guard isRecordingValue, streamNumber == unifiedStreamNumber else {
             logger.notice(
-                "Ignored a stale capture stream callback: stream=\(streamNumber, privacy: .public) currentUnified=\(self.unifiedStreamNumber.map(String.init) ?? "none", privacy: .public) currentApp=\(self.appStreamNumber.map(String.init) ?? "none", privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                "Ignored a stale capture stream callback: stream=\(streamNumber, privacy: .public) currentUnified=\(self.unifiedStreamNumber.map(String.init) ?? "none", privacy: .public) error=\(error.localizedDescription, privacy: .public)"
             )
             return
         }
@@ -1115,20 +481,6 @@ actor RecordingService: RecordingServiceProtocol {
         return streamNumber
     }
 
-    private func reportStreamFailures(of session: AppAudioCaptureSession) -> Int {
-        nextCaptureStreamNumber += 1
-        let streamNumber = nextCaptureStreamNumber
-        session.onStreamStopped = { [weak self] error in
-            Task { [weak self] in await self?.reportCaptureStreamFailure(error, fromStream: streamNumber) }
-        }
-        return streamNumber
-    }
-
-    /// Everything the capture-health monitor needs, gathered in one actor hop.
-    ///
-    /// `streamFailureCount` is deliberately not consuming, unlike `consumePendingError()`: the
-    /// monitor observes it every tick, while the pending error is spent once when a failure is
-    /// reported to the user and written to the session log.
     func captureHealthSnapshot() async -> CaptureHealthMonitor.Snapshot {
         let counts = await captureFrameCounts()
         var snapshot = CaptureHealthMonitor.Snapshot(
@@ -1143,113 +495,39 @@ actor RecordingService: RecordingServiceProtocol {
         return snapshot
     }
 
-    /// Starts audio capture for a recording: unified ScreenCaptureKit when enabled and an app was
-    /// selected, otherwise the legacy engine path with its device and recorder fallbacks.
-    ///
-    /// Extracted so the start safety net can restart capture without disturbing the session,
-    /// folder, or screen capture around it. Callers own session state; this owns only capture.
-    private func startAudioCapture(
-        micFileURL: URL,
-        appFileURL: URL,
-        appProcessID: pid_t?
-    ) async throws {
-        var unifiedStarted = false
-        if recordingAudioSyncFlags.isUnifiedCaptureEnabled, let appProcessID {
-            do {
-                let unified = UnifiedCaptureSession(
-                    micFileURL: micFileURL,
-                    appFileURL: appFileURL,
-                    processID: appProcessID,
-                    micDeviceUID: micCaptureTargetUID(),
-                    liveAudioContinuation: liveAudioContinuation,
-                    onMicFirstHostTime: { [weak self, clock = liveAudioClock] hostTime in
-                        clock?.observe(hostTime)
-                        Task { [weak self] in await self?.captureMicStartHostTimeIfNeeded(hostTime) }
-                    },
-                    onAppFirstHostTime: { [weak self, clock = liveAudioClock] hostTime in
-                        clock?.observe(hostTime)
-                        Task { [weak self] in await self?.captureAppStartHostTimeIfNeeded(hostTime) }
-                    },
-                    gates: captureGates
-                )
-                let streamNumber = reportStreamFailures(of: unified)
-                unifiedStreamNumber = streamNumber
-                do {
-                    try await startCaptureSession(.unified(unified))
-                } catch {
-                    if unifiedStreamNumber == streamNumber { unifiedStreamNumber = nil }
-                    throw error
-                }
-                self.unifiedCaptureSession = unified
-                self.unifiedConfiguredMicDeviceID = resolveDeviceID(for: unified.currentMicDeviceUID)
-                self.appAudioURL = appFileURL
-                self.micCaptureStartedAt = hostNow()
-                publishMicTarget(unified.currentMicDeviceUID)
-                unifiedStarted = true
-            } catch {
-                logger.warning("Unified capture failed to start; falling back to legacy capture. error=\(error.localizedDescription, privacy: .public)")
-            }
+    private func startAudioCapture(micFileURL: URL, appFileURL: URL?, appProcessID: pid_t?) async throws {
+        let target = micCaptureTargetUID()
+        let deviceID = resolveDeviceID(for: target) ?? hardware.defaultInputDeviceID()
+        guard let deviceID, hardware.isUsableMicrophone(deviceID: deviceID) else {
+            throw RecordingError.failedToStart("No usable microphone")
         }
-
-        if !unifiedStarted {
-        try micStreamer.prepare(url: micFileURL, format: micTargetFormat)
-
-        if let appProcessID {
-            let appSession = AppAudioCaptureSession(
-                fileURL: appFileURL,
-                processID: appProcessID,
-                onFirstBufferHostTime: { [weak self, clock = liveAudioClock] hostTime in
-                    clock?.observe(hostTime)
-                    Task { [weak self] in
-                        await self?.captureAppStartHostTimeIfNeeded(hostTime)
-                    }
-                },
-                liveAudioContinuation: liveAudioContinuation,
-                gate: captureGates.app
-            )
-            let streamNumber = reportStreamFailures(of: appSession)
-            appStreamNumber = streamNumber
-            do {
-                try await startCaptureSession(.appAudio(appSession))
-            } catch {
-                if appStreamNumber == streamNumber { appStreamNumber = nil }
-                throw error
-            }
-            self.appAudioCaptureSession = appSession
-            self.appAudioURL = appFileURL
-        } else {
-            self.appAudioCaptureSession = nil
-            self.appAudioURL = nil
-        }
-
+        CaptureTrace.armFirstBuffer(target: target ?? "<default>")
+        let unified = UnifiedCaptureSession(
+            micFileURL: micFileURL, appFileURL: appFileURL, processID: appProcessID,
+            micDeviceUID: target, liveAudioContinuation: liveAudioContinuation,
+            onMicFirstHostTime: { [weak self, clock = liveAudioClock] hostTime in
+                clock?.observe(hostTime)
+                Task { await self?.captureMicStartHostTimeIfNeeded(hostTime) }
+            },
+            onAppFirstHostTime: { [weak self, clock = liveAudioClock] hostTime in
+                clock?.observe(hostTime)
+                Task { await self?.captureAppStartHostTimeIfNeeded(hostTime) }
+            }, gates: captureGates
+        )
+        let number = reportStreamFailures(of: unified)
+        unifiedStreamNumber = number
         do {
-            try await startMicCapture(micFileURL: micFileURL, liveContinuation: liveAudioContinuation)
-        } catch is CaptureStartAbandoned {
-            throw CaptureStartAbandoned()
+            try await startCaptureSession(.unified(unified))
         } catch {
-            // Bluetooth/external devices can fail explicit routing on some setups.
-            // Retry with the default input device so the live stream path stays active.
-            if desiredMicDeviceUID != nil {
-                logger.warning(
-                    "Mic capture failed for selected device; retrying on default input. error=\(error.localizedDescription, privacy: .public)"
-                )
-                routeRefusedMicDeviceID = resolveDeviceID(for: desiredMicDeviceUID)
-                fallbackMicDeviceUID = nil
-                do {
-                    try await startMicCapture(micFileURL: micFileURL, liveContinuation: liveAudioContinuation)
-                } catch is CaptureStartAbandoned {
-                    throw CaptureStartAbandoned()
-                } catch {
-                    logger.warning(
-                        "Default-device mic capture retry failed; falling back to recorder. error=\(error.localizedDescription, privacy: .public)"
-                    )
-                    try await startRecorderFallback(to: micFileURL)
-                }
-            } else {
-                try await startRecorderFallback(to: micFileURL)
-            }
+            await unified.stop()
+            if unifiedStreamNumber == number { unifiedStreamNumber = nil }
+            throw error
         }
-        } // end if !unifiedStarted
+        unifiedCaptureSession = unified
+        unifiedConfiguredMicDeviceID = resolveDeviceID(for: target)
+        appAudioURL = appFileURL
+        micCaptureStartedAt = hostNow()
+        publishMicTarget(target)
     }
 
     /// Tears audio capture down and starts it again with the same configuration and the same
@@ -1260,7 +538,7 @@ actor RecordingService: RecordingServiceProtocol {
     /// zero frames were written, so there is nothing to lose. Any future caller that restarts
     /// after a partial failure must revisit that.
     func restartAudioCapture() async -> Bool {
-        guard isRecordingValue, let micFileURL, let activeAppFileURL else {
+        guard isRecordingValue, let micFileURL else {
             return false
         }
 
@@ -1286,8 +564,8 @@ actor RecordingService: RecordingServiceProtocol {
         do {
             try await startAudioCapture(
                 micFileURL: micFileURL,
-                appFileURL: activeAppFileURL,
-                appProcessID: activeAppProcessID
+                appFileURL: activeAppSource?.fileURL,
+                appProcessID: activeAppSource?.processID
             )
             logger.notice("Audio capture restarted after failed start verification.")
             return true
@@ -1328,32 +606,26 @@ actor RecordingService: RecordingServiceProtocol {
 
     private func performRestartInPlace() async -> Bool {
         let generation = recordingGeneration
-        guard isCurrentRecording(generation), let activeAppFileURL, let micFileURL else {
+        guard isCurrentRecording(generation), let micFileURL else {
             return false
         }
 
-        // Mic-only recordings never take the unified path, and the engine path already has its own
-        // recovery in `mic-capture-resilience` — which likewise does not re-prepare the writer.
-        guard let existing = unifiedCaptureSession else {
-            logger.notice("Mid-session restart delegating to engine-path mic recovery.")
-            return await recoverMicCapture(reason: .restart)
-        }
-
+        guard let existing = unifiedCaptureSession else { return false }
         let startedAt = Date()
         let framesBefore = (mic: existing.micFramesWritten, app: existing.appFramesWritten)
         await existing.stopStreamPreservingOutput()
         guard isCurrentRecording(generation), unifiedCaptureSession === existing else {
             return false
         }
-        Self.sendStartedPauseMarkers(gates: captureGates, to: liveAudioContinuation, mic: true, app: true)
+        Self.sendStartedPauseMarkers(gates: captureGates, to: liveAudioContinuation, mic: true, app: appAudioURL != nil)
         let reused = existing.streamers
         let targetUID = micCaptureTargetUID()
         noteMicSwitchRequested(path: "unified", target: targetUID, reason: .restart)
 
         let replacement = UnifiedCaptureSession(
             micFileURL: micFileURL,
-            appFileURL: activeAppFileURL,
-            processID: activeAppProcessID ?? 0,
+            appFileURL: activeAppSource?.fileURL,
+            processID: activeAppSource?.processID,
             micDeviceUID: targetUID,
             liveAudioContinuation: liveAudioContinuation,
             onMicFirstHostTime: { [weak self, clock = liveAudioClock] hostTime in
@@ -1399,22 +671,9 @@ actor RecordingService: RecordingServiceProtocol {
     }
 
     private func stopAudioCaptureForRestart() async {
-        micRecoveryRetryTask?.cancel()
-        micRecoveryRetryTask = nil
-        if let unifiedCaptureSession {
-            await unifiedCaptureSession.stop()
-        }
+        await unifiedCaptureSession?.stop()
         unifiedCaptureSession = nil
-        if let appAudioCaptureSession {
-            await appAudioCaptureSession.stop()
-        }
-        appAudioCaptureSession = nil
         unifiedStreamNumber = nil
-        appStreamNumber = nil
-        await stopMicCapture()
-        audioRecorder?.stop()
-        audioRecorder = nil
-        micStreamer.close()
         appAudioURL = nil
     }
 
@@ -1434,6 +693,7 @@ actor RecordingService: RecordingServiceProtocol {
             liveAudioContinuation?.finish()
             throw RecordingError.alreadyRecording
         }
+        CaptureTrace.beginRecording("micOnly=\(appProcessID == nil)")
         lifecycleState = .starting
         recordingGeneration += 1
         self.captureGates = RecordingCaptureGates(hostNow: hostNow)
@@ -1457,7 +717,7 @@ actor RecordingService: RecordingServiceProtocol {
             try await permissionChecker()
         } catch {
             lifecycleState = .idle
-            throw error
+            throw RecordingError.failedToStart(error.diagnosticDetail ?? error.localizedDescription)
         }
 
         if !scopedAccessStarter(workspace.rootURL) {
@@ -1488,25 +748,20 @@ actor RecordingService: RecordingServiceProtocol {
             self.activeCaptureDisplayID = captureDisplayID
             self.shouldSkipScreenMux = false
             self.micFileURL = micFileURL
-            micRecoveryRetryTask?.cancel()
-            micRecoveryRetryTask = nil
             if let micDeviceID, micDeviceID != 0 {
                 fallbackMicDeviceUID = hardware.deviceUID(deviceID: micDeviceID)
             } else {
                 fallbackMicDeviceUID = nil
             }
             desiredMicDeviceUID = preferredMicDeviceUID ?? fallbackMicDeviceUID
-            routeRefusedMicDeviceID = nil
             isPreferredMicAbsent = desiredMicDeviceUID != nil && resolveDeviceID(for: desiredMicDeviceUID) == nil
-            // Phase 2: for mic+app recordings, capture both from one ScreenCaptureKit stream
-            // (shared clock) when enabled. Falls back to the legacy AVAudioEngine + separate
-            // SCStream path on any failure.
-            self.activeAppFileURL = appFileURL
-            self.activeAppProcessID = appProcessID
+            self.activeAppSource = appProcessID.map {
+                UnifiedCaptureSession.AppSource(fileURL: appFileURL, processID: $0)
+            }
             self.recordingAudioSyncFlags = audioSyncFlags
             try await startAudioCapture(
                 micFileURL: micFileURL,
-                appFileURL: appFileURL,
+                appFileURL: activeAppSource?.fileURL,
                 appProcessID: appProcessID
             )
             self.recordingStartedAt = now()
@@ -1519,7 +774,7 @@ actor RecordingService: RecordingServiceProtocol {
             self.captureStreamFailureCount = 0
             self.handledStreamFailureCount = 0
             self.captureRestartCount = 0
-            self.activeCapturedAppName = capturedAppName
+            self.activeCapturedAppName = activeAppSource == nil ? nil : capturedAppName
             self.pendingTitle = title
 
             if let captureDisplayID {
@@ -1556,7 +811,7 @@ actor RecordingService: RecordingServiceProtocol {
                 micAudioURL: micFileURL.path,
                 appAudioURL: appProcessID != nil ? appFileURL.path : nil,
                 title: title ?? makeSessionTitle(createdAt: recordingCreatedAt),
-                capturedAppName: capturedAppName,
+                capturedAppName: activeCapturedAppName,
                 status: .recording
             )
             // Saved with the session so recovery finalizes with the values the recording started with.
@@ -1569,7 +824,7 @@ actor RecordingService: RecordingServiceProtocol {
             try context.save()
             self.currentSessionID = session.id
             logger.notice(
-                "Recording \(session.id, privacy: .public) audio-sync flags: timelineMixdown=\(audioSyncFlags.isTimelineMixdownEnabled, privacy: .public) unifiedCapture=\(audioSyncFlags.isUnifiedCaptureEnabled, privacy: .public) captureHealthRecovery=\(audioSyncFlags.isCaptureHealthRecoveryEnabled, privacy: .public) unifiedStarted=\(self.unifiedCaptureSession != nil, privacy: .public)"
+                "Recording \(session.id, privacy: .public) audio-sync flags: timelineMixdown=\(audioSyncFlags.isTimelineMixdownEnabled, privacy: .public) captureHealthRecovery=\(audioSyncFlags.isCaptureHealthRecoveryEnabled, privacy: .public) unifiedStarted=\(self.unifiedCaptureSession != nil, privacy: .public)"
             )
             registerMicHardwareListeners()
             didStart = true
@@ -1578,9 +833,6 @@ actor RecordingService: RecordingServiceProtocol {
             await requestMicRetarget(reason: .start)
             return session.id
         } catch {
-            await stopMicCapture()
-            audioRecorder?.stop()
-            await appAudioCaptureSession?.stop()
             await cleanupRecordingState()
             releaseRecordingScopeIfNeeded()
             audioLevelValue = 0
@@ -1623,27 +875,11 @@ actor RecordingService: RecordingServiceProtocol {
         // Read before teardown: these counters live on the capture sessions, which are released
         // immediately below. Zero app frames for the whole recording means app audio never
         // arrived, and the recording is finalized as microphone-only.
-        let appFramesAtStop: Int64? = if let unifiedCaptureSession {
-            appAudioURL == nil ? nil : unifiedCaptureSession.appFramesWritten
-        } else {
-            appAudioCaptureSession?.framesWritten
-        }
-        let micFramesAtStop: Int64? = if let unifiedCaptureSession {
-            unifiedCaptureSession.micFramesWritten
-        } else if audioRecorder != nil {
-            // The AVAudioRecorder fallback does not write through AudioFileStreamer, so there is
-            // no frame count to measure coverage against.
-            nil
-        } else {
-            micStreamer.framesWritten
-        }
+        let appFramesAtStop = appAudioURL == nil ? nil : unifiedCaptureSession?.appFramesWritten
+        let micFramesAtStop = unifiedCaptureSession?.micFramesWritten
         // Write failures are read here for the same reason: the counters live on the capture
         // sessions, which are released below.
-        var writeFailuresAtStop: Int = if let unifiedCaptureSession {
-            unifiedCaptureSession.micWriteFailureCount + unifiedCaptureSession.appWriteFailureCount
-        } else {
-            micStreamer.writeFailureCount + (appAudioCaptureSession?.writeFailureCount ?? 0)
-        }
+        var writeFailuresAtStop = (unifiedCaptureSession?.micWriteFailureCount ?? 0) + (unifiedCaptureSession?.appWriteFailureCount ?? 0)
 #if DEBUG
         if let writeFailureOverrideForTesting {
             writeFailuresAtStop = writeFailureOverrideForTesting
@@ -1656,11 +892,6 @@ actor RecordingService: RecordingServiceProtocol {
         }
 
         deregisterMicHardwareListeners()
-        await stopMicCapture()
-        audioRecorder?.stop()
-        micStreamer.close()
-        await appAudioCaptureSession?.stop()
-        appAudioCaptureSession = nil
         await unifiedCaptureSession?.stop()
         unifiedCaptureSession = nil
         let activeScreenCaptureSession = screenCaptureSession
@@ -1824,7 +1055,6 @@ actor RecordingService: RecordingServiceProtocol {
     // MARK: - Pause and resume
 
     /// Pauses the active recording. Capture streams stay open and what they deliver is discarded.
-    /// The `AVAudioRecorder` fallback, which has no buffers to discard, is paused itself.
     /// True when the recording is paused, including when it already was.
     ///
     /// A pause asked for during a resume waits for it. It still pauses when the resume failed, since
@@ -1836,7 +1066,6 @@ actor RecordingService: RecordingServiceProtocol {
         guard isRecordingValue else { return false }
         if captureGates.clock.pause(at: hostNow) {
             micDeviceCapturedAtPause = capturedMicDevice
-            audioRecorder?.pause()
             screenCaptureSession?.recordingDidPause()
         }
         return true
@@ -1845,9 +1074,8 @@ actor RecordingService: RecordingServiceProtocol {
     /// Ends the pause. True when the recording is running, including when it was not paused.
     ///
     /// Sources that died during the pause are restarted first, whatever the capture-health recovery
-    /// flag is. If the microphone can't be restarted, resume fails and the recording stays paused;
-    /// a legacy app stream that can't be restarted is left out. A request made during a resume
-    /// waits for it and gets its result.
+    /// flag is. If capture can't be restarted, resume fails and the recording stays paused.
+    /// A request made during a resume waits for it and gets its result.
     func resumeRecording() async -> Bool {
         if let resumeTask {
             return await resumeTask.value
@@ -1873,14 +1101,8 @@ actor RecordingService: RecordingServiceProtocol {
                 logger.error("Resume failed: microphone capture could not be restarted. The recording stays paused.")
                 return false
             }
-            await restartDeadLegacyAppStream(generation: generation)
             guard isCurrentRecording(generation) else { return false }
         } while !micTransitionsInFlight.isEmpty
-        // Recorded again only now, so it captures nothing while the clock is still paused.
-        if let audioRecorder, !audioRecorder.record() {
-            logger.error("Resume failed: the recorder fallback did not restart. The recording stays paused.")
-            return false
-        }
         acknowledgeStreamFailuresHandledByResume()
         guard captureGates.clock.resume(at: hostNow) else { return true }
         screenCaptureSession?.recordingDidResume()
@@ -1893,15 +1115,14 @@ actor RecordingService: RecordingServiceProtocol {
         let includesApp = appAudioURL != nil
         let endedPause = gates.clock.timeline.pauseStarts.count
         await unifiedCaptureSession?.drainSampleCallbacks()
-        await appAudioCaptureSession?.drainSampleCallbacks()
         Self.sendStartedPauseMarkers(
             gates: gates, to: continuation, mic: true, app: includesApp, through: endedPause
         )
         return true
     }
 
-    /// Every stream failure reported so far was checked by this resume and its source restarted,
-    /// or left out when only legacy app audio could not restart. Its error is spent with it.
+    /// Every stream failure reported so far was checked by this resume and capture restarted.
+    /// Its error is spent with it.
     private func acknowledgeStreamFailuresHandledByResume() {
         guard captureStreamFailureCount > handledStreamFailureCount else { return }
         handledStreamFailureCount = captureStreamFailureCount
@@ -1913,9 +1134,7 @@ actor RecordingService: RecordingServiceProtocol {
     /// Restarts microphone capture if it died during the pause. False when it is dead and could not
     /// be restarted.
     ///
-    /// The microphone is dead when its stream stopped, its engine is not running, or no raw buffer
-    /// arrived within the stall threshold. The recorder fallback is restarted by `record()` at the
-    /// end of the resume.
+    /// Restarts a stopped or stalled microphone before reopening the pause clock.
     private func restartDeadMicrophone(generation: Int) async -> Bool {
         if let unified = unifiedCaptureSession {
             let streamStopped = !unified.isStreamLive
@@ -1927,23 +1146,9 @@ actor RecordingService: RecordingServiceProtocol {
             )
             return await restartAudioCaptureInPlace()
         }
-        guard !isRecorderFallbackActive else { return true }
-        let engineStopped = !(await isMicEngineRunning())
-        let stalled = isMicrophoneStalled()
-        guard engineStopped || stalled else { return true }
-        logger.notice(
-            "Resume restarting engine microphone. engineStopped=\(engineStopped, privacy: .public) micStalled=\(stalled, privacy: .public)"
-        )
-        let restarted = await performMicRecovery(reason: .resume)
-        guard restarted, isCurrentRecording(generation) else { return false }
-        micRecoveryRetryTask?.cancel()
-        micRecoveryRetryTask = nil
-        captureRestartCount += 1
-        return true
+        return false
     }
 
-    /// True when no raw microphone buffer arrived within the stall threshold, counted from the last
-    /// buffer or from when the capture started, whichever is later.
     private func isMicrophoneStalled() -> Bool {
         guard let lastSign = [captureGates.mic.lastArrivalHostTime, micCaptureStartedAt].compactMap({ $0 }).max() else {
             return false
@@ -1954,56 +1159,6 @@ actor RecordingService: RecordingServiceProtocol {
         return silentSeconds > CaptureHealthMonitor.Configuration.default.stallThreshold
     }
 
-    /// Restarts the legacy app stream if it stopped during the pause. Its absence alone is not a
-    /// failure. A restart that fails leaves the recording without app audio from here on.
-    private func restartDeadLegacyAppStream(generation: Int) async {
-        guard let existing = appAudioCaptureSession, !existing.isStreamLive else { return }
-        logger.notice("Resume restarting the app audio stream.")
-        if !(await restartLegacyAppCapture(existing, generation: generation)) {
-            logger.warning("App audio stream could not be restarted; the recording continues without app audio.")
-        }
-    }
-
-    /// Replaces a stopped legacy app stream with a new one that writes into the same file.
-    private func restartLegacyAppCapture(_ existing: AppAudioCaptureSession, generation: Int) async -> Bool {
-        guard let appFileURL = activeAppFileURL, let processID = activeAppProcessID else { return false }
-        await existing.stopStreamPreservingOutput()
-        guard isCurrentRecording(generation), appAudioCaptureSession === existing else { return false }
-        Self.sendStartedPauseMarkers(gates: captureGates, to: liveAudioContinuation, mic: false, app: true)
-
-        let replacement = AppAudioCaptureSession(
-            fileURL: appFileURL,
-            processID: processID,
-            onFirstBufferHostTime: { [weak self, clock = liveAudioClock] hostTime in
-                clock?.observe(hostTime)
-                Task { [weak self] in await self?.captureAppStartHostTimeIfNeeded(hostTime) }
-            },
-            liveAudioContinuation: liveAudioContinuation,
-            streamer: existing.outputHandler.streamer,
-            gate: captureGates.app,
-            reusingPreparedOutput: existing.outputHandler.isOutputPrepared
-        )
-        let streamNumber = reportStreamFailures(of: replacement)
-        do {
-            try await startCaptureSession(.appAudio(replacement))
-        } catch {
-            logger.error("App audio restart failed: \(error.localizedDescription, privacy: .public)")
-            return false
-        }
-        guard isCurrentRecording(generation), appAudioCaptureSession === existing else {
-            await replacement.stopStreamPreservingOutput()
-            return false
-        }
-        appAudioCaptureSession = replacement
-        appStreamNumber = streamNumber
-        captureRestartCount += 1
-        logger.notice("App audio stream restarted (restart #\(self.captureRestartCount, privacy: .public)).")
-        return true
-    }
-
-    /// Sends each source's marker for every pause that has started and that the source has not
-    /// marked from its own buffers. For a capture replacement and the stop, which follow a drained
-    /// or stopped delivery path, and the resume.
     private static func sendStartedPauseMarkers(
         gates: RecordingCaptureGates,
         to continuation: AsyncStream<LiveAudioChunk>.Continuation?,
@@ -2045,13 +1200,6 @@ actor RecordingService: RecordingServiceProtocol {
             return
         }
         self.desiredMicDeviceUID = desiredDeviceUID
-        routeRefusedMicDeviceID = nil
-        // The recorder fallback writes the microphone file itself, so the engine can't take over
-        // without writing over it.
-        guard unifiedCaptureSession != nil || !isRecorderFallbackActive else {
-            logger.notice("Mic retarget ignored: the recorder fallback keeps recording on the system input.")
-            return
-        }
         await requestMicRetarget(reason: .retarget)
     }
 
@@ -2060,11 +1208,11 @@ actor RecordingService: RecordingServiceProtocol {
     /// Why a microphone switch was requested. Logged only.
     private enum MicSwitchReason: String {
         case start, retarget, removal, preferredReturned, returnedUnderSameUID, hardwareChange
-        case restart, configurationChange, retry, resume
+        case restart, resume
     }
 
     /// Queues `body` behind every microphone transition queued before it, so target updates,
-    /// unified restarts and engine recoveries run one at a time in request order.
+    /// unified restarts run one at a time in request order.
     private func enqueueMicTransition<T: Sendable>(
         _ body: @escaping @Sendable () async -> T
     ) -> Task<T, Never> {
@@ -2111,8 +1259,6 @@ actor RecordingService: RecordingServiceProtocol {
             await applyMicTargetToUnifiedCapture(generation: generation, reason: reason)
             return
         }
-        guard !isRecorderFallbackActive else { return }
-        await applyMicTargetToEngine(generation: generation, reason: reason)
     }
 
     /// True when the unified stream is not on the target rule's device, or is on a device that
@@ -2178,29 +1324,9 @@ actor RecordingService: RecordingServiceProtocol {
         isMicSwitchUnsettled = false
     }
 
-    /// Restarts engine capture on the target rule's device when it is not the device in use,
-    /// including when the device in use was removed while the engine still reports running.
-    private func applyMicTargetToEngine(generation: Int, reason: MicSwitchReason) async {
-        let target = micCaptureTargetUID()
-        guard resolveDeviceID(for: target) != currentCaptureDeviceID
-                || currentCaptureDeviceUID != (resolveDeviceID(for: target) == nil ? nil : target)
-        else {
-            return
-        }
-        noteMicSwitchRequested(path: "engine", target: target, reason: reason)
-        let didRecover = await recoverMicCapture(reason: reason)
-        guard isCurrentRecording(generation) else { return }
-        if didRecover {
-            micRecoveryRetryTask?.cancel()
-            micRecoveryRetryTask = nil
-            return
-        }
-        scheduleMicRecoveryRetry()
-    }
-
-    /// Logs a switch, reports capture as switching until the new target's first buffer, and marks
-    /// a transition for the capture-health grace period unless the switch is a health restart.
     private func noteMicSwitchRequested(path: String, target: String?, reason: MicSwitchReason) {
+        CaptureTrace.log("switchRequested", "target=\(target ?? "<default>") reason=\(reason.rawValue)")
+        CaptureTrace.armFirstBuffer(target: target ?? "<default>")
         isMicSwitchUnsettled = true
         if reason != .restart {
             noteMicTransition()
@@ -2237,7 +1363,7 @@ actor RecordingService: RecordingServiceProtocol {
     }
 
     /// The microphone capture is aimed at, and when its first buffer arrived. Nil when no
-    /// recording runs and under the recorder fallback, whose device is not known.
+    /// recording runs.
     func micCaptureTarget() -> MicCaptureTarget? {
         micTarget
     }
@@ -2245,7 +1371,6 @@ actor RecordingService: RecordingServiceProtocol {
     /// The microphone being captured. Nil when no recording runs.
     func capturedMicrophone() -> CapturedMicrophone? {
         guard isRecordingValue else { return nil }
-        if isRecorderFallbackActive { return .unknown }
         if captureGates.clock.isPaused, let micDeviceCapturedAtPause {
             return .capturing(micDeviceCapturedAtPause)
         }
@@ -2273,18 +1398,13 @@ actor RecordingService: RecordingServiceProtocol {
         let path: String
         let capturedUID: String?
         let capturedDeviceGone: Bool
-        if let unified = unifiedCaptureSession {
-            path = "unified"
-            capturedUID = unified.currentMicDeviceUID
-            capturedDeviceGone = capturedUID != nil && resolveDeviceID(for: capturedUID) == nil
-        } else {
-            path = "engine"
-            capturedUID = currentCaptureDeviceUID
-            capturedDeviceGone = capturedUID != nil && resolveDeviceID(for: capturedUID) != currentCaptureDeviceID
-        }
+        path = "unified"
+        capturedUID = unifiedCaptureSession?.currentMicDeviceUID
+        capturedDeviceGone = capturedUID != nil && resolveDeviceID(for: capturedUID) == nil
         if capturedDeviceGone, let capturedUID {
             reason = .removal
             if loggedRemovedMicUID != capturedUID {
+                CaptureTrace.log("micRemovalDetected", "device=\(capturedUID)")
                 loggedRemovedMicUID = capturedUID
                 noteMicTransition()
                 logger.notice(
@@ -2296,6 +1416,7 @@ actor RecordingService: RecordingServiceProtocol {
             if resolveDeviceID(for: desired) == nil {
                 isPreferredMicAbsent = true
             } else if isPreferredMicAbsent {
+                CaptureTrace.log("preferredMicReturnDetected", "device=\(desired)")
                 isPreferredMicAbsent = false
                 if loggedRemovedMicUID == desired { loggedRemovedMicUID = nil }
                 reason = .preferredReturned
@@ -2311,13 +1432,7 @@ actor RecordingService: RecordingServiceProtocol {
 
     private func cleanupRecordingState(deleteScreenTmpVideo: Bool = true) async {
         let screenTmpURL = makeCurrentScreenTmpVideoURL()
-        micRecoveryRetryTask?.cancel()
-        micRecoveryRetryTask = nil
         deregisterMicHardwareListeners()
-        await stopMicCapture()
-        micStreamer.close()
-        audioRecorder = nil
-        appAudioCaptureSession = nil
         if let unifiedCaptureSession {
             await unifiedCaptureSession.stop()
         }
@@ -2332,6 +1447,7 @@ actor RecordingService: RecordingServiceProtocol {
             try? fileManager.removeItem(at: screenTmpURL)
         }
         appAudioURL = nil
+        activeAppSource = nil
         recordingStartedAt = nil
         recordingStopRequestedAt = nil
         recordingCreatedAt = nil
@@ -2347,12 +1463,8 @@ actor RecordingService: RecordingServiceProtocol {
         activeCaptureDisplayID = nil
         desiredMicDeviceUID = nil
         fallbackMicDeviceUID = nil
-        routeRefusedMicDeviceID = nil
-        currentCaptureDeviceID = nil
-        currentCaptureDeviceUID = nil
         unifiedConfiguredMicDeviceID = nil
         unifiedStreamNumber = nil
-        appStreamNumber = nil
         loggedRemovedMicUID = nil
         isPreferredMicAbsent = false
         lastMicTransition = nil
@@ -2365,14 +1477,9 @@ actor RecordingService: RecordingServiceProtocol {
         micTransitionsInFlight = []
         queuedMicRetarget = nil
         micFileURL = nil
-        isRecoveringMicCapture = false
-        micRecoveryTask = nil
         restartInPlaceTask = nil
         resumeTask = nil
         micCaptureStartedAt = nil
-#if DEBUG
-        recorderFallbackActiveForTesting = false
-#endif
     }
 
     private func releaseRecordingScopeIfNeeded() {
@@ -2399,350 +1506,14 @@ actor RecordingService: RecordingServiceProtocol {
         recordingFolderURL.map(RecordingFileLayout.screenTmpVideoURL(in:))
     }
 
-    private func handleAudioEngineConfigurationChange() async {
-        guard isRecordingValue else {
-            return
-        }
-        // The recording path holds no `AVAudioEngine` under unified capture, so there is nothing
-        // to restart. Recorded as an explicit exemption in `mic-capture-resilience` rather than
-        // left implicit here.
-        guard unifiedCaptureSession == nil else {
-            return
-        }
-        // Match prior behavior: only react when engine-path capture is interrupted/stopped.
-        guard !(await isMicEngineRunning()) else {
-            return
-        }
-        guard !isRecoveringMicCapture else {
-            return
-        }
-        // Recorder fallback is naturally resilient to device changes.
-        guard !isRecorderFallbackActive else {
-            return
-        }
-
-        let generation = recordingGeneration
-        let didRecover = await performMicRecovery(reason: .configurationChange)
-        guard isCurrentRecording(generation) else { return }
-
-        guard !didRecover else {
-            micRecoveryRetryTask?.cancel()
-            micRecoveryRetryTask = nil
-            return
-        }
-        // Transient device-route/config transitions can fail an immediate restart.
-        // Keep the session alive and continue retrying in the background.
-        scheduleMicRecoveryRetry()
-    }
-
     private func handleHardwareChange() async {
-        guard isRecordingValue else {
-            return
-        }
-        // The recorder fallback records the system input and ignores device changes (decision 10).
-        guard unifiedCaptureSession != nil || !isRecorderFallbackActive else {
-            return
-        }
-        // The device that refused explicit routing is tried again once it has left the list.
-        if let routeRefusedMicDeviceID, routeRefusedMicDeviceID != resolveDeviceID(for: desiredMicDeviceUID) {
-            self.routeRefusedMicDeviceID = nil
-        }
-        let reason = noteMicDeviceChanges()
-        await requestMicRetarget(reason: reason)
+        guard isRecordingValue else { return }
+        await requestMicRetarget(reason: noteMicDeviceChanges())
     }
 
-    private func startRecorderFallback(to fileURL: URL) async throws {
-        let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: 44_100,
-            AVNumberOfChannelsKey: 1,
-            AVLinearPCMBitDepthKey: 16,
-            AVLinearPCMIsFloatKey: false,
-            AVLinearPCMIsBigEndianKey: false
-        ]
-
-        let recorder = try makeRecorderFallback(fileURL, settings)
-        guard recorder.record() else {
-            throw RecordingError.failedToStart("Unable to start recorder fallback.")
-        }
-
-        await stopMicCapture()
-        self.audioEngine = nil
-        self.audioRecorder = recorder
-        micTargetNumber += 1
-        micTarget = nil
-    }
-
-    /// Starts engine capture on `desiredMicDeviceUID`, read after the last suspension so a newer
-    /// request is the one installed. Throws `CaptureStartAbandoned` when the recording ended or was
-    /// replaced during that suspension.
-    private func startMicCapture(
-        micFileURL: URL,
-        liveContinuation: AsyncStream<LiveAudioChunk>.Continuation?
-    ) async throws {
-        let generation = recordingGeneration
-        let vpEnabled = await voiceProcessingSetting()
-        guard isCurrentOrStartingRecording(generation) else {
-            throw CaptureStartAbandoned()
-        }
-        let targetUID = micCaptureTargetUID()
-        let deviceID = resolveDeviceID(for: targetUID)
-        let deviceKey = deviceID ?? 0
-        guard !devicesWithHungEngineCall.contains(deviceKey) else {
-            logger.error(
-                "Engine mic start not tried: an earlier engine call on this device has not returned. device=\(targetUID ?? "<default>", privacy: .public)"
-            )
-            throw MicEngineCallHung()
-        }
-        micCaptureHandleCount += 1
-        let handle = MicCaptureEngineHandle(
-            controller: makeMicCaptureController(),
-            deviceID: deviceID,
-            number: micCaptureHandleCount
-        )
-        let targetFormat = micTargetFormat
-        let micStreamer = micStreamer
-        let gate = captureGates.mic
-        let liveAudioClock = liveAudioClock
-        let startedAt = ContinuousClock.now
-        let outcome = await handle.call(timeout: engineCallTimeout) { controller in
-            try controller.startCapture(
-                deviceID: deviceID,
-                targetFormat: targetFormat,
-                micFileURL: micFileURL,
-                micStreamer: micStreamer,
-                gate: gate,
-                voiceProcessingEnabled: vpEnabled,
-                applyVoiceProcessing: { [weak self] inputNode, enabled in
-                    self?.applyVoiceProcessingIfNeeded(to: inputNode, enabled: enabled)
-                },
-                onFirstHostTime: { [weak self, clock = liveAudioClock] hostTime in
-                    clock?.observe(hostTime)
-                    Task { [weak self] in
-                        await self?.captureMicStartHostTimeIfNeeded(hostTime)
-                    }
-                },
-                onBuffer: { output in
-                    switch output {
-                    case let .audio(samples, sampleRate, hostTime, rawHostTime):
-                        liveContinuation?.yield(LiveAudioChunk(
-                            samples: samples,
-                            source: .mic,
-                            sampleRate: sampleRate,
-                            hostTime: hostTime,
-                            rawHostTime: rawHostTime
-                        ))
-                    case let .pauseMarker(number):
-                        liveContinuation?.yield(.pauseMarker(number, source: .mic))
-                    }
-                }
-            )
-        }
-        guard let outcome else {
-            abandonHungEngine(handle, call: "start", device: targetUID, startedAt: startedAt)
-            throw MicEngineCallHung()
-        }
-        try outcome.get()
-        // The recording ended or was replaced while the engine started.
-        guard isCurrentOrStartingRecording(generation) else {
-            await stopEngine(handle, device: targetUID)
-            throw CaptureStartAbandoned()
-        }
-        micCaptureHandle = handle
-        self.audioRecorder = nil
-        self.audioEngine = nil
-        self.currentCaptureDeviceID = deviceID
-        self.currentCaptureDeviceUID = deviceID == nil ? nil : targetUID
-        self.micFileURL = micFileURL
-        self.micCaptureStartedAt = hostNow()
-        publishMicTarget(currentCaptureDeviceUID)
-    }
-
-    private func stopMicCapture() async {
-        let handle = micCaptureHandle
-        let device = currentCaptureDeviceUID
-        micCaptureHandle = nil
-        currentCaptureDeviceID = nil
-        currentCaptureDeviceUID = nil
-        audioEngine = nil
-        if let handle {
-            await stopEngine(handle, device: device)
-        }
-    }
-
-    /// Stops `handle`'s capture off the actor. Abandons it when the stop does not return in time.
-    private func stopEngine(_ handle: MicCaptureEngineHandle, device: String?) async {
-        let startedAt = ContinuousClock.now
-        if await handle.call(timeout: engineCallTimeout, { $0.stopCapture() }) == nil {
-            abandonHungEngine(handle, call: "stop", device: device, startedAt: startedAt)
-        }
-    }
-
-    /// True when the engine capture running now reports running. False when there is none, or it
-    /// did not answer in time.
-    private func isMicEngineRunning() async -> Bool {
-        guard let handle = micCaptureHandle else { return false }
-        let startedAt = ContinuousClock.now
-        let device = currentCaptureDeviceUID
-        guard let outcome = await handle.call(timeout: engineCallTimeout, { $0.isCaptureRunning() }) else {
-            if micCaptureHandle === handle {
-                micCaptureHandle = nil
-                currentCaptureDeviceID = nil
-                currentCaptureDeviceUID = nil
-            }
-            abandonHungEngine(handle, call: "isRunning", device: device, startedAt: startedAt)
-            return false
-        }
-        return (try? outcome.get()) ?? false
-    }
-
-    /// Logs a call that timed out, keeps its device out of new engine starts until the call
-    /// returns, and tears down what the call left running when it does.
-    private func abandonHungEngine(
-        _ handle: MicCaptureEngineHandle,
-        call: String,
-        device: String?,
-        startedAt: ContinuousClock.Instant
-    ) {
-        let deviceKey = handle.deviceID ?? 0
-        devicesWithHungEngineCall.insert(deviceKey)
-        logger.error(
-            "Engine mic \(call, privacy: .public) timed out: device=\(device ?? "<default>", privacy: .public) elapsedMs=\(Self.milliseconds(since: startedAt), privacy: .public). The engine is abandoned."
-        )
-        handle.abandon { [weak self] in
-            Task { [weak self] in
-                await self?.abandonedEngineReturned(deviceKey: deviceKey, call: call, device: device, startedAt: startedAt)
-            }
-        }
-    }
-
-    private func abandonedEngineReturned(
-        deviceKey: AudioDeviceID,
-        call: String,
-        device: String?,
-        startedAt: ContinuousClock.Instant
-    ) {
-        devicesWithHungEngineCall.remove(deviceKey)
-        logger.notice(
-            "Abandoned engine mic \(call, privacy: .public) returned and was stopped: device=\(device ?? "<default>", privacy: .public) elapsedMs=\(Self.milliseconds(since: startedAt), privacy: .public)"
-        )
-    }
-
-    private static func milliseconds(since start: ContinuousClock.Instant) -> Int {
-        let elapsed = ContinuousClock.now - start
-        return Int(elapsed.timeInterval * 1_000)
-    }
-
-    private func teardownEngineForRecovery() async {
-        await stopMicCapture()
-    }
-
-    /// Restarts engine capture after every transition queued before it, or waits for the restart
-    /// already queued and returns its result.
-    private func performMicRecovery(reason: MicSwitchReason) async -> Bool {
-        if let micRecoveryTask {
-            return await micRecoveryTask.value
-        }
-        let task = enqueueMicTransition { [weak self] in
-            await self?.recoverMicCapture(reason: reason) ?? false
-        }
-        micRecoveryTask = task
-        isRecoveringMicCapture = true
-        let recovered = await task.value
-        if micRecoveryTask == task {
-            micRecoveryTask = nil
-            isRecoveringMicCapture = false
-        }
-        return recovered
-    }
-
-    /// Stops engine capture and starts it on the target rule's device. Runs inside a queued
-    /// transition; callers outside one use `performMicRecovery(reason:)`.
-    private func recoverMicCapture(reason: MicSwitchReason) async -> Bool {
-        guard let micFileURL else {
-            return false
-        }
-        // The recorder fallback writes the microphone file itself; engine capture would write over
-        // what it has saved.
-        guard !isRecorderFallbackActive else {
-            logger.notice("Mic recovery skipped: the recorder fallback holds the microphone file.")
-            return false
-        }
-        await teardownEngineForRecovery()
-        Self.sendStartedPauseMarkers(gates: captureGates, to: liveAudioContinuation, mic: true, app: false)
-        let recovered: Bool
-        // Read before the start: a start that hangs takes its device out of the target rule.
-        let attemptedTarget = micCaptureTargetUID()
-        do {
-            try await startMicCapture(micFileURL: micFileURL, liveContinuation: liveAudioContinuation)
-            recovered = true
-        } catch {
-            recovered = false
-        }
-        let device = recovered ? currentCaptureDeviceUID : attemptedTarget
-        logger.notice(
-            "Engine mic recovery attempt: reason=\(reason.rawValue, privacy: .public) device=\(device ?? "<default>", privacy: .public) result=\(recovered ? "started" : "failed", privacy: .public)"
-        )
-        return recovered
-    }
-
-    private func scheduleMicRecoveryRetry() {
-        guard isRecordingValue else {
-            return
-        }
-        guard micRecoveryRetryTask == nil else {
-            return
-        }
-        micRecoveryRetryTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(350))
-                // A cancelled sleep returns at once; a recovery that succeeded elsewhere cancelled us.
-                guard !Task.isCancelled, let self else {
-                    return
-                }
-                let shouldContinue = await self.retryMicCaptureFromRetryLoop()
-                if !shouldContinue {
-                    return
-                }
-            }
-        }
-    }
-
-    private func retryMicCaptureFromRetryLoop() async -> Bool {
-        guard isRecordingValue else {
-            micRecoveryRetryTask?.cancel()
-            micRecoveryRetryTask = nil
-            return false
-        }
-        guard !isRecoveringMicCapture else {
-            return true
-        }
-        let generation = recordingGeneration
-        let didRecover = await performMicRecovery(reason: .retry)
-        guard isCurrentRecording(generation) else { return false }
-        if didRecover {
-            micRecoveryRetryTask?.cancel()
-            micRecoveryRetryTask = nil
-            return false
-        }
-        return true
-    }
-
-    /// The one target rule for every capture transition: the preferred device while it is usable,
-    /// has not refused the route and has no engine call that hung, otherwise the device the
-    /// recording started on under the same conditions, otherwise the system default (`nil`).
-    /// Callers read it after their last suspension.
     private func micCaptureTargetUID() -> String? {
-        if let desiredDeviceID = resolveDeviceID(for: desiredMicDeviceUID),
-           desiredDeviceID != routeRefusedMicDeviceID,
-           !devicesWithHungEngineCall.contains(desiredDeviceID) {
-            return desiredMicDeviceUID
-        }
-        if let fallbackDeviceID = resolveDeviceID(for: fallbackMicDeviceUID),
-           fallbackDeviceID != routeRefusedMicDeviceID,
-           !devicesWithHungEngineCall.contains(fallbackDeviceID) {
-            return fallbackMicDeviceUID
-        }
+        if resolveDeviceID(for: desiredMicDeviceUID) != nil { return desiredMicDeviceUID }
+        if resolveDeviceID(for: fallbackMicDeviceUID) != nil { return fallbackMicDeviceUID }
         return nil
     }
 
@@ -2859,19 +1630,6 @@ actor RecordingService: RecordingServiceProtocol {
 
     func capturedHostTimes() -> (mic: HostNanoseconds?, app: HostNanoseconds?, video: HostNanoseconds?) {
         (micStartHostTime, appStartHostTime, videoStartHostTime)
-    }
-
-    nonisolated func applyVoiceProcessingIfNeeded(to inputNode: AVAudioInputNode, enabled: Bool) {
-        guard enabled else { return }
-        do {
-            if let setter = voiceProcessingPropertySetter {
-                try setter(inputNode)
-            } else {
-                try inputNode.setVoiceProcessingEnabled(true)
-            }
-        } catch {
-            logger.warning("Voice processing activation failed: \(error.localizedDescription, privacy: .public). Continuing without VP.")
-        }
     }
 
     func runMixdown(

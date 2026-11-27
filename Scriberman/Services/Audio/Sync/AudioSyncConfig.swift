@@ -19,17 +19,15 @@ struct AudioSyncConfig: @unchecked Sendable {
 
     struct FlagDefinitions: Sendable, Equatable {
         var timelineMixdown: Flag
-        var unifiedCapture: Flag
         var captureHealthRecovery: Flag
 
         static let shipped = FlagDefinitions(
             timelineMixdown: Flag(key: "AudioSync.timelineMixdownEnabled", defaultValue: true),
-            unifiedCapture: Flag(key: "AudioSync.unifiedCaptureEnabled", defaultValue: true),
             captureHealthRecovery: Flag(key: "AudioSync.captureHealthRecoveryEnabled", defaultValue: true)
         )
 
         /// Every flag, in the order the Dev Features tab lists them.
-        var all: [Flag] { [timelineMixdown, unifiedCapture, captureHealthRecovery] }
+        var all: [Flag] { [timelineMixdown, captureHealthRecovery] }
     }
 
     private let store: UserDefaults
@@ -47,13 +45,6 @@ struct AudioSyncConfig: @unchecked Sendable {
     /// `defaults write <bundle> AudioSync.timelineMixdownEnabled -bool NO`.
     var isTimelineMixdownEnabled: Bool { value(of: definitions.timelineMixdown) }
 
-    /// Phase 2: when true, mic + app are captured from one ScreenCaptureKit stream
-    /// (macOS 15+ `captureMicrophone`) for a shared clock, instead of AVAudioEngine mic +
-    /// a separate SCStream. Applies to mic+app recordings; the AVAudioEngine path remains as a
-    /// fallback when unified capture cannot start. **Default ON** (unset ⇒ true). Force off with
-    /// `defaults write <bundle> AudioSync.unifiedCaptureEnabled -bool NO`.
-    var isUnifiedCaptureEnabled: Bool { value(of: definitions.unifiedCapture) }
-
     /// When true, a recording whose capture dies mid-session is restarted in place and, if that
     /// does not help within the budget, stopped and reported. When false, capture health is still
     /// evaluated and logged but nothing acts on it — behaviour is exactly as before.
@@ -65,11 +56,10 @@ struct AudioSyncConfig: @unchecked Sendable {
     /// capture health to evaluating and logging without acting.
     var isCaptureHealthRecoveryEnabled: Bool { value(of: definitions.captureHealthRecovery) }
 
-    /// All three flags read now, for one recording to use from start to finalization.
+    /// Both flags read now, for one recording to use from start to finalization.
     func snapshot() -> AudioSyncFlags {
         AudioSyncFlags(
             isTimelineMixdownEnabled: isTimelineMixdownEnabled,
-            isUnifiedCaptureEnabled: isUnifiedCaptureEnabled,
             isCaptureHealthRecoveryEnabled: isCaptureHealthRecoveryEnabled
         )
     }
@@ -84,13 +74,11 @@ struct AudioSyncConfig: @unchecked Sendable {
 /// recording and never to one in progress.
 struct AudioSyncFlags: Sendable, Equatable {
     let isTimelineMixdownEnabled: Bool
-    let isUnifiedCaptureEnabled: Bool
     let isCaptureHealthRecoveryEnabled: Bool
 
     /// The values of `FlagDefinitions.shipped` with nothing stored.
     static let shippedDefaults = AudioSyncFlags(
         isTimelineMixdownEnabled: AudioSyncConfig.FlagDefinitions.shipped.timelineMixdown.defaultValue,
-        isUnifiedCaptureEnabled: AudioSyncConfig.FlagDefinitions.shipped.unifiedCapture.defaultValue,
         isCaptureHealthRecoveryEnabled: AudioSyncConfig.FlagDefinitions.shipped.captureHealthRecovery.defaultValue
     )
 }

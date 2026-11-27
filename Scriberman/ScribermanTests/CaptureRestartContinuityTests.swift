@@ -254,8 +254,7 @@ struct CaptureRestartContinuityTests {
         )
         return RecordingService(
             workspaceService: MockWorkspaceService(),
-            modelContainer: container,
-            appAudioSettings: AppAudioSettings()
+            modelContainer: container
         )
     }
 
