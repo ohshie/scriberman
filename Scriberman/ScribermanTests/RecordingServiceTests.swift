@@ -2221,242 +2221,273 @@ final class RecordingServiceTests {
 
     @Test
     func aRetargetWhoseEngineStartHangsReturnsAndSchedulesARetry() async throws {
-        let fixture = try await makeHangFixture()
-        defer { fixture.engines.releaseAll(); removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [(id: 11, uid: "uid-a"), (id: 22, uid: "uid-b")]
-        fixture.engines.hangingDeviceIDs = [22]
-        await fixture.service.setRecordingStateForTesting(isRecording: true)
-        await fixture.service.setMicRecoveryStateForTesting(
-            desiredMicDeviceUID: "uid-a",
-            micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav")
-        )
+        try await withHangFixture() { fixture in
+            fixture.hardware.devices = [(id: 11, uid: "uid-a"), (id: 22, uid: "uid-b")]
+            fixture.engines.hangingDeviceIDs = [22]
+            await fixture.service.setRecordingStateForTesting(isRecording: true)
+            await fixture.service.setMicRecoveryStateForTesting(
+                desiredMicDeviceUID: "uid-a",
+                micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav")
+            )
 
-        let finished = await finishes(within: 3) {
-            await fixture.service.retargetMic(desiredDeviceUID: "uid-b")
+            let finished = await finishes(within: 3) {
+                await fixture.service.retargetMic(desiredDeviceUID: "uid-b")
+            }
+
+            // The service is held by the blocked start until it is released, so ask nothing more.
+            try #require(finished)
+            #expect(await fixture.service.isRecording())
+            #expect(await fixture.service.recoveryDebugStateForTesting().hasRecoveryRetryTask)
         }
-
-        // The service is held by the blocked start until it is released, so ask nothing more.
-        try #require(finished)
-        #expect(await fixture.service.isRecording())
-        #expect(await fixture.service.recoveryDebugStateForTesting().hasRecoveryRetryTask)
     }
 
     @Test
     func aHungEngineStartThatReturnsLateIsStoppedWithoutTouchingTheCurrentCapture() async throws {
-        let fixture = try await makeHangFixture()
-        defer { fixture.engines.releaseAll(); removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [(id: 11, uid: "uid-a"), (id: 22, uid: "uid-b")]
-        fixture.engines.hangingDeviceIDs = [22]
-        await fixture.service.setRecordingStateForTesting(isRecording: true)
-        await fixture.service.setMicRecoveryStateForTesting(
-            desiredMicDeviceUID: "uid-a",
-            micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav"),
-            fallbackMicDeviceUID: "uid-a"
-        )
-        try #require(await finishes(within: 3) { await fixture.service.retargetMic(desiredDeviceUID: "uid-b") })
-        await fixture.service.performMicRecoveryRetryAttemptForTesting()
-        let hung = try #require(fixture.engines.made.first { $0.hung })
-        let current = try #require(fixture.engines.made.last)
-        #expect(hung !== current)
-        #expect(current.startedDeviceIDs == [11])
+        try await withHangFixture() { fixture in
+            fixture.hardware.devices = [(id: 11, uid: "uid-a"), (id: 22, uid: "uid-b")]
+            fixture.engines.hangingDeviceIDs = [22]
+            await fixture.service.setRecordingStateForTesting(isRecording: true)
+            await fixture.service.setMicRecoveryStateForTesting(
+                desiredMicDeviceUID: "uid-a",
+                micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav"),
+                fallbackMicDeviceUID: "uid-a"
+            )
+            try #require(await finishes(within: 3) { await fixture.service.retargetMic(desiredDeviceUID: "uid-b") })
+            await fixture.service.performMicRecoveryRetryAttemptForTesting()
+            let hung = try #require(fixture.engines.made.first { $0.hung })
+            let current = try #require(fixture.engines.made.last)
+            #expect(hung !== current)
+            #expect(current.startedDeviceIDs == [11])
 
-        hung.release()
+            hung.release()
 
-        #expect(await eventually { hung.stopCount > 0 })
-        #expect(current.isRunning)
-        #expect(current.stopCount == 0)
-        #expect(await fixture.service.recoveryDebugStateForTesting().currentCaptureDeviceID == 11)
-        _ = await fixture.service.stopRecording()
+            #expect(await eventually { hung.stopCount > 0 })
+            #expect(current.isRunning)
+            #expect(current.stopCount == 0)
+            #expect(await fixture.service.recoveryDebugStateForTesting().currentCaptureDeviceID == 11)
+            _ = await fixture.service.stopRecording()
+        }
     }
 
     @Test
     func aDeviceWhoseEngineStartHangsIsNotStartedAgainUntilTheCallReturns() async throws {
-        let fixture = try await makeHangFixture()
-        defer { fixture.engines.releaseAll(); removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [(id: 11, uid: "uid-a"), (id: 22, uid: "uid-b")]
-        fixture.engines.hangingDeviceIDs = [22, 0]
-        await fixture.service.setRecordingStateForTesting(isRecording: true)
-        await fixture.service.setMicRecoveryStateForTesting(
-            desiredMicDeviceUID: "uid-b",
-            micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav")
-        )
+        try await withHangFixture() { fixture in
+            fixture.hardware.devices = [(id: 11, uid: "uid-a"), (id: 22, uid: "uid-b")]
+            fixture.engines.hangingDeviceIDs = [22, 0]
+            await fixture.service.setRecordingStateForTesting(isRecording: true)
+            await fixture.service.setMicRecoveryStateForTesting(
+                desiredMicDeviceUID: "uid-b",
+                micFileURL: fixture.workspace.rootURL.appendingPathComponent("mic.wav")
+            )
 
-        for _ in 0..<3 {
-            try #require(await finishes(within: 3) { await fixture.service.performMicRecoveryRetryAttemptForTesting() })
+            for _ in 0..<3 {
+                try #require(await finishes(within: 3) { await fixture.service.performMicRecoveryRetryAttemptForTesting() })
+            }
+
+            #expect(fixture.engines.attemptedDeviceIDs.filter { $0 == 22 }.count == 1)
+            #expect(fixture.engines.attemptedDeviceIDs.filter { $0 == nil }.count == 1)
+            _ = await fixture.service.stopRecording()
         }
-
-        #expect(fixture.engines.attemptedDeviceIDs.filter { $0 == 22 }.count == 1)
-        #expect(fixture.engines.attemptedDeviceIDs.filter { $0 == nil }.count == 1)
-        _ = await fixture.service.stopRecording()
     }
 
     @Test
     func aStopWhileAnEngineRecoveryHangsCompletesAndSavesTheRecording() async throws {
-        let fixture = try await makeHangFixture(engineCallTimeout: .seconds(30))
-        defer { fixture.engines.releaseAll(); removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [(id: 11, uid: "builtin")]
-        let sessionID = try await fixture.service.startRecording(
-            in: fixture.workspace,
-            micDeviceID: 11,
-            preferredMicDeviceUID: "airpods",
-            title: "Session",
-            audioSyncFlags: .shippedDefaults
-        )
-        fixture.engines.hangingDeviceIDs = [22]
-        fixture.hardware.devices.append((id: 22, uid: "airpods"))
-        let service = fixture.service
-        Task { await service.simulateHardwareChangeForTesting() }
-        try #require(await eventually { fixture.engines.made.contains { $0.hung } })
-
-        let stopped = StopResult()
-        try #require(await finishes(within: 3) { await stopped.set(service.stopRecording()) })
-
-        #expect(await stopped.value == sessionID)
-        let session = try fetchRecordingSession(id: sessionID, from: ModelContext(fixture.container))
-        #expect(session.status == .recorded)
-        let hung = try #require(fixture.engines.made.first { $0.hung })
-        hung.release()
-        #expect(await eventually { hung.stopCount > 0 })
-    }
-
-    @Test
-    func startCompletesWhenItsTargetRecheckHangsAndCaptureReturnsToTheStartDevice() async throws {
-        let fixture = try await makeHangFixture(engineCallTimeout: .seconds(1))
-        defer { fixture.engines.releaseAll(); removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [(id: 11, uid: "builtin")]
-        fixture.engines.hangingDeviceIDs = [22]
-        // The preferred mic appears while the start's engine starts, so only the re-check sees it.
-        let hardware = fixture.hardware
-        fixture.engines.onFirstStart = { hardware.devices.append((id: 22, uid: "airpods")) }
-
-        let started = await finishes(within: 4) {
-            _ = try? await fixture.service.startRecording(
+        try await withHangFixture(engineCallTimeout: .seconds(30)) { fixture in
+            fixture.hardware.devices = [(id: 11, uid: "builtin")]
+            let sessionID = try await fixture.service.startRecording(
                 in: fixture.workspace,
                 micDeviceID: 11,
                 preferredMicDeviceUID: "airpods",
                 title: "Session",
                 audioSyncFlags: .shippedDefaults
             )
-        }
+            fixture.engines.hangingDeviceIDs = [22]
+            fixture.hardware.devices.append((id: 22, uid: "airpods"))
+            let service = fixture.service
+            Task { await service.simulateHardwareChangeForTesting() }
+            try #require(await eventually { fixture.engines.made.contains { $0.hung } })
 
-        try #require(started)
-        #expect(await fixture.service.isRecording())
-        #expect(fixture.engines.made.contains { $0.hung })
-        #expect(await eventually {
-            await fixture.service.recoveryDebugStateForTesting().currentCaptureDeviceID == 11
-                && fixture.engines.made.last?.isRunning == true
-        })
-        _ = await fixture.service.stopRecording()
+            let stopped = StopResult()
+            try #require(await finishes(within: 3) { await stopped.set(service.stopRecording()) })
+
+            #expect(await stopped.value == sessionID)
+            let session = try fetchRecordingSession(id: sessionID, from: ModelContext(fixture.container))
+            #expect(session.status == .recorded)
+            let hung = try #require(fixture.engines.made.first { $0.hung })
+            hung.release()
+            #expect(await eventually { hung.stopCount > 0 })
+        }
+    }
+
+    @Test
+    func startCompletesWhenItsTargetRecheckHangsAndCaptureReturnsToTheStartDevice() async throws {
+        try await withHangFixture(engineCallTimeout: .seconds(1)) { fixture in
+            fixture.hardware.devices = [(id: 11, uid: "builtin")]
+            fixture.engines.hangingDeviceIDs = [22]
+            // The preferred mic appears while the start's engine starts, so only the re-check sees it.
+            let hardware = fixture.hardware
+            fixture.engines.onFirstStart = { hardware.devices.append((id: 22, uid: "airpods")) }
+
+            let started = await finishes(within: 4) {
+                _ = try? await fixture.service.startRecording(
+                    in: fixture.workspace,
+                    micDeviceID: 11,
+                    preferredMicDeviceUID: "airpods",
+                    title: "Session",
+                    audioSyncFlags: .shippedDefaults
+                )
+            }
+
+            try #require(started)
+            #expect(await fixture.service.isRecording())
+            #expect(fixture.engines.made.contains { $0.hung })
+            #expect(await eventually {
+                await fixture.service.recoveryDebugStateForTesting().currentCaptureDeviceID == 11
+                    && fixture.engines.made.last?.isRunning == true
+            })
+            _ = await fixture.service.stopRecording()
+        }
     }
 
     @Test
     func aStartWhoseEngineHangsOnThePreferredMicRecordsOnTheDefault() async throws {
-        let fixture = try await makeHangFixture()
-        defer { fixture.engines.releaseAll(); removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [(id: 11, uid: "builtin"), (id: 22, uid: "airpods")]
-        fixture.engines.hangingDeviceIDs = [22]
+        try await withHangFixture() { fixture in
+            fixture.hardware.devices = [(id: 11, uid: "builtin"), (id: 22, uid: "airpods")]
+            fixture.engines.hangingDeviceIDs = [22]
 
-        let started = await finishes(within: 3) {
-            _ = try? await fixture.service.startRecording(
+            let started = await finishes(within: 3) {
+                _ = try? await fixture.service.startRecording(
+                    in: fixture.workspace,
+                    micDeviceID: 22,
+                    preferredMicDeviceUID: "airpods",
+                    title: "Session",
+                    audioSyncFlags: .shippedDefaults
+                )
+            }
+
+            try #require(started)
+            #expect(await fixture.service.isRecording())
+            #expect(fixture.engines.made.last?.startedDeviceIDs == [nil])
+            #expect(fixture.engines.made.last?.isRunning == true)
+            _ = await fixture.service.stopRecording()
+        }
+    }
+
+    @Test
+    func aStartWhoseEngineHangsOnTheDefaultUsesTheRecorderFallback() async throws {
+        try await withHangFixture() { fixture in
+            fixture.hardware.devices = [(id: 11, uid: "builtin")]
+            fixture.engines.hangingDeviceIDs = [0]
+
+            let started = await finishes(within: 3) {
+                _ = try? await fixture.service.startRecording(in: fixture.workspace, title: "Session", audioSyncFlags: .shippedDefaults)
+            }
+
+            try #require(started)
+            #expect(await fixture.service.isRecording())
+            #expect(fixture.recorder.recordCalls == 1)
+            #expect(await fixture.service.capturedMicrophone() == .unknown)
+            _ = await fixture.service.stopRecording()
+        }
+    }
+
+    @Test
+    func aRemovalWhoseDefaultEngineStartHangsReturnsAndSchedulesARetry() async throws {
+        try await withHangFixture() { fixture in
+            fixture.hardware.devices = [(id: 11, uid: "builtin"), (id: 22, uid: "airpods")]
+            _ = try await fixture.service.startRecording(
                 in: fixture.workspace,
                 micDeviceID: 22,
                 preferredMicDeviceUID: "airpods",
                 title: "Session",
                 audioSyncFlags: .shippedDefaults
             )
+            fixture.engines.hangingDeviceIDs = [0]
+            fixture.hardware.devices = [(id: 11, uid: "builtin")]
+
+            let finished = await finishes(within: 3) { await fixture.service.simulateHardwareChangeForTesting() }
+
+            try #require(finished)
+            #expect(fixture.engines.made.last?.hung == true)
+            #expect(await fixture.service.recoveryDebugStateForTesting().hasRecoveryRetryTask)
+            _ = await fixture.service.stopRecording()
         }
-
-        try #require(started)
-        #expect(await fixture.service.isRecording())
-        #expect(fixture.engines.made.last?.startedDeviceIDs == [nil])
-        #expect(fixture.engines.made.last?.isRunning == true)
-        _ = await fixture.service.stopRecording()
-    }
-
-    @Test
-    func aStartWhoseEngineHangsOnTheDefaultUsesTheRecorderFallback() async throws {
-        let fixture = try await makeHangFixture()
-        defer { fixture.engines.releaseAll(); removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [(id: 11, uid: "builtin")]
-        fixture.engines.hangingDeviceIDs = [0]
-
-        let started = await finishes(within: 3) {
-            _ = try? await fixture.service.startRecording(in: fixture.workspace, title: "Session", audioSyncFlags: .shippedDefaults)
-        }
-
-        try #require(started)
-        #expect(await fixture.service.isRecording())
-        #expect(fixture.recorder.recordCalls == 1)
-        #expect(await fixture.service.capturedMicrophone() == .unknown)
-        _ = await fixture.service.stopRecording()
-    }
-
-    @Test
-    func aRemovalWhoseDefaultEngineStartHangsReturnsAndSchedulesARetry() async throws {
-        let fixture = try await makeHangFixture()
-        defer { fixture.engines.releaseAll(); removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [(id: 11, uid: "builtin"), (id: 22, uid: "airpods")]
-        _ = try await fixture.service.startRecording(
-            in: fixture.workspace,
-            micDeviceID: 22,
-            preferredMicDeviceUID: "airpods",
-            title: "Session",
-            audioSyncFlags: .shippedDefaults
-        )
-        fixture.engines.hangingDeviceIDs = [0]
-        fixture.hardware.devices = [(id: 11, uid: "builtin")]
-
-        let finished = await finishes(within: 3) { await fixture.service.simulateHardwareChangeForTesting() }
-
-        try #require(finished)
-        #expect(fixture.engines.made.last?.hung == true)
-        #expect(await fixture.service.recoveryDebugStateForTesting().hasRecoveryRetryTask)
-        _ = await fixture.service.stopRecording()
     }
 
     @Test
     func aResumeWhoseEngineRestartHangsFailsAndKeepsTheRecordingPaused() async throws {
-        let fixture = try await makeHangFixture()
-        defer { fixture.engines.releaseAll(); removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [(id: 11, uid: "builtin")]
-        _ = try await fixture.service.startRecording(
-            in: fixture.workspace,
-            micDeviceID: 11,
-            title: "Session",
-            audioSyncFlags: .shippedDefaults
-        )
-        #expect(await fixture.service.pauseRecording())
-        try #require(fixture.engines.made.last).die()
-        fixture.engines.hangingDeviceIDs = [11]
+        try await withHangFixture() { fixture in
+            fixture.hardware.devices = [(id: 11, uid: "builtin")]
+            _ = try await fixture.service.startRecording(
+                in: fixture.workspace,
+                micDeviceID: 11,
+                title: "Session",
+                audioSyncFlags: .shippedDefaults
+            )
+            #expect(await fixture.service.pauseRecording())
+            try #require(fixture.engines.made.last).die()
+            fixture.engines.hangingDeviceIDs = [11]
 
-        let resumed = ResumeResult()
-        try #require(await finishes(within: 3) { await resumed.set(fixture.service.resumeRecording()) })
+            let resumed = ResumeResult()
+            try #require(await finishes(within: 3) { await resumed.set(fixture.service.resumeRecording()) })
 
-        #expect(await resumed.value == false)
-        #expect(await fixture.service.isPaused())
-        _ = await fixture.service.stopRecording()
+            #expect(await resumed.value == false)
+            #expect(await fixture.service.isPaused())
+            _ = await fixture.service.stopRecording()
+        }
     }
 
     @Test
     func aStopWhoseEngineStopHangsCompletesAndSavesTheRecording() async throws {
-        let fixture = try await makeHangFixture()
-        defer { fixture.engines.releaseAll(); removeWorkspace(at: fixture.workspace.rootURL) }
-        fixture.hardware.devices = [(id: 11, uid: "builtin")]
-        let sessionID = try await fixture.service.startRecording(
-            in: fixture.workspace,
-            micDeviceID: 11,
-            title: "Session",
-            audioSyncFlags: .shippedDefaults
-        )
-        try #require(fixture.engines.made.last).stopHangs = true
+        try await withHangFixture() { fixture in
+            fixture.hardware.devices = [(id: 11, uid: "builtin")]
+            let sessionID = try await fixture.service.startRecording(
+                in: fixture.workspace,
+                micDeviceID: 11,
+                title: "Session",
+                audioSyncFlags: .shippedDefaults
+            )
+            try #require(fixture.engines.made.last).stopHangs = true
 
-        let stopped = StopResult()
-        try #require(await finishes(within: 3) { await stopped.set(fixture.service.stopRecording()) })
+            let stopped = StopResult()
+            try #require(await finishes(within: 3) { await stopped.set(fixture.service.stopRecording()) })
 
-        #expect(await stopped.value == sessionID)
-        let session = try fetchRecordingSession(id: sessionID, from: ModelContext(fixture.container))
-        #expect(session.status == .recorded)
+            #expect(await stopped.value == sessionID)
+            let session = try fetchRecordingSession(id: sessionID, from: ModelContext(fixture.container))
+            #expect(session.status == .recorded)
+        }
     }
+
+    /// Runs `body` with a hang fixture, then always opens every gate the fakes block on, stops
+    /// the recording, and checks that no fake call is still blocked: an abandoned call must return
+    /// and be discarded through the service, not outlive the test on a blocked thread.
+    private func withHangFixture(
+        engineCallTimeout: Duration = .milliseconds(200),
+        _ body: (HangFixture) async throws -> Void
+    ) async throws {
+        let fixture = try await makeHangFixture(engineCallTimeout: engineCallTimeout)
+        var failure: (any Error)?
+        do {
+            try await body(fixture)
+        } catch {
+            failure = error
+        }
+        fixture.engines.releaseAll()
+        _ = await fixture.service.stopRecording()
+        let engines = fixture.engines
+        #expect(await eventually { engines.blockedCallCount == 0 }, "A fake engine call is still blocked")
+        removeWorkspace(at: fixture.workspace.rootURL)
+        if let failure { throw failure }
+    }
+
+    private typealias HangFixture = (
+        service: RecordingService,
+        workspace: Workspace,
+        hardware: MockRecoveryAudioDeviceHardware,
+        engines: HangingEngines,
+        container: ModelContainer,
+        recorder: HangTestRecorder
+    )
 
     private func makeHangFixture(engineCallTimeout: Duration = .milliseconds(200)) async throws -> (
         service: RecordingService,
@@ -2942,6 +2973,7 @@ private final class HangingEngines: @unchecked Sendable {
     private var _made: [HangingMicController] = []
     private var _attemptedDeviceIDs: [AudioDeviceID?] = []
     private var _onFirstStart: (@Sendable () -> Void)?
+    private var _released = false
 
     /// Starts on these devices block until released. 0 stands for the system default.
     var hangingDeviceIDs: Set<AudioDeviceID> {
@@ -2975,12 +3007,26 @@ private final class HangingEngines: @unchecked Sendable {
             first?()
             return self.hangingDeviceIDs.contains(deviceID ?? 0)
         }
-        lock.withLock { _made.append(controller) }
+        let released = lock.withLock {
+            _made.append(controller)
+            return _released
+        }
+        if released { controller.release() }
         return controller
     }
 
+    /// Opens every controller's gate for good, including controllers made afterwards.
     func releaseAll() {
-        made.forEach { $0.release() }
+        let controllers = lock.withLock {
+            _released = true
+            return _made
+        }
+        controllers.forEach { $0.release() }
+    }
+
+    /// Calls blocked inside a fake right now, across every controller made.
+    var blockedCallCount: Int {
+        made.reduce(0) { $0 + $1.blockedCallCount }
     }
 }
 
@@ -2988,13 +3034,15 @@ private final class HangingEngines: @unchecked Sendable {
 /// did on hardware (spec, test 10).
 private final class HangingMicController: MicCaptureControlling, @unchecked Sendable {
     private let hangs: @Sendable (AudioDeviceID?) -> Bool
-    private let released = DispatchSemaphore(value: 0)
+    private let gate = NSCondition()
+    private var gateOpen = false
     private let lock = NSLock()
     private var _startedDeviceIDs: [AudioDeviceID?] = []
     private var _stopCount = 0
     private var _running = false
     private var _hung = false
     private var _stopHangs = false
+    private var _blockedCallCount = 0
     private var _onBuffer: MicBufferHandler?
 
     init(hangs: @escaping @Sendable (AudioDeviceID?) -> Bool) {
@@ -3008,6 +3056,7 @@ private final class HangingMicController: MicCaptureControlling, @unchecked Send
     /// True when a start blocked.
     var hung: Bool { lock.withLock { _hung } }
     var onBuffer: MicBufferHandler? { lock.withLock { _onBuffer } }
+    var blockedCallCount: Int { lock.withLock { _blockedCallCount } }
     /// Stops block until released.
     var stopHangs: Bool {
         get { lock.withLock { _stopHangs } }
@@ -3032,7 +3081,7 @@ private final class HangingMicController: MicCaptureControlling, @unchecked Send
     ) throws {
         if hangs(deviceID) {
             lock.withLock { _hung = true }
-            released.wait()
+            block()
         }
         lock.withLock {
             _startedDeviceIDs.append(deviceID)
@@ -3043,7 +3092,7 @@ private final class HangingMicController: MicCaptureControlling, @unchecked Send
 
     func stopCapture() {
         if stopHangs {
-            released.wait()
+            block()
         }
         lock.withLock {
             _stopCount += 1
@@ -3055,8 +3104,19 @@ private final class HangingMicController: MicCaptureControlling, @unchecked Send
 
     func isCaptureRunning() -> Bool { isRunning }
 
-    /// Lets a blocked start return. Safe to call when nothing is blocked.
+    /// Opens the gate for good: blocked calls return and later ones do not block.
     func release() {
-        released.signal()
+        gate.lock()
+        gateOpen = true
+        gate.broadcast()
+        gate.unlock()
+    }
+
+    private func block() {
+        lock.withLock { _blockedCallCount += 1 }
+        gate.lock()
+        while !gateOpen { gate.wait() }
+        gate.unlock()
+        lock.withLock { _blockedCallCount -= 1 }
     }
 }
