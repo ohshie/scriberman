@@ -519,17 +519,76 @@ final class NewSessionViewModel {
             }
 
             let selectedMicDeviceID = selectedDevice?.id
-            let capturedApp = selectedApp
-            let capturedMicrophone = selectedDevice
-            let recordingSessionID = try await startRecordingAttempt(
-                in: workspace,
-                micDeviceID: selectedMicDeviceID,
-                preferredMicDeviceUID: preferredMicUID,
-                captureDisplayID: captureDisplayID,
-                capturedAppName: selectedCapturedAppName,
-                appProcessID: selectedAppProcessID,
-                title: choice.title
-            )
+            var capturedApp = selectedApp
+            var capturedMicrophone = selectedDevice
+            var startError: Error?
+            var recordingSessionID: UUID?
+            var fallbackMessage: String?
+
+            do {
+                recordingSessionID = try await startRecordingAttempt(
+                    in: workspace,
+                    micDeviceID: selectedMicDeviceID,
+                    preferredMicDeviceUID: preferredMicUID,
+                    captureDisplayID: captureDisplayID,
+                    capturedAppName: selectedCapturedAppName,
+                    appProcessID: selectedAppProcessID,
+                    title: choice.title
+                )
+            } catch {
+                startError = error
+            }
+
+            if let error = startError, selectedAppProcessID != nil {
+                logger.warning("App audio start failed; retrying as microphone-only. error=\(error.localizedDescription, privacy: .public)")
+                fallbackMessage = "App audio capture unavailable. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording."
+
+                do {
+                    recordingSessionID = try await startRecordingAttempt(
+                        in: workspace,
+                        micDeviceID: selectedMicDeviceID,
+                        preferredMicDeviceUID: preferredMicUID,
+                        captureDisplayID: captureDisplayID,
+                        capturedAppName: nil,
+                        appProcessID: nil,
+                        title: choice.title
+                    )
+                    startError = nil
+                    capturedApp = nil
+                } catch {
+                    startError = error
+                }
+            }
+
+            if let error = startError, selectedMicDeviceID != nil {
+                logger.warning("Selected microphone start failed; retrying on system default. error=\(error.localizedDescription, privacy: .public)")
+                do {
+                    recordingSessionID = try await startRecordingAttempt(
+                        in: workspace,
+                        micDeviceID: nil,
+                        preferredMicDeviceUID: preferredMicUID,
+                        captureDisplayID: captureDisplayID,
+                        capturedAppName: nil,
+                        appProcessID: nil,
+                        title: choice.title
+                    )
+                    startError = nil
+                    capturedApp = nil
+                    capturedMicrophone = nil
+                    if fallbackMessage == nil {
+                        fallbackMessage = "Selected microphone unavailable. Falling back to system default microphone."
+                    }
+                } catch {
+                    startError = error
+                }
+            }
+
+            if let startError {
+                throw startError
+            }
+            guard let recordingSessionID else {
+                throw RecordingError.failedToStart("Recording session could not be created.")
+            }
 
             if let selectedDevice {
                 audioDeviceService.incrementUsage(for: selectedDevice.uid)
@@ -541,6 +600,10 @@ final class NewSessionViewModel {
 
             menuBarSettings?.lastUsedMicUID = preferredMicUID
             menuBarSettings?.lastUsedAppBundleID = selectedApp?.bundleID
+
+            if let fallbackMessage {
+                errorMessage = fallbackMessage
+            }
 
             recordingStartedAt = clock()
             clearPauseState()

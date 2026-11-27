@@ -827,7 +827,7 @@ struct NewSessionViewModelTests {
     }
 
     @Test
-    func aFailedStartKeepsThePreferredMicAndDoesNotRetry() async throws {
+    func aStartRetriedOnTheDefaultInputKeepsThePreferredMic() async throws {
         let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
         defer { cleanup() }
         _ = (workspaceService, appAudioService)
@@ -839,10 +839,9 @@ struct NewSessionViewModelTests {
 
         await viewModel.startRecording(title: "Session", context: context)
 
-        #expect(recordingService.startCalls.map(\.micDeviceID) == [7])
-        #expect(recordingService.startCalls.map(\.preferredMicDeviceUID) == ["uid-7"])
-        #expect(audioDeviceService.preferredDeviceUID == "uid-7")
-        #expect(viewModel.errorMessage == "Recording failed to start: no audio.")
+        #expect(recordingService.startCalls.map(\.micDeviceID) == [7, nil])
+        #expect(recordingService.startCalls.map(\.preferredMicDeviceUID) == ["uid-7", "uid-7"])
+        #expect(menuBarSettings.lastUsedMicUID == "uid-7")
     }
 
     @Test
