@@ -2217,6 +2217,123 @@ final class RecordingServiceTests {
         await fixture.service.simulateAudioEngineConfigurationChangeForTesting()
     }
 
+    // MARK: - Input format change during an engine start (ticket 11)
+
+    @Test
+    func anEngineStartWhoseInputChangesFormatBeforeTheTapStartsWithoutAStaleTapFormat() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let target = try #require(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1))
+        let streamer = AudioFileStreamer(label: "mic")
+        try streamer.prepare(url: root.appendingPathComponent("mic.wav"), format: target)
+        defer { streamer.close() }
+        let engine = FormatChangingMicInput(rates: [24_000, 16_000])
+        let controller = AVAudioEngineMicCaptureController(makeEngine: { engine })
+        let delivered = DeliveredRates()
+
+        try controller.startCapture(
+            deviceID: 22,
+            targetFormat: target,
+            micFileURL: root.appendingPathComponent("mic.wav"),
+            micStreamer: streamer,
+            gate: CaptureAudioGate(),
+            voiceProcessingEnabled: false,
+            applyVoiceProcessing: { _, _ in },
+            onFirstHostTime: { _ in },
+            onBuffer: { output in
+                if case .audio(let samples, let rate, _, _) = output, !samples.isEmpty { delivered.add(rate) }
+            }
+        )
+
+        #expect(engine.staleTapFormats.isEmpty, "tap installed with a format the input no longer has")
+        #expect(controller.isCaptureRunning())
+        // Buffers in the input's new format are converted to the target format.
+        let tapBlock = try #require(engine.tapBlock)
+        for index in 0..<5 {
+            let buffer = try CaptureAudioGateTests.makePCM([Float](repeating: 0.1, count: 320), sampleRate: 16_000)
+            tapBlock(buffer, AVAudioTime(hostTime: mach_absolute_time() + UInt64(index) * 1_000))
+        }
+        #expect(delivered.rates.contains(48_000))
+        #expect(!delivered.rates.contains { $0 != 48_000 })
+    }
+
+    @Test
+    func aMicOnlyStartWhoseInputChangesFormatRecordsOnTheEngine() async throws {
+        let fixture = try await makeFormatChangeFixture(startError: nil)
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        fixture.hardware.devices = [(id: 22, uid: "airpods")]
+
+        _ = try await fixture.service.startRecording(
+            in: fixture.workspace, micDeviceID: 22, title: "Session", audioSyncFlags: .shippedDefaults
+        )
+
+        let engines = fixture.engines.made
+        #expect(!engines.isEmpty)
+        #expect(engines.allSatisfy { $0.staleTapFormats.isEmpty }, "tap installed with a format the input no longer has")
+        #expect(engines.last?.isRunning == true)
+        #expect(fixture.recorder.recordCalls == 0)
+        _ = await fixture.service.stopRecording()
+    }
+
+    @Test
+    func aMicOnlyStartWhoseEngineFailsAfterAFormatChangeFallsBackToTheRecorder() async throws {
+        let fixture = try await makeFormatChangeFixture(
+            startError: NSError(domain: NSOSStatusErrorDomain, code: 1_852_797_029)
+        )
+        defer { removeWorkspace(at: fixture.workspace.rootURL) }
+        fixture.hardware.devices = [(id: 22, uid: "airpods")]
+
+        _ = try await fixture.service.startRecording(
+            in: fixture.workspace, micDeviceID: 22, title: "Session", audioSyncFlags: .shippedDefaults
+        )
+
+        let engines = fixture.engines.made
+        #expect(!engines.isEmpty)
+        #expect(engines.allSatisfy { $0.staleTapFormats.isEmpty }, "tap installed with a format the input no longer has")
+        #expect(fixture.recorder.recordCalls == 1)
+        #expect(await fixture.service.isRecording())
+        _ = await fixture.service.stopRecording()
+    }
+
+    private func makeFormatChangeFixture(startError: NSError?) async throws -> (
+        service: RecordingService,
+        workspace: Workspace,
+        hardware: MockRecoveryAudioDeviceHardware,
+        engines: FormatChangingMicInputs,
+        recorder: HangTestRecorder
+    ) {
+        let workspace = makeWorkspace()
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(
+            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            SpeakerProfile.self, RecordingTag.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let hardware = MockRecoveryAudioDeviceHardware()
+        let engines = FormatChangingMicInputs(startError: startError)
+        let recorder = HangTestRecorder()
+        let appAudioSettings = await MainActor.run { AppAudioSettings() }
+        let service = RecordingService(
+            workspaceService: workspaceService,
+            modelContainer: container,
+            appAudioSettings: appAudioSettings,
+            hardware: hardware,
+            micCaptureControllerFactory: { AVAudioEngineMicCaptureController(makeEngine: { engines.make() }) },
+            notificationCenter: NotificationCenter(),
+            mixdownCoordinator: MockRecordingMixdownCoordinator(),
+            screenVideoMuxer: MockScreenVideoMuxer(),
+            permissionChecker: {},
+            scopedAccessStarter: { _ in true },
+            scopedAccessStopper: { _ in },
+            recorderFallbackFactory: { _, _ in recorder },
+            voiceProcessingSetting: { false }
+        )
+        return (service, workspace, hardware, engines, recorder)
+    }
+
     // MARK: - Hung engine start (ticket 09)
 
     @Test
@@ -3119,4 +3236,85 @@ private final class HangingMicController: MicCaptureControlling, @unchecked Send
         gate.unlock()
         lock.withLock { _blockedCallCount -= 1 }
     }
+}
+
+/// An engine input whose format moves to the next rate in `rates` after each read, the way
+/// AirPods switch to their headset mode during a start ("iounit configuration changed"). A tap
+/// installed with a format the input no longer has is recorded where AVFAudio would raise.
+private final class FormatChangingMicInput: MicInputEngine, @unchecked Sendable {
+    private let lock = NSLock()
+    private var rates: [Double]
+    private let startError: NSError?
+    private var _staleTapFormats: [AVAudioFormat] = []
+    private var _tapBlock: AVAudioNodeTapBlock?
+    private var _isRunning = false
+
+    init(rates: [Double], startError: NSError? = nil) {
+        self.rates = rates
+        self.startError = startError
+    }
+
+    var staleTapFormats: [AVAudioFormat] { lock.withLock { _staleTapFormats } }
+    var tapBlock: AVAudioNodeTapBlock? { lock.withLock { _tapBlock } }
+    var isRunning: Bool { lock.withLock { _isRunning } }
+
+    private var liveFormat: AVAudioFormat {
+        AVAudioFormat(standardFormatWithSampleRate: rates[0], channels: 1)!
+    }
+
+    func routeInput(to _: AudioDeviceID) throws {}
+    func applyVoiceProcessing(_: (AVAudioInputNode, Bool) -> Void, enabled _: Bool) {}
+
+    func currentInputFormat() -> AVAudioFormat {
+        lock.withLock {
+            let format = liveFormat
+            if rates.count > 1 { rates.removeFirst() }
+            return format
+        }
+    }
+
+    func installInputTap(bufferSize _: AVAudioFrameCount, format: AVAudioFormat?, block: @escaping AVAudioNodeTapBlock) {
+        lock.withLock {
+            if let format, format != liveFormat { _staleTapFormats.append(format) }
+            _tapBlock = block
+        }
+    }
+
+    func removeInputTap() {
+        lock.withLock { _tapBlock = nil }
+    }
+
+    func start() throws {
+        if let startError { throw startError }
+        lock.withLock { _isRunning = true }
+    }
+
+    func stop() {
+        lock.withLock { _isRunning = false }
+    }
+}
+
+private final class FormatChangingMicInputs: @unchecked Sendable {
+    private let lock = NSLock()
+    private let startError: NSError?
+    private var _made: [FormatChangingMicInput] = []
+
+    init(startError: NSError?) {
+        self.startError = startError
+    }
+
+    var made: [FormatChangingMicInput] { lock.withLock { _made } }
+
+    func make() -> FormatChangingMicInput {
+        let input = FormatChangingMicInput(rates: [24_000, 16_000], startError: startError)
+        lock.withLock { _made.append(input) }
+        return input
+    }
+}
+
+private final class DeliveredRates: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _rates: [Double] = []
+    var rates: [Double] { lock.withLock { _rates } }
+    func add(_ rate: Double) { lock.withLock { _rates.append(rate) } }
 }

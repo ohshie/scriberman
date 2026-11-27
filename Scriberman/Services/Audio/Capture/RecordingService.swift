@@ -78,93 +78,29 @@ protocol MicCaptureControlling: AnyObject {
     func isCaptureRunning() -> Bool
 }
 
-final class AVAudioEngineMicCaptureController: MicCaptureControlling {
-    private var audioEngine: AVAudioEngine?
-    /// Counts starts, so log lines tell one capture's buffers from the next one's.
-    private var captureGeneration = 0
+/// The parts of an `AVAudioEngine` that a mic capture uses, behind a protocol so a test can stand
+/// in for the input and change its format during a start.
+protocol MicInputEngine: AnyObject {
+    /// Routes the input unit to `deviceID`.
+    func routeInput(to deviceID: AudioDeviceID) throws
+    func applyVoiceProcessing(_ apply: (AVAudioInputNode, Bool) -> Void, enabled: Bool)
+    /// The input node's current hardware format on bus 0.
+    func currentInputFormat() -> AVAudioFormat
+    /// Installs the tap on the input node's bus 0. A non-nil `format` that no longer matches the
+    /// input makes AVFAudio raise an Objective-C exception, which aborts the app.
+    func installInputTap(bufferSize: AVAudioFrameCount, format: AVAudioFormat?, block: @escaping AVAudioNodeTapBlock)
+    func removeInputTap()
+    /// Prepares and starts the engine.
+    func start() throws
+    func stop()
+    var isRunning: Bool { get }
+}
 
-    func startCapture(
-        deviceID: AudioDeviceID?,
-        targetFormat: AVAudioFormat,
-        micFileURL _: URL,
-        micStreamer: AudioFileStreamer,
-        gate: CaptureAudioGate,
-        voiceProcessingEnabled: Bool,
-        applyVoiceProcessing: @Sendable (AVAudioInputNode, Bool) -> Void,
-        onFirstHostTime: @escaping @Sendable (HostNanoseconds) -> Void,
-        onBuffer: @escaping MicBufferHandler
-    ) throws {
-        stopCapture()
-        captureGeneration += 1
+final class AVAudioEngineMicInput: MicInputEngine {
+    private let engine = AVAudioEngine()
 
-        let engine = AVAudioEngine()
-        let inputNode = engine.inputNode
-
-        if let deviceID, deviceID != 0 {
-            try setInputDevice(deviceID, on: inputNode)
-        }
-
-        applyVoiceProcessing(inputNode, voiceProcessingEnabled)
-
-        let inputFormat = inputNode.inputFormat(forBus: 0)
-        guard inputFormat.sampleRate.isFinite, inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
-            throw RecordingError.failedToStart("Invalid audio input format.")
-        }
-
-        let tap = try EngineMicTap(
-            inputFormat: inputFormat,
-            targetFormat: targetFormat,
-            micStreamer: micStreamer,
-            gate: gate,
-            captureGeneration: captureGeneration,
-            onFirstHostTime: onFirstHostTime,
-            onBuffer: onBuffer
-        )
-
-        inputNode.removeTap(onBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, audioTime in
-            guard self != nil else {
-                return
-            }
-            tap.process(
-                buffer,
-                hostTime: Self.hostTime(of: audioTime),
-                sampleTime: audioTime.isSampleTimeValid ? Double(audioTime.sampleTime) : nil
-            )
-        }
-
-        engine.prepare()
-        try engine.start()
-        audioEngine = engine
-    }
-
-    /// Host time of a tap buffer, or nil when the tap reports none.
-    static func hostTime(of audioTime: AVAudioTime) -> HostNanoseconds? {
-        audioTime.hostTime != 0 ? HostNanoseconds(machTicks: audioTime.hostTime) : nil
-    }
-
-    func stopCapture() {
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        audioEngine?.stop()
-        audioEngine = nil
-    }
-
-    func retargetDevice(_ deviceID: AudioDeviceID?) throws {
-        guard let audioEngine else {
-            return
-        }
-        try setInputDevice(deviceID, on: audioEngine.inputNode)
-    }
-
-    func isCaptureRunning() -> Bool {
-        audioEngine?.isRunning ?? false
-    }
-
-    private func setInputDevice(_ deviceID: AudioDeviceID?, on inputNode: AVAudioInputNode) throws {
-        guard let deviceID, deviceID != 0 else {
-            return
-        }
-        guard let inputAudioUnit = inputNode.audioUnit else {
+    func routeInput(to deviceID: AudioDeviceID) throws {
+        guard let inputAudioUnit = engine.inputNode.audioUnit else {
             throw RecordingError.failedToStart("Audio input unit is unavailable.")
         }
         var targetDeviceID = deviceID
@@ -181,6 +117,123 @@ final class AVAudioEngineMicCaptureController: MicCaptureControlling {
         if status != noErr {
             throw RecordingError.failedToStart("Unable to route microphone input.")
         }
+    }
+
+    func applyVoiceProcessing(_ apply: (AVAudioInputNode, Bool) -> Void, enabled: Bool) {
+        apply(engine.inputNode, enabled)
+    }
+
+    func currentInputFormat() -> AVAudioFormat {
+        engine.inputNode.inputFormat(forBus: 0)
+    }
+
+    func installInputTap(bufferSize: AVAudioFrameCount, format: AVAudioFormat?, block: @escaping AVAudioNodeTapBlock) {
+        engine.inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: format, block: block)
+    }
+
+    func removeInputTap() {
+        engine.inputNode.removeTap(onBus: 0)
+    }
+
+    func start() throws {
+        engine.prepare()
+        try engine.start()
+    }
+
+    func stop() {
+        engine.stop()
+    }
+
+    var isRunning: Bool { engine.isRunning }
+}
+
+final class AVAudioEngineMicCaptureController: MicCaptureControlling {
+    private let makeEngine: () -> any MicInputEngine
+    private var audioEngine: (any MicInputEngine)?
+    /// Counts starts, so log lines tell one capture's buffers from the next one's.
+    private var captureGeneration = 0
+
+    init(makeEngine: @escaping () -> any MicInputEngine = { AVAudioEngineMicInput() }) {
+        self.makeEngine = makeEngine
+    }
+
+    func startCapture(
+        deviceID: AudioDeviceID?,
+        targetFormat: AVAudioFormat,
+        micFileURL _: URL,
+        micStreamer: AudioFileStreamer,
+        gate: CaptureAudioGate,
+        voiceProcessingEnabled: Bool,
+        applyVoiceProcessing: @Sendable (AVAudioInputNode, Bool) -> Void,
+        onFirstHostTime: @escaping @Sendable (HostNanoseconds) -> Void,
+        onBuffer: @escaping MicBufferHandler
+    ) throws {
+        stopCapture()
+        captureGeneration += 1
+
+        let engine = makeEngine()
+
+        if let deviceID, deviceID != 0 {
+            try engine.routeInput(to: deviceID)
+        }
+
+        engine.applyVoiceProcessing(applyVoiceProcessing, enabled: voiceProcessingEnabled)
+
+        let inputFormat = engine.currentInputFormat()
+        guard inputFormat.sampleRate.isFinite, inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+            throw RecordingError.failedToStart("Invalid audio input format.")
+        }
+
+        let tap = try EngineMicTap(
+            inputFormat: inputFormat,
+            targetFormat: targetFormat,
+            micStreamer: micStreamer,
+            gate: gate,
+            captureGeneration: captureGeneration,
+            onFirstHostTime: onFirstHostTime,
+            onBuffer: onBuffer
+        )
+
+        engine.removeInputTap()
+        // No format: the tap takes the node's format at install time. `inputFormat` can be stale
+        // by then (AirPods switch to their headset mode during a start), and a tap format that no
+        // longer matches makes AVFAudio raise, which aborts the app (spec, test 14). EngineMicTap
+        // converts each buffer from the buffer's own format.
+        engine.installInputTap(bufferSize: 1_024, format: nil) { [weak self] buffer, audioTime in
+            guard self != nil else {
+                return
+            }
+            tap.process(
+                buffer,
+                hostTime: Self.hostTime(of: audioTime),
+                sampleTime: audioTime.isSampleTimeValid ? Double(audioTime.sampleTime) : nil
+            )
+        }
+
+        try engine.start()
+        audioEngine = engine
+    }
+
+    /// Host time of a tap buffer, or nil when the tap reports none.
+    static func hostTime(of audioTime: AVAudioTime) -> HostNanoseconds? {
+        audioTime.hostTime != 0 ? HostNanoseconds(machTicks: audioTime.hostTime) : nil
+    }
+
+    func stopCapture() {
+        audioEngine?.removeInputTap()
+        audioEngine?.stop()
+        audioEngine = nil
+    }
+
+    func retargetDevice(_ deviceID: AudioDeviceID?) throws {
+        guard let audioEngine, let deviceID, deviceID != 0 else {
+            return
+        }
+        try audioEngine.routeInput(to: deviceID)
+    }
+
+    func isCaptureRunning() -> Bool {
+        audioEngine?.isRunning ?? false
     }
 }
 
