@@ -1,57 +1,21 @@
 import Foundation
-import Observation
 import Testing
 @testable import Scriberman
 
 @MainActor
 struct AppAudioSettingsTests {
-    @Test
-    func testDefaults() {
-        let (settings, cleanup) = makeSubject()
-        defer { cleanup() }
-
-        #expect(settings.voiceProcessingEnabled == false)
-    }
-
-    @Test
-    func testPersistenceRoundTrip() {
-        let suiteName = "AppAudioSettingsTests.\(UUID().uuidString)"
-        let userDefaults = UserDefaults(suiteName: suiteName) ?? .standard
-        userDefaults.removePersistentDomain(forName: suiteName)
-        defer { userDefaults.removePersistentDomain(forName: suiteName) }
-
-        let initialSettings = AppAudioSettings(userDefaults: userDefaults)
-        initialSettings.voiceProcessingEnabled = true
-
-        let restoredSettings = AppAudioSettings(userDefaults: userDefaults)
-        #expect(restoredSettings.voiceProcessingEnabled == true)
-    }
-
-    @Test
-    func voiceProcessingEnabledNotifiesObservers() async {
-        let (settings, cleanup) = makeSubject()
-        defer { cleanup() }
-
-        await confirmation("Preference change is observed") { changed in
-            withObservationTracking {
-                _ = settings.voiceProcessingEnabled
-            } onChange: {
-                changed()
-            }
-            settings.voiceProcessingEnabled = true
-        }
-        #expect(settings.voiceProcessingEnabled == true)
-    }
-
-    private func makeSubject() -> (AppAudioSettings, () -> Void) {
-        let suiteName = "AppAudioSettingsTests.\(UUID().uuidString)"
-        let userDefaults = UserDefaults(suiteName: suiteName) ?? .standard
-        userDefaults.removePersistentDomain(forName: suiteName)
-
-        let cleanup = {
-            userDefaults.removePersistentDomain(forName: suiteName)
-        }
-
-        return (AppAudioSettings(userDefaults: userDefaults), cleanup)
+    @Test(arguments: [false, true])
+    func launchDeletesRemovedSettingsOnce(oldValue: Bool) {
+        let suite = "AppAudioSettingsTests.\(UUID().uuidString)"
+        let store = UserDefaults(suiteName: suite)!
+        defer { store.removePersistentDomain(forName: suite) }
+        store.set(oldValue, forKey: "audio.voiceProcessingEnabled")
+        store.set(false, forKey: "AudioSync.unifiedCaptureEnabled")
+        _ = AppAudioSettings(userDefaults: store)
+        #expect(store.object(forKey: "audio.voiceProcessingEnabled") == nil)
+        #expect(store.object(forKey: "AudioSync.unifiedCaptureEnabled") == nil)
+        store.set(true, forKey: "audio.voiceProcessingEnabled")
+        _ = AppAudioSettings(userDefaults: store)
+        #expect(store.bool(forKey: "audio.voiceProcessingEnabled"))
     }
 }

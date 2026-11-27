@@ -157,6 +157,9 @@ final class AudioFileStreamer: @unchecked Sendable {
                     AudioCaptureSegment(startHostTimeNanos: hostTimeNanos, frameCount: Int(frameLength))
                 )
                 self.stateLock.unlock()
+                if self.label == "mic" {
+                    CaptureTrace.noteMicWritten(buffer, hostTimeNanos: hostTimeNanos)
+                }
             } catch {
                 // Surface the failure so alignment problems are diagnosable rather than
                 // silent (a dropped write shifts one channel permanently). We still avoid

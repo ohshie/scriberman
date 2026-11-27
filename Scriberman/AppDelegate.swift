@@ -4,6 +4,8 @@ import SwiftData
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
+    static let mainWindowSceneID = "main"
+    var openMainWindow: (() -> Void)?
     weak var appState: AppState?
     var modelContext: ModelContext?
     /// Floating "Stop this recording?" panel for idle recordings.
@@ -74,9 +76,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        attachWindowDelegateIfNeeded()
         syncStatusItemVisibilityFromSettings()
         ensureMainWindowVisibleIfNeeded()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showMainWindow()
+        return false
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -117,14 +123,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     func showMainWindow() {
-        guard let window = resolveMainWindow() else {
-            logger.info("showMainWindow no window resolved")
-            return
-        }
-
         let changed = NSApp.setActivationPolicy(.regular)
         NSApp.unhide(nil)
         NSApp.activate()
+        if mainWindow?.isVisible != true {
+            openMainWindow?()
+        }
+        guard let window = resolveMainWindow() else {
+            return
+        }
         if window.isMiniaturized {
             window.deminiaturize(nil)
         }
@@ -170,30 +177,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
     }
 
-    private func attachWindowDelegateIfNeeded() {
-        guard let window = resolveMainWindow() else {
-            return
-        }
-
-        guard mainWindow !== window || window.delegate !== self else {
-            return
-        }
-
+    func registerMainWindow(_ window: NSWindow) {
+        window.tabbingMode = .disallowed
         window.delegate = self
         mainWindow = window
     }
 
     private func resolveMainWindow() -> NSWindow? {
-        if let mainWindow {
-            return mainWindow
-        }
-
-        if let candidate = NSApp.mainWindow ?? NSApp.keyWindow ?? NSApp.windows.first {
-            mainWindow = candidate
-            return candidate
-        }
-
-        return nil
+        mainWindow
     }
 
     private func ensureMainWindowVisibleIfNeeded() {
@@ -301,7 +292,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             appState.appAudioService.refreshRunningApps()
             addIdleItems(to: menu)
         case .recording:
-            addRecordingItems(to: menu, duration: appState.newSessionViewModel.elapsedTime)
+            for item in Self.recordingMenuItems(
+                duration: appState.newSessionViewModel.elapsedTime,
+                isPaused: appState.newSessionViewModel.isPaused,
+                canPauseOrResume: appState.captureCoordinator.phase.canPauseOrResume,
+                target: self
+            ) {
+                menu.addItem(item)
+            }
+            menu.addItem(.separator())
+            addOpenAndQuitItems(to: menu)
         }
     }
 
@@ -322,21 +322,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         addOpenAndQuitItems(to: menu)
     }
 
-    private func addRecordingItems(to menu: NSMenu, duration: TimeInterval) {
-        let durationItem = NSMenuItem(title: "Recording: \(TimeFormatter.displayFormat(seconds: Float(duration)))", action: nil, keyEquivalent: "")
+    /// The time line, pause or resume, and Stop Recording, for a recording that runs or is paused.
+    /// While paused the time line shows the frozen time.
+    static func recordingMenuItems(
+        duration: TimeInterval,
+        isPaused: Bool,
+        canPauseOrResume: Bool,
+        target: AnyObject?
+    ) -> [NSMenuItem] {
+        let time = TimeFormatter.displayFormat(seconds: Float(duration))
+        let durationItem = NSMenuItem(
+            title: isPaused ? "Paused: \(time)" : "Recording: \(time)",
+            action: nil,
+            keyEquivalent: ""
+        )
         durationItem.isEnabled = false
-        menu.addItem(durationItem)
+
+        let pauseItem = NSMenuItem(
+            title: ControlsCommands.pauseResumeTitle(isPaused: isPaused),
+            action: canPauseOrResume ? #selector(pauseOrResumeRecordingFromStatusItem) : nil,
+            keyEquivalent: ""
+        )
+        pauseItem.target = target
+        pauseItem.isEnabled = canPauseOrResume
 
         let stopItem = NSMenuItem(
             title: "Stop Recording",
             action: #selector(stopRecordingFromStatusItem),
             keyEquivalent: ""
         )
-        stopItem.target = self
-        menu.addItem(stopItem)
+        stopItem.target = target
 
-        menu.addItem(.separator())
-        addOpenAndQuitItems(to: menu)
+        return [durationItem, pauseItem, stopItem]
     }
 
     private func addOpenAndQuitItems(to menu: NSMenu) {
@@ -426,6 +443,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc
     private func startQuickRecordingFromStatusItem() {
         startQuickRecording()
+    }
+
+    @objc
+    private func pauseOrResumeRecordingFromStatusItem() {
+        guard let appState else {
+            logger.error("pauseOrResumeRecordingFromStatusItem missing appState")
+            return
+        }
+
+        Task {
+            _ = await appState.captureCoordinator.pauseOrResume()
+        }
     }
 
     @objc

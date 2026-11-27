@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 import SwiftData
 
-/// The status, capture-options, start and stop routes. Every start and stop goes through the
+/// The status, capture-options, start, stop, pause and resume routes. Every start and stop goes through the
 /// capture coordinator; after one, the session is requested in the window as the menu-bar
 /// commands do.
 @MainActor
@@ -48,7 +48,9 @@ final class ExtensionAPIRecording {
         return ExtensionAPIHandler.json(StatusBody(
             state: Self.stateName(coordinator.phase),
             session: session.map(SessionBody.init),
-            capture: session == nil ? nil : current.map { CaptureBody($0.capture) }
+            capture: session == nil ? nil : current.map {
+                CaptureBody($0.capture, capturedMicrophone: coordinator.capturedMicrophone)
+            }
         ))
     }
 
@@ -105,6 +107,35 @@ final class ExtensionAPIRecording {
         return ExtensionAPIHandler.json(StopBody(session: SessionBody(session)))
     }
 
+    /// `POST /v1/recordings/pause`: pauses the recording through the capture coordinator, which
+    /// joins a pause under way and succeeds when it is already paused.
+    func pause() async -> HTTPResponse {
+        transitioned(await coordinator.pause())
+    }
+
+    /// `POST /v1/recordings/resume`: resumes the recording through the capture coordinator, which
+    /// joins a resume under way and succeeds when it is not paused. A failed resume leaves it paused.
+    func resume() async -> HTTPResponse {
+        transitioned(await coordinator.resume())
+    }
+
+    private func transitioned(_ result: Result<Void, CaptureCoordinator.TransitionError>) -> HTTPResponse {
+        switch result {
+        case .success:
+            guard let current = coordinator.current else {
+                return ExtensionAPIHandler.error(.notRecording, status: 409)
+            }
+            guard let session = try? RecordingSession.fetch(id: current.id, in: context) else {
+                return ExtensionAPIHandler.error(.notFound, status: 404)
+            }
+            return ExtensionAPIHandler.json(TransitionBody(session: SessionBody(session)))
+        case .failure(.notRecording), .failure(.cancelled):
+            return ExtensionAPIHandler.error(.notRecording, status: 409)
+        case .failure(.resumeFailed):
+            return ExtensionAPIHandler.error(.resumeFailed, status: 500)
+        }
+    }
+
     // MARK: - Update
 
     private struct UpdateRequest: Decodable {
@@ -125,7 +156,7 @@ final class ExtensionAPIRecording {
         if let title = request.title, title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return ExtensionAPIHandler.error(.invalidRequest, status: 400)
         }
-        guard coordinator.phase == .recording, let current = coordinator.current else {
+        guard [.recording, .paused].contains(coordinator.phase), let current = coordinator.current else {
             return ExtensionAPIHandler.error(.notRecording, status: 409)
         }
         // Fetched now, so a session deleted since the request began is not found.
@@ -289,6 +320,7 @@ final class ExtensionAPIRecording {
         case .idle: "idle"
         case .starting: "starting"
         case .recording: "recording"
+        case .paused: "paused"
         case .stopping: "stopping"
         }
     }
@@ -331,6 +363,18 @@ final class ExtensionAPIRecording {
             displayId = sources.displayID
         }
 
+        /// What a running recording captures: the microphone is the device being captured, nil
+        /// while capture switches or when the device is not known.
+        init(_ sources: CaptureSources, capturedMicrophone: CapturedMicrophone?) {
+            if case .capturing(let device) = capturedMicrophone {
+                microphoneUid = device.uid
+            } else {
+                microphoneUid = nil
+            }
+            appBundleId = sources.appBundleID
+            displayId = sources.displayID
+        }
+
         // Absent sources are sent as null rather than left out.
         func encode(to encoder: any Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
@@ -367,6 +411,11 @@ final class ExtensionAPIRecording {
     }
 
     private struct StopBody: Encodable {
+        let session: SessionBody
+    }
+
+    /// The body of a pause or resume, the same as a stop's.
+    private struct TransitionBody: Encodable {
         let session: SessionBody
     }
 

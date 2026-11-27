@@ -28,6 +28,7 @@ final class AITransformationRunner {
             case notFound
             /// The result could not be saved to the store.
             case saveFailed
+            case busy
         }
 
         let code: Code
@@ -38,12 +39,14 @@ final class AITransformationRunner {
     enum StartRefusal: Error, Equatable {
         /// The session already has a run under way.
         case alreadyRunning
+        case busy
     }
 
     private let aiProviderService: any AIProviderServiceProtocol
     private let promptStore: AIPromptStore
     /// The sessions' background jobs: a delete cancels a run and waits for it.
     private let sessionJobs: SessionJobs
+    private let spliceReservations: SpliceReservations
 
     private var runningSessionIDs: Set<UUID> = []
     private var operations: [UUID: OperationState] = [:]
@@ -52,8 +55,10 @@ final class AITransformationRunner {
     init(
         aiProviderService: any AIProviderServiceProtocol,
         promptStore: AIPromptStore,
-        sessionJobs: SessionJobs
+        sessionJobs: SessionJobs,
+        spliceReservations: SpliceReservations? = nil
     ) {
+        self.spliceReservations = spliceReservations ?? .shared
         self.aiProviderService = aiProviderService
         self.promptStore = promptStore
         self.sessionJobs = sessionJobs
@@ -67,6 +72,7 @@ final class AITransformationRunner {
     /// session's displayed transcript and the model selected now. A session that already has a
     /// run under way is refused.
     func start(prompt: AIPrompt, on session: any TranscribableSession) throws(StartRefusal) -> UUID {
+        guard !spliceReservations.isReserved(session) else { throw .busy }
         let sessionID = session.id
         guard !runningSessionIDs.contains(sessionID) else {
             throw .alreadyRunning
@@ -133,6 +139,9 @@ final class AITransformationRunner {
         guard sessionJobs.mayWrite(generation), !Self.isDeleted(session) else {
             Self.logger.notice("Transformation for session \(session.id, privacy: .public) not saved: the session was deleted.")
             return .failed(Failure(code: .notFound, message: nil))
+        }
+        guard !spliceReservations.isReserved(session) else {
+            return .failed(Failure(code: .busy, message: SpliceCopy.errorMessage(SpliceError.busy)))
         }
 
         let result: AITransformationResult

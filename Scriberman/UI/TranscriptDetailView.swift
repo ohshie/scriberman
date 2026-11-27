@@ -29,13 +29,15 @@ struct TranscriptDetailView: View {
     let onExport: () -> Void
     /// Asks the window to confirm and delete the session; `nil` while it cannot be deleted.
     let onDelete: (() -> Void)?
-    /// Restores a trimmed recording to its pre-trim state; `nil` for sessions that cannot be trimmed.
+    /// Restores a splice group; nil while restoration is unavailable.
     let onRestoreOriginal: (() async throws -> Void)?
     let onOpenTransformation: ((UUID) -> Void)?
     /// Called when a title commit fails to save; the session keeps its previous title.
     let onTitleNotSaved: () -> Void
     /// A Session menu command for this view to carry out; cleared once handled.
     @Binding var commandRequest: DetailCommandRequest?
+    let spliceEditor: SpliceEditorViewModel?
+    let onToggleSplice: (() -> Void)?
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.undoManager) private var undoManager
@@ -43,7 +45,7 @@ struct TranscriptDetailView: View {
     @Environment(AppState.self) private var appState
     @State private var showingRestoreConfirmation = false
     @State private var isRestoringOriginal = false
-    @State private var restoreErrorMessage: String?
+    @State private var restoreError: Error?
     @State private var editingTitle: String
     @State private var viewModel: TranscriptDetailViewModel
     @FocusState private var titleFocused: Bool
@@ -70,7 +72,9 @@ struct TranscriptDetailView: View {
         onRestoreOriginal: (() async throws -> Void)? = nil,
         onOpenTransformation: ((UUID) -> Void)?,
         onTitleNotSaved: @escaping () -> Void,
-        commandRequest: Binding<DetailCommandRequest?> = .constant(nil)
+        commandRequest: Binding<DetailCommandRequest?> = .constant(nil),
+        spliceEditor: SpliceEditorViewModel? = nil,
+        onToggleSplice: (() -> Void)? = nil
     ) {
         self.session = session
         self.audioPlayerViewModel = audioPlayerViewModel
@@ -86,6 +90,8 @@ struct TranscriptDetailView: View {
         self.onOpenTransformation = onOpenTransformation
         self.onTitleNotSaved = onTitleNotSaved
         _commandRequest = commandRequest
+        self.spliceEditor = spliceEditor
+        self.onToggleSplice = onToggleSplice
         _editingTitle = State(initialValue: session.title)
         _viewModel = State(initialValue: TranscriptDetailViewModel(
             session: session,
@@ -96,7 +102,7 @@ struct TranscriptDetailView: View {
         ))
     }
 
-    var body: some View {
+    private var transcriptScroll: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 header
@@ -126,8 +132,17 @@ struct TranscriptDetailView: View {
         }
         // A retranscription or restore changes the session's displayed transcript while the view
         // is open. The view's own speaker rename writes the same value back, so this is a no-op then.
+    }
+
+    private var observedTranscript: some View {
+        transcriptScroll
         .onChange(of: inputTranscript) {
             viewModel.refreshTranscript()
+        }
+        .onChange(of: session.duration) {
+            if (session as? RecordingSession)?.spliceGroupID != nil {
+                undoManager?.removeAllActions(withTarget: viewModel)
+            }
         }
         .onChange(of: searchState.query) {
             viewModel.updateSearch()
@@ -148,6 +163,10 @@ struct TranscriptDetailView: View {
                 autoScrollEnabled = false
             }
         }
+    }
+
+    var body: some View {
+        observedTranscript
         .safeAreaBar(edge: .bottom) {
             if isSearchVisible {
                 TranscriptFindBar(searchState: searchState) {
@@ -208,6 +227,29 @@ struct TranscriptDetailView: View {
             if let recording = session as? RecordingSession {
                 ToolbarSpacer(.fixed, placement: .primaryAction)
 
+                if recording.spliceGroupID != nil {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            showingRestoreConfirmation = true
+                        } label: {
+                            Label("Restore Original", systemImage: "arrow.uturn.backward")
+                        }
+                        .help("Restore Original")
+                        .accessibilityLabel("Restore original")
+                        .disabled(onRestoreOriginal == nil || isRestoringOriginal)
+                    }
+                }
+
+                ToolbarItem(placement: .primaryAction) {
+                    Toggle(isOn: Binding(get: { spliceEditor != nil }, set: { _ in onToggleSplice?() })) {
+                        Label("Splice", systemImage: "scissors")
+                    }
+                    .toggleStyle(.button)
+                    .help("Splice into parts")
+                    .accessibilityLabel("Splice")
+                    .disabled(onToggleSplice == nil || spliceEditor?.isApplying == true)
+                }
+
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         TagAssignmentMenuContent(session: recording)
@@ -233,6 +275,13 @@ struct TranscriptDetailView: View {
         .restoreOriginalConfirmation(isPresented: $showingRestoreConfirmation) {
             restoreOriginal()
         }
+        .alert("Couldn't Restore", isPresented: Binding(
+            get: { restoreError != nil }, set: { if !$0 { restoreError = nil } }
+        )) {
+            Button("OK", role: .cancel) { restoreError = nil }
+        } message: {
+            Text(restoreError.map(SpliceCopy.errorMessage) ?? "")
+        }
         .task {
             viewModel.loadPrompts()
             viewModel.refreshSelectedTransformation()
@@ -242,6 +291,10 @@ struct TranscriptDetailView: View {
             commandRequest = nil
             handle(request)
         }
+        .onChange(of: spliceEditor != nil) {
+            renamingBlockID = nil
+            isSpeakerListShown = false
+        }
     }
 
     private var header: some View {
@@ -249,6 +302,7 @@ struct TranscriptDetailView: View {
             TextField("Title", text: $editingTitle)
                 .textFieldStyle(.plain)
                 .font(.largeTitle.weight(.semibold))
+                .disabled(isRestoringOriginal)
                 .focused($titleFocused)
                 .onSubmit {
                     commitTitle()
@@ -271,11 +325,6 @@ struct TranscriptDetailView: View {
                 .font(.headline)
                 .foregroundStyle(.secondary)
 
-            if let restoreErrorMessage {
-                Text(restoreErrorMessage)
-                    .foregroundStyle(.red)
-                    .font(.caption)
-            }
         }
     }
 
@@ -313,12 +362,14 @@ struct TranscriptDetailView: View {
             Label("Transform", systemImage: "sparkles")
         }
         .help("Transform")
-        .disabled(viewModel.isAIEnabled == false || viewModel.isRunningTransformation || viewModel.finalTranscriptText.isEmpty)
+        .disabled(isRestoringOriginal || viewModel.isAIEnabled == false || viewModel.isRunningTransformation || viewModel.finalTranscriptText.isEmpty)
     }
 
     @ViewBuilder
     private var transcriptBody: some View {
-        if isRawMarkdownShown {
+        if let spliceEditor, let transcript = viewModel.shownTranscript {
+            SpliceTranscriptView(editor: spliceEditor, transcript: transcript, player: audioPlayerViewModel)
+        } else if isRawMarkdownShown {
             Text(viewModel.rawMarkdown)
                 .font(.body.monospaced())
                 .textSelection(.enabled)
@@ -342,7 +393,7 @@ struct TranscriptDetailView: View {
                             }
                             TranscriptDetailViewModel.seekAndPlay(block: block, player: audioPlayerViewModel)
                         },
-                        speakerEditing: speakerEditing(for: block),
+                        speakerEditing: isRestoringOriginal ? nil : speakerEditing(for: block),
                         showsAudioSource: viewModel.shownTranscript?.isSinglePassOfMixedAudio != true
                     )
                     .zIndex(renamingBlockID == block.id ? 1 : 0)
@@ -360,7 +411,7 @@ struct TranscriptDetailView: View {
         }
         .help("Speakers")
         .accessibilityLabel("Speakers")
-        .disabled(!hasTranscript)
+        .disabled(!hasTranscript || spliceEditor != nil || isRestoringOriginal)
         .popover(isPresented: $isSpeakerListShown, arrowEdge: .bottom) {
             if let transcript = viewModel.shownTranscript {
                 SessionSpeakerListView(
@@ -411,9 +462,11 @@ struct TranscriptDetailView: View {
                 }
             },
             onRename: { name in
+                guard !isRestoringOriginal else { return }
                 viewModel.renameSpeaker(id: block.speaker.id, to: name, undoManager: undoManager)
             },
             onAssign: { speakerID in
+                guard !isRestoringOriginal else { return }
                 viewModel.assign(block, to: speakerID, undoManager: undoManager)
             }
         )
@@ -494,19 +547,26 @@ struct TranscriptDetailView: View {
 
     private func restoreOriginal() {
         guard let onRestoreOriginal else { return }
+        isSpeakerListShown = false
+        renamingBlockID = nil
         isRestoringOriginal = true
-        restoreErrorMessage = nil
+        restoreError = nil
         Task {
             do {
                 try await onRestoreOriginal()
+                undoManager?.removeAllActions(withTarget: viewModel)
             } catch {
-                restoreErrorMessage = error.localizedDescription
+                restoreError = error
             }
             isRestoringOriginal = false
         }
     }
 
     private func commitTitle() {
+        guard !isRestoringOriginal else {
+            editingTitle = session.title
+            return
+        }
         if case .saveFailed = viewModel.commitTitle(editingTitle, context: modelContext, undoManager: undoManager) {
             editingTitle = session.title
             onTitleNotSaved()

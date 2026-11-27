@@ -10,6 +10,14 @@ struct AppShellView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.controlActiveState) private var controlActiveState
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var playbackDock
+    @State private var spliceEditor: SpliceEditorViewModel?
+    @State private var spliceCutPointCache = SpliceCutPointCache()
+    @State private var spliceError: Error?
+    @State private var isRestoringOriginal = false
+    @State private var restoreFailedMemberCount: Int?
+    private var isApplyingSessionEdit: Bool { isRestoringOriginal || spliceEditor?.isApplying == true }
     @Query(sort: \RecordingSession.createdAt, order: .reverse) private var recordingSessions: [RecordingSession]
     @Query(sort: \ImportedSession.createdAt, order: .reverse) private var importedSessions: [ImportedSession]
     @State private var selectedSession: JobsViewModel.SessionListItem?
@@ -51,7 +59,7 @@ struct AppShellView: View {
         recordingSessions.filter { !appState.sessionDeletion.isRemoving($0.id) }
     }
 
-    var body: some View {
+    private var shellLayout: some View {
         NavigationSplitView {
             JobsView(
                 viewModel: appState.jobsViewModel,
@@ -72,6 +80,7 @@ struct AppShellView: View {
                 hasPendingDeletions: pendingDeletions.isEntryEnabled,
                 onShowPendingDeletions: { showPendingDeletions() }
             )
+            .disabled(isApplyingSessionEdit)
             .focused($isSessionListFocused)
             .navigationSplitViewColumnWidth(min: 380, ideal: 460)
         } detail: {
@@ -83,15 +92,27 @@ struct AppShellView: View {
                         }
                 }
                 .safeAreaBar(edge: .bottom, spacing: 0) {
-                    AudioPlayerBar(
-                        viewModel: audioPlayerViewModel,
-                        sessionHasAudio: audioURL(for: selectedSession) != nil || selectedSessionHasMixdownNil(selectedSession),
-                        mixdownURL: mixdownURLString(for: selectedSession),
-                        onResumeScroll: transcriptAutoScrollEnabled ? nil : {
-                            transcriptAutoScrollEnabled = true
-                        }
-                    )
+                    if let spliceEditor, case .recording(let session) = selectedSession,
+                       let audioPath = session.mixdownURL {
+                        SpliceEditorView(
+                            editor: spliceEditor, player: audioPlayerViewModel,
+                            transcript: session.displayedTranscript, audioURL: URL(fileURLWithPath: audioPath),
+                            onCancel: closeSpliceEditor, onApply: applySplice
+                        )
+                        .matchedGeometryEffect(id: "playback", in: playbackDock)
+                    } else {
+                        AudioPlayerBar(
+                            viewModel: audioPlayerViewModel,
+                            sessionHasAudio: audioURL(for: selectedSession) != nil || selectedSessionHasMixdownNil(selectedSession),
+                            mixdownURL: mixdownURLString(for: selectedSession),
+                            onResumeScroll: transcriptAutoScrollEnabled ? nil : {
+                                transcriptAutoScrollEnabled = true
+                            }
+                        )
+                        .matchedGeometryEffect(id: "playback", in: playbackDock)
+                    }
                 }
+                .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: spliceEditor != nil)
                 .navigationSplitViewColumnWidth(min: 560, ideal: 860)
             } else if pendingDeletions.isOpen {
                 PendingDeletionsView(
@@ -119,6 +140,10 @@ struct AppShellView: View {
         .toolbar(removing: .title)
         .toolbar(removing: .search)
         .frame(minHeight: 580)
+    }
+
+    private var presentedShell: some View {
+        shellLayout
         .alert("Study Action Failed", isPresented: Binding(
             get: { studyActionErrorMessage != nil },
             set: { isPresented in
@@ -163,14 +188,26 @@ struct AppShellView: View {
                 storeFailureAlert = .transcriptNotSaved(count)
             }
         }
-        .sheet(isPresented: Binding(
-            get: { appState.sessionToTrim != nil },
-            set: { if !$0 { appState.sessionToTrim = nil } }
+        .alert("Couldn't Splice", isPresented: Binding(
+            get: { spliceError != nil }, set: { if !$0 { spliceError = nil } }
         )) {
-            if let session = appState.sessionToTrim {
-                TrimEditorView(
-                    viewModel: TrimEditorViewModel(session: session, audioPlayer: audioPlayerViewModel, context: modelContext),
-                    onDismiss: { appState.sessionToTrim = nil }
+            Button("OK", role: .cancel) { spliceError = nil }
+        } message: {
+            Text(spliceError.map(SpliceCopy.errorMessage) ?? "")
+        }
+        .alert("Restored with Problems", isPresented: Binding(
+            get: { restoreFailedMemberCount != nil }, set: { if !$0 { restoreFailedMemberCount = nil } }
+        )) {
+            Button("OK", role: .cancel) { restoreFailedMemberCount = nil }
+        } message: {
+            Text(SpliceCopy.restorePartialMessage(restoreFailedMemberCount ?? 0))
+        }
+        .background {
+            if let spliceEditor {
+                SpliceKeyboardHandler(
+                    isEditingText: textEditingObserver.isEditingText, isApplying: spliceEditor.isApplying,
+                    onCut: { spliceEditor.addCut(near: audioPlayerViewModel.currentTime) },
+                    onCancel: closeSpliceEditor
                 )
             }
         }
@@ -180,6 +217,10 @@ struct AppShellView: View {
                 textEditingObserver.observe(window)
             }
         }
+    }
+
+    var body: some View {
+        presentedShell
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else {
                 return
@@ -201,6 +242,7 @@ struct AppShellView: View {
             guard oldValue?.id != newValue?.id else {
                 return
             }
+            closeSpliceEditor()
 
             transcriptAutoScrollEnabled = true
             audioPlayerViewModel.stop()
@@ -215,6 +257,8 @@ struct AppShellView: View {
             isRawMarkdownShown = false
             detailNavigation.selectionChanged(to: newValue?.id)
         }
+        .onChange(of: appState.workspace) { closeSpliceEditor() }
+        .onChange(of: detailNavigation.isSessionShown) { if !detailNavigation.isSessionShown { closeSpliceEditor() } }
         // A request from outside any window is shown by the key main window. Each of these is a
         // moment the request may have become showable: it arrived, this window became key, or the
         // session it names reached this window's query.
@@ -233,6 +277,7 @@ struct AppShellView: View {
     }
 
     private func showRequestedSession() {
+        guard !isApplyingSessionEdit else { return }
         guard controlActiveState == .key else {
             return
         }
@@ -359,13 +404,16 @@ struct AppShellView: View {
                 exportTranscript(for: session)
             },
             onDelete: commandAvailability.isEnabled(.delete) ? { requestDeletion() } : nil,
-            onRestoreOriginal: onRestoreOriginal,
+            onRestoreOriginal: commandAvailability.isEnabled(.restoreOriginal) ? onRestoreOriginal : nil,
             onOpenTransformation: { transformationID in
+                guard !isApplyingSessionEdit else { return }
                 selectedTransformationID = transformationID
                 detailNavigation.openTransformation(transformationID)
             },
             onTitleNotSaved: { storeFailureAlert = .titleNotSaved },
-            commandRequest: $detailCommandRequest
+            commandRequest: $detailCommandRequest,
+            spliceEditor: spliceEditor,
+            onToggleSplice: commandAvailability.isEnabled(.splice) ? { toggleSpliceEditor() } : nil
         )
         .id(session.id)
     }
@@ -443,6 +491,9 @@ struct AppShellView: View {
         switch result {
         case .deleted:
             break
+        case .busy:
+            selectedSession = item
+            storeFailureAlert = .deletionFailed(SpliceCopy.errorMessage(SpliceError.busy))
         case .saveFailed(let reason):
             selectedSession = item
             storeFailureAlert = .deletionFailed(reason)
@@ -488,8 +539,10 @@ struct AppShellView: View {
     /// Removes a held session for good, once the user has confirmed.
     private func removeNow(_ row: PendingDeletionsViewModel.Row) {
         Task {
-            if case .folderLeft(let folder) = await pendingDeletions.removeNow(row) {
-                storeFailureAlert = .filesLeft(folder.path)
+            switch await pendingDeletions.removeNow(row, context: modelContext) {
+            case .folderLeft(let folder): storeFailureAlert = .filesLeft(folder.path)
+            case .busy: storeFailureAlert = .deletionFailed(SpliceCopy.errorMessage(SpliceError.busy))
+            case .removed, .notHeld: break
             }
         }
     }
@@ -512,8 +565,18 @@ struct AppShellView: View {
     }
 
     private func restoreOriginal(of session: RecordingSession) async throws {
+        guard !isApplyingSessionEdit, !selectedGroupHasRunningTransformation else { throw SpliceError.busy }
+        guard let workspace = appState.workspace, isSelectionInActiveWorkspace else { throw SpliceError.inactiveWorkspace }
+        isRestoringOriginal = true
+        defer {
+            isRestoringOriginal = false
+            showRequestedSession()
+        }
         audioPlayerViewModel.stop()
-        try await AudioTrimService().restore(session: session, context: modelContext)
+        let result = try await SpliceService().restore(
+            session: session, workspace: workspace, context: modelContext, coordinator: appState.sessionDeletion
+        )
+        if !result.failedSessionIDs.isEmpty { restoreFailedMemberCount = result.failedSessionIDs.count }
         audioPlayerViewModel.reload()
     }
 
@@ -605,11 +668,13 @@ struct AppShellView: View {
                     Label("New Session", systemImage: "plus")
                 }
                 .help("New Session")
+                .disabled(isApplyingSessionEdit)
             }
         }
     }
 
     private func startNewSession() {
+        guard !isApplyingSessionEdit else { return }
         appState.selectPendingSession()
         appState.newSessionViewModel.refreshAudioDevicesOnPanelExpanded()
         if let pendingSession = appState.pendingSession {
@@ -623,6 +688,7 @@ struct AppShellView: View {
             selection: selectedSession,
             availability: commandAvailability,
             isPlaying: audioPlayerViewModel.isPlaying,
+            isRecordingPaused: appState.newSessionViewModel.isPaused,
             isEditingText: textEditingObserver.isEditingText,
             isRawMarkdownShown: isRawMarkdownShown,
             actions: MainWindowActions(
@@ -650,18 +716,18 @@ struct AppShellView: View {
                 restoreOriginal: {
                     requestFromDetail(.restoreOriginal)
                 },
-                trim: {
-                    guard case .recording(let session) = selectedSession else { return }
-                    appState.sessionToTrim = session
-                },
+                splice: toggleSpliceEditor,
                 delete: { requestDeletion() },
                 startRecording: { startRecording() },
                 stopRecording: { stopRecording() },
+                pauseResumeRecording: { pauseOrResumeRecording() },
                 playPause: { togglePlayback() },
                 find: { find() },
                 toggleRawMarkdown: { isRawMarkdownShown.toggle() }
             ),
-            modelContext: modelContext
+            modelContext: modelContext,
+            spliceEditor: spliceEditor,
+            isApplyingSessionEdit: isApplyingSessionEdit
         )
     }
 
@@ -673,8 +739,86 @@ struct AppShellView: View {
             hasLoadedAudio: audioPlayerViewModel.isReady,
             // The session search field is always in the window, so Find always has a target.
             hasFindTarget: true,
-            isSelectionInActiveWorkspace: isSelectionInActiveWorkspace
+            isSelectionInActiveWorkspace: isSelectionInActiveWorkspace,
+            hasSpliceCutPoint: selectedRecordingHasCutPoints,
+            isTrimmed: (selectedTranscribableSession as? RecordingSession)?.isTrimmed == true,
+            hasPendingScreenMux: (selectedTranscribableSession as? RecordingSession)?.screenMuxState != nil,
+            isSpliceEditorOpen: spliceEditor != nil || isRestoringOriginal,
+            isApplyingSplice: isApplyingSessionEdit,
+            hasSpliceGroup: (selectedTranscribableSession as? RecordingSession)?.spliceGroupID != nil,
+            hasBusySpliceMember: selectedGroupHasBusyMember,
+            isSessionReserved: selectedTranscribableSession.map { SpliceReservations.shared.isReserved($0) } ?? false,
+            isTransformationRunning: selectedGroupHasRunningTransformation,
+            canPauseOrResumeRecording: appState.captureCoordinator.phase.canPauseOrResume
         )
+    }
+
+    private var selectedRecordingHasCutPoints: Bool {
+        guard let session = selectedTranscribableSession as? RecordingSession else { return false }
+        return spliceCutPointCache.hasCutPoint(session)
+    }
+
+    /// An AI prompt runs on the selected session or on another part of its splice group.
+    private var selectedGroupHasRunningTransformation: Bool {
+        guard let session = selectedTranscribableSession else { return false }
+        let runner = appState.aiTransformationRunner
+        if runner.isRunning(session.id) { return true }
+        guard let groupID = (session as? RecordingSession)?.spliceGroupID else { return false }
+        return recordingSessions.contains { $0.spliceGroupID == groupID && runner.isRunning($0.id) }
+    }
+
+    private var selectedGroupHasBusyMember: Bool {
+        guard let groupID = (selectedTranscribableSession as? RecordingSession)?.spliceGroupID else { return false }
+        return recordingSessions.contains {
+            $0.spliceGroupID == groupID && ($0.screenMuxState != nil || !SessionCommandAvailability.isSettled($0.status))
+        }
+    }
+
+    private func toggleSpliceEditor() {
+        if spliceEditor != nil { closeSpliceEditor(); return }
+        guard commandAvailability.isEnabled(.splice), case .recording(let session) = selectedSession else { return }
+        detailNavigation.returnToSession()
+        isRawMarkdownShown = false
+        transcriptAutoScrollEnabled = false
+        spliceEditor = SpliceEditorViewModel(
+            title: session.title, duration: session.duration, transcript: session.transcript, retranscript: session.retranscript,
+            fingerprint: SplicePlan.fingerprint(transcriptData: session.transcriptData, retranscriptData: session.retranscriptData)
+        )
+    }
+
+    private func closeSpliceEditor() {
+        guard !isApplyingSessionEdit else { return }
+        spliceEditor?.discardHistory()
+        spliceEditor = nil
+    }
+
+    private func applySplice() {
+        guard let editor = spliceEditor, editor.canApply,
+              case .recording(let session) = selectedSession else { return }
+        guard let workspace = appState.workspace, isSelectionInActiveWorkspace else {
+            spliceError = SpliceError.inactiveWorkspace
+            return
+        }
+        // A prompt can still start while the editor is open, through the extension API.
+        guard !selectedGroupHasRunningTransformation else {
+            spliceError = SpliceError.busy
+            return
+        }
+        audioPlayerViewModel.stop()
+        editor.isApplying = true
+        Task { @MainActor in
+            do {
+                try await SpliceService().splice(session: session, plan: editor.plan, workspace: workspace, context: modelContext)
+                editor.isApplying = false
+                editor.discardHistory()
+                spliceEditor = nil
+                audioPlayerViewModel.reload()
+            } catch {
+                editor.isApplying = false
+                spliceError = error
+            }
+            showRequestedSession()
+        }
     }
 
     /// The selected session's folder is in the active workspace. A session with no folder yet has
@@ -705,6 +849,7 @@ struct AppShellView: View {
     /// is created first when there is none. When recording cannot start yet, the panel stays shown
     /// so its controls say why.
     private func startRecording() {
+        guard !isApplyingSessionEdit else { return }
         startNewSession()
         let viewModel = appState.newSessionViewModel
         guard viewModel.canRecord, let pendingSession = appState.pendingSession else {
@@ -727,6 +872,12 @@ struct AppShellView: View {
     private func stopRecording() {
         Task {
             _ = await appState.captureCoordinator.stop(context: modelContext)
+        }
+    }
+
+    private func pauseOrResumeRecording() {
+        Task {
+            _ = await appState.captureCoordinator.pauseOrResume()
         }
     }
 
@@ -756,7 +907,7 @@ struct AppShellView: View {
         case .pending:
             return .pending
         case .recording(let session):
-            return .recording(session.status, isTrimmed: session.isTrimmed)
+            return .recording(session.status)
         case .imported(let session):
             return .imported(session.status)
         }
@@ -922,7 +1073,7 @@ private enum StoreFailureAlert: Equatable {
 }
 
 /// Reports the window this view is in, and again whenever it moves to another.
-private struct WindowReader: NSViewRepresentable {
+struct WindowReader: NSViewRepresentable {
     let onWindowChange: (NSWindow?) -> Void
 
     func makeNSView(context: Context) -> ReportingView {

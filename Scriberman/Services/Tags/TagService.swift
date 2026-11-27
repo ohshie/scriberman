@@ -118,7 +118,9 @@ struct TagService {
     /// made without telling them. The default tag is displaced here, which is the only way it ever
     /// leaves a recording that still has tags.
     @discardableResult
+    @MainActor
     func assign(_ tag: RecordingTag, to session: RecordingSession, in context: ModelContext) throws -> Bool {
+        guard !SpliceReservations.shared.isReserved(session) else { throw SpliceError.busy }
         guard !tag.isDefault else {
             // The default tag is applied by the rules below, never chosen.
             return false
@@ -136,7 +138,9 @@ struct TagService {
     }
 
     /// Removes `tag` from `session`, restoring the default when nothing is left.
+    @MainActor
     func unassign(_ tag: RecordingTag, from session: RecordingSession, in context: ModelContext) throws {
+        guard !SpliceReservations.shared.isReserved(session) else { throw SpliceError.busy }
         session.tags.removeAll { $0.id == tag.id }
         try restoreFloorIfNeeded(for: session, in: context)
         try context.save()
@@ -214,6 +218,7 @@ struct TagService {
         in context: ModelContext,
         undoManager: UndoManager?
     ) throws {
+        guard !SpliceReservations.shared.isReserved(session) else { throw SpliceError.busy }
         let previousTags = session.tags
         session.tags = tags.filter { $0.modelContext != nil && !$0.isDeleted }
         try restoreFloorIfNeeded(for: session, in: context)
@@ -233,6 +238,7 @@ struct TagService {
     ///
     /// The sweep and the repair are one operation. Splitting them would leave the bound false for
     /// however long it took something else to notice.
+    @MainActor
     func delete(_ tag: RecordingTag, in context: ModelContext) throws {
         guard !tag.isDefault else { throw TagError.defaultTagNotDeletable }
 
@@ -243,6 +249,7 @@ struct TagService {
         // deletion is rare and the sweep has to be exhaustive.
         let affected = try context.fetch(FetchDescriptor<RecordingSession>())
             .filter { session in session.tags.contains { $0.id == tagID } }
+        guard !affected.contains(where: { SpliceReservations.shared.isReserved($0) }) else { throw SpliceError.busy }
         for session in affected {
             session.tags.removeAll { $0.id == tagID }
             try restoreFloorIfNeeded(for: session, in: context)

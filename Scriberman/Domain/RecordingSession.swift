@@ -47,6 +47,7 @@ final class RecordingSession {
     /// The audio-sync flag values the recording started with, saved when the session is created so
     /// recovery finalizes with them. `nil` on recordings made before the snapshot existed.
     var audioSyncTimelineMixdownEnabled: Bool?
+    /// Retained for existing SwiftData stores; capture no longer reads this retired flag.
     var audioSyncUnifiedCaptureEnabled: Bool?
     var audioSyncCaptureHealthRecoveryEnabled: Bool?
     var transcriptData: Data?
@@ -71,6 +72,7 @@ final class RecordingSession {
     var originalTranscriptData: Data?
     var originalRetranscriptData: Data?
     var trimEnd: Double?
+    var spliceGroupID: UUID?
 
     var isTrimmed: Bool { originalMixdownURL != nil }
 
@@ -110,20 +112,18 @@ final class RecordingSession {
     var audioSyncFlags: AudioSyncFlags? {
         get {
             guard let audioSyncTimelineMixdownEnabled,
-                  let audioSyncUnifiedCaptureEnabled,
                   let audioSyncCaptureHealthRecoveryEnabled
             else {
                 return nil
             }
             return AudioSyncFlags(
                 isTimelineMixdownEnabled: audioSyncTimelineMixdownEnabled,
-                isUnifiedCaptureEnabled: audioSyncUnifiedCaptureEnabled,
                 isCaptureHealthRecoveryEnabled: audioSyncCaptureHealthRecoveryEnabled
             )
         }
         set {
             audioSyncTimelineMixdownEnabled = newValue?.isTimelineMixdownEnabled
-            audioSyncUnifiedCaptureEnabled = newValue?.isUnifiedCaptureEnabled
+            audioSyncUnifiedCaptureEnabled = nil
             audioSyncCaptureHealthRecoveryEnabled = newValue?.isCaptureHealthRecoveryEnabled
         }
     }

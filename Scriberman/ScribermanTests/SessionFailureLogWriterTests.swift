@@ -12,6 +12,7 @@ struct SessionFailureLogWriterTests {
 
     private func makeFailure(sessionID: UUID = UUID()) -> SessionFailureLogWriter.Failure {
         SessionFailureLogWriter.Failure(
+            kind: .startVerification,
             sessionID: sessionID,
             startedAt: Date(timeIntervalSince1970: 1_756_000_000),
             micFrames: 0,
@@ -74,6 +75,7 @@ struct SessionFailureLogWriterTests {
         let workspace = makeWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
         let failure = SessionFailureLogWriter.Failure(
+            kind: .startVerification,
             sessionID: UUID(),
             startedAt: Date(),
             micFrames: nil,
@@ -89,5 +91,31 @@ struct SessionFailureLogWriterTests {
         let contents = try String(contentsOf: url, encoding: .utf8)
         #expect(contents.contains("mic frames:          unavailable"))
         #expect(contents.contains("app frames:          not captured"))
+    }
+
+    @Test(arguments: [
+        (SessionFailureLogWriter.Failure.Kind.startVerification, "Recording failed to start: no audio."),
+        (.restartsExhausted, "Recording stopped: audio capture did not recover."),
+    ])
+    func testEachFailureKindHasItsOwnHeader(kind: SessionFailureLogWriter.Failure.Kind, header: String) throws {
+        let workspace = makeWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace.rootURL) }
+        let failure = SessionFailureLogWriter.Failure(
+            kind: kind,
+            sessionID: UUID(),
+            startedAt: Date(),
+            micFrames: 5_933_728,
+            appFrames: 7_495_680,
+            micWriteFailures: 0,
+            appWriteFailures: 0,
+            restartAttempted: true,
+            lastError: nil
+        )
+
+        let url = try #require(SessionFailureLogWriter(entriesProvider: { _ in [] }).write(failure, in: workspace))
+
+        let lines = try String(contentsOf: url, encoding: .utf8).components(separatedBy: "\n")
+        #expect(lines.contains(header))
+        #expect(!lines.contains("Recording start verification failed: no audio frames were written."))
     }
 }

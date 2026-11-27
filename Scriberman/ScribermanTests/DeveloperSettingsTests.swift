@@ -28,7 +28,7 @@ struct DeveloperSettingsTests {
     @Test("Flags are listed from their definitions")
     func flagsComeFromDefinitions() {
         let settings = DeveloperSettings(store: makeDefaults())
-        #expect(settings.flags == [shipped.timelineMixdown, shipped.unifiedCapture, shipped.captureHealthRecovery])
+        #expect(settings.flags == [shipped.timelineMixdown, shipped.captureHealthRecovery])
     }
 
     @Test("Seven clicks on the version label unlock")
@@ -125,7 +125,7 @@ struct DeveloperSettingsTests {
     @Test("A flag set away from its default persists across relaunch")
     func flagAwayFromDefaultPersists() {
         let defaults = makeDefaults()
-        let flag = shipped.unifiedCapture
+        let flag = shipped.timelineMixdown
         DeveloperSettings(store: defaults).set(flag, isOn: !flag.defaultValue)
         #expect(DeveloperSettings(store: defaults).isOn(flag) == !flag.defaultValue)
     }
@@ -159,15 +159,14 @@ struct DeveloperSettingsTests {
         let config = AudioSyncConfig(store: defaults)
 
         settings.set(shipped.timelineMixdown, isOn: false)
-        settings.set(shipped.unifiedCapture, isOn: false)
         settings.set(shipped.captureHealthRecovery, isOn: false)
         #expect(config.snapshot() == AudioSyncFlags(
             isTimelineMixdownEnabled: false,
-            isUnifiedCaptureEnabled: false,
+
             isCaptureHealthRecoveryEnabled: false
         ))
 
-        settings.set(shipped.unifiedCapture, isOn: true)
-        #expect(config.isUnifiedCaptureEnabled)
+        settings.set(shipped.timelineMixdown, isOn: true)
+        #expect(config.isTimelineMixdownEnabled)
     }
 }

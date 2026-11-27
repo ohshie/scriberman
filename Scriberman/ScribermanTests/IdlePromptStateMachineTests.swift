@@ -76,6 +76,49 @@ struct IdlePromptStateMachineTests {
         #expect(result == start)
     }
 
+    @Test("A resume counts as activity for every watched source", arguments: [true, false])
+    func resumeCountsAsActivity(allIdle: Bool) {
+        let snapshot = IdleActivitySnapshot(
+            appAudio: start,
+            micAudio: start.addingTimeInterval(600),
+            userInput: nil,
+            resumedAt: start.addingTimeInterval(900)
+        )
+        let result = IdlePromptStateMachine.effectiveLastActivity(
+            snapshot: snapshot,
+            settings: settings(app: true, mic: true, input: true, allIdle: allIdle),
+            recordingStartedAt: start
+        )
+        #expect(result == start.addingTimeInterval(900))
+    }
+
+    @Test("Activity after a resume still counts")
+    func activityAfterResumeCounts() {
+        let snapshot = IdleActivitySnapshot(
+            appAudio: start.addingTimeInterval(1_000),
+            resumedAt: start.addingTimeInterval(900)
+        )
+        let result = IdlePromptStateMachine.effectiveLastActivity(
+            snapshot: snapshot,
+            settings: settings(app: true),
+            recordingStartedAt: start
+        )
+        #expect(result == start.addingTimeInterval(1_000))
+    }
+
+    @Test("A resume closes the prompt and no prompt or auto-stop follows at once", arguments: [true, false])
+    func resumeClosesPrompt(allIdle: Bool) {
+        var machine = IdlePromptStateMachine()
+        let rules = settings(app: true, mic: true, allIdle: allIdle, autoStop: true, autoStopDelay: 60)
+        let silent = IdleActivitySnapshot(appAudio: start, micAudio: start)
+        #expect(tick(&machine, at: threshold, snapshot: silent, settings: rules) == .showPrompt)
+
+        let resumedAt = start.addingTimeInterval(threshold + 30)
+        let resumed = IdleActivitySnapshot(appAudio: start, micAudio: start, resumedAt: resumedAt)
+        #expect(tick(&machine, at: threshold + 30, snapshot: resumed, settings: rules) == .dismissPrompt)
+        #expect(tick(&machine, at: threshold + 120, snapshot: resumed, settings: rules) == .none)
+    }
+
     @Test("A watched source that was never active falls back to the recording start")
     func neverActiveFallsBackToStart() {
         let result = IdlePromptStateMachine.effectiveLastActivity(

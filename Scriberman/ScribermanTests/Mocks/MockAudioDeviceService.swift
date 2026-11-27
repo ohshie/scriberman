@@ -4,7 +4,10 @@ import Foundation
 @MainActor
 final class MockAudioDeviceService: AudioDeviceServiceProtocol {
     var availableDevices: [AudioInputDevice] = []
-    var selectedDevice: AudioInputDevice?
+    var selectedDevice: AudioInputDevice? {
+        didSet { preferredDeviceUID = selectedDevice?.uid }
+    }
+    var preferredDeviceUID: String?
     private(set) var incrementUsageCalls: [String] = []
     private(set) var refreshDevicesCalls = 0
 

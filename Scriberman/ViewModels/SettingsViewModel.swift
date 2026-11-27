@@ -223,7 +223,6 @@ final class SettingsViewModel {
 
     /// A value in Settings with its own reset button.
     enum ResettableSetting: CaseIterable {
-        case voiceProcessing
         case vadThreshold
         case vadMinSpeechDuration
         case asrConfidenceGate
@@ -234,8 +233,6 @@ final class SettingsViewModel {
     func canReset(_ setting: ResettableSetting) -> Bool {
         let d = LiveTranscriptionPipelineSettings.defaults
         switch setting {
-        case .voiceProcessing:
-            return appAudioSettings.voiceProcessingEnabled
         case .vadThreshold:
             return !Self.isApproximatelyEqual(vadThreshold, d.vadThreshold)
         case .vadMinSpeechDuration:
@@ -264,7 +261,6 @@ final class SettingsViewModel {
         vadMinSpeechDuration = d.vadMinSpeechDuration
         asrConfidenceGate = d.asrConfidenceGate
         asrAmplitudeGate = d.asrAmplitudeGate
-        appAudioSettings.resetToDefaults()
     }
 
     private static func isInProgress(_ phase: BundleInstallPhase) -> Bool {
