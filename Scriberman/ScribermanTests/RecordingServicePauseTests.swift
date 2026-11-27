@@ -380,7 +380,8 @@ struct RecordingServicePauseTests {
             _ = try await fixture.start()
             Issue.record("Expected recording start to fail")
         } catch {
-            guard case .failedToStart(let reason) = error else {
+            guard let recordingError = error as? RecordingError,
+                  case .failedToStart(let reason) = recordingError else {
                 Issue.record("Expected failedToStart")
                 return
             }
