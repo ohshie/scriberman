@@ -344,6 +344,25 @@ struct RecordingServicePauseTests {
         #expect(try fixture.session(id).appAudioURL == nil)
     }
 
+    @Test
+    func failedChosenMicStartRetriesOnDefaultAndKeepsThePreferredMicForItsReturn() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.remove() }
+        fixture.captures.failStarts(1)
+        do {
+            _ = try await fixture.start(micDeviceID: 2, preferredMic: "device-b")
+            Issue.record("Expected the chosen microphone start to fail")
+        } catch {}
+        _ = try await fixture.start(preferredMic: "device-b")
+        #expect(fixture.captures.unified.map(\.currentMicDeviceUID) == ["device-b", nil])
+        fixture.hardware.unplug("device-b")
+        await fixture.service.simulateHardwareChangeForTesting()
+        fixture.hardware.plug("device-b", id: 4)
+        await fixture.service.simulateHardwareChangeForTesting()
+        #expect(fixture.captures.unified.last?.currentMicDeviceUID == "device-b")
+        _ = await fixture.service.stopRecording()
+    }
+
     enum StartFailure: CaseIterable, Sendable { case streamRefused, screenPermissionDenied, microphonePermissionDenied, noUsableMic }
 
     @Test(arguments: StartFailure.allCases)

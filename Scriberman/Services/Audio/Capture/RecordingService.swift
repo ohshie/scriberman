@@ -133,6 +133,10 @@ actor RecordingService: RecordingServiceProtocol {
     /// The device capture uses while the preferred one is not usable: the device the recording
     /// started on, or `nil` for the system default.
     private var fallbackMicDeviceUID: String?
+    /// A failed explicit start can be followed by the view model's system-default retry.
+    private var failedStartMicDevice: (uid: String, id: AudioDeviceID)?
+    /// Keep that retry on the default until the failed device leaves or gets a new hardware ID.
+    private var startRetryExcludedMicDevice: (uid: String, id: AudioDeviceID)?
     private var micFileURL: URL?
     private var hasScopedRecordingAccess = false
     private var recordingWorkspaceRootURL: URL?
@@ -753,6 +757,10 @@ actor RecordingService: RecordingServiceProtocol {
             } else {
                 fallbackMicDeviceUID = nil
             }
+            if micDeviceID == nil, let failed = failedStartMicDevice,
+               failed.uid == preferredMicDeviceUID {
+                startRetryExcludedMicDevice = failed
+            }
             desiredMicDeviceUID = preferredMicDeviceUID ?? fallbackMicDeviceUID
             isPreferredMicAbsent = desiredMicDeviceUID != nil && resolveDeviceID(for: desiredMicDeviceUID) == nil
             self.activeAppSource = appProcessID.map {
@@ -827,13 +835,21 @@ actor RecordingService: RecordingServiceProtocol {
                 "Recording \(session.id, privacy: .public) audio-sync flags: timelineMixdown=\(audioSyncFlags.isTimelineMixdownEnabled, privacy: .public) captureHealthRecovery=\(audioSyncFlags.isCaptureHealthRecoveryEnabled, privacy: .public) unifiedStarted=\(self.unifiedCaptureSession != nil, privacy: .public)"
             )
             registerMicHardwareListeners()
+            failedStartMicDevice = nil
             didStart = true
             // A device removed or returned while capture started is not seen by the listeners,
             // which start only now.
             await requestMicRetarget(reason: .start)
             return session.id
         } catch {
+            let failedTarget = micCaptureTargetUID()
+            let failedDevice = resolveDeviceID(for: failedTarget)
             await cleanupRecordingState()
+            if let failedTarget, let failedDevice {
+                failedStartMicDevice = (failedTarget, failedDevice)
+            } else {
+                failedStartMicDevice = nil
+            }
             releaseRecordingScopeIfNeeded()
             audioLevelValue = 0
             lifecycleState = .idle
@@ -1200,6 +1216,7 @@ actor RecordingService: RecordingServiceProtocol {
             return
         }
         self.desiredMicDeviceUID = desiredDeviceUID
+        startRetryExcludedMicDevice = nil
         await requestMicRetarget(reason: .retarget)
     }
 
@@ -1463,6 +1480,7 @@ actor RecordingService: RecordingServiceProtocol {
         activeCaptureDisplayID = nil
         desiredMicDeviceUID = nil
         fallbackMicDeviceUID = nil
+        startRetryExcludedMicDevice = nil
         unifiedConfiguredMicDeviceID = nil
         unifiedStreamNumber = nil
         loggedRemovedMicUID = nil
@@ -1508,12 +1526,21 @@ actor RecordingService: RecordingServiceProtocol {
 
     private func handleHardwareChange() async {
         guard isRecordingValue else { return }
+        if let excluded = startRetryExcludedMicDevice,
+           resolveDeviceID(for: excluded.uid) != excluded.id {
+            startRetryExcludedMicDevice = nil
+        }
         await requestMicRetarget(reason: noteMicDeviceChanges())
     }
 
     private func micCaptureTargetUID() -> String? {
-        if resolveDeviceID(for: desiredMicDeviceUID) != nil { return desiredMicDeviceUID }
-        if resolveDeviceID(for: fallbackMicDeviceUID) != nil { return fallbackMicDeviceUID }
+        for uid in [desiredMicDeviceUID, fallbackMicDeviceUID] {
+            guard let uid, let id = resolveDeviceID(for: uid) else { continue }
+            if let excluded = startRetryExcludedMicDevice, excluded.uid == uid, excluded.id == id {
+                continue
+            }
+            return uid
+        }
         return nil
     }
 
