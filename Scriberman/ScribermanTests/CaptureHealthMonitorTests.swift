@@ -443,6 +443,25 @@ struct CaptureHealthMonitorTests {
     }
 
     @Test
+    func aMicOnlyStallAfterATransitionGetsTheGracePeriodThenRestarts() {
+        var monitor = CaptureHealthMonitor(configuration: config(stallThreshold: 3))
+        let transition = CaptureHealthMonitor.MicTransition(number: 1, at: start.addingTimeInterval(0.5))
+        _ = monitor.update(now: start, snapshot: snapshot(mic: 960, app: nil), isRecording: true)
+
+        let stalled = monitor.update(
+            now: start.addingTimeInterval(4), snapshot: snapshot(mic: 960, app: nil, transition: transition), isRecording: true
+        )
+        #expect(stalled == .none)
+        #expect(monitor.lastGraceEvent == .started)
+
+        let after = monitor.update(
+            now: start.addingTimeInterval(9.5), snapshot: snapshot(mic: 960, app: nil, transition: transition), isRecording: true
+        )
+        #expect(after == .restart)
+        #expect(monitor.lastGraceEvent == .expired)
+    }
+
+    @Test
     func testMicBuffersInsideTheGracePeriodCountAsRecovery() {
         var effect = CaptureHealthMonitor.Effect.none
         let transition = CaptureHealthMonitor.MicTransition(number: 1, at: start.addingTimeInterval(0.5))

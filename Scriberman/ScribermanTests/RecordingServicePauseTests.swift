@@ -755,11 +755,11 @@ struct RecordingServicePauseTests {
 
     private static let stallThresholdMs: UInt64 = 3_100
 
-    @Test(arguments: [true, false])
-    func resumeRestartsADeadUnifiedCaptureInPlace(recovery: Bool) async throws {
+    @Test(arguments: [true, false], Source.allCases)
+    func resumeRestartsADeadUnifiedCaptureInPlace(recovery: Bool, source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1, recovery: recovery)
+        _ = try await fixture.start(appProcessID: source.pid, recovery: recovery)
         let original = try #require(fixture.captures.unified.last)
         try fixture.sendUnified(Self.before, to: original)
         _ = await fixture.service.pauseRecording()
@@ -773,15 +773,15 @@ struct RecordingServicePauseTests {
         let session = try fixture.session(id)
         let expected = run(Self.before, 1) + run(Self.after, 1)
         #expect(try samples(session.micAudioURL) == expected)
-        #expect(try samples(session.appAudioURL) == expected)
+        if source == .micAndApp { #expect(try samples(session.appAudioURL) == expected) }
         #expect(session.captureInterruptionCount == 1)
     }
 
-    @Test
-    func resumeRestartsAUnifiedMicrophoneThatStoppedDelivering() async throws {
+    @Test(arguments: Source.allCases)
+    func resumeRestartsAUnifiedMicrophoneThatStoppedDelivering(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1)
+        _ = try await fixture.start(appProcessID: source.pid)
         try fixture.sendUnified(Self.before, to: try #require(fixture.captures.unified.last))
         _ = await fixture.service.pauseRecording()
         fixture.time.advance(ms: Self.stallThresholdMs)
@@ -833,11 +833,11 @@ struct RecordingServicePauseTests {
 
     // MARK: - Failed resume
 
-    @Test
-    func aUnifiedCaptureThatCannotRestartFailsResumeAndRetryWorks() async throws {
+    @Test(arguments: Source.allCases)
+    func aUnifiedCaptureThatCannotRestartFailsResumeAndRetryWorks(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1)
+        _ = try await fixture.start(appProcessID: source.pid)
         let original = try #require(fixture.captures.unified.last)
         try fixture.sendUnified(Self.before, to: original)
         _ = await fixture.service.pauseRecording()
@@ -859,12 +859,18 @@ struct RecordingServicePauseTests {
 
     enum Interleaving: CaseIterable, Sendable { case pause, resume, stop }
 
-    private func prepare(_ operation: Operation, paused: Bool, _ fixture: Fixture) async throws {
+    /// Whether the recording captures an app besides the microphone.
+    enum Source: CaseIterable, Sendable {
+        case micAndApp, micOnly
+        var pid: pid_t? { self == .micAndApp ? 1 : nil }
+    }
+
+    private func prepare(_ operation: Operation, paused: Bool, source: Source, _ fixture: Fixture) async throws {
         var micDeviceID: AudioDeviceID?
         var preferredMic: String?
         if operation == .unifiedRemoval { micDeviceID = 2; preferredMic = "device-b" }
         if operation == .unifiedReturn { fixture.hardware.unplug("device-b"); preferredMic = "device-b" }
-        _ = try await fixture.start(appProcessID: 1, micDeviceID: micDeviceID, preferredMic: preferredMic)
+        _ = try await fixture.start(appProcessID: source.pid, micDeviceID: micDeviceID, preferredMic: preferredMic)
         try fixture.sendUnified(Self.before, to: try #require(fixture.captures.unified.last))
         if operation == .unifiedHardwareChange {
             fixture.captures.failUpdates(1)
@@ -901,14 +907,15 @@ struct RecordingServicePauseTests {
         }
     }
 
-    @Test(arguments: Operation.allCases, Interleaving.allCases)
+    @Test(arguments: Operation.allCases, Interleaving.allCases.flatMap { i in Source.allCases.map { (i, $0) } })
     func aSuspendedOperationStaysSafeAroundPauseResumeAndStop(
-        operation: Operation, interleaving: Interleaving
+        operation: Operation, interleavingAndSource: (Interleaving, Source)
     ) async throws {
+        let (interleaving, source) = interleavingAndSource
         let fixture = try await makeFixture()
         defer { fixture.remove() }
         let startsPaused = operation == .unifiedResume || interleaving == .resume
-        try await prepare(operation, paused: startsPaused, fixture)
+        try await prepare(operation, paused: startsPaused, source: source, fixture)
 
         let task = run(operation, fixture)
         #expect(await fixture.suspender.waitUntilHolding())
@@ -951,18 +958,18 @@ struct RecordingServicePauseTests {
             let session = try fixture.session(id)
             let expected = run(Self.before, 1) + run(Self.after, 1)
             #expect(try samples(session.micAudioURL) == expected)
-            #expect(try samples(session.appAudioURL) == expected)
+            if source == .micAndApp { #expect(try samples(session.appAudioURL) == expected) }
             #expect(fixture.captures.liveSessionCount == 0)
         }
     }
 
     // MARK: - Operations suspended
 
-    @Test
-    func aUnifiedRetargetEndsOnTheNewestRequestedDevice() async throws {
+    @Test(arguments: Source.allCases)
+    func aUnifiedRetargetEndsOnTheNewestRequestedDevice(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1)
+        _ = try await fixture.start(appProcessID: source.pid)
         fixture.suspender.arm(.streamUpdate)
         let service = fixture.service
         let first = Task { await service.retargetMic(desiredDeviceUID: "device-b") }
@@ -977,11 +984,11 @@ struct RecordingServicePauseTests {
         _ = await service.stopRecording()
     }
 
-    @Test
-    func concurrentRestartsInPlaceShareOneReplacement() async throws {
+    @Test(arguments: Source.allCases)
+    func concurrentRestartsInPlaceShareOneReplacement(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1)
+        _ = try await fixture.start(appProcessID: source.pid)
         try fixture.sendUnified(Self.before, to: try #require(fixture.captures.unified.last))
         fixture.suspender.arm(.captureStart)
         let service = fixture.service
@@ -1008,11 +1015,11 @@ struct RecordingServicePauseTests {
         }
     }
 
-    @Test
-    func aFailureResumeHandledIsAcknowledgedAndALaterOneIsNot() async throws {
+    @Test(arguments: Source.allCases)
+    func aFailureResumeHandledIsAcknowledgedAndALaterOneIsNot(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1)
+        _ = try await fixture.start(appProcessID: source.pid)
         let original = try #require(fixture.captures.unified.last)
         try fixture.sendUnified(Self.before, to: original)
         _ = await fixture.service.pauseRecording()
@@ -1033,11 +1040,11 @@ struct RecordingServicePauseTests {
         _ = await fixture.service.stopRecording()
     }
 
-    @Test
-    func aFailureDuringARecordingThatIsNotPausedIsNotAcknowledged() async throws {
+    @Test(arguments: Source.allCases)
+    func aFailureDuringARecordingThatIsNotPausedIsNotAcknowledged(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1)
+        _ = try await fixture.start(appProcessID: source.pid)
         try #require(fixture.captures.unified.last).handleStreamStoppedForTesting(StubFailure())
         await waitForStreamFailures(1, on: fixture.service)
 
@@ -1049,11 +1056,11 @@ struct RecordingServicePauseTests {
 
     // MARK: - Microphone removed and returned
 
-    @Test
-    func unifiedCaptureMovesToTheDefaultWhenItsMicIsRemovedAndBackWhenItReturns() async throws {
+    @Test(arguments: Source.allCases)
+    func unifiedCaptureMovesToTheDefaultWhenItsMicIsRemovedAndBackWhenItReturns(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        _ = try await fixture.start(appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b")
         let session = try #require(fixture.captures.unified.last)
         #expect(session.currentMicDeviceUID == "device-b")
         try fixture.sendUnified(Self.before, to: session)
@@ -1072,16 +1079,16 @@ struct RecordingServicePauseTests {
         let id = try #require(await fixture.service.stopRecording())
         let expected = run(Self.before, 1) + run(Self.after, 1) + run(Self.before, 1)
         #expect(try samples(fixture.session(id).micAudioURL) == expected)
-        #expect(try samples(fixture.session(id).appAudioURL) == expected)
+        if source == .micAndApp { #expect(try samples(fixture.session(id).appAudioURL) == expected) }
     }
 
     /// Removed and back under the same UID before the fallback was applied: the stream still names
     /// the UID and gets nothing from it until it is moved away and back.
-    @Test
-    func aUnifiedMicThatReturnsUnderTheSameUIDIsMovedAwayAndBack() async throws {
+    @Test(arguments: Source.allCases)
+    func aUnifiedMicThatReturnsUnderTheSameUIDIsMovedAwayAndBack(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        _ = try await fixture.start(appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b")
         let session = try #require(fixture.captures.unified.last)
 
         fixture.hardware.unplug("device-b")
@@ -1095,12 +1102,12 @@ struct RecordingServicePauseTests {
         _ = await fixture.service.stopRecording()
     }
 
-    @Test
-    func removalsAndSwitchesAreReportedToCaptureHealthButItsOwnRestartsAreNot() async throws {
+    @Test(arguments: Source.allCases)
+    func removalsAndSwitchesAreReportedToCaptureHealthButItsOwnRestartsAreNot(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
         _ = try await fixture.start(
-            appProcessID: 1, micDeviceID: 2, preferredMic: "device-b"
+            appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b"
         )
         let atStart = await fixture.service.captureHealthSnapshot().lastMicTransition
 
@@ -1129,11 +1136,11 @@ struct RecordingServicePauseTests {
         return await condition()
     }
 
-    @Test
-    func aUnifiedRestartTargetsByTheRuleInsteadOfTheDeviceItReplaces() async throws {
+    @Test(arguments: Source.allCases)
+    func aUnifiedRestartTargetsByTheRuleInsteadOfTheDeviceItReplaces(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        _ = try await fixture.start(appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b")
         try fixture.sendUnified(Self.before, to: try #require(fixture.captures.unified.last))
 
         // No hardware event is handled: the restart alone must not target the absent device.
@@ -1202,11 +1209,14 @@ struct RecordingServicePauseTests {
         (Transition.removal, Transition.restart), (.restart, .removal),
         (.removal, .retargetToC), (.retargetToC, .removal),
         (.removal, .returnUnderNewID), (.restart, .retargetToC), (.retargetToC, .restart),
-    ])
-    func twoOverlappingUnifiedTransitionsEndOnTheTargetRulesDevice(first: Transition, second: Transition) async throws {
+    ], Source.allCases)
+    func twoOverlappingUnifiedTransitionsEndOnTheTargetRulesDevice(
+        transitions: (Transition, Transition), source: Source
+    ) async throws {
+        let (first, second) = transitions
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        _ = try await fixture.start(appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b")
         try fixture.sendUnified(Self.before, to: try #require(fixture.captures.unified.last))
 
         let held = request(first, fixture, hold: true)
@@ -1226,14 +1236,14 @@ struct RecordingServicePauseTests {
         let id = try #require(await fixture.service.stopRecording())
         let expected = run(Self.before, 1) + run(Self.after, 1)
         #expect(try samples(fixture.session(id).micAudioURL) == expected)
-        #expect(try samples(fixture.session(id).appAudioURL) == expected)
+        if source == .micAndApp { #expect(try samples(fixture.session(id).appAudioURL) == expected) }
     }
 
-    @Test
-    func anUpdateThatIsNoLongerTheTargetIsNotReportedAsCaptured() async throws {
+    @Test(arguments: Source.allCases)
+    func anUpdateThatIsNoLongerTheTargetIsNotReportedAsCaptured(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        _ = try await fixture.start(appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b")
         fixture.captures.refuseUpdates(to: "device-c")
 
         let removal = request(.removal, fixture, hold: true)
@@ -1252,12 +1262,12 @@ struct RecordingServicePauseTests {
 
     // MARK: Pause
 
-    @Test
-    func aRemovalDuringAPauseIsAppliedAtOnceAndWritesNothingUntilResume() async throws {
+    @Test(arguments: Source.allCases)
+    func aRemovalDuringAPauseIsAppliedAtOnceAndWritesNothingUntilResume(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
         _ = try await fixture.start(
-            appProcessID: 1, micDeviceID: 2, preferredMic: "device-b"
+            appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b"
         )
         func send(_ value: Float) throws {
 
@@ -1282,12 +1292,12 @@ struct RecordingServicePauseTests {
         #expect(try samples(fixture.session(id).micAudioURL) == run(Self.before, 1) + run(Self.after, 1))
     }
 
-    @Test
-    func aSwitchRunningAtResumeCompletesBeforeTheClocksReopen() async throws {
+    @Test(arguments: Source.allCases)
+    func aSwitchRunningAtResumeCompletesBeforeTheClocksReopen(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
         _ = try await fixture.start(
-            appProcessID: 1, micDeviceID: 2, preferredMic: "device-b"
+            appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b"
         )
         _ = await fixture.service.pauseRecording()
         let service = fixture.service
@@ -1310,11 +1320,11 @@ struct RecordingServicePauseTests {
         _ = await service.stopRecording()
     }
 
-    @Test
-    func aRemovalDuringTheResumesOwnRestartIsAppliedBeforeTheClocksReopen() async throws {
+    @Test(arguments: Source.allCases)
+    func aRemovalDuringTheResumesOwnRestartIsAppliedBeforeTheClocksReopen(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        _ = try await fixture.start(appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b")
         try fixture.sendUnified(Self.before, to: try #require(fixture.captures.unified.last))
         _ = await fixture.service.pauseRecording()
         try #require(fixture.captures.unified.last).handleStreamStoppedForTesting(StubFailure())
@@ -1344,11 +1354,11 @@ struct RecordingServicePauseTests {
         #expect(try samples(fixture.session(id).micAudioURL) == run(Self.before, 1) + run(Self.after, 1))
     }
 
-    @Test
-    func aRejectedUnifiedFallbackFailsResumeWhenTheRestartFailsToo() async throws {
+    @Test(arguments: Source.allCases)
+    func aRejectedUnifiedFallbackFailsResumeWhenTheRestartFailsToo(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        _ = try await fixture.start(appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b")
         try fixture.sendUnified(Self.before, to: try #require(fixture.captures.unified.last))
         _ = await fixture.service.pauseRecording()
 
@@ -1371,12 +1381,12 @@ struct RecordingServicePauseTests {
 
     // MARK: Start and stop
 
-    @Test
-    func aRemovalWhileUnifiedCaptureStartsIsAppliedOnceItRuns() async throws {
+    @Test(arguments: Source.allCases)
+    func aRemovalWhileUnifiedCaptureStartsIsAppliedOnceItRuns(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
         fixture.suspender.arm(.captureStart)
-        let start = Task { try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b") }
+        let start = Task { try await fixture.start(appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b") }
         #expect(await fixture.suspender.waitUntilHolding())
         fixture.hardware.unplug("device-b")
         fixture.suspender.release()
@@ -1387,11 +1397,11 @@ struct RecordingServicePauseTests {
         _ = await fixture.service.stopRecording()
     }
 
-    @Test
-    func aHardwareChangeAfterStopDoesNothing() async throws {
+    @Test(arguments: Source.allCases)
+    func aHardwareChangeAfterStopDoesNothing(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        _ = try await fixture.start(appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b")
         _ = await fixture.service.stopRecording()
         fixture.hardware.unplug("device-b")
         await fixture.service.simulateHardwareChangeForTesting()
@@ -1423,11 +1433,11 @@ struct RecordingServicePauseTests {
         #expect(try samples(fixture.session(id).appAudioURL) == run(Self.before, 1) + run(Self.after, 1))
     }
 
-    @Test
-    func aRejectedUnifiedFallbackIsLeftToARestartWhichTargetsTheDefault() async throws {
+    @Test(arguments: Source.allCases)
+    func aRejectedUnifiedFallbackIsLeftToARestartWhichTargetsTheDefault(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        _ = try await fixture.start(appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b")
         try fixture.sendUnified(Self.before, to: try #require(fixture.captures.unified.last))
 
         fixture.captures.failUpdates(1)
@@ -1450,11 +1460,11 @@ struct RecordingServicePauseTests {
 
     // MARK: Stale stream callbacks
 
-    @Test
-    func aDelayedCallbackFromAReplacedStreamIsIgnored() async throws {
+    @Test(arguments: Source.allCases)
+    func aDelayedCallbackFromAReplacedStreamIsIgnored(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1)
+        _ = try await fixture.start(appProcessID: source.pid)
         let original = try #require(fixture.captures.unified.last)
         #expect(await fixture.service.restartAudioCaptureInPlace())
 
@@ -1486,11 +1496,11 @@ struct RecordingServicePauseTests {
 
     // MARK: Sample rate across a switch
 
-    @Test
-    func aDefaultAtAnotherSampleRateIsWrittenAtItsRealLength() async throws {
+    @Test(arguments: Source.allCases)
+    func aDefaultAtAnotherSampleRateIsWrittenAtItsRealLength(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        _ = try await fixture.start(appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b")
         func send(_ value: Float, rate: Double) throws {
 
                 try fixture.sendUnified(value, to: try #require(fixture.captures.unified.last), micRate: rate)
@@ -1513,11 +1523,11 @@ struct RecordingServicePauseTests {
 
     // MARK: What capture is aimed at (for reporting)
 
-    @Test
-    func theCaptureTargetFollowsTheSwitchAndItsFirstBuffer() async throws {
+    @Test(arguments: Source.allCases)
+    func theCaptureTargetFollowsTheSwitchAndItsFirstBuffer(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        _ = try await fixture.start(appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b")
         func send(_ value: Float) throws {
 
                 try fixture.sendUnified(value, to: try #require(fixture.captures.unified.last))
@@ -1547,11 +1557,11 @@ struct RecordingServicePauseTests {
 
     // MARK: Captured microphone (requirement 21)
 
-    @Test
-    func theFirstBufferMarksTheStartDeviceAsCaptured() async throws {
+    @Test(arguments: Source.allCases)
+    func theFirstBufferMarksTheStartDeviceAsCaptured(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        _ = try await fixture.start(appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b")
         let service = fixture.service
         #expect(await service.capturedMicrophone() == .switching)
 
@@ -1567,11 +1577,11 @@ struct RecordingServicePauseTests {
         #expect(await service.capturedMicrophone() == nil)
     }
 
-    @Test
-    func aRemovedMicIsNotReportedWhileTheUpdateRuns() async throws {
+    @Test(arguments: Source.allCases)
+    func aRemovedMicIsNotReportedWhileTheUpdateRuns(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        _ = try await fixture.start(appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b")
         let service = fixture.service
         try fixture.sendUnified(Self.before, to: try #require(fixture.captures.unified.last))
         #expect(await eventually { await service.capturedMicrophone() != .switching })
@@ -1584,11 +1594,11 @@ struct RecordingServicePauseTests {
         _ = await service.stopRecording()
     }
 
-    @Test
-    func aRejectedUpdateKeepsReportingTheDeviceStillCaptured() async throws {
+    @Test(arguments: Source.allCases)
+    func aRejectedUpdateKeepsReportingTheDeviceStillCaptured(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        _ = try await fixture.start(appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b")
         let service = fixture.service
         try fixture.sendUnified(Self.before, to: try #require(fixture.captures.unified.last))
         let deviceB = CapturedMicrophone.capturing(
@@ -1604,11 +1614,11 @@ struct RecordingServicePauseTests {
         _ = await service.stopRecording()
     }
 
-    @Test
-    func anUpdateLeftOffTheTargetIsReportedAsSwitching() async throws {
+    @Test(arguments: Source.allCases)
+    func anUpdateLeftOffTheTargetIsReportedAsSwitching(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        _ = try await fixture.start(appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b")
         let service = fixture.service
         try fixture.sendUnified(Self.before, to: try #require(fixture.captures.unified.last))
         #expect(await eventually { await service.capturedMicrophone() != .switching })
@@ -1638,11 +1648,11 @@ struct RecordingServicePauseTests {
         CapturedMicDevice(uid: "device-a", name: "Name of device-a", isSystemDefault: true)
     )
 
-    @Test
-    func aRemovalReportsTheDefaultFromItsFirstBufferAndAReturnReportsTheMicAgain() async throws {
+    @Test(arguments: Source.allCases)
+    func aRemovalReportsTheDefaultFromItsFirstBufferAndAReturnReportsTheMicAgain(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        _ = try await fixture.start(appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b")
         func send(_ value: Float) throws {
 
                 try fixture.sendUnified(value, to: try #require(fixture.captures.unified.last))
@@ -1666,11 +1676,11 @@ struct RecordingServicePauseTests {
         _ = await service.stopRecording()
     }
 
-    @Test
-    func aPauseKeepsReportingTheMicCapturedWhenItBegan() async throws {
+    @Test(arguments: Source.allCases)
+    func aPauseKeepsReportingTheMicCapturedWhenItBegan(source: Source) async throws {
         let fixture = try await makeFixture()
         defer { fixture.remove() }
-        _ = try await fixture.start(appProcessID: 1, micDeviceID: 2, preferredMic: "device-b")
+        _ = try await fixture.start(appProcessID: source.pid, micDeviceID: 2, preferredMic: "device-b")
         func send(_ value: Float) throws {
 
                 try fixture.sendUnified(value, to: try #require(fixture.captures.unified.last))
