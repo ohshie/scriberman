@@ -111,6 +111,10 @@ actor RecordingService: RecordingServiceProtocol {
     /// The host clock that pauses and the stop are timed by.
     private let hostNow: HostTimeProvider
     private let startCaptureSession: CaptureSessionStarter
+    private var startRequestInProgress = false
+    private var startCancellationRequested = false
+    private var captureStartTask: Task<Void, any Error>?
+    private var pendingCaptureSession: UnifiedCaptureSession?
     private var recordingStartedAt: Date?
     private var recordingCreatedAt: Date?
     /// When the stop closed the pause clock.
@@ -521,7 +525,8 @@ actor RecordingService: RecordingServiceProtocol {
         let number = reportStreamFailures(of: unified)
         unifiedStreamNumber = number
         do {
-            try await startCaptureSession(.unified(unified))
+            try await startSession(unified)
+            guard !startCancellationRequested else { throw CancellationError() }
         } catch {
             await unified.stop()
             if unifiedStreamNumber == number { unifiedStreamNumber = nil }
@@ -532,6 +537,20 @@ actor RecordingService: RecordingServiceProtocol {
         appAudioURL = appFileURL
         micCaptureStartedAt = hostNow()
         publishMicTarget(target)
+    }
+
+    private func startSession(_ session: UnifiedCaptureSession) async throws {
+        let starter = startCaptureSession
+        let task = Task.detached { try await starter(.unified(session)) }
+        pendingCaptureSession = session
+        captureStartTask = task
+        defer {
+            if captureStartTask == task {
+                captureStartTask = nil
+                pendingCaptureSession = nil
+            }
+        }
+        try await task.value
     }
 
     /// Tears audio capture down and starts it again with the same configuration and the same
@@ -647,8 +666,9 @@ actor RecordingService: RecordingServiceProtocol {
         let streamNumber = reportStreamFailures(of: replacement)
 
         do {
-            try await startCaptureSession(.unified(replacement))
+            try await startSession(replacement)
         } catch {
+            await replacement.stopStreamPreservingOutput()
             logger.error(
                 "Mid-session capture restart failed: \(error.localizedDescription, privacy: .public). Captured audio is retained."
             )
@@ -699,12 +719,15 @@ actor RecordingService: RecordingServiceProtocol {
         }
         CaptureTrace.beginRecording("micOnly=\(appProcessID == nil)")
         lifecycleState = .starting
+        startCancellationRequested = false
+        startRequestInProgress = true
         recordingGeneration += 1
         self.captureGates = RecordingCaptureGates(hostNow: hostNow)
         self.liveAudioClock = liveAudioClock
         self.liveAudioContinuation = liveAudioContinuation
         var didStart = false
         defer {
+            startRequestInProgress = false
             if !didStart {
                 self.liveAudioContinuation?.finish()
                 self.liveAudioContinuation = nil
@@ -717,6 +740,10 @@ actor RecordingService: RecordingServiceProtocol {
             lifecycleState = .idle
             throw RecordingError.invalidWorkspaceAccess
         }
+        guard !startCancellationRequested else {
+            lifecycleState = .idle
+            throw .failedToStart("Recording failed to start: no audio.")
+        }
         do {
             try await permissionChecker()
         } catch {
@@ -724,6 +751,10 @@ actor RecordingService: RecordingServiceProtocol {
             throw RecordingError.failedToStart(error.diagnosticDetail ?? error.localizedDescription)
         }
 
+        guard !startCancellationRequested else {
+            lifecycleState = .idle
+            throw .failedToStart("Recording failed to start: no audio.")
+        }
         if !scopedAccessStarter(workspace.rootURL) {
             lifecycleState = .idle
             throw RecordingError.invalidWorkspaceAccess
@@ -793,11 +824,15 @@ actor RecordingService: RecordingServiceProtocol {
                     }
                 }
                 do {
-                    try await screenCaptureSession.start(
-                        displayID: captureDisplayID,
-                        videoURL: screenTmpVideoURL,
-                        pauseClock: captureGates.clock
-                    )
+                    let clock = captureGates.clock
+                    let task = Task.detached {
+                        try await screenCaptureSession.start(
+                            displayID: captureDisplayID, videoURL: screenTmpVideoURL, pauseClock: clock
+                        )
+                    }
+                    captureStartTask = task
+                    defer { if captureStartTask == task { captureStartTask = nil } }
+                    try await task.value
                     self.screenCaptureSession = screenCaptureSession
                     // A pause taken while the stream started was not reported to it.
                     if captureGates.clock.isPaused {
@@ -813,6 +848,7 @@ actor RecordingService: RecordingServiceProtocol {
                 self.screenCaptureSession = nil
             }
 
+            guard !startCancellationRequested else { throw CancellationError() }
             let session = RecordingSession(
                 createdAt: recordingCreatedAt,
                 duration: 0,
@@ -831,6 +867,7 @@ actor RecordingService: RecordingServiceProtocol {
             try applyDefaultTag(session, context)
             try context.save()
             self.currentSessionID = session.id
+            startRequestInProgress = false
             logger.notice(
                 "Recording \(session.id, privacy: .public) audio-sync flags: timelineMixdown=\(audioSyncFlags.isTimelineMixdownEnabled, privacy: .public) captureHealthRecovery=\(audioSyncFlags.isCaptureHealthRecoveryEnabled, privacy: .public) unifiedStarted=\(self.unifiedCaptureSession != nil, privacy: .public)"
             )
@@ -853,6 +890,12 @@ actor RecordingService: RecordingServiceProtocol {
             releaseRecordingScopeIfNeeded()
             audioLevelValue = 0
             lifecycleState = .idle
+            if error is CancellationError {
+                throw .failedToStart("Recording failed to start: no audio.")
+            }
+            if let recordingError = error as? RecordingError,
+               case .failedToStart(let reason) = recordingError,
+               reason == "Recording failed to start: no audio." { throw recordingError }
             throw RecordingError.failedToStart(error.localizedDescription)
         }
     }
@@ -863,8 +906,20 @@ actor RecordingService: RecordingServiceProtocol {
 #if DEBUG
         stopRecordingCallCount += 1
 #endif
+        if startRequestInProgress {
+            startCancellationRequested = true
+            captureGates.clock.close(at: hostNow)
+            pendingCaptureSession?.invalidateOutputs()
+            unifiedCaptureSession?.invalidateOutputs()
+            captureStartTask?.cancel()
+            liveAudioContinuation?.finish()
+            liveAudioContinuation = nil
+            return nil
+        }
         switch lifecycleState {
-        case .idle, .starting:
+        case .starting:
+            return nil
+        case .idle:
             liveAudioContinuation?.finish()
             liveAudioContinuation = nil
             return nil
@@ -875,6 +930,8 @@ actor RecordingService: RecordingServiceProtocol {
             // while the capture queues drain.
             recordingStopRequestedAt = now()
             captureGates.clock.close(at: hostNow)
+            pendingCaptureSession?.invalidateOutputs()
+            captureStartTask?.cancel()
             let teardown = Task { await self.finalizeActiveRecording() }
             lifecycleState = .stopping(teardown)
             return await teardown.value

@@ -36,6 +36,7 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
     /// callback as well as from the async start/stop context.
     private let streamLock = NSLock()
     private var _stream: (any UnifiedCaptureStreaming)?
+    private var retired = false
 
     private var stream: (any UnifiedCaptureStreaming)? {
         streamLock.lock()
@@ -43,10 +44,13 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
         return _stream
     }
 
-    private func setStream(_ newValue: (any UnifiedCaptureStreaming)?) {
-        streamLock.lock()
-        _stream = newValue
-        streamLock.unlock()
+    @discardableResult
+    private func setStream(_ newValue: (any UnifiedCaptureStreaming)?) -> Bool {
+        streamLock.withLock {
+            guard !retired else { return false }
+            _stream = newValue
+            return true
+        }
     }
 
     /// Clears the retained stream and returns what it was, so a caller can stop it exactly once.
@@ -68,7 +72,8 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
 
     /// The microphone device identifier the stream is currently configured with. Used by
     /// `RecordingService` to decide whether a device change actually requires a retarget.
-    private(set) var currentMicDeviceUID: String?
+    private var configuredMicDeviceUID: String?
+    var currentMicDeviceUID: String? { streamLock.withLock { configuredMicDeviceUID } }
 
     var micAudioLevel: Float { micHandler.audioLevel }
     var appAudioLevel: Float { appHandler.audioLevel }
@@ -98,7 +103,7 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
             nil as AppSource?
         }
         self.appSource = appSource
-        self.currentMicDeviceUID = micDeviceUID
+        self.configuredMicDeviceUID = micDeviceUID
         self.configuration = Self.makeConfiguration(micDeviceUID: micDeviceUID, capturesAppAudio: appSource != nil)
         self.notificationCenter = notificationCenter
         self.appHandler = AppAudioStreamOutputHandler(
@@ -143,15 +148,29 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
     }
 
     func start() async throws {
-        let contentEnd = CaptureTrace.begin("shareableContent")
-        let content: SCShareableContent
+        try await start(discoverStream: { [self] in try await discoverStream() })
+    }
+
+    /// The discovery seam also covers filter construction and output registration. Content and
+    /// all start attempts share one deadline, rather than each receiving another two seconds.
+    func start(discoverStream: @escaping @Sendable () async throws -> CaptureStreamReference) async throws {
+        let deadline = ContinuousClock.now + BoundedCaptureCall.startLimit
         do {
-            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-            contentEnd("ok")
-        } catch {
-            contentEnd("error \(error.localizedDescription)")
-            throw error
+            let reference = try await BoundedCaptureCall.run(
+                call: "shareableContent", device: currentMicDeviceUID, until: deadline,
+                onAbandon: { [self] in invalidateOutputs() },
+                lateResult: { [self] result in
+                    if case .success(let reference) = result { await stopAbandoned(reference) }
+                }, operation: discoverStream
+            )
+            try await start(stream: reference.stream, deadline: deadline)
+        } catch is BoundedCaptureCall.TimedOut {
+            throw RecordingError.failedToStart("Recording failed to start: no audio.")
         }
+    }
+
+    private func discoverStream() async throws -> CaptureStreamReference {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         guard let processID else {
             // Mic only: the filter needs some content; the main display is used, with no window
             // excluded. No `.screen` or `.audio` output is added, so only microphone buffers are
@@ -167,8 +186,7 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
             )
             let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
             try addOutputs(to: stream)
-            try await start(stream: stream)
-            return
+            return CaptureStreamReference(stream: stream)
         }
         guard let app = content.applications.first(where: { $0.processID == processID }) else {
             throw RecordingError.failedToStart("Selected app is not available for audio capture.")
@@ -181,7 +199,7 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try addOutputs(to: stream)
 
-        try await start(stream: stream)
+        return CaptureStreamReference(stream: stream)
     }
 
     func addOutputs(to stream: any UnifiedCaptureStreaming) throws {
@@ -192,35 +210,76 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
     }
 
     /// Drives the same retry path for real streams and hardware-free test streams.
-    func start(stream: any UnifiedCaptureStreaming, retryDelay: Duration = .milliseconds(300)) async throws {
+    func start(
+        stream: any UnifiedCaptureStreaming, retryDelay: Duration = .milliseconds(300),
+        deadline: ContinuousClock.Instant? = nil
+    ) async throws {
+        let deadline = deadline ?? ContinuousClock.now + BoundedCaptureCall.startLimit
+        let reference = CaptureStreamReference(stream: stream)
         var lastError: Error?
         for attempt in 0..<3 {
-            try Task.checkCancellation()
+            if Task.isCancelled {
+                invalidateOutputs()
+                await stopAbandoned(reference)
+                throw CancellationError()
+            }
             let startEnd = CaptureTrace.begin("streamStart", "attempt=\(attempt) micOnly=\(processID == nil)")
             do {
-                try await stream.startCapture()
+                try await BoundedCaptureCall.run(
+                    call: "startCapture", device: currentMicDeviceUID, until: deadline,
+                    onAbandon: { [self] in invalidateOutputs() },
+                    lateResult: { [self] _ in await stopAbandoned(reference) }
+                ) { try await reference.stream.startCapture() }
                 startEnd("ok")
                 try Task.checkCancellation()
-                setStream(stream)
+                guard setStream(stream) else {
+                    await stopAbandoned(reference)
+                    throw CancellationError()
+                }
                 return
             } catch {
                 startEnd("error \(error.localizedDescription)")
-                let startError = error
-                lastError = startError
+                if error is BoundedCaptureCall.TimedOut {
+                    throw RecordingError.failedToStart("Recording failed to start: no audio.")
+                }
+                if error is CancellationError {
+                    invalidateOutputs()
+                    // The pending call owns late cleanup. If cancellation arrived after it
+                    // completed, stop here as well; stopping the abandoned stream is idempotent.
+                    await stopAbandoned(reference)
+                    throw error
+                }
+                lastError = error
                 do {
-                    try await stream.stopCapture()
+                    try await BoundedCaptureCall.run(
+                        call: "stopCapture(start cleanup)", device: currentMicDeviceUID,
+                        until: min(deadline, ContinuousClock.now + BoundedCaptureCall.stopLimit),
+                        onAbandon: { [self] in invalidateOutputs() }
+                    ) { try await reference.stream.stopCapture() }
+                } catch is BoundedCaptureCall.TimedOut {
+                    throw RecordingError.failedToStart("Recording failed to start: no audio.")
                 } catch {
-                    throw RecordingError.failedToStart("\(startError.localizedDescription) Capture cleanup failed: \(error.localizedDescription)")
+                    throw RecordingError.failedToStart("\(lastError!.localizedDescription) Capture cleanup failed: \(error.localizedDescription)")
                 }
                 await drainSampleCallbacks()
-                if startError is CancellationError { throw startError }
-                try Task.checkCancellation()
-                if attempt < 2 {
-                    try await Task.sleep(for: retryDelay)
-                }
+                if attempt < 2 { try await Task.sleep(for: min(retryDelay, max(.zero, deadline - ContinuousClock.now))) }
             }
         }
         throw RecordingError.failedToStart(lastError?.localizedDescription ?? "Failed to start unified capture.")
+    }
+
+    func invalidateOutputs() {
+        streamLock.withLock { retired = true }
+        appHandler.invalidate()
+        micHandler.invalidate()
+    }
+
+    private func stopAbandoned(_ reference: CaptureStreamReference) async {
+        _ = try? await BoundedCaptureCall.run(
+            call: "stopCapture(abandoned)", device: currentMicDeviceUID,
+            until: ContinuousClock.now + BoundedCaptureCall.stopLimit,
+            onAbandon: { [self] in invalidateOutputs() }
+        ) { try await reference.stream.stopCapture() }
     }
 
     private static func makeConfiguration(micDeviceUID: String?, capturesAppAudio: Bool) -> SCStreamConfiguration {
@@ -244,7 +303,7 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
     /// reopen its output file.
     ///
     /// Returns `false` when the stream is not running or the update was rejected; in that case the
-    /// retained configuration is rolled back so it keeps describing what the stream actually has.
+    /// retained configuration is committed only after a successful response from the current stream.
     func retargetMic(deviceUID: String?) async -> Bool {
         guard let stream else {
             logger.warning(
@@ -253,20 +312,25 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
             return false
         }
 
-        let previous = configuration.microphoneCaptureDeviceID
-        configuration.microphoneCaptureDeviceID = deviceUID
+        let update = configuration.copy() as! SCStreamConfiguration
+        update.microphoneCaptureDeviceID = deviceUID
         let updateEnd = CaptureTrace.begin("streamUpdate", "device=\(deviceUID ?? "<default>")")
         do {
-            try await stream.updateConfiguration(configuration)
+            try await stream.updateConfiguration(update)
+            let accepted = streamLock.withLock {
+                guard !retired, _stream === stream else { return false }
+                configuredMicDeviceUID = deviceUID
+                configuration.microphoneCaptureDeviceID = deviceUID
+                return true
+            }
+            guard accepted else { return false }
             updateEnd("ok")
-            currentMicDeviceUID = deviceUID
             logger.notice(
                 "Mic retargeted on live stream. deviceUID=\(deviceUID ?? "<default>", privacy: .public)"
             )
             return true
         } catch {
             updateEnd("error \(error.localizedDescription)")
-            configuration.microphoneCaptureDeviceID = previous
             logger.error(
                 "Mic retarget failed; continuing on previous device. deviceUID=\(deviceUID ?? "<default>", privacy: .public) error=\(error.localizedDescription, privacy: .public)"
             )
@@ -281,11 +345,13 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
     }
 
     func stop() async {
+        streamLock.withLock { retired = true }
         if let stream = takeStream() {
             let stopEnd = CaptureTrace.begin("streamStop")
-            try? await stream.stopCapture()
+            await stopAbandoned(CaptureStreamReference(stream: stream))
             stopEnd("done")
         }
+        invalidateOutputs()
         await drainSampleCallbacks()
         appHandler.closeOutput()
         micHandler.closeOutput()
@@ -298,11 +364,13 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
     /// recording continues writing into the same files. Callers that are finishing a recording must
     /// use `stop()` instead — this deliberately leaves the writers unfinalized.
     func stopStreamPreservingOutput() async {
+        streamLock.withLock { retired = true }
         if let stream = takeStream() {
             let stopEnd = CaptureTrace.begin("streamStop", "preservingOutput=true")
-            try? await stream.stopCapture()
+            await stopAbandoned(CaptureStreamReference(stream: stream))
             stopEnd("done")
         }
+        invalidateOutputs()
         await drainSampleCallbacks()
     }
 
@@ -329,6 +397,8 @@ final class UnifiedCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendab
 #endif
 
     nonisolated private func handleStreamStopped(_ error: any Error) {
+        guard streamLock.withLock({ !retired }) else { return }
+        invalidateOutputs()
         logger.error("Unified capture stream stopped with error: \(error.localizedDescription, privacy: .public)")
         CaptureTrace.log("streamStoppedWithError", "error=\(error.localizedDescription)")
         // The stream is gone; stop reporting it as an active capture before anyone reacts to the

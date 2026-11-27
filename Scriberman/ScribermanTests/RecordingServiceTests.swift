@@ -28,6 +28,170 @@ final class RecordingServiceTests {
         #expect(await iterator.next() == nil)
     }
 
+    @Test
+    func stopDuringPermissionCheckCancelsStart() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        let container = try ModelContainer(for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let gate = MockScreenCaptureStopBlocker()
+        let service = RecordingService(workspaceService: workspaceService, modelContainer: container,
+            hardware: MockRecoveryAudioDeviceHardware(),
+            permissionChecker: {
+                await gate.markStopStarted()
+                await gate.waitUntilReleased()
+            }, scopedAccessStarter: { _ in true }, scopedAccessStopper: { _ in },
+            captureSessionStarter: { try await CaptureStartProbe().start($0) })
+        let start = Task { try? await service.startRecording(in: workspace) }
+        await gate.waitUntilStopStarts()
+        // Stop must cancel even before there is a stream to stop.
+        _ = await service.stopRecording()
+        await gate.release()
+        #expect(await start.value == nil)
+        #expect(await service.isRecording() == false)
+        _ = await service.stopRecording()
+    }
+
+    @Test(arguments: [false, true])
+    func partialFailedStartKeepsAudioAndSidecarsWithoutSessionRow(unified: Bool) async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let service = RecordingService(workspaceService: workspaceService, modelContainer: container,
+            hardware: MockRecoveryAudioDeviceHardware(), permissionChecker: {},
+            scopedAccessStarter: { _ in true }, scopedAccessStopper: { _ in },
+            captureSessionStarter: { start in
+                try await CaptureStartProbe().start(start)
+                throw StubUnifiedStreamError()
+            })
+        do {
+            _ = try await service.startRecording(in: workspace, appProcessID: unified ? 1234 : nil)
+            Issue.record("Expected failed start")
+        } catch { }
+        #expect(await service.isRecording() == false)
+        let sessions = try ModelContext(container).fetch(FetchDescriptor<RecordingSession>())
+        #expect(sessions.isEmpty)
+        let folder = try #require(FileManager.default.contentsOfDirectory(at: workspace.recordingsURL,
+            includingPropertiesForKeys: nil).first)
+        let mic = folder.appendingPathComponent("mic.wav")
+        #expect(try AVAudioFile(forReading: mic).length > 0)
+        #expect(FileManager.default.fileExists(atPath: mic.appendingPathExtension("timing").path))
+        if unified { #expect(try AVAudioFile(forReading: folder.appendingPathComponent("app.wav")).length > 0) }
+    }
+
+    @Test(arguments: [false, true])
+    func stopDuringHungCaptureStartCancelsAndAllowsNextRecording(unified: Bool) async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let stream = BlockedCaptureStream(.start)
+        defer { stream.release() }
+        let calls = VPCallCounter()
+        let service = RecordingService(workspaceService: workspaceService, modelContainer: container,
+            hardware: MockRecoveryAudioDeviceHardware(), mixdownCoordinator: MockRecordingMixdownCoordinator(),
+            screenVideoMuxer: MockScreenVideoMuxer(), permissionChecker: {},
+            scopedAccessStarter: { _ in true }, scopedAccessStopper: { _ in },
+            captureSessionStarter: { start in
+                calls.increment()
+                if calls.callCount == 1 {
+                    if case .unified(let session) = start { try await session.start(stream: stream) }
+                } else { try await CaptureStartProbe().start(start) }
+            })
+        let start = Task { try? await service.startRecording(in: workspace, appProcessID: unified ? 1234 : nil) }
+        #expect(await captureCallEventually { stream.blockedCallCount > 0 })
+        #expect(await service.stopRecording() == nil)
+        #expect(await start.value == nil)
+        #expect(await service.isRecording() == false)
+        let next = try await service.startRecording(in: workspace)
+        stream.release()
+        #expect(await captureCallEventually { stream.blockedCallCount == 0 && stream.stopCount > 0 })
+        #expect(await service.isRecording())
+        #expect(await service.stopRecording() == next)
+    }
+
+    @Test
+    func stopDuringVideoStartDoesNotCreateARecordingAfterStop() async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let gate = MockScreenCaptureStopBlocker()
+        let video = MockScreenCaptureSession()
+        video.onStart = {
+            await gate.markStopStarted()
+            await gate.waitUntilReleased()
+        }
+        let service = RecordingService(workspaceService: workspaceService, modelContainer: container,
+            hardware: MockRecoveryAudioDeviceHardware(), mixdownCoordinator: MockRecordingMixdownCoordinator(),
+            screenVideoMuxer: MockScreenVideoMuxer(), permissionChecker: {},
+            scopedAccessStarter: { _ in true }, scopedAccessStopper: { _ in },
+            screenCaptureSessionFactory: { video },
+            captureSessionStarter: { try await CaptureStartProbe().start($0) })
+        let start = Task { try? await service.startRecording(in: workspace, captureDisplayID: 1) }
+        await gate.waitUntilStopStarts()
+        _ = await service.stopRecording()
+        await gate.release()
+        #expect(await start.value == nil)
+        #expect(await service.isRecording() == false)
+        #expect(try ModelContext(container).fetch(FetchDescriptor<RecordingSession>()).isEmpty)
+        #expect(video.stopCallCount > 0)
+        _ = await service.stopRecording()
+    }
+
+    @Test(arguments: [false, true])
+    func hungStreamStopSavesAudioBeforeFakeReturns(unified: Bool) async throws {
+        let workspace = makeWorkspace()
+        defer { removeWorkspace(at: workspace.rootURL) }
+        try FileManager.default.createDirectory(at: workspace.rootURL, withIntermediateDirectories: true)
+        let container = try ModelContainer(for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let workspaceService = MockWorkspaceService()
+        workspaceService.requireWritableResult = .success(workspace)
+        let stream = BlockedCaptureStream(.stop)
+        defer { stream.release() }
+        let service = RecordingService(workspaceService: workspaceService, modelContainer: container,
+            hardware: MockRecoveryAudioDeviceHardware(), mixdownCoordinator: MockRecordingMixdownCoordinator(),
+            screenVideoMuxer: MockScreenVideoMuxer(), permissionChecker: {},
+            scopedAccessStarter: { _ in true }, scopedAccessStopper: { _ in },
+            captureSessionStarter: { start in
+                if case .unified(let session) = start {
+                    try await session.start(stream: stream)
+                    let sample = try CaptureAudioGateTests.makeSampleBuffer(
+                        Array(repeating: CaptureAudioGateTests.before, count: 960), sampleRate: 48_000,
+                        hostTime: HostNanoseconds(machTicks: mach_absolute_time()))
+                    session.micHandler.processSampleBufferForTesting(sample)
+                    if unified { session.appHandler.processSampleBufferForTesting(sample) }
+                }
+            })
+        let id = try await service.startRecording(in: workspace, appProcessID: unified ? 1234 : nil)
+        let completed = CallCompletion()
+        let stop = Task { let result = await service.stopRecording(); completed.finish(); return result }
+        try await Task.sleep(for: .seconds(2))
+        #expect(completed.completed)
+        stream.release()
+        #expect(await stop.value == id)
+        let saved = try fetchRecordingSession(id: id, from: ModelContext(container))
+        #expect(saved.status == .recorded)
+        let micURL = URL(fileURLWithPath: saved.micAudioURL)
+        let frames = try AVAudioFile(forReading: micURL).length
+        #expect(frames > 0)
+        #expect(AudioFileStreamer.loadTimingSidecar(for: micURL)?.totalFrames == Int(frames))
+        #expect(await captureCallEventually { stream.blockedCallCount == 0 })
+    }
+
     // MARK: - Folder layout
 
     private static let utc = TimeZone(identifier: "UTC")!

@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreMedia
 import Foundation
 import ScreenCaptureKit
@@ -258,4 +259,212 @@ private final class RetryCaptureStream: UnifiedCaptureStreaming, @unchecked Send
     }
     func addStreamOutput(_: SCStreamOutput, type: SCStreamOutputType, sampleHandlerQueue: DispatchQueue?) throws {}
     func updateConfiguration(_: SCStreamConfiguration) async throws {}
+}
+
+/// A gate that stays open after cleanup, including for late teardown calls.
+final class BlockedCaptureStream: UnifiedCaptureStreaming, @unchecked Sendable {
+    enum Call { case start, update, stop }
+    let blocked: Call
+    private let condition = NSCondition()
+    private let queue = DispatchQueue(label: "ScribermanTests.BlockedStream.\(UUID().uuidString)")
+    private var open = false
+    private let lock = NSLock()
+    private var blockedCount = 0
+    private var stops = 0
+    init(_ blocked: Call) { self.blocked = blocked }
+    var blockedCallCount: Int { lock.withLock { blockedCount } }
+    var stopCount: Int { lock.withLock { stops } }
+    func release() {
+        condition.lock()
+        open = true
+        condition.broadcast()
+        condition.unlock()
+    }
+    private func blockThread() {
+        lock.withLock { blockedCount += 1 }
+        condition.lock()
+        while !open { condition.wait() }
+        condition.unlock()
+        lock.withLock { blockedCount -= 1 }
+    }
+    private func wait() async {
+        await withCheckedContinuation { continuation in
+            queue.async { self.blockThread(); continuation.resume() }
+        }
+    }
+    func startCapture() async throws { if blocked == .start { await wait() } }
+    func updateConfiguration(_: SCStreamConfiguration) async throws { if blocked == .update { await wait() } }
+    func stopCapture() async throws {
+        if blocked == .stop { await wait() }
+        lock.withLock { stops += 1 }
+    }
+    func addStreamOutput(_: SCStreamOutput, type: SCStreamOutputType, sampleHandlerQueue: DispatchQueue?) throws {}
+}
+
+final class CallCompletion: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    var completed: Bool { lock.withLock { done } }
+    func finish() { lock.withLock { done = true } }
+}
+
+struct BoundedCaptureCallTests {
+    @Test(arguments: [false, true])
+    func hungStartTimesOutAndLateStartIsStopped(unified: Bool) async throws {
+        try await withBlockedStream(.start, unified: unified) { session, stream in
+            let finished = CallCompletion()
+            let task = Task {
+                do {
+                    try await session.start(stream: stream)
+                    Issue.record("A timed out start succeeded")
+                } catch {
+                    #expect(error.localizedDescription.contains("Recording failed to start: no audio."))
+                }
+                finished.finish()
+            }
+            try await Task.sleep(for: .seconds(2))
+            try await Task.sleep(for: .seconds(1))
+            #expect(finished.completed)
+            #expect(!session.isStreamLive)
+            stream.release()
+            await task.value
+            await session.stop()
+            #expect(await captureCallEventually { stream.stopCount > 0 })
+            #expect(!session.isStreamLive)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func hungStopReturnsAndDropsLateBuffers(unified: Bool) async throws {
+        try await withBlockedStream(.stop, unified: unified) { session, stream in
+            session.attachStreamForTesting(stream)
+            let finished = CallCompletion()
+            let task = Task { await session.stop(); finished.finish() }
+            try await Task.sleep(for: .seconds(2))
+            #expect(finished.completed)
+            #expect(!session.isStreamLive)
+            stream.release()
+            await task.value
+        }
+    }
+
+    @Test
+    func stopDuringUpdateDoesNotPublishItsLateDevice() async throws {
+        try await withBlockedStream(.update, unified: false) { session, stream in
+            session.attachStreamForTesting(stream)
+            let update = Task { await session.retargetMic(deviceUID: "device-b") }
+            try await Task.sleep(for: .seconds(1))
+            await session.stop()
+            stream.release()
+            #expect(await update.value == false)
+            #expect(session.currentMicDeviceUID == "device-a")
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func discoveryAndStartShareOneDeadlineAndLateDiscoveryNeverStarts(unified: Bool) async throws {
+        try await withBlockedStream(.start, unified: unified) { session, stream in
+            let finished = CallCompletion()
+            let task = Task {
+                do {
+                    try await session.start(discoverStream: {
+                        try await stream.startCapture() // Blocks the content provider, not session start.
+                        return CaptureStreamReference(stream: stream)
+                    })
+                    Issue.record("Late content started a stream")
+                } catch {
+                    #expect(error.localizedDescription == "Failed to start recording: Recording failed to start: no audio.")
+                }
+                finished.finish()
+            }
+            try await Task.sleep(for: .seconds(2))
+            try await Task.sleep(for: .seconds(1))
+            #expect(finished.completed)
+            stream.release()
+            await task.value
+            #expect(await captureCallEventually { stream.stopCount > 0 })
+            #expect(!session.isStreamLive)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func retiredHandlersCannotReopenFilesOrWriteToAdoptedWriters(unified: Bool) async throws {
+        try await withBlockedStream(.stop, unified: unified) { session, stream in
+            let sample = try CaptureAudioGateTests.makeSampleBuffer(
+                Array(repeating: CaptureAudioGateTests.before, count: 960), sampleRate: 48_000,
+                hostTime: HostNanoseconds(nanoseconds: 1_000_000_000))
+            session.micHandler.processSampleBufferForTesting(sample)
+            if unified { session.appHandler.processSampleBufferForTesting(sample) }
+            session.attachStreamForTesting(stream)
+            await session.stopStreamPreservingOutput()
+            let micBefore = session.micFramesWritten
+            let appBefore = session.appFramesWritten
+            session.micHandler.processSampleBufferForTesting(sample)
+            session.appHandler.processSampleBufferForTesting(sample)
+            session.streamers.mic.close()
+            session.streamers.app.close()
+            #expect(session.micFramesWritten == micBefore)
+            #expect(session.appFramesWritten == appBefore)
+            #expect(session.micWriteFailureCount == 0)
+            #expect(session.appWriteFailureCount == 0)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func partialTimedOutStartKeepsWrittenAudioAndRejectsLateBuffers(unified: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try await withBlockedStream(.start, unified: unified, root: root) { session, stream in
+            let sample = try CaptureAudioGateTests.makeSampleBuffer(
+                Array(repeating: CaptureAudioGateTests.before, count: 960), sampleRate: 48_000,
+                hostTime: HostNanoseconds(nanoseconds: 1_000_000_000))
+            session.micHandler.processSampleBufferForTesting(sample)
+            if unified { session.appHandler.processSampleBufferForTesting(sample) }
+            do { try await session.start(stream: stream); Issue.record("Expected timeout") } catch { }
+            await session.stop()
+            let micURL = root.appendingPathComponent("mic.wav")
+            let frames = try AVAudioFile(forReading: micURL).length
+            #expect(frames > 0)
+            #expect(AudioFileStreamer.loadTimingSidecar(for: micURL)?.totalFrames == Int(frames))
+            session.micHandler.processSampleBufferForTesting(sample)
+            session.appHandler.processSampleBufferForTesting(sample)
+            stream.release()
+            #expect(await captureCallEventually { stream.stopCount > 0 })
+            #expect(try AVAudioFile(forReading: micURL).length == frames)
+            #expect(session.micWriteFailureCount == 0)
+            if unified {
+                let appURL = root.appendingPathComponent("app.wav")
+                let appFrames = try AVAudioFile(forReading: appURL).length
+                #expect(appFrames > 0)
+                #expect(AudioFileStreamer.loadTimingSidecar(for: appURL)?.totalFrames == Int(appFrames))
+                #expect(session.appWriteFailureCount == 0)
+            }
+        }
+    }
+
+    private func withBlockedStream(
+        _ call: BlockedCaptureStream.Call, unified: Bool,
+        root: URL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
+        _ body: (UnifiedCaptureSession, BlockedCaptureStream) async throws -> Void
+    ) async throws {
+        let session = UnifiedCaptureSession(
+            micFileURL: root.appendingPathComponent("mic.wav"),
+            appFileURL: unified ? root.appendingPathComponent("app.wav") : nil,
+            processID: unified ? 1234 : nil, micDeviceUID: "device-a"
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let stream = BlockedCaptureStream(call)
+        var failure: (any Error)?
+        do { try await body(session, stream) } catch { failure = error }
+        stream.release()
+        await session.stop()
+        #expect(await captureCallEventually { stream.blockedCallCount == 0 })
+        try? FileManager.default.removeItem(at: root)
+        if let failure { throw failure }
+    }
+}
+
+func captureCallEventually(_ condition: @Sendable () -> Bool) async -> Bool {
+    let deadline = ContinuousClock.now + .seconds(2)
+    while !condition(), ContinuousClock.now < deadline { await Task.yield() }
+    return condition()
 }
