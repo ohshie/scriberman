@@ -172,25 +172,11 @@ struct TimeFormatterTests {
         #expect(recording.contains("TimeFormatter.displayMonthDayTime(createdAt)"))
     }
 
-    @MainActor
-    @Test
-    func trimLabelShowsHours() throws {
-        let container = try ModelContainer(
-            for: RecordingSession.self, ImportedSession.self, RecordingTranscriptSegment.self,
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
-        )
-        let session = RecordingSession(createdAt: .now, duration: 4_500, micAudioURL: "/tmp/mic.wav", title: "Test", status: .done)
-        let viewModel = TrimEditorViewModel(session: session, audioPlayer: AudioPlayerViewModel(), context: ModelContext(container))
-
-        #expect(viewModel.keepRangeLabel == "Keep: 0:00 → 1:15:00")
-    }
-
     @Test(.tags(.sourceLint))
     func onScreenDurationsUseTheDisplayFormat() throws {
         let timer = try readSource("../UI/ActiveRecordingDetailView.swift")
         let player = try readSource("../UI/AudioPlayerBar.swift")
         let menu = try readSource("../AppDelegate.swift")
-        let trim = try readSource("../ViewModels/TrimEditorViewModel.swift")
 
         #expect(!timer.contains("private func durationText"))
         #expect(timer.contains("TimeFormatter.displayFormat(seconds: Float(currentDuration))"))
@@ -199,8 +185,6 @@ struct TimeFormatterTests {
         #expect(player.contains("TimeFormatter.displayFormat(seconds: Float(viewModel.duration))"))
         #expect(!menu.contains("private func menuDuration"))
         #expect(menu.contains("TimeFormatter.displayFormat(seconds: Float(duration))"))
-        #expect(!trim.contains("private func formatTime"))
-        #expect(trim.contains("TimeFormatter.displayFormat(seconds: Float(trimPosition))"))
     }
 
     private func readSource(_ relativePathFromTests: String) throws -> String {

@@ -14,9 +14,15 @@ final class AudioDeviceService: AudioDeviceServiceProtocol {
             guard !isApplyingSelection else {
                 return
             }
-            lastDisconnectedSelectedUID = nil
             persistSelectedUID()
         }
+    }
+
+    /// Saved in `selectedMicUID`. Written only by an explicit pick, so a fallback leaves it, and
+    /// read at every revalidation, so the saved device is selected again when it appears, also
+    /// after a relaunch during its absence.
+    var preferredDeviceUID: String? {
+        userDefaults.string(forKey: selectedMicUIDKey)
     }
 
     @ObservationIgnored private let hardware: AudioDeviceHardwareProviding
@@ -33,7 +39,6 @@ final class AudioDeviceService: AudioDeviceServiceProtocol {
     @ObservationIgnored nonisolated(unsafe) private var configurationObserver: NSObjectProtocol?
     @ObservationIgnored private var isApplyingSelection = false
     @ObservationIgnored private let usageStore: AudioDeviceUsageStore
-    @ObservationIgnored private var lastDisconnectedSelectedUID: String?
 
     init(
         hardware: AudioDeviceHardwareProviding = CoreAudioDeviceHardware(),
@@ -71,10 +76,9 @@ final class AudioDeviceService: AudioDeviceServiceProtocol {
     func enumerateInputDevices() -> [AudioInputDevice] {
         do {
             let devices = try hardware.allDeviceIDs().compactMap { deviceID -> AudioInputDevice? in
-                // Offered only if it can actually capture. A device with no input channels is not a
-                // microphone in any state, so it is absent from the list rather than present and
-                // unavailable — there is nothing a user could do to make it one.
-                guard hardware.inputChannelCount(deviceID: deviceID) > 0,
+                // Offered only if it can capture now. An unusable device is absent from the list
+                // rather than present and unavailable.
+                guard hardware.isUsableMicrophone(deviceID: deviceID),
                       let uid = hardware.deviceUID(deviceID: deviceID),
                       let name = hardware.deviceName(deviceID: deviceID)
                 else {
@@ -111,39 +115,39 @@ final class AudioDeviceService: AudioDeviceServiceProtocol {
         }
     }
 
+    /// Selects the preferred device when it is offered, otherwise keeps a current selection that is
+    /// still offered, otherwise falls back to the system default. A fallback never writes the
+    /// preference. A preference that names a device present and alive but unusable as a microphone
+    /// (no input channels, a private aggregate) is cleared; one that is absent or dying is kept.
     private func revalidateSelectedDevice() {
-        let defaultDevice = currentDefaultInputDevice()
+        if let preferredUID = preferredDeviceUID {
+            if let preferred = device(withUID: preferredUID) {
+                applySelection(preferred)
+                return
+            }
+            if isPresentButUnusable(uid: preferredUID) {
+                userDefaults.removeObject(forKey: selectedMicUIDKey)
+            }
+        }
 
         if let currentUID = selectedDevice?.uid,
            let matchingCurrent = device(withUID: currentUID) {
-            applySelection(matchingCurrent, persist: false)
-            recoverDisconnectedDeviceIfNeeded(defaultDevice: defaultDevice)
+            applySelection(matchingCurrent)
             return
         }
 
-        if let currentUID = selectedDevice?.uid {
-            lastDisconnectedSelectedUID = currentUID
-            applySelection(defaultDevice ?? availableDevices.first, persist: true)
-            return
-        }
+        applySelection(currentDefaultInputDevice() ?? availableDevices.first)
+    }
 
-        let savedUID = userDefaults.string(forKey: selectedMicUIDKey)
-        if let savedUID,
-           let restored = device(withUID: savedUID) {
-            applySelection(restored, persist: false)
-            return
+    private func isPresentButUnusable(uid: String) -> Bool {
+        guard let deviceIDs = try? hardware.allDeviceIDs() else {
+            return false
         }
-
-        if savedUID != nil {
-            userDefaults.removeObject(forKey: selectedMicUIDKey)
+        return deviceIDs.contains { deviceID in
+            hardware.deviceUID(deviceID: deviceID) == uid
+                && hardware.isAlive(deviceID: deviceID)
+                && !hardware.isUsableMicrophone(deviceID: deviceID)
         }
-
-        if let defaultDevice {
-            applySelection(defaultDevice, persist: false)
-            return
-        }
-
-        applySelection(availableDevices.first, persist: false)
     }
 
     private func registerHardwarePropertyListeners() {
@@ -187,25 +191,10 @@ final class AudioDeviceService: AudioDeviceServiceProtocol {
         availableDevices.first(where: { $0.uid == uid })
     }
 
-    private func recoverDisconnectedDeviceIfNeeded(defaultDevice: AudioInputDevice?) {
-        guard let disconnectedUID = lastDisconnectedSelectedUID,
-              let recoveredDevice = device(withUID: disconnectedUID),
-              let selectedDevice,
-              let defaultDevice,
-              selectedDevice.uid == defaultDevice.uid else {
-            return
-        }
-        lastDisconnectedSelectedUID = nil
-        applySelection(recoveredDevice, persist: true)
-    }
-
-    private func applySelection(_ device: AudioInputDevice?, persist: Bool) {
+    /// Changes the current selection without touching the saved preference.
+    private func applySelection(_ device: AudioInputDevice?) {
         isApplyingSelection = true
         selectedDevice = device
         isApplyingSelection = false
-
-        if persist {
-            persistSelectedUID()
-        }
     }
 }

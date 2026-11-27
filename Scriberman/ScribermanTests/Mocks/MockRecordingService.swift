@@ -11,7 +11,7 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
     var startThrowSequence: [RecordingError] = []
     var startReturns: UUID = UUID()
     var stopReturns: UUID?
-    var startCalls: [(workspace: Workspace, micDeviceID: AudioDeviceID?, captureDisplayID: CGDirectDisplayID?, capturedAppName: String?, appProcessID: pid_t?, title: String?, audioSyncFlags: AudioSyncFlags)] = []
+    var startCalls: [(workspace: Workspace, micDeviceID: AudioDeviceID?, preferredMicDeviceUID: String?, captureDisplayID: CGDirectDisplayID?, capturedAppName: String?, appProcessID: pid_t?, title: String?, audioSyncFlags: AudioSyncFlags)] = []
     var retargetMicCalls: [String?] = []
     var pendingError: RecordingError?
 
@@ -52,11 +52,12 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
     /// restart" without timing games.
     var frameCountQueue: [(mic: Int64?, app: Int64?)] = [(mic: 512, app: nil)]
     private(set) var frameCountCallCount = 0
+    var writeFailureCounts: (mic: Int, app: Int) = (0, 0)
 
     func captureFrameCounts() async -> (mic: Int64?, app: Int64?, micWriteFailures: Int, appWriteFailures: Int) {
         frameCountCallCount += 1
         let counts = frameCountQueue.count > 1 ? frameCountQueue.removeFirst() : (frameCountQueue.first ?? (mic: 512, app: nil))
-        return (counts.mic, counts.app, 0, 0)
+        return (counts.mic, counts.app, writeFailureCounts.mic, writeFailureCounts.app)
     }
 
     /// Snapshots returned by `captureHealthSnapshot()`. Deliberately separate state from
@@ -68,8 +69,14 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
     ]
     private(set) var captureHealthSnapshotCallCount = 0
 
+    /// When set, answers `captureHealthSnapshot()` in place of the queue.
+    var captureHealthSnapshotProvider: (() -> CaptureHealthMonitor.Snapshot)?
+
     func captureHealthSnapshot() async -> CaptureHealthMonitor.Snapshot {
         captureHealthSnapshotCallCount += 1
+        if let captureHealthSnapshotProvider {
+            return captureHealthSnapshotProvider()
+        }
         let fallback = CaptureHealthMonitor.Snapshot(micFrames: 512, appFrames: nil)
         guard captureHealthSnapshotQueue.count > 1 else {
             return captureHealthSnapshotQueue.first ?? fallback
@@ -93,9 +100,13 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
         return restartAudioCaptureInPlaceResult
     }
 
+    /// When set, a start waits at this gate before it records the call.
+    var startGate: AsyncGate?
+
     func startRecording(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID?,
+        preferredMicDeviceUID: String?,
         captureDisplayID: CGDirectDisplayID?,
         capturedAppName: String?,
         appProcessID: pid_t?,
@@ -104,9 +115,13 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
         liveAudioClock: LiveCaptureClock?,
         audioSyncFlags: AudioSyncFlags
     ) async throws(RecordingError) -> UUID {
+        if let startGate {
+            await startGate.pass()
+        }
         startCalls.append((
             workspace: workspace,
             micDeviceID: micDeviceID,
+            preferredMicDeviceUID: preferredMicDeviceUID,
             captureDisplayID: captureDisplayID,
             capturedAppName: capturedAppName,
             appProcessID: appProcessID,
@@ -140,6 +155,8 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
     }
 
     func stopRecording() async -> UUID? {
+        calls.append("stop")
+        isPausedValue = false
         liveAudioContinuation?.finish()
         liveAudioContinuation = nil
         defer { persistedSessionID = nil }
@@ -157,5 +174,74 @@ final class MockRecordingService: RecordingServiceProtocol, @unchecked Sendable 
 
     func retargetMic(desiredDeviceUID: String?) async {
         retargetMicCalls.append(desiredDeviceUID)
+    }
+
+    // MARK: - Pause and resume
+
+    /// The order of pause, resume and stop calls, each recorded when the call begins.
+    private(set) var calls: [String] = []
+    var pauseCallCount: Int { calls.filter { $0 == "pause" }.count }
+    var resumeCallCount: Int { calls.filter { $0 == "resume" }.count }
+    var pauseResult = true
+    var resumeResult = true
+    /// When set, a resume waits at this gate before it answers.
+    var resumeGate: AsyncGate?
+    private(set) var isPausedValue = false
+
+    func pauseRecording() async -> Bool {
+        calls.append("pause")
+        if pauseResult {
+            isPausedValue = true
+        }
+        return pauseResult
+    }
+
+    func resumeRecording() async -> Bool {
+        calls.append("resume")
+        if let resumeGate {
+            await resumeGate.pass()
+        }
+        calls.append("resumed")
+        if resumeResult {
+            isPausedValue = false
+        }
+        return resumeResult
+    }
+
+    func isPaused() async -> Bool {
+        isPausedValue
+    }
+
+    var capturedMicrophoneOverride: CapturedMicrophone?
+
+    func capturedMicrophone() async -> CapturedMicrophone? {
+        capturedMicrophoneOverride
+    }
+}
+
+/// Holds whoever calls `pass()` until `open()`. `waitUntilHolding()` returns once someone waits.
+actor AsyncGate {
+    private var isOpen = false
+    private var held: [CheckedContinuation<Void, Never>] = []
+    private var watchers: [CheckedContinuation<Void, Never>] = []
+
+    func pass() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            held.append(continuation)
+            watchers.forEach { $0.resume() }
+            watchers = []
+        }
+    }
+
+    func waitUntilHolding() async {
+        guard held.isEmpty, !isOpen else { return }
+        await withCheckedContinuation { watchers.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        held.forEach { $0.resume() }
+        held = []
     }
 }

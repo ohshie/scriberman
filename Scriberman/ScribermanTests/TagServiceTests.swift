@@ -6,6 +6,7 @@ import Testing
 
 /// Covers the two bounds SwiftData cannot express — at least one tag, at most three — at every
 /// transition that can break them, and the placeholder behaviour of the default tag.
+@MainActor
 struct TagServiceTests {
     private func makeContext() throws -> ModelContext {
         let container = try ModelContainer(

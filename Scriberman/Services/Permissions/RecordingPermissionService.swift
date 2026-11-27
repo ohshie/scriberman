@@ -1,7 +1,25 @@
 import AVFoundation
+import CoreGraphics
 import Foundation
 
 enum RecordingPermissionService {
+    static func ensureRecordingPermissions() async throws(RecordingError) {
+        try await ensureRecordingPermissions(
+            screenPermission: { CGPreflightScreenCaptureAccess() },
+            microphonePermission: ensureMicrophonePermission
+        )
+    }
+
+    static func ensureRecordingPermissions(
+        screenPermission: () -> Bool,
+        microphonePermission: () async throws(RecordingError) -> Void
+    ) async throws(RecordingError) {
+        guard screenPermission() else {
+            throw RecordingError.failedToStart("Screen recording permission denied")
+        }
+        try await microphonePermission()
+    }
+
     static func ensureMicrophonePermission() async throws(RecordingError) {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:

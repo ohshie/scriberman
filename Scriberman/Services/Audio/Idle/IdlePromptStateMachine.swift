@@ -40,10 +40,17 @@ struct IdlePromptStateMachine: Equatable {
         settings: IdlePromptSettings,
         recordingStartedAt: Date
     ) -> Date? {
+        // A resume counts as activity for every watched source, so it holds off the prompt under
+        // either rule.
+        func watched(_ activity: Date?) -> Date {
+            let last = activity ?? recordingStartedAt
+            guard let resumedAt = snapshot.resumedAt else { return last }
+            return max(last, resumedAt)
+        }
         var values: [Date] = []
-        if settings.watchAppAudio { values.append(snapshot.appAudio ?? recordingStartedAt) }
-        if settings.watchMicAudio { values.append(snapshot.micAudio ?? recordingStartedAt) }
-        if settings.watchUserInput { values.append(snapshot.userInput ?? recordingStartedAt) }
+        if settings.watchAppAudio { values.append(watched(snapshot.appAudio)) }
+        if settings.watchMicAudio { values.append(watched(snapshot.micAudio)) }
+        if settings.watchUserInput { values.append(watched(snapshot.userInput)) }
         guard !values.isEmpty else { return nil }
         return settings.requiresAllSourcesIdle ? values.max() : values.min()
     }

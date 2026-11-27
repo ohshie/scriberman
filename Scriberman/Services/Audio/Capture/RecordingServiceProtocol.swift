@@ -36,6 +36,7 @@ protocol RecordingServiceProtocol: Sendable {
     func startRecording(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID?,
+        preferredMicDeviceUID: String?,
         captureDisplayID: CGDirectDisplayID?,
         capturedAppName: String?,
         appProcessID: pid_t?,
@@ -43,11 +44,20 @@ protocol RecordingServiceProtocol: Sendable {
         liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation?,
         liveAudioClock: LiveCaptureClock?,
         audioSyncFlags: AudioSyncFlags
-    ) async throws(RecordingError) -> UUID
+    ) async throws -> UUID
     func stopRecording() async -> UUID?
     func consumePendingError() async -> RecordingError?
     func retargetMic(desiredDeviceUID: String?) async
     /// Whether the current recording is capturing the screen. Screen capture that fails to start
     /// leaves the recording running without video, so a start asked for a display may not have one.
     func isScreenCaptureActive() async -> Bool
+    /// Pauses the recording. True when it is paused, including when it already was.
+    func pauseRecording() async -> Bool
+    /// Ends the pause. True when the recording runs, including when it was not paused. False when
+    /// capture could not be restarted; the recording then stays paused.
+    func resumeRecording() async -> Bool
+    /// True while a recording is paused. `isRecording()` stays true.
+    func isPaused() async -> Bool
+    /// The microphone the recording is capturing. Nil when no recording runs.
+    func capturedMicrophone() async -> CapturedMicrophone?
 }

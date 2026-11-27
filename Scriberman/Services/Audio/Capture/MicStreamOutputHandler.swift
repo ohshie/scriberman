@@ -12,6 +12,13 @@ import ScreenCaptureKit
 ///
 /// @unchecked Sendable: mutable state is protected by `lock` and the streamer's queue.
 final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendable {
+    // One handler belongs to one stream generation. Retirement waits for an admitted callback
+    // before the writers can be closed or handed to the next generation.
+    private let callbackLock = NSLock()
+    private var retired = false
+
+    func invalidate() { callbackLock.withLock { retired = true } }
+
     private let lock = NSLock()
     /// Injected so a mid-session capture restart can rebuild the stream and its handlers while
     /// continuing to write into the same file, with its accumulated timing segments intact.
@@ -19,7 +26,8 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
     private let liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation?
     private let targetFormat: AVAudioFormat
     private var fileURL: URL?
-    private var converter: AVAudioConverter?
+    private let gate: CaptureAudioGate
+    private var conversion: GatedAudioConversion?
     private var converterSourceFormat: AVAudioFormat?
     private var firstBufferHostTime: HostNanoseconds?
     private var hasPrepared = false
@@ -47,10 +55,12 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
 
     init(
         liveAudioContinuation: AsyncStream<LiveAudioChunk>.Continuation? = nil,
-        streamer: AudioFileStreamer = AudioFileStreamer(label: "mic")
+        streamer: AudioFileStreamer = AudioFileStreamer(label: "mic"),
+        gate: CaptureAudioGate = CaptureAudioGate()
     ) {
         self.liveAudioContinuation = liveAudioContinuation
         self.streamer = streamer
+        self.gate = gate
         self.targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: 48_000,
@@ -64,7 +74,7 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
         lock.lock()
         defer { lock.unlock() }
         fileURL = url
-        converter = nil
+        conversion = nil
         converterSourceFormat = nil
         firstBufferHostTime = nil
         hasPrepared = false
@@ -77,10 +87,17 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
         lock.lock()
         defer { lock.unlock() }
         fileURL = url
-        converter = nil
+        conversion = nil
         converterSourceFormat = nil
         firstBufferHostTime = nil
         hasPrepared = true
+    }
+
+    /// True once the writer is open: prepared on the first buffer, or adopted from a predecessor.
+    var isOutputPrepared: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return hasPrepared
     }
 
     func closeOutput() {
@@ -107,23 +124,34 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
 #endif
 
     private func process(_ sampleBuffer: CMSampleBuffer) {
+        callbackLock.lock()
+        defer { callbackLock.unlock() }
+        guard !retired else { return }
+        gate.recordArrival()
         guard layoutTracker.admit(sampleBuffer) else {
             return
         }
         let hostTime = HostNanoseconds(presentationTimeOf: sampleBuffer)
-        let hostNanos = hostTime?.nanoseconds
-        captureFirstBufferHostTimeIfNeeded(hostTime)
+        captureFirstBufferHostTimeIfNeeded(hostTime.flatMap {
+            gate.firstKeptHostTime(
+                startingAt: $0,
+                frameCount: CMSampleBufferGetNumSamples(sampleBuffer),
+                sampleRate: sampleBuffer.sampleRate
+            )
+        })
 
         guard let nativeBuffer = Self.makePCMBuffer(from: sampleBuffer) else {
             return
         }
 
         lock.lock()
-        if converter == nil || converterSourceFormat != nativeBuffer.format {
-            converter = AVAudioConverter(from: nativeBuffer.format, to: targetFormat)
+        if conversion == nil || converterSourceFormat != nativeBuffer.format {
+            conversion = AVAudioConverter(from: nativeBuffer.format, to: targetFormat).map {
+                GatedAudioConversion(converter: $0, targetFormat: targetFormat, gate: gate)
+            }
             converterSourceFormat = nativeBuffer.format
         }
-        guard let fileURL, let converter else {
+        guard let fileURL, let conversion else {
             lock.unlock()
             return
         }
@@ -138,15 +166,25 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
         }
         lock.unlock()
 
-        guard let converted = Self.convert(nativeBuffer, with: converter, to: targetFormat),
-              converted.frameLength > 0 else {
-            return
-        }
-
-        streamer.write(buffer: converted, hostTimeNanos: hostNanos)
-        let monoSamples = AudioDownmixer.toMono(buffer: converted)
-        if !monoSamples.isEmpty {
-            liveAudioContinuation?.yield(LiveAudioChunk(samples: monoSamples, source: .mic, sampleRate: targetFormat.sampleRate, hostTime: hostTime))
+        conversion.process(nativeBuffer, hostTime: hostTime) { event in
+            switch event {
+            case .audio(let audio):
+                CaptureTrace.noteConverted(audio.buffer, hostTime: audio.hostTime)
+                streamer.write(buffer: audio.buffer, hostTimeNanos: audio.hostTime?.nanoseconds)
+                guard let liveHostTime = audio.hostTime else { return }
+                let monoSamples = AudioDownmixer.toMono(buffer: audio.buffer)
+                if !monoSamples.isEmpty {
+                    liveAudioContinuation?.yield(LiveAudioChunk(
+                        samples: monoSamples,
+                        source: .mic,
+                        sampleRate: targetFormat.sampleRate,
+                        hostTime: liveHostTime,
+                        rawHostTime: audio.rawHostTime
+                    ))
+                }
+            case .pauseMarker(let number):
+                liveAudioContinuation?.yield(.pauseMarker(number, source: .mic))
+            }
         }
     }
 
@@ -162,38 +200,6 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
         lock.unlock()
         if didCapture {
             callback?(hostTime)
-        }
-    }
-
-    private static func convert(
-        _ buffer: AVAudioPCMBuffer,
-        with converter: AVAudioConverter,
-        to targetFormat: AVAudioFormat
-    ) -> AVAudioPCMBuffer? {
-        let ratio = targetFormat.sampleRate / buffer.format.sampleRate
-        let capacity = max(AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 32, 1)
-        guard let output = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else {
-            return nil
-        }
-        // Feed the input buffer exactly once per convert() call. Returning it again when the
-        // converter asks for more input duplicates frames into the output (observed as a
-        // constant per-buffer surplus that time-stretches the whole channel).
-        var didProvideInput = false
-        var error: NSError?
-        let status = converter.convert(to: output, error: &error) { _, outStatus in
-            if didProvideInput {
-                outStatus.pointee = .noDataNow
-                return nil
-            }
-            didProvideInput = true
-            outStatus.pointee = .haveData
-            return buffer
-        }
-        switch status {
-        case .haveData, .inputRanDry, .endOfStream:
-            return output.frameLength > 0 ? output : nil
-        default:
-            return nil
         }
     }
 
@@ -255,6 +261,14 @@ final class MicStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendabl
             }
         }
         return pcmBuffer
+    }
+}
+
+extension CMSampleBuffer {
+    /// Sample rate of the buffer's audio format, or 0 when it has none.
+    var sampleRate: Double {
+        CMSampleBufferGetFormatDescription(self)
+            .flatMap { CMAudioFormatDescriptionGetStreamBasicDescription($0)?.pointee.mSampleRate } ?? 0
     }
 }
 

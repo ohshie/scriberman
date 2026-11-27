@@ -15,6 +15,7 @@ enum OnboardingStep: Int, CaseIterable {
 @Observable
 @MainActor
 final class AppState {
+    private let spliceReservations: SpliceReservations
     let mainServices: MainServiceContainer
     let backgroundServices: BackgroundServiceContainer
     let permissionService: PermissionServiceProtocol
@@ -67,7 +68,6 @@ final class AppState {
     /// The Settings tab a request to open Settings was actually asking for, or `nil` for whichever
     /// was last shown. Set by the places that send people to Settings for one specific thing.
     var requestedSettingsTab: SettingsTab?
-    var sessionToTrim: RecordingSession?
     /// SwiftUI's `openSettings` action, registered by `ContentView`. Lets AppKit-hosted UI such as
     /// the dictation HUD open the Settings scene.
     @ObservationIgnored var openSettingsAction: (() -> Void)?
@@ -129,18 +129,21 @@ final class AppState {
         prepareDictationHandler: ((Workspace) async -> Void)? = nil,
         registerHotkeyHandler: (() -> Void)? = nil,
         sessionDeletion: SessionDeletionCoordinator? = nil,
-        modelContext: ModelContext? = nil
+        modelContext: ModelContext? = nil,
+        spliceReservations: SpliceReservations? = nil
     ) {
         self.prepareDictationHandler = prepareDictationHandler
         self.registerHotkeyHandler = registerHotkeyHandler
         self.modelContext = modelContext
+        self.spliceReservations = spliceReservations ?? .shared
         self.mainServices = services.main
         self.backgroundServices = services.background
         self.permissionService = services.main.permissionService
         let aiTransformationRunner = AITransformationRunner(
             aiProviderService: services.main.aiProviderService,
             promptStore: AIPromptStore(),
-            sessionJobs: services.background.sessionJobs
+            sessionJobs: services.background.sessionJobs,
+            spliceReservations: spliceReservations
         )
         self.aiTransformationRunner = aiTransformationRunner
         let developerSettings = DeveloperSettings()
@@ -167,12 +170,14 @@ final class AppState {
             retranscriptionService: services.background.retranscriptionService,
             audioImportService: services.background.audioImportService,
             transcriptExportService: services.main.transcriptExportService,
-            sessionJobs: services.background.sessionJobs
+            sessionJobs: services.background.sessionJobs,
+            spliceReservations: spliceReservations
         )
         self.jobsViewModel = jobsViewModel
         self.sessionDeletion = sessionDeletion ?? SessionDeletionCoordinator(
             workspaceService: services.background.workspaceService,
-            sessionJobs: services.background.sessionJobs
+            sessionJobs: services.background.sessionJobs,
+            spliceReservations: spliceReservations
         )
         self.settingsViewModel = SettingsViewModel(
             workspaceService: services.background.workspaceService,
@@ -214,7 +219,8 @@ final class AppState {
                 return try await jobsViewModel.importAudioFile(at: url, context: modelContext, conversionEnded: conversionEnded)
             },
             modelContext: modelContext,
-            transformationRunner: aiTransformationRunner
+            transformationRunner: aiTransformationRunner,
+            spliceReservations: spliceReservations
         )
         let extensionAPI = ExtensionAPIService(
             settings: extensionAPISettings,
@@ -476,7 +482,7 @@ final class AppState {
     }
 
     var isWorkspaceChangeAllowed: Bool {
-        guard !isChangingWorkspace, newSessionViewModel.isIdle,
+        guard !spliceReservations.hasReservations, !isChangingWorkspace, newSessionViewModel.isIdle,
               dictationService.state == .idle || dictationService.state == .prewarming,
               !jobsViewModel.isImporting, !jobsViewModel.isRetranscribing,
               !sessionDeletion.hasOperationInProgress else { return false }
@@ -533,6 +539,7 @@ final class AppState {
     private func activateDeletion(in workspace: Workspace) async {
         guard let modelContext else { return }
         await sessionDeletion.activate(workspace, context: modelContext)
+        await SpliceService(reservations: spliceReservations, reconciliationCoordinator: sessionDeletion).reconcile(workspace: workspace, context: modelContext)
     }
 
     func verifyWorkspaceForWrite() async -> Bool {

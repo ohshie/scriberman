@@ -178,24 +178,6 @@ struct SettingsView: View {
                 .tag(SettingsTab.tags)
 
                 Form {
-                    Section("Audio Processing") {
-                        @Bindable var audioSettings = appState.appAudioSettings
-                        HStack {
-                            Toggle("Noise Suppression (Voice Processing)", isOn: $audioSettings.voiceProcessingEnabled)
-                            Button {
-                                appState.appAudioSettings.voiceProcessingEnabled = false
-                            } label: {
-                                Image(systemName: "arrow.counterclockwise")
-                            }
-                            .buttonStyle(.borderless)
-                            .disabled(!viewModel.canReset(.voiceProcessing))
-                            .accessibilityLabel("Reset to default")
-                        }
-                        Text("Applies hardware noise suppression and echo cancellation to the microphone. Takes effect on the next recording. May add minor latency. Default: Off (disabled).")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
                     IdlePromptSettingsSection(preferences: appState.idlePromptPreferences)
 
                     Section("Recording Pipeline") {

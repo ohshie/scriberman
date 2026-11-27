@@ -85,7 +85,6 @@ struct ServiceContainer {
                 recordingService: RecordingService(
                     workspaceService: workspaceService,
                     modelContainer: modelContainer,
-                    appAudioSettings: appAudioSettings,
                     finalizer: recordingFinalizer
                 ),
                 transcriptionService: transcriptionService,

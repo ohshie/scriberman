@@ -31,6 +31,7 @@ enum ExtensionAPIErrorCode: String, Sendable, CaseIterable {
     case noTranscript = "no_transcript"
     case aiNotConfigured = "ai_not_configured"
     case transformationRunning = "transformation_running"
+    case sessionBusy = "session_busy"
     case notAudio = "not_audio"
     case invalidFileName = "invalid_file_name"
     case importNotRecorded = "import_not_recorded"
@@ -38,6 +39,8 @@ enum ExtensionAPIErrorCode: String, Sendable, CaseIterable {
     case captureFailed = "capture_failed"
     /// The store refused a change; nothing was changed.
     case saveFailed = "save_failed"
+    /// Capture could not be restarted. The recording stays paused.
+    case resumeFailed = "resume_failed"
 }
 
 /// What `admit` decided from the head alone.
@@ -108,6 +111,7 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
     /// Where routes that name a session look it up. Nil finds no session.
     private let modelContext: ModelContext?
     private let transformationRunner: AITransformationRunner?
+    private let spliceReservations: SpliceReservations
 
     /// Nonces seen per client, with the time each was seen.
     private var seenNonces: [String: Date] = [:]
@@ -139,8 +143,10 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         availableDiskSpace: (@MainActor () -> Int64?)? = nil,
         makeStagingDirectory: @escaping @MainActor (URL) throws -> URL = { try ExtensionAPIStagedUpload.makeUniqueDirectory(in: $0) },
         modelContext: ModelContext? = nil,
-        transformationRunner: AITransformationRunner? = nil
+        transformationRunner: AITransformationRunner? = nil,
+        spliceReservations: SpliceReservations? = nil
     ) {
+        self.spliceReservations = spliceReservations ?? .shared
         self.port = port
         self.pairingStore = pairingStore
         self.callerVerifier = callerVerifier
@@ -289,13 +295,15 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
             return Self.json(detail)
         case .session:
             guard let id = Self.sessionID(inPath: head.path) else { return Self.error(.invalidRequest, status: 400) }
+            guard !isReserved(id) else { return Self.error(.sessionBusy, status: 409) }
             guard let detail = sessions.detail(id) else { return Self.error(.notFound, status: 404) }
             return Self.json(detail)
         case .prompts:
             let prompts = await loadPrompts()
             if let revoked = revocationResponse(for: signing) { return revoked }
             return Self.json(PromptList(prompts: prompts.map { .init(id: $0.id.uuidString, name: $0.name) }))
-        case .status, .captureOptions, .quickStart, .startRecording, .stopRecording, .updateCurrentRecording:
+        case .status, .captureOptions, .quickStart, .startRecording, .stopRecording, .pauseRecording, .resumeRecording,
+             .updateCurrentRecording:
             guard let recording else { return Self.error(.notFoundRoute, status: 404) }
             return await respond(to: route, recording: recording, body: body, signing: signing)
         case .calendarSuggestions, .startFromCalendar:
@@ -333,6 +341,8 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         case .quickStart: response = await recording.quickStart()
         case .startRecording: response = await recording.start(body: body)
         case .stopRecording: response = await recording.stop()
+        case .pauseRecording: response = await recording.pause()
+        case .resumeRecording: response = await recording.resume()
         case .updateCurrentRecording: response = recording.updateCurrent(body: body)
         default: return Self.error(.notFoundRoute, status: 404)
         }
@@ -460,6 +470,9 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
     }
 
     private func runTransformation(sessionID: String, body: Data, signing: RequestSigning) async -> HTTPResponse {
+        if let id = ExtensionAPISessionID(pathSegment: sessionID), isReserved(id) {
+            return Self.error(.sessionBusy, status: 409)
+        }
         guard let request = try? JSONDecoder().decode(TransformationBody.self, from: body),
               let promptID = UUID(uuidString: request.promptId)
         else {
@@ -472,6 +485,7 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         guard let runner = transformationRunner, let session = session(withID: sessionID) else {
             return Self.error(.notFound, status: 404)
         }
+        guard !spliceReservations.isReserved(session) else { return Self.error(.sessionBusy, status: 409) }
         guard let prompt = prompts.first(where: { $0.id == promptID }) else {
             return Self.error(.notFound, status: 404)
         }
@@ -479,6 +493,7 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         do {
             operationID = try runner.start(prompt: prompt, on: session)
         } catch {
+            if error == .busy { return Self.error(.sessionBusy, status: 409) }
             return Self.error(.transformationRunning, status: 409)
         }
         // A run whose requirements are unmet has already failed; those failures answer the request.
@@ -488,6 +503,8 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
                 return Self.error(.aiNotConfigured, status: 409)
             case .noTranscript:
                 return Self.error(.noTranscript, status: 409)
+            case .busy:
+                return Self.error(.sessionBusy, status: 409)
             case .providerFailed, .notFound, .saveFailed:
                 break
             }
@@ -519,6 +536,7 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         case .notFound: ExtensionAPIErrorCode.notFound.rawValue
         case .providerFailed: "provider_failed"
         case .saveFailed: "save_failed"
+        case .busy: ExtensionAPIErrorCode.sessionBusy.rawValue
         }
     }
 
@@ -530,6 +548,7 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         case .notFound: ExtensionAPIErrorCode.notFound.message
         case .providerFailed: ExtensionAPIStrings.providerFailed
         case .saveFailed: ExtensionAPIErrorCode.saveFailed.message
+        case .busy: ExtensionAPIErrorCode.sessionBusy.message
         }
     }
 
@@ -540,6 +559,7 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
     }
 
     private func openSession(_ id: ExtensionAPISessionID, actions: ExtensionAPISessionActions) -> HTTPResponse {
+        guard !isReserved(id) else { return Self.error(.sessionBusy, status: 409) }
         guard session(id) != nil else { return Self.error(.notFound, status: 404) }
         switch id.kind {
         case .recording: actions.requestSession(.recording(id.uuid))
@@ -555,10 +575,12 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         signing: RequestSigning
     ) async -> HTTPResponse {
         guard let session = session(id) else { return Self.error(.notFound, status: 404) }
+        guard !isReserved(id) else { return Self.error(.sessionBusy, status: 409) }
         guard session.displayedTranscript != nil else { return Self.error(.noTranscript, status: 409) }
         actions.showWindow()
         let outcome = await actions.export(session) { [weak self] in
-            self?.revocationResponse(for: signing) == nil
+            guard let self else { return false }
+            return revocationResponse(for: signing) == nil && !isReserved(id)
         }
         if let revoked = revocationResponse(for: signing) { return revoked }
         switch outcome {
@@ -566,7 +588,8 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         case .cancelled: return Self.json(ExportResponse(outcome: "cancelled"))
         case .failed: return Self.json(ExportResponse(outcome: "failed"))
         case .sessionDeleted: return Self.error(.notFound, status: 404)
-        case .writeRefused: return Self.error(.unauthorized, status: 401)
+        case .writeRefused:
+            return Self.error(isReserved(id) ? .sessionBusy : .unauthorized, status: isReserved(id) ? 409 : 401)
         }
     }
 
@@ -584,6 +607,7 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
         }
         if let revoked = revocationResponse(for: signing) { return revoked }
         // Looked up after the suspension, so a session deleted meanwhile is not found.
+        guard !isReserved(id) else { return Self.error(.sessionBusy, status: 409) }
         guard let session = session(id),
               let folder = ExtensionAPISessionActions.folder(of: session),
               JobsViewModel.isRemovableSessionFolder(folder, in: workspace)
@@ -599,6 +623,11 @@ final class ExtensionAPIHandler: ExtensionAPIRequestHandling {
     }
 
     // MARK: - Sessions
+
+    private func isReserved(_ id: ExtensionAPISessionID) -> Bool {
+        spliceReservations.isReserved(sessionID: id.uuid)
+            || session(id).map { spliceReservations.isReserved($0) } == true
+    }
 
     /// The session a kind-qualified id (`recording:<uuid>` or `imported:<uuid>`) names, or nil.
     private func session(withID id: String) -> (any TranscribableSession)? {
@@ -830,6 +859,8 @@ enum ExtensionAPIRoute: Equatable, Sendable, CaseIterable {
     case calendarSuggestions
     case startFromCalendar
     case stopRecording
+    case pauseRecording
+    case resumeRecording
     case updateCurrentRecording
     case sessions
     case latestSession
@@ -857,8 +888,8 @@ enum ExtensionAPIRoute: Equatable, Sendable, CaseIterable {
             "GET"
         case .updateCurrentRecording:
             "PATCH"
-        case .pair, .quickStart, .startRecording, .startFromCalendar, .stopRecording, .openSession, .exportSession,
-             .revealSession, .runTransformation, .imports:
+        case .pair, .quickStart, .startRecording, .startFromCalendar, .stopRecording, .pauseRecording,
+             .resumeRecording, .openSession, .exportSession, .revealSession, .runTransformation, .imports:
             "POST"
         }
     }
@@ -874,6 +905,8 @@ enum ExtensionAPIRoute: Equatable, Sendable, CaseIterable {
         case .calendarSuggestions: ["calendar", "suggestions"]
         case .startFromCalendar: ["recordings", "from-calendar"]
         case .stopRecording: ["recordings", "stop"]
+        case .pauseRecording: ["recordings", "pause"]
+        case .resumeRecording: ["recordings", "resume"]
         case .updateCurrentRecording: ["recordings", "current"]
         case .sessions: ["sessions"]
         case .latestSession: ["sessions", "latest"]

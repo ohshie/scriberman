@@ -87,8 +87,8 @@ final class PendingDeletionsViewModel {
     }
 
     /// Removes the session for good. The caller asks for confirmation first.
-    func removeNow(_ row: Row) async -> SessionDeletionCoordinator.RemovalResult {
-        let result = await coordinator.removeHeld(row.id)
+    func removeNow(_ row: Row, context: ModelContext) async -> SessionDeletionCoordinator.RemovalResult {
+        let result = await coordinator.removeHeld(row.id, context: context)
         await refresh()
         return result
     }

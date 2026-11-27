@@ -1,25 +1,17 @@
 import Foundation
-import Observation
 
+/// Runs at launch when the service container creates the audio settings.
 @MainActor
-@Observable
 final class AppAudioSettings {
-    private enum Key {
-        static let voiceProcessingEnabled = "audio.voiceProcessingEnabled"
-    }
-
-    private let userDefaults: UserDefaults
-
-    var voiceProcessingEnabled: Bool {
-        didSet { userDefaults.set(voiceProcessingEnabled, forKey: Key.voiceProcessingEnabled) }
-    }
-
     init(userDefaults: UserDefaults = .standard) {
-        self.userDefaults = userDefaults
-        voiceProcessingEnabled = userDefaults.bool(forKey: Key.voiceProcessingEnabled)
+        Self.migrateRemovedSettings(in: userDefaults)
     }
 
-    func resetToDefaults() {
-        voiceProcessingEnabled = false
+    static func migrateRemovedSettings(in store: UserDefaults) {
+        let migration = "audio.removedVoiceProcessingSetting"
+        guard !store.bool(forKey: migration) else { return }
+        store.removeObject(forKey: "audio.voiceProcessingEnabled")
+        store.removeObject(forKey: "AudioSync.unifiedCaptureEnabled")
+        store.set(true, forKey: migration)
     }
 }

@@ -16,6 +16,7 @@ struct Transcript: Codable, Equatable {
     /// `true` when one pass transcribed a one-channel mixdown of mic and app audio, so the
     /// segments' `.mic` source does not say which capture stream a voice came from. `nil` otherwise.
     var isSinglePassOfMixedAudio: Bool?
+    var spliceOriginSessionID: UUID?
 
     init(
         fullText: String,
@@ -63,7 +64,7 @@ struct Transcript: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case fullText, segments, speakers, speakerVoiceprints, speakerEmbeddings, speakerProfileIDs, voiceprintSpace
-        case isSinglePassOfMixedAudio
+        case isSinglePassOfMixedAudio, spliceOriginSessionID
     }
 
     /// Reads `speakerVoiceprints`, or, for a transcript saved before voiceprint lists existed,
@@ -82,6 +83,7 @@ struct Transcript: Codable, Equatable {
         speakerProfileIDs = try container.decodeIfPresent([String: UUID].self, forKey: .speakerProfileIDs)
         voiceprintSpace = try container.decodeIfPresent(String.self, forKey: .voiceprintSpace)
         isSinglePassOfMixedAudio = try container.decodeIfPresent(Bool.self, forKey: .isSinglePassOfMixedAudio)
+        spliceOriginSessionID = try container.decodeIfPresent(UUID.self, forKey: .spliceOriginSessionID)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -94,5 +96,6 @@ struct Transcript: Codable, Equatable {
         try container.encodeIfPresent(speakerProfileIDs, forKey: .speakerProfileIDs)
         try container.encodeIfPresent(voiceprintSpace, forKey: .voiceprintSpace)
         try container.encodeIfPresent(isSinglePassOfMixedAudio, forKey: .isSinglePassOfMixedAudio)
+        try container.encodeIfPresent(spliceOriginSessionID, forKey: .spliceOriginSessionID)
     }
 }

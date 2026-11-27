@@ -4,7 +4,24 @@ enum TranscriptGrouper {
     private static let fallbackSpeakerColor = "#6B7280"
 
     static func makeBlocks(from transcript: Transcript) -> [TranscriptBlock] {
+        makeBlocks(from: transcript, breaksAt: [])
+    }
+
+    static func makeBlocks(from transcript: Transcript, breaksAt cutPoints: [Double]) -> [TranscriptBlock] {
         guard transcript.segments.isEmpty == false else { return [] }
+        let boundaries = cutPoints.filter(\.isFinite).sorted()
+        func hasBoundary(from end: Float, to start: Float) -> Bool {
+            guard end.isFinite, start.isFinite else { return false }
+            // An overlapping segment can only be cut off where it starts.
+            let end = min(end, start)
+            var lower = 0, upper = boundaries.count
+            while lower < upper {
+                let middle = (lower + upper) / 2
+                if boundaries[middle] < Double(end) { lower = middle + 1 }
+                else { upper = middle }
+            }
+            return lower < boundaries.count && boundaries[lower] <= Double(start)
+        }
 
         // Colour comes from the speaker's position here rather than from what was stored with it.
         // Every transcript recorded before this was written gave all its speakers one colour, and a
@@ -23,7 +40,8 @@ enum TranscriptGrouper {
 
             if var lastBlock = blocks.last,
                lastBlock.speaker.id == segment.speakerId,
-               lastBlock.audioSource == segment.audioSource {
+               lastBlock.audioSource == segment.audioSource,
+               !hasBoundary(from: lastBlock.endTime, to: segment.startTime) {
                 let mergedText = [lastBlock.text, normalizedText]
                     .filter { $0.isEmpty == false }
                     .joined(separator: " ")

@@ -14,6 +14,7 @@ actor RetranscriptionService {
     private let transcribePassFromSamplesHandler: TranscribePassFromSamples
     private let saveContext: SaveContext
     private let sessionJobs: SessionJobs
+    private let spliceReservations: SpliceReservations?
     private let transcriptAligner = TranscriptAligner()
     private let logger = Logger(subsystem: "Scriberman", category: "RetranscriptionService")
 
@@ -23,8 +24,10 @@ actor RetranscriptionService {
         prepareModelsHandler: PrepareModels? = nil,
         transcribePassFromSamplesHandler: TranscribePassFromSamples? = nil,
         saveContext: SaveContext? = nil,
-        sessionJobs: SessionJobs = SessionJobs()
+        sessionJobs: SessionJobs = SessionJobs(),
+        spliceReservations: SpliceReservations? = nil
     ) {
+        self.spliceReservations = spliceReservations
         self.transcriptionService = transcriptionService
         self.extractSamples = extractSamples ?? { url in
             try M4AChannelExtractor().extract(url: url)
@@ -54,6 +57,10 @@ actor RetranscriptionService {
         pipelineSettings: LiveTranscriptionPipelineSettings = .defaults
     ) async {
         // In a task of its own, so a delete of the session cancels it and waits for it.
+        let registry: SpliceReservations
+        if let spliceReservations { registry = spliceReservations }
+        else { registry = await SpliceReservations.shared }
+        guard await !registry.isReserved(sessionID: sessionID) else { return }
         await sessionJobs.run(sessionID) { generation in
             await self.retranscribe(
                 sessionID: sessionID,

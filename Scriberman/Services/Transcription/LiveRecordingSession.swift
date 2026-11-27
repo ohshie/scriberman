@@ -5,7 +5,42 @@ struct LiveAudioChunk: Sendable {
     let samples: [Float]
     let source: AudioSource
     let sampleRate: Double
+    /// Capture time without pauses. Positions the chunk in the recording.
     let hostTime: HostNanoseconds?
+    /// Capture time as the hardware reported it. Comparable with the current host time.
+    let rawHostTime: HostNanoseconds?
+    /// Set on a marker, which carries no audio: the source has sent all its audio from before
+    /// pause number `pauseNumber`. Pauses are numbered from 1.
+    let pauseNumber: Int?
+
+    /// `rawHostTime` defaults to `hostTime`, which is right for audio with no pause before it.
+    init(
+        samples: [Float],
+        source: AudioSource,
+        sampleRate: Double,
+        hostTime: HostNanoseconds?,
+        rawHostTime: HostNanoseconds? = nil
+    ) {
+        self.samples = samples
+        self.source = source
+        self.sampleRate = sampleRate
+        self.hostTime = hostTime
+        self.rawHostTime = rawHostTime ?? hostTime
+        self.pauseNumber = nil
+    }
+
+    private init(pauseNumber: Int, source: AudioSource) {
+        self.samples = []
+        self.source = source
+        self.sampleRate = 0
+        self.hostTime = nil
+        self.rawHostTime = nil
+        self.pauseNumber = pauseNumber
+    }
+
+    static func pauseMarker(_ number: Int, source: AudioSource) -> LiveAudioChunk {
+        LiveAudioChunk(pauseNumber: number, source: source)
+    }
 }
 
 /// The streams and their only consumers belong to one recording attempt.
@@ -77,7 +112,7 @@ struct LiveAudioQueueMonitor {
     }
 
     mutating func observe(_ chunk: LiveAudioChunk, now: HostNanoseconds = HostNanoseconds(machTicks: mach_absolute_time())) {
-        guard let hostTime = chunk.hostTime else { return }
+        guard let hostTime = chunk.rawHostTime else { return }
         let seconds = max(0, now.seconds(since: hostTime))
         if seconds > Self.warningThresholdSeconds {
             if delayedSources.insert(chunk.source).inserted { report(chunk.source, true, seconds) }

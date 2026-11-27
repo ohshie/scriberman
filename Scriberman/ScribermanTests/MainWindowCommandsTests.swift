@@ -3,6 +3,60 @@ import SwiftUI
 import Testing
 @testable import Scriberman
 
+@MainActor
+@Suite(.serialized)
+struct MainWindowLifecycleTests {
+    private func makeWindow() -> NSWindow {
+        NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 200),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+    }
+
+    @Test
+    func reopeningUsesTheMainSceneWhenAnotherWindowIsVisible() {
+        let delegate = AppDelegate()
+        let settings = makeWindow()
+        settings.makeKeyAndOrderFront(nil)
+        defer { settings.orderOut(nil) }
+        var openCount = 0
+        delegate.openMainWindow = { openCount += 1 }
+
+        delegate.applicationDidBecomeActive(Notification(name: NSApplication.didBecomeActiveNotification))
+        #expect(settings.delegate !== delegate)
+        #expect(!delegate.applicationShouldHandleReopen(NSApp, hasVisibleWindows: true))
+        #expect(openCount == 1)
+        #expect(settings.delegate !== delegate)
+    }
+
+    @Test
+    func repeatedReopeningKeepsTheRegisteredWindowAndDisallowsTabs() {
+        let delegate = AppDelegate()
+        let window = makeWindow()
+        delegate.registerMainWindow(window)
+        defer { window.orderOut(nil) }
+        var openCount = 0
+        delegate.openMainWindow = { openCount += 1 }
+
+        delegate.showMainWindow()
+        #expect(window.isVisible)
+        #expect(window.delegate === delegate)
+        #expect(window.tabbingMode == .disallowed)
+        #expect(openCount == 1)
+
+        delegate.showMainWindow()
+        #expect(window.isVisible)
+        #expect(openCount == 1)
+
+        window.orderOut(nil)
+        #expect(!delegate.applicationShouldHandleReopen(NSApp, hasVisibleWindows: false))
+        #expect(window.isVisible)
+        #expect(openCount == 2)
+    }
+}
+
 struct ControlsCommandsTests {
     @Test
     func playPauseIsTitledForWhatItWillDo() {
@@ -27,6 +81,12 @@ struct ControlsCommandsTests {
             #expect(shortcut.key == .space)
             #expect(shortcut.modifiers.isEmpty)
         }
+    }
+
+    @Test
+    func pauseResumeIsTitledForWhatItWillDo() {
+        #expect(ControlsCommands.pauseResumeTitle(isPaused: false) == "Pause Recording")
+        #expect(ControlsCommands.pauseResumeTitle(isPaused: true) == "Resume Recording")
     }
 
     @Test
@@ -75,12 +135,50 @@ struct ControlsAndFindMenuBarTests {
     }
 
     @Test
+    func pauseRecordingSitsBetweenStartAndStopWithShiftCommandP() async throws {
+        let controls = try await topMenu("Controls")
+        let titles = controls.items.map(\.title)
+        let start = try #require(titles.firstIndex(of: "Start Recording"))
+        let pause = try #require(titles.firstIndex(of: "Pause Recording"))
+        let stop = try #require(titles.firstIndex(of: "Stop Recording"))
+        #expect(start + 1 == pause)
+        #expect(pause + 1 == stop)
+        let item = controls.items[pause]
+        #expect(item.keyEquivalent == "p")
+        #expect(item.keyEquivalentModifierMask == [.command, .shift])
+    }
+
+    /// Shift-Command-P belongs to Pause Recording alone, system items included.
+    @Test
+    func noOtherMenuItemUsesShiftCommandP() async throws {
+        _ = try await topMenu("Controls")
+        func items(_ menu: NSMenu) -> [NSMenuItem] {
+            menu.items.flatMap { [$0] + ($0.submenu.map(items) ?? []) }
+        }
+        let mainMenu = try #require(NSApp.mainMenu)
+        let users = items(mainMenu).filter {
+            $0.keyEquivalent.lowercased() == "p"
+                && $0.keyEquivalentModifierMask.intersection(.deviceIndependentFlagsMask) == [.command, .shift]
+        }
+        #expect(users.map(\.title) == ["Pause Recording"])
+    }
+
+    @Test
     func findIsInTheEditMenu() async throws {
         let edit = try await topMenu("Edit")
         let find = try #require(edit.items.first { $0.title == "Find" })
 
         #expect(find.keyEquivalent == "f")
         #expect(find.keyEquivalentModifierMask == .command)
+    }
+
+    @Test
+    func spliceReplacesTrimInTheSessionMenu() async throws {
+        let session = try await topMenu("Session")
+        let splice = try #require(session.items.first { $0.title == "Splice…" })
+        #expect(splice.keyEquivalent.lowercased() == "s")
+        #expect(splice.keyEquivalentModifierMask == [.command, .option])
+        #expect(!session.items.contains { $0.title == "Trim…" })
     }
 
     @Test
@@ -208,5 +306,93 @@ struct ControlsAndFindCommandsSourceTests {
             contentsOf: testsDirectory.appendingPathComponent(relativePathFromTests),
             encoding: .utf8
         )
+    }
+}
+
+/// The menu-bar item's lines while a recording runs or is paused.
+@MainActor
+struct StatusMenuRecordingItemsTests {
+    private func items(duration: TimeInterval = 754, isPaused: Bool, canPauseOrResume: Bool = true) -> [NSMenuItem] {
+        AppDelegate.recordingMenuItems(
+            duration: duration,
+            isPaused: isPaused,
+            canPauseOrResume: canPauseOrResume,
+            target: nil
+        )
+    }
+
+    @Test
+    func runningShowsRecordingTimeThenPauseAboveStop() {
+        let items = items(isPaused: false)
+        #expect(items.map(\.title) == ["Recording: 12:34", "Pause Recording", "Stop Recording"])
+        #expect(!items[0].isEnabled)
+        #expect(items[1].action == NSSelectorFromString("pauseOrResumeRecordingFromStatusItem"))
+        #expect(items[2].action == NSSelectorFromString("stopRecordingFromStatusItem"))
+    }
+
+    @Test
+    func pausedShowsTheFrozenTimeThenResumeAboveStop() {
+        let items = items(isPaused: true)
+        #expect(items.map(\.title) == ["Paused: 12:34", "Resume Recording", "Stop Recording"])
+        #expect(!items[0].isEnabled)
+        #expect(items[1].action == NSSelectorFromString("pauseOrResumeRecordingFromStatusItem"))
+    }
+
+    @Test(arguments: [false, true])
+    func pauseResumeIsEnabledOnlyWhenTheRecordingCanBePaused(canPauseOrResume: Bool) {
+        let items = items(isPaused: false, canPauseOrResume: canPauseOrResume)
+        #expect(items[1].isEnabled == canPauseOrResume)
+        #expect(items[2].isEnabled)
+    }
+}
+
+/// The recording view's pause button, beside Stop.
+struct RecordingViewPauseButtonTests {
+    @Test
+    func runningOffersPauseWithTheBarsShape() {
+        let button = ActiveRecordingDetailView.pauseButton(isPaused: false)
+        #expect(button.caption == "Pause")
+        #expect(button.innerShape == .pauseBars)
+    }
+
+    @Test
+    func pausedOffersResumeWithTheRecordShape() {
+        let button = ActiveRecordingDetailView.pauseButton(isPaused: true)
+        #expect(button.caption == "Resume")
+        #expect(button.innerShape == .circle)
+    }
+}
+
+struct RecordingViewMicrophoneFieldTests {
+    private let usb = CapturedMicDevice(uid: "usb", name: "USB Microphone", isSystemDefault: false)
+    private let builtIn = CapturedMicDevice(uid: "built-in", name: "MacBook Pro Microphone", isSystemDefault: true)
+
+    @Test
+    func aChosenMicShowsItsName() {
+        #expect(ActiveRecordingDetailView.microphoneValue(.capturing(usb), hasCaptured: true) == "USB Microphone")
+    }
+
+    @Test
+    func theSystemDefaultIsMarkedAsTheDefault() {
+        #expect(
+            ActiveRecordingDetailView.microphoneValue(.capturing(builtIn), hasCaptured: true)
+                == "MacBook Pro Microphone (default)"
+        )
+    }
+
+    @Test
+    func beforeTheFirstMicAudioItShowsStarting() {
+        #expect(ActiveRecordingDetailView.microphoneValue(.switching, hasCaptured: false) == "Starting…")
+        #expect(ActiveRecordingDetailView.microphoneValue(nil, hasCaptured: false) == "Starting…")
+    }
+
+    @Test
+    func aSwitchAfterMicAudioShowsSwitching() {
+        #expect(ActiveRecordingDetailView.microphoneValue(.switching, hasCaptured: true) == "Switching…")
+    }
+
+    @Test
+    func theRecorderFallbackShowsSystemInput() {
+        #expect(ActiveRecordingDetailView.microphoneValue(.unknown, hasCaptured: false) == "System input")
     }
 }

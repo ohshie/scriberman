@@ -1,13 +1,16 @@
+import AppKit
 import SwiftData
 import SwiftUI
 
 /// What a main window publishes to the menu bar: its selection, which commands it can run, and how
-/// to run them. Menus act on the focused window's value only, so with two windows open each acts on
-/// its own selection, and with Settings or no main window focused the value is absent.
+/// to run them. Menus act on the focused window's value only; with Settings or no main window
+/// focused the value is absent.
 struct MainWindowCommandContext {
     let selection: JobsViewModel.SessionListItem?
     let availability: SessionCommandAvailability
     let isPlaying: Bool
+    /// The running recording is paused, so the pause item resumes it.
+    var isRecordingPaused = false
     /// Editable text holds the window's keyboard, so single-key shortcuts must leave the key to it.
     let isEditingText: Bool
     /// The transcript shows as Markdown text rather than passages.
@@ -15,6 +18,8 @@ struct MainWindowCommandContext {
     let actions: MainWindowActions
     /// The window's store context, for the Tags submenu that edits the selection's tags in place.
     let modelContext: ModelContext
+    var spliceEditor: SpliceEditorViewModel? = nil
+    var isApplyingSessionEdit = false
 }
 
 /// The commands a main window runs on its own selection.
@@ -27,11 +32,13 @@ struct MainWindowActions {
     let export: () -> Void
     let transform: (_ promptID: UUID) -> Void
     let restoreOriginal: () -> Void
-    let trim: () -> Void
+    let splice: () -> Void
     /// Asks for the window's delete confirmation; nothing is deleted until it is confirmed.
     let delete: () -> Void
     let startRecording: () -> Void
     let stopRecording: () -> Void
+    /// Pauses the running recording, or resumes the paused one.
+    let pauseResumeRecording: () -> Void
     let playPause: () -> Void
     let find: () -> Void
     let toggleRawMarkdown: () -> Void
@@ -103,6 +110,12 @@ struct ControlsCommands: Commands {
             .keyboardShortcut("r", modifiers: [.command, .shift])
             .disabled(!mainWindow.availability.isEnabled(.startRecording))
 
+            Button(Self.pauseResumeTitle(isPaused: mainWindow?.isRecordingPaused ?? false)) {
+                mainWindow?.actions.pauseResumeRecording()
+            }
+            .keyboardShortcut("p", modifiers: [.command, .shift])
+            .disabled(!mainWindow.availability.isEnabled(.pauseResumeRecording))
+
             Button("Stop Recording") {
                 mainWindow?.actions.stopRecording()
             }
@@ -120,6 +133,11 @@ struct ControlsCommands: Commands {
             ))
             .disabled(!mainWindow.availability.isEnabled(.playPause))
         }
+    }
+
+    /// The pause/resume item's title, also used by the menu-bar item.
+    static func pauseResumeTitle(isPaused: Bool) -> String {
+        isPaused ? "Resume Recording" : "Pause Recording"
     }
 
     static func playPauseTitle(isPlaying: Bool) -> String {
@@ -207,9 +225,12 @@ struct SessionCommands: Commands {
             }
         case .restoreOriginal:
             Button("Restore Original") { mainWindow?.actions.restoreOriginal() }
-        case .trim:
-            Button("Trim…") { mainWindow?.actions.trim() }
-                .keyboardShortcut("T", modifiers: [.command, .option])
+        case .splice:
+            Toggle("Splice…", isOn: Binding(
+                get: { mainWindow?.spliceEditor != nil },
+                set: { _ in mainWindow?.actions.splice() }
+            ))
+            .keyboardShortcut("s", modifiers: [.command, .option])
         case .delete:
             Button("Delete") { mainWindow?.actions.delete() }
                 .keyboardShortcut(.delete, modifiers: .command)
@@ -232,5 +253,77 @@ struct SessionCommands: Commands {
                 Button(prompt.name) { mainWindow?.actions.transform(prompt.id) }
             }
         }
+    }
+}
+
+/// Editor history is separate; text fields and the rest of the app use responder-chain undo.
+struct SpliceUndoCommands: Commands {
+    @FocusedValue(\.mainWindow) private var mainWindow: MainWindowCommandContext?
+    var body: some Commands {
+        CommandGroup(replacing: .undoRedo) {
+            if let editor = mainWindow?.spliceEditor, mainWindow?.isEditingText != true {
+                Button(editor.undoManager.undoMenuItemTitle, action: editor.undo)
+                    .keyboardShortcut("z", modifiers: .command)
+                    .disabled(!editor.canUndo)
+                Button(editor.undoManager.redoMenuItemTitle, action: editor.redo)
+                    .keyboardShortcut("z", modifiers: [.command, .shift])
+                    .disabled(!editor.canRedo)
+            } else {
+                // Replacing the group removes the system items, so these mirror them: the title
+                // names the action and the item is disabled when there is nothing to undo.
+                let state = UndoMenuState.shared
+                Button(state.undoTitle) { NSApp.sendAction(Selector(("undo:")), to: nil, from: nil) }
+                    .keyboardShortcut("z", modifiers: .command)
+                    .disabled(!state.canUndo || mainWindow?.isApplyingSessionEdit == true)
+                Button(state.redoTitle) { NSApp.sendAction(Selector(("redo:")), to: nil, from: nil) }
+                    .keyboardShortcut("z", modifiers: [.command, .shift])
+                    .disabled(!state.canRedo || mainWindow?.isApplyingSessionEdit == true)
+            }
+        }
+    }
+}
+
+/// The key window's undo state, as the system Undo and Redo items would show it. Refreshed on
+/// undo-manager and key-window changes, and on window updates so a focus change into or out of a
+/// text field is picked up.
+@MainActor
+@Observable
+final class UndoMenuState {
+    static let shared = UndoMenuState(observing: .default)
+
+    private(set) var undoTitle = "Undo"
+    private(set) var redoTitle = "Redo"
+    private(set) var canUndo = false
+    private(set) var canRedo = false
+    @ObservationIgnored private var observers: [NSObjectProtocol] = []
+
+    init(observing center: NotificationCenter?) {
+        guard let center else { return }
+        let names: [Notification.Name] = [
+            .NSUndoManagerCheckpoint, .NSUndoManagerDidUndoChange,
+            .NSUndoManagerDidRedoChange, .NSUndoManagerDidCloseUndoGroup,
+            NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification, NSWindow.didUpdateNotification,
+        ]
+        observers = names.map { name in
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refresh() }
+            }
+        }
+    }
+
+    func refresh() {
+        refresh(from: NSApp.keyWindow?.firstResponder?.undoManager)
+    }
+
+    /// Assigns only changed values, so the frequent window-update refresh rebuilds no menus.
+    func refresh(from manager: UndoManager?) {
+        let undo = manager?.undoMenuItemTitle ?? "Undo"
+        let redo = manager?.redoMenuItemTitle ?? "Redo"
+        let canUndo = manager?.canUndo ?? false
+        let canRedo = manager?.canRedo ?? false
+        if undoTitle != undo { undoTitle = undo }
+        if redoTitle != redo { redoTitle = redo }
+        if self.canUndo != canUndo { self.canUndo = canUndo }
+        if self.canRedo != canRedo { self.canRedo = canRedo }
     }
 }

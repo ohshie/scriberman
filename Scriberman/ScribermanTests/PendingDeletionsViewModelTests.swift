@@ -326,7 +326,7 @@ final class PendingDeletionsViewModelTests {
         await viewModel.refresh()
         viewModel.open()
 
-        let result = await viewModel.removeNow(try row(second))
+        let result = await viewModel.removeNow(try row(second), context: context)
 
         #expect(result == .removed)
         #expect(!FileManager.default.fileExists(atPath: holding.heldFolder(for: second).path))
@@ -341,7 +341,7 @@ final class PendingDeletionsViewModelTests {
         await viewModel.refresh()
         viewModel.open()
 
-        _ = await viewModel.removeNow(try row(id))
+        _ = await viewModel.removeNow(try row(id), context: context)
 
         #expect(!viewModel.isOpen)
         #expect(!viewModel.isEntryEnabled)
@@ -352,7 +352,7 @@ final class PendingDeletionsViewModelTests {
         let id = try await deleteRecording(title: "Gone")
         await viewModel.refresh()
 
-        _ = await viewModel.removeNow(try row(id))
+        _ = await viewModel.removeNow(try row(id), context: context)
 
         #expect(!undoManager.canUndo)
         undoManager.undo()
@@ -366,7 +366,7 @@ final class PendingDeletionsViewModelTests {
         await viewModel.refresh()
         announcements.removeAll()
 
-        _ = await viewModel.removeNow(try row(id))
+        _ = await viewModel.removeNow(try row(id), context: context)
 
         #expect(announcements.isEmpty)
     }
@@ -377,7 +377,7 @@ final class PendingDeletionsViewModelTests {
         await viewModel.refresh()
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: holding.url.path)
 
-        let result = await viewModel.removeNow(try row(id))
+        let result = await viewModel.removeNow(try row(id), context: context)
 
         #expect(result == .folderLeft(holding.heldFolder(for: id)))
     }

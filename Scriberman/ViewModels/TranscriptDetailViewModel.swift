@@ -11,6 +11,7 @@ final class TranscriptDetailViewModel {
     private let store: SpeakerEmbeddingStore?
     private let markdownRenderer = MarkdownRenderer()
     private let saveContext: @MainActor (ModelContext) throws -> Void
+    private let writeSpeakerData: (Data, URL) throws -> Void
     /// The app's one runner, so a session runs one transformation at a time across every window.
     private let aiTransformationRunner: AITransformationRunner
 
@@ -49,8 +50,10 @@ final class TranscriptDetailViewModel {
         store: SpeakerEmbeddingStore? = nil,
         transcript: Transcript? = nil,
         saveContext: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() },
-        aiTransformationRunner: AITransformationRunner? = nil
+        aiTransformationRunner: AITransformationRunner? = nil,
+        writeSpeakerData: @escaping (Data, URL) throws -> Void = { try $0.write(to: $1, options: .atomic) }
     ) {
+        self.writeSpeakerData = writeSpeakerData
         self.session = session
         self.aiProviderService = aiProviderService
         self.promptStore = promptStore
@@ -202,6 +205,7 @@ final class TranscriptDetailViewModel {
         do {
             operationID = try aiTransformationRunner.start(prompt: selectedPrompt, on: session)
         } catch {
+            if error == .busy { transformationErrorMessage = SpliceCopy.errorMessage(SpliceError.busy) }
             return
         }
         transformationErrorMessage = nil
@@ -303,6 +307,12 @@ final class TranscriptDetailViewModel {
         guard let shownTranscript else { return nil }
         let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         let previousLabel = shownTranscript.speakers.first { $0.id == id }?.label
+        if let recording = session as? RecordingSession, recording.spliceGroupID != nil,
+           shownTranscript.spliceOriginSessionID != nil {
+            guard !name.isEmpty, let previousLabel, name != previousLabel else { return nil }
+            return renameLinkedSpeaker(id: id, to: name, in: shownTranscript, recording: recording,
+                teaches: previousLabel.lowercased() != name.lowercased(), undoManager: undoManager)
+        }
         guard !name.isEmpty, name != previousLabel,
               let updatedTranscript = Self.renameSpeaker(id: id, to: name, in: shownTranscript, of: session)
         else { return nil }
@@ -345,8 +355,8 @@ final class TranscriptDetailViewModel {
             registerSpeakerEditUndo(UndoActionName.mergeSpeaker, restoring: SpeakerEditState(transcript: original), over: updatedTranscript, undoManager: undoManager)
             return nil
         }
-        let source = Self.voiceprintSource(for: id, of: session)
-        let targetSource = Self.voiceprintSource(for: targetID, of: session)
+        let source = Self.partVoiceprintSource(for: id, of: session)
+        let targetSource = Self.partVoiceprintSource(for: targetID, of: session)
         let before = SpeakerEditState(transcript: original, sources: [source, targetSource])
         registerSpeakerEditUndo(UndoActionName.mergeSpeaker, restoring: before, over: updatedTranscript, undoManager: undoManager)
         return enqueueSpeakerMemoryUpdate(failure: "Teaching speaker memory a merge failed") {
@@ -369,7 +379,7 @@ final class TranscriptDetailViewModel {
             registerSpeakerEditUndo(UndoActionName.resetSpeaker, restoring: SpeakerEditState(transcript: shownTranscript), over: updatedTranscript, undoManager: undoManager)
             return nil
         }
-        let source = Self.voiceprintSource(for: id, of: session)
+        let source = Self.partVoiceprintSource(for: id, of: session)
         let before = SpeakerEditState(transcript: shownTranscript, sources: [source])
         registerSpeakerEditUndo(UndoActionName.resetSpeaker, restoring: before, over: updatedTranscript, undoManager: undoManager)
         return enqueueSpeakerMemoryUpdate(failure: "Removing a reset speaker from speaker memory failed") {
@@ -379,6 +389,61 @@ final class TranscriptDetailViewModel {
     }
 
     // MARK: - Undo
+
+    private final class LinkedSpeakerEditState {
+        let change: SpliceSpeakerRename
+        let sources: Set<VoiceprintSource>
+        var memory: SpeakerMemorySnapshot?
+        init(change: SpliceSpeakerRename, sources: Set<VoiceprintSource>) {
+            self.change = change
+            self.sources = sources
+        }
+    }
+
+    private func renameLinkedSpeaker(
+        id: String, to name: String, in transcript: Transcript, recording: RecordingSession,
+        teaches: Bool, undoManager: UndoManager?
+    ) -> Task<Void, Never>? {
+        let change: SpliceSpeakerRename
+        do {
+            change = try SpliceSpeakerRename(session: recording, transcript: transcript, speakerID: id, name: name)
+            try change.apply(saveContext: saveContext, writeData: writeSpeakerData)
+        } catch {
+            Self.logger.error("Renaming a linked speaker failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+        shownTranscript = session.displayedTranscript
+        let source = Self.voiceprintSource(for: id, of: session)
+        let state = LinkedSpeakerEditState(change: change.reversed, sources: teaches && store != nil ? [source] : [])
+        registerLinkedSpeakerUndo(state, undoManager: undoManager)
+        guard let store, teaches, let updated = shownTranscript else { return nil }
+        return enqueueSpeakerMemoryUpdate(failure: "Teaching speaker memory a linked rename failed") {
+            state.memory = try await store.snapshot(of: state.sources)
+            try await Self.updateSpeakerMemory(forRenaming: id, to: name, in: updated, source: source, store: store)
+        }
+    }
+
+    private func registerLinkedSpeakerUndo(_ state: LinkedSpeakerEditState, undoManager: UndoManager?) {
+        guard let undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { [weak undoManager] _ in
+            guard Self.isStored(self.session) else { return }
+            do {
+                try state.change.apply(saveContext: self.saveContext, writeData: self.writeSpeakerData)
+            } catch {
+                Self.logger.error("Undoing a linked speaker rename failed: \(error.localizedDescription, privacy: .public)")
+                return
+            }
+            self.shownTranscript = self.session.displayedTranscript
+            let opposite = LinkedSpeakerEditState(change: state.change.reversed, sources: state.sources)
+            self.registerLinkedSpeakerUndo(opposite, undoManager: undoManager)
+            guard let store = self.store, !state.sources.isEmpty else { return }
+            self.enqueueSpeakerMemoryUpdate(failure: "Restoring speaker memory for a linked rename failed") {
+                opposite.memory = try await store.snapshot(of: state.sources)
+                if let memory = state.memory { try await store.restore(memory) }
+            }
+        }
+        undoManager.setActionName(UndoActionName.renameSpeaker)
+    }
 
     /// One side of a speaker edit, for undo and redo: the displayed transcript and what speaker
     /// memory held for the edit's voiceprint sources. `memory` is filled in by the memory update
@@ -422,7 +487,8 @@ final class TranscriptDetailViewModel {
     ) {
         // A deleted session, or a transcript changed since by a retranscription or a restore, is
         // left as it is.
-        guard !(wasStored && !Self.isStored(session)), session.displayedTranscript == current else {
+        guard !SpliceReservations.shared.isReserved(session),
+              !(wasStored && !Self.isStored(session)), session.displayedTranscript == current else {
             Self.logger.notice("Skipped undoing a speaker edit: the transcript changed since.")
             return
         }
@@ -440,14 +506,16 @@ final class TranscriptDetailViewModel {
         }
     }
 
-    /// Runs `operation` after every speaker memory update queued before it, then reloads the
-    /// profiles.
+    /// Snapshot and teaching are ordered across detail view models, including edits in other parts.
+    private static var lastSpeakerMemoryUpdate: Task<Void, Never>?
+
+    /// Runs `operation` after every speaker memory update queued before it, then reloads profiles.
     @discardableResult
     private func enqueueSpeakerMemoryUpdate(
         failure: String,
         _ operation: @escaping @MainActor () async throws -> Void
     ) -> Task<Void, Never> {
-        let previous = speakerMemoryUpdate
+        let previous = Self.lastSpeakerMemoryUpdate
         let task = Task {
             await previous?.value
             do {
@@ -458,6 +526,7 @@ final class TranscriptDetailViewModel {
             }
         }
         speakerMemoryUpdate = task
+        Self.lastSpeakerMemoryUpdate = task
         return task
     }
 
@@ -483,6 +552,7 @@ extension TranscriptDetailViewModel {
         in transcript: Transcript,
         of session: any TranscribableSession
     ) -> Transcript? {
+        guard !SpliceReservations.shared.isReserved(session) else { return nil }
         var base = transcript
         let targetID: String
         if let speakerID {
@@ -504,6 +574,7 @@ extension TranscriptDetailViewModel {
         in transcript: Transcript,
         of session: any TranscribableSession
     ) -> Transcript? {
+        guard !SpliceReservations.shared.isReserved(session) else { return nil }
         guard let updatedTranscript = TranscriptSpeakerEditing.merge(id, into: targetID, in: transcript) else { return nil }
         writeDisplayed(updatedTranscript, to: session)
         return updatedTranscript
@@ -512,6 +583,7 @@ extension TranscriptDetailViewModel {
     /// Resets speaker `id` in `transcript` and writes the result to `session`'s displayed pass.
     /// `nil` when the speaker is missing.
     static func resetSpeaker(_ id: String, in transcript: Transcript, of session: any TranscribableSession) -> Transcript? {
+        guard !SpliceReservations.shared.isReserved(session) else { return nil }
         guard let updatedTranscript = TranscriptSpeakerEditing.reset(id, in: transcript) else { return nil }
         writeDisplayed(updatedTranscript, to: session)
         return updatedTranscript
@@ -541,6 +613,14 @@ extension TranscriptDetailViewModel {
 
     /// The source of the voiceprints speaker `id` of `session`'s displayed pass teaches.
     static func voiceprintSource(for id: String, of session: any TranscribableSession) -> VoiceprintSource {
+        VoiceprintSource(sessionID: session.displayedTranscript?.spliceOriginSessionID ?? session.id,
+            pass: displayedPass(of: session), speakerID: id)
+    }
+
+    /// The source of what a merge or reset of speaker `id` teaches. These edits change only this
+    /// part's transcript, so they keep to this part's own source and leave what the other parts of
+    /// a splice group taught alone.
+    static func partVoiceprintSource(for id: String, of session: any TranscribableSession) -> VoiceprintSource {
         VoiceprintSource(sessionID: session.id, pass: displayedPass(of: session), speakerID: id)
     }
 
@@ -572,13 +652,24 @@ extension TranscriptDetailViewModel {
     /// Renames a speaker in `transcript` and writes the result to `session`'s displayed pass.
     /// Returns the updated transcript, or `nil` when the speaker is not in it.
     ///
-    /// `session` is the only session written: the caller passes the one the view belongs to.
+    /// A sliced pass also updates its linked group and manifest. Other passes stay local.
     static func renameSpeaker(
         id: String,
         to newName: String,
         in transcript: Transcript,
         of session: any TranscribableSession
     ) -> Transcript? {
+        guard !SpliceReservations.shared.isReserved(session) else { return nil }
+        if let recording = session as? RecordingSession, recording.spliceGroupID != nil, transcript.spliceOriginSessionID != nil {
+            do {
+                let change = try SpliceSpeakerRename(session: recording, transcript: transcript, speakerID: id, name: newName)
+                try change.apply(saveContext: { try $0.save() }, writeData: { try $0.write(to: $1, options: .atomic) })
+                return session.displayedTranscript
+            } catch {
+                Self.logger.error("Renaming a linked speaker failed: \(error.localizedDescription, privacy: .public)")
+                return nil
+            }
+        }
         guard let updatedTranscript = TranscriptSpeakerEditing.rename(id, to: newName, in: transcript) else { return nil }
         writeDisplayed(updatedTranscript, to: session)
         return updatedTranscript
@@ -640,6 +731,7 @@ extension TranscriptDetailViewModel {
         context: ModelContext,
         saveContext: @MainActor (ModelContext) throws -> Void = { try $0.save() }
     ) -> TitleCommitResult {
+        guard !SpliceReservations.shared.isReserved(session) else { return .saveFailed(SpliceCopy.errorMessage(SpliceError.busy)) }
         session.title = title
         do {
             try saveContext(context)

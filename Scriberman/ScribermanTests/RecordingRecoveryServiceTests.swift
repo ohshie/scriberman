@@ -108,7 +108,7 @@ final class RecordingRecoveryServiceTests {
         let service = RecordingRecoveryService(
             workspaceService: workspaceService,
             modelContainer: container,
-            performMixdown: { _, _, _, _ in }
+            performMixdown: { _, appURL, _, _ in #expect(appURL == nil) }
         )
 
         await service.sweepIncompleteSessions()
@@ -118,6 +118,7 @@ final class RecordingRecoveryServiceTests {
         let recovered = try #require(fetched.first(where: { $0.id == sessionID }))
         #expect(recovered.status == .recorded)
         #expect(recovered.mixdownURL != nil)
+        #expect(recovered.appAudioURL == nil)
     }
 
     @Test
@@ -583,7 +584,7 @@ final class RecordingRecoveryServiceTests {
         let context = ModelContext(container)
         context.insert(makeSessionAwaitingMixdown(in: folder, audioSyncFlags: AudioSyncFlags(
             isTimelineMixdownEnabled: timeline,
-            isUnifiedCaptureEnabled: true,
+
             isCaptureHealthRecoveryEnabled: true
         )))
         try context.save()
@@ -619,7 +620,7 @@ final class RecordingRecoveryServiceTests {
         let context = ModelContext(container)
         context.insert(try makeSessionAwaitingScreenMux(in: folder, audioSyncFlags: AudioSyncFlags(
             isTimelineMixdownEnabled: timeline,
-            isUnifiedCaptureEnabled: true,
+
             isCaptureHealthRecoveryEnabled: true
         )))
         try context.save()

@@ -44,7 +44,12 @@ func rewriteTranscriptMarkdown(for session: RecordingSession, end: Float? = nil)
 }
 
 /// `rewriteTranscriptMarkdown`, reporting a failed write instead of ignoring it.
-func writeTranscriptMarkdown(for session: RecordingSession, end: Float? = nil) throws {
+func writeTranscriptMarkdown(
+    for session: RecordingSession,
+    end: Float? = nil,
+    writeEmpty: Bool = false,
+    writeData: (Data, URL) throws -> Void = { try $0.write(to: $1, options: .atomic) }
+) throws {
     let rows: [MarkdownRenderer.Row]
     if let transcript = session.displayedTranscript {
         rows = MarkdownRenderer.rows(for: transcript)
@@ -54,7 +59,7 @@ func writeTranscriptMarkdown(for session: RecordingSession, end: Float? = nil) t
             .map(liveRow(for:))
     }
     let fileURL = transcriptMarkdownURL(for: session)
-    guard !rows.isEmpty || FileManager.default.fileExists(atPath: fileURL.path) else { return }
+    guard writeEmpty || !rows.isEmpty || FileManager.default.fileExists(atPath: fileURL.path) else { return }
 
     let kept = rows.compactMap { row -> MarkdownRenderer.Row? in
         guard let end else { return row }
@@ -64,7 +69,7 @@ func writeTranscriptMarkdown(for session: RecordingSession, end: Float? = nil) t
         return capped
     }
     let contents = MarkdownRenderer().renderMarkdown(session: session, rows: kept)
-    try contents.write(to: fileURL, atomically: true, encoding: .utf8)
+    try writeData(Data(contents.utf8), fileURL)
 }
 
 func transcriptMarkdownURL(for session: RecordingSession) -> URL {

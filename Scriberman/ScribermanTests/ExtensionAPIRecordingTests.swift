@@ -51,6 +51,8 @@ struct ExtensionAPIRecordingTests {
                 configurations: ModelConfiguration(isStoredInMemoryOnly: true)
             )
             context = ModelContext(container)
+            // The sessions routes read the store the recordings are saved in.
+            api.sessionContainer = container
             recordingService.persistsSessionsIn = container
             recordingService.isRecordingOverride = true
 
@@ -211,13 +213,16 @@ struct ExtensionAPIRecordingTests {
         let work = try fixture.tag("Work")
         let mic = AudioInputDevice(id: 4, uid: "mic-usb", name: "USB Mic")
         fixture.audioDeviceService.availableDevices = [mic]
+        fixture.recordingService.capturedMicrophoneOverride = .capturing(
+            CapturedMicDevice(uid: "mic-usb", name: "USB Mic", isSystemDefault: false)
+        )
         let start = await fixture.send(
             "POST", "/v1/recordings",
             json: #"{"title": "Standup", "microphoneUid": "mic-usb", "tagIds": ["\#(work.id.uuidString)"]}"#
         )
         let started = try decode(StartBody.self, start)
 
-        let response = await fixture.send("GET", "/v1/status")
+        let response = await statusOnceMicrophoneIs("mic-usb", fixture)
 
         #expect(response.status == 200)
         let body = try decode(StatusBody.self, response)
@@ -226,6 +231,55 @@ struct ExtensionAPIRecordingTests {
         #expect(body.session?.title == "Standup")
         #expect(body.session?.tags == [TagBody(id: work.id.uuidString, name: "Work")])
         #expect(body.capture == CaptureBody(microphoneUid: "mic-usb", appBundleId: nil, displayId: nil))
+    }
+
+    /// The status once its microphone UID is `uid`; the recording monitor polls the captured mic.
+    private func statusOnceMicrophoneIs(_ uid: String?, _ fixture: Fixture) async -> HTTPResponse {
+        let deadline = Date().addingTimeInterval(5)
+        var response = await fixture.send("GET", "/v1/status")
+        while Date() < deadline,
+              (try? decode(StatusBody.self, response).capture?.microphoneUid) != .some(uid) {
+            try? await Task.sleep(for: .milliseconds(20))
+            response = await fixture.send("GET", "/v1/status")
+        }
+        return response
+    }
+
+    @Test
+    func statusReportsTheCapturedMicNotTheOneChosenAtStart() async throws {
+        let fixture = try Fixture()
+        try await fixture.pair()
+        fixture.audioDeviceService.availableDevices = [AudioInputDevice(id: 4, uid: "mic-usb", name: "USB Mic")]
+        fixture.recordingService.capturedMicrophoneOverride = .capturing(
+            CapturedMicDevice(uid: "built-in", name: "MacBook Pro Microphone", isSystemDefault: true)
+        )
+        let start = try decode(
+            StartBody.self,
+            await fixture.send("POST", "/v1/recordings", json: #"{"title": "Call", "microphoneUid": "mic-usb"}"#)
+        )
+        #expect(start.capture.microphoneUid == "mic-usb")
+
+        let body = try decode(StatusBody.self, await statusOnceMicrophoneIs("built-in", fixture))
+
+        #expect(body.capture == CaptureBody(microphoneUid: "built-in", appBundleId: nil, displayId: nil))
+    }
+
+    @Test(arguments: [CapturedMicrophone.switching, .unknown])
+    func statusReportsNoMicWhileSwitchingOrUnknown(_ captured: CapturedMicrophone) async throws {
+        let fixture = try Fixture()
+        try await fixture.pair()
+        fixture.audioDeviceService.availableDevices = [AudioInputDevice(id: 4, uid: "mic-usb", name: "USB Mic")]
+        fixture.recordingService.capturedMicrophoneOverride = .capturing(
+            CapturedMicDevice(uid: "mic-usb", name: "USB Mic", isSystemDefault: false)
+        )
+        _ = await fixture.send("POST", "/v1/recordings", json: #"{"title": "Call", "microphoneUid": "mic-usb"}"#)
+        _ = await statusOnceMicrophoneIs("mic-usb", fixture)
+
+        fixture.recordingService.capturedMicrophoneOverride = captured
+        let body = try decode(StatusBody.self, await statusOnceMicrophoneIs(nil, fixture))
+
+        #expect(body.state == "recording")
+        #expect(body.capture == CaptureBody(microphoneUid: nil, appBundleId: nil, displayId: nil))
     }
 
     @Test
@@ -689,6 +743,25 @@ struct ExtensionAPIRecordingTests {
     }
 
     @Test
+    func renameAndTagWorkWhilePaused() async throws {
+        let fixture = try Fixture()
+        try await fixture.pair()
+        let ops = try fixture.tag("Ops")
+        let started = try await startRecording(fixture)
+        try #require(await fixture.coordinator.pause().isSuccess)
+
+        let response = await fixture.send(
+            "PATCH", "/v1/recordings/current",
+            json: #"{"title": "Paused call", "tagIds": ["\#(ops.id.uuidString)"]}"#
+        )
+
+        #expect(response.status == 200)
+        let stored = try persisted(fixture, started.id)
+        #expect(stored?.title == "Paused call")
+        #expect(tagIDs(stored) == [ops.id])
+    }
+
+    @Test
     func renameAndTagTogetherApplyBoth() async throws {
         let fixture = try Fixture()
         try await fixture.pair()
@@ -935,5 +1008,12 @@ final class GatedWorkspaceService: WorkspaceServiceProtocol, @unchecked Sendable
             }
         }
         return try result.get()
+    }
+}
+
+private extension Result where Failure == CaptureCoordinator.TransitionError {
+    var isSuccess: Bool {
+        if case .success = self { return true }
+        return false
     }
 }

@@ -8,7 +8,9 @@ import SwiftData
 protocol ScreenCaptureSessionControlling: AnyObject, Sendable {
     var onError: (@Sendable (Error) -> Void)? { get set }
     var videoStartHostTime: HostNanoseconds? { get }
-    func start(displayID: CGDirectDisplayID, videoURL: URL) async throws
+    func start(displayID: CGDirectDisplayID, videoURL: URL, pauseClock: RecordingPauseClock) async throws
+    func recordingDidPause()
+    func recordingDidResume()
     func stop() async
 }
 

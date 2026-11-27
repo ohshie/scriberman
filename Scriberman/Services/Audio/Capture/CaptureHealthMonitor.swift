@@ -37,13 +37,44 @@ struct CaptureHealthMonitor: Equatable {
         /// Monotonically increasing. An increase since the last tick means a capture stream
         /// reported that it stopped, which is direct evidence of death rather than an inference.
         var streamFailureCount: Int
+        /// How many of `streamFailureCount` were already dealt with elsewhere, by a resume that
+        /// checked and restarted capture. Those are not acted on again.
+        var handledStreamFailureCount: Int
 
-        init(micFrames: Int64?, appFrames: Int64?, streamFailureCount: Int = 0) {
+        /// The latest removal of the captured mic or switch to another device, if any.
+        var lastMicTransition: MicTransition?
+        /// Writes that failed since the recording began, for the failure log. Not judged here.
+        var micWriteFailures = 0
+        var appWriteFailures = 0
+
+        init(micFrames: Int64?, appFrames: Int64?, streamFailureCount: Int = 0, handledStreamFailureCount: Int = 0) {
             self.micFrames = micFrames
             self.appFrames = appFrames
             self.streamFailureCount = streamFailureCount
+            self.handledStreamFailureCount = handledStreamFailureCount
         }
     }
+
+    /// A removal of the captured microphone, or a switch of capture to another device. `number`
+    /// increases with each transition, so one transition earns one grace period.
+    struct MicTransition: Equatable, Sendable {
+        let number: Int
+        let at: Date
+    }
+
+    /// What happened to the grace period on the most recent evaluation, for the caller to log.
+    enum GraceEvent: Equatable {
+        case started
+        /// Mic buffers arrived within it.
+        case recovered
+        /// It ran out with no mic buffers; the stall is handled as dead capture.
+        case expired
+    }
+
+    /// A mic stall that began this close to a transition gets a grace period instead of a restart.
+    static let graceWindowAroundTransition: TimeInterval = 2
+    /// How long the new device has to deliver mic buffers.
+    static let gracePeriod: TimeInterval = 5
 
     struct Configuration: Equatable {
         /// How long a measured source may go without its frame count advancing before it counts as
@@ -68,9 +99,18 @@ struct CaptureHealthMonitor: Equatable {
     private var appTracker = SourceTracker()
     private var lastSeenStreamFailureCount = 0
     private var hasSeenFirstTick = false
+    /// When the current grace period began; nil outside one.
+    private var graceStartedAt: Date?
+    /// The newest transition a grace period was already used for.
+    private var graceUsedForTransition = 0
+
+    private(set) var lastGraceEvent: GraceEvent?
 
     private(set) var restartsIssued = 0
     private(set) var consecutiveRestartsWithoutRecovery = 0
+    /// Restarts for a mic stall without the mic recovering in between. App frames do not reset it:
+    /// with live app audio and a dead mic, the shared counter above never reaches its limit.
+    private(set) var consecutiveMicStallRestarts = 0
     /// Whether this recording has been restarted at least once, for the session marker.
     var wasInterrupted: Bool { restartsIssued > 0 }
 
@@ -85,18 +125,21 @@ struct CaptureHealthMonitor: Equatable {
     ///   - snapshot: frame counts and the reported stream-failure count.
     ///   - isRecording: gates the whole monitor; a stopped recording resets it.
     mutating func update(now: Date, snapshot: Snapshot, isRecording: Bool) -> Effect {
+        lastGraceEvent = nil
         guard isRecording else {
             reset()
             return .none
         }
 
-        // First observation establishes the baseline. Nothing can be stalled yet.
+        // First observation establishes the baseline. Nothing can be stalled yet, but a failure
+        // reported before it is still a failure.
         guard hasSeenFirstTick else {
             hasSeenFirstTick = true
             micTracker.observe(count: snapshot.micFrames, at: now)
             appTracker.observe(count: snapshot.appFrames, at: now)
+            let streamFailed = snapshot.streamFailureCount > max(lastSeenStreamFailureCount, snapshot.handledStreamFailureCount)
             lastSeenStreamFailureCount = snapshot.streamFailureCount
-            return .none
+            return streamFailed ? restartOrFail(now: now) : .none
         }
 
         let micAdvanced = micTracker.observe(count: snapshot.micFrames, at: now)
@@ -106,8 +149,11 @@ struct CaptureHealthMonitor: Equatable {
         if micAdvanced || appAdvanced {
             consecutiveRestartsWithoutRecovery = 0
         }
+        if micAdvanced {
+            consecutiveMicStallRestarts = 0
+        }
 
-        let streamFailed = snapshot.streamFailureCount > lastSeenStreamFailureCount
+        let streamFailed = snapshot.streamFailureCount > max(lastSeenStreamFailureCount, snapshot.handledStreamFailureCount)
         lastSeenStreamFailureCount = snapshot.streamFailureCount
 
         // A reported stream error is direct evidence and does not wait out the stall threshold.
@@ -118,19 +164,70 @@ struct CaptureHealthMonitor: Equatable {
         // restarting to chase app audio would tear down a healthy microphone — and the usual cause
         // is that the captured application quit or never activated an audio session, which is
         // already handled at stop by `RecordingStartVerifier.shouldFinalizeWithoutAppAudio`.
-        let isDead = streamFailed || micTracker.isStalled(now: now, threshold: configuration.stallThreshold)
-        guard isDead else {
+        if streamFailed {
+            return restartOrFail(now: now)
+        }
+        if graceStartedAt != nil, micAdvanced {
+            graceStartedAt = nil
+            lastGraceEvent = .recovered
+        }
+        if let graceStartedAt {
+            guard now.timeIntervalSince(graceStartedAt) > Self.gracePeriod else {
+                return .none
+            }
+            lastGraceEvent = .expired
+            return restartOrFail(now: now, forMicStall: true)
+        }
+        guard micTracker.isStalled(now: now, threshold: configuration.stallThreshold) else {
             return .none
         }
+        if startsGracePeriod(now: now, transition: snapshot.lastMicTransition) {
+            return .none
+        }
+        return restartOrFail(now: now, forMicStall: true)
+    }
 
+    /// Restarts the stall clocks without touching the restart budget. For a resume: no frames are
+    /// written during a pause, so the time it lasted is not a stall.
+    mutating func restartStallClocks(at now: Date) {
+        micTracker.deferJudgement(to: now)
+        appTracker.deferJudgement(to: now)
+        // A grace period running when the pause began gets its full length again.
+        if graceStartedAt != nil {
+            graceStartedAt = now
+        }
+    }
+
+    /// Starts a grace period when the mic stall began within the window around a transition that
+    /// has not had one yet.
+    private mutating func startsGracePeriod(now: Date, transition: MicTransition?) -> Bool {
+        guard let transition, transition.number > graceUsedForTransition,
+              let stallBegan = micTracker.lastAdvancedAt,
+              abs(transition.at.timeIntervalSince(stallBegan)) <= Self.graceWindowAroundTransition
+        else {
+            return false
+        }
+        graceUsedForTransition = transition.number
+        graceStartedAt = now
+        lastGraceEvent = .started
+        return true
+    }
+
+    /// Capture is dead: restart within the budget, or give up.
+    private mutating func restartOrFail(now: Date, forMicStall: Bool = false) -> Effect {
         guard consecutiveRestartsWithoutRecovery < configuration.consecutiveRestartLimit,
+              !forMicStall || consecutiveMicStallRestarts < configuration.consecutiveRestartLimit,
               restartsIssued < configuration.totalRestartLimit
         else {
             return .fail
         }
 
+        graceStartedAt = nil
         restartsIssued += 1
         consecutiveRestartsWithoutRecovery += 1
+        if forMicStall {
+            consecutiveMicStallRestarts += 1
+        }
         // Give the restart a full threshold to prove itself rather than judging it against the
         // clock of the capture it replaced.
         micTracker.deferJudgement(to: now)
@@ -145,12 +242,15 @@ struct CaptureHealthMonitor: Equatable {
         hasSeenFirstTick = false
         restartsIssued = 0
         consecutiveRestartsWithoutRecovery = 0
+        consecutiveMicStallRestarts = 0
+        graceStartedAt = nil
+        graceUsedForTransition = 0
     }
 
     /// Tracks one source's frame count and when it last advanced.
     private struct SourceTracker: Equatable {
         private var lastCount: Int64?
-        private var lastAdvancedAt: Date?
+        private(set) var lastAdvancedAt: Date?
 
         /// Records an observation. Returns whether the count advanced.
         ///

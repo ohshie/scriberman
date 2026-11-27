@@ -184,24 +184,8 @@ struct CaptureStreamFailureReportingTests {
         #expect(stream.stopCallCount == 0)
     }
 
-    // MARK: - AppAudioCaptureSession
 
-    @Test
-    func testLegacyAppSessionReportsNonTCCStreamError() {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let session = AppAudioCaptureSession(
-            fileURL: root.appendingPathComponent("app.wav"),
-            processID: 1234,
-            notificationCenter: NotificationCenter()
-        )
-        let box = ErrorBox()
-        session.onStreamStopped = { [box] error in box.record(error) }
 
-        session.handleStreamStoppedForTesting(Self.connectionInterruptedError())
-
-        #expect(box.errors == ["Failed during stream due to application connection being interrupted"])
-    }
 
     // MARK: - RecordingService.pendingError
 
@@ -213,8 +197,7 @@ struct CaptureStreamFailureReportingTests {
         )
         return RecordingService(
             workspaceService: MockWorkspaceService(),
-            modelContainer: container,
-            appAudioSettings: AppAudioSettings()
+            modelContainer: container
         )
     }
 
