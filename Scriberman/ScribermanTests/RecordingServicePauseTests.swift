@@ -331,6 +331,40 @@ struct RecordingServicePauseTests {
         #expect(chunks.allSatisfy { $0.source == .mic })
     }
 
+    /// Removal with a 1 s outage, a pause, and a return, on a mic-only recording: live chunks and
+    /// the saved timing keep every buffer at its capture time, so transcript times match the audio.
+    @Test
+    func micOnlyLiveChunksAndTimingKeepCaptureTimesAcrossSwitchesAndAPause() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.remove() }
+        let id = try await fixture.start(micDeviceID: 2, preferredMic: "device-b")
+        let start = fixture.time.host.nanoseconds
+        try fixture.sendMic(Self.before)
+        fixture.hardware.unplug("device-b")
+        await fixture.service.simulateHardwareChangeForTesting()
+        fixture.time.advance(ms: 1_000)
+        try fixture.sendMic(Self.after)
+        #expect(await fixture.service.pauseRecording())
+        try fixture.sendMic(Self.paused)
+        #expect(await fixture.service.resumeRecording())
+        fixture.hardware.plug("device-b", id: 4)
+        await fixture.service.simulateHardwareChangeForTesting()
+        try fixture.sendMic(Self.before)
+        #expect(await fixture.service.stopRecording() == id)
+
+        let chunks = await fixture.chunks()
+        #expect(sequence(chunks, .mic) == ["audio", "audio", "1", "audio"])
+        #expect(chunks.allSatisfy { $0.source == .mic })
+        let audioTimes = chunks.compactMap { $0.hostTime?.nanoseconds }.map { ($0 - start) / 1_000_000 }
+        // 0 ms, after the 1 s outage at 1 020 ms, then the paused 20 ms are removed: 1 040 ms.
+        #expect(audioTimes == [0, 1_020, 1_040])
+
+        let micURL = URL(fileURLWithPath: try fixture.session(id).micAudioURL)
+        let sidecar = try #require(AudioFileStreamer.loadTimingSidecar(for: micURL))
+        #expect(sidecar.segments.map { ($0.startHostTimeNanos - start) / 1_000_000 } == [0, 1_020, 1_040])
+        #expect(sidecar.totalFrames == (try samples(micURL.path)).count)
+    }
+
     @Test
     func micOnlyStartVerificationRestartKeepsAppAbsent() async throws {
         let fixture = try await makeFixture()
