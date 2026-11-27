@@ -12,6 +12,15 @@ import OSLog
 /// file.
 struct SessionFailureLogWriter {
     struct Failure {
+        /// What failed. Each kind has its own header line.
+        enum Kind: Equatable {
+            /// No audio frames were written at the start, and a restart did not help.
+            case startVerification
+            /// Capture died mid-recording and capture-health restarts did not bring it back.
+            case restartsExhausted
+        }
+
+        let kind: Kind
         let sessionID: UUID
         let startedAt: Date
         let micFrames: Int64?
@@ -58,7 +67,7 @@ struct SessionFailureLogWriter {
         started: \(ISO8601DateFormatter().string(from: failure.startedAt))
         written: \(ISO8601DateFormatter().string(from: Date()))
 
-        Recording start verification failed: no audio frames were written.
+        \(Self.header(for: failure.kind))
         mic frames:          \(failure.micFrames.map(String.init) ?? "unavailable")
         app frames:          \(failure.appFrames.map(String.init) ?? "not captured")
         mic write failures:  \(failure.micWriteFailures)
@@ -78,6 +87,15 @@ struct SessionFailureLogWriter {
             out += "--- log entries unavailable ---\n"
         }
         return out
+    }
+
+    private static func header(for kind: Failure.Kind) -> String {
+        switch kind {
+        case .startVerification:
+            "Recording failed to start: no audio."
+        case .restartsExhausted:
+            "Recording stopped: audio capture did not recover."
+        }
     }
 
     private static func unifiedLogEntries(since: Date) -> [String]? {

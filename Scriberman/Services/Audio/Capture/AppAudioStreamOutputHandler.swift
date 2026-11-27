@@ -5,6 +5,13 @@ import ScreenCaptureKit
 
 // @unchecked Sendable: all mutable state protected by NSLock and internal DispatchQueue
 final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Sendable {
+    // One handler belongs to one stream generation. Retirement waits for an admitted callback
+    // before the writers can be closed or handed to the next generation.
+    private let callbackLock = NSLock()
+    private var retired = false
+
+    func invalidate() { callbackLock.withLock { retired = true } }
+
     private let lock = NSLock()
     private var fileURL: URL?
     /// Injected so a mid-session capture restart can rebuild the stream and its handlers while
@@ -105,6 +112,9 @@ final class AppAudioStreamOutputHandler: NSObject, SCStreamOutput, @unchecked Se
 #endif
 
     private func process(_ sampleBuffer: CMSampleBuffer) {
+        callbackLock.lock()
+        defer { callbackLock.unlock() }
+        guard !retired else { return }
         gate.recordArrival()
         guard layoutTracker.admit(sampleBuffer) else {
             return

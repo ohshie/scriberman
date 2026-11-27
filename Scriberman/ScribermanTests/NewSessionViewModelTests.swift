@@ -413,6 +413,37 @@ struct NewSessionViewModelTests {
     }
 
     @Test
+    func monitorFollowsTheCapturedMicrophoneAndForgetsItWhenTheRecordingEnds() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.permissionService.micStatus = .granted
+        fixture.recordingService.isRecordingOverride = true
+        fixture.recordingService.capturedMicrophoneOverride = .switching
+
+        await fixture.viewModel.startRecording(title: "Session", context: fixture.context)
+        await waitUntil { fixture.viewModel.capturedMicrophone == .switching }
+        #expect(fixture.viewModel.capturedMicrophone == .switching)
+        #expect(!fixture.viewModel.hasCapturedMicrophone)
+
+        let builtIn = CapturedMicrophone.capturing(
+            CapturedMicDevice(uid: "built-in", name: "Built-in Microphone", isSystemDefault: true)
+        )
+        fixture.recordingService.capturedMicrophoneOverride = builtIn
+        await waitUntil { fixture.viewModel.capturedMicrophone == builtIn }
+        #expect(fixture.viewModel.capturedMicrophone == builtIn)
+        #expect(fixture.viewModel.hasCapturedMicrophone)
+
+        fixture.recordingService.capturedMicrophoneOverride = .switching
+        await waitUntil { fixture.viewModel.capturedMicrophone == .switching }
+        #expect(fixture.viewModel.hasCapturedMicrophone)
+
+        fixture.recordingService.isRecordingOverride = false
+        await waitUntil { fixture.viewModel.state == .idle }
+        #expect(fixture.viewModel.capturedMicrophone == nil)
+        #expect(!fixture.viewModel.hasCapturedMicrophone)
+    }
+
+    @Test
     func resetReturnsTheLevelBoxToZero() async {
         let fixture = makeFixture()
         defer { fixture.cleanup() }
@@ -774,6 +805,43 @@ struct NewSessionViewModelTests {
 
         #expect(menuBarSettings.lastUsedMicUID == "uid-7")
         #expect(menuBarSettings.lastUsedAppBundleID == "com.apple.Music")
+    }
+
+    @Test
+    func startingWhileThePreferredMicIsAbsentCarriesItSeparatelyFromTheStartDevice() async throws {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
+        defer { cleanup() }
+        _ = (workspaceService, appAudioService)
+        permissionService.micStatus = .granted
+        let builtIn = AudioInputDevice(id: 1, uid: "builtin", name: "Built-in Mic")
+        audioDeviceService.availableDevices = [builtIn]
+        audioDeviceService.selectedDevice = builtIn
+        audioDeviceService.preferredDeviceUID = "airpods"
+
+        await viewModel.startRecording(title: "Session", context: context)
+
+        let call = try #require(recordingService.startCalls.first)
+        #expect(call.micDeviceID == 1)
+        #expect(call.preferredMicDeviceUID == "airpods")
+        #expect(menuBarSettings.lastUsedMicUID == "airpods")
+    }
+
+    @Test
+    func aStartRetriedOnTheDefaultInputKeepsThePreferredMic() async throws {
+        let (workspaceService, recordingService, audioDeviceService, appAudioService, permissionService, menuBarSettings, viewModel, context, _, cleanup) = makeFixture()
+        defer { cleanup() }
+        _ = (workspaceService, appAudioService)
+        permissionService.micStatus = .granted
+        let device = AudioInputDevice(id: 7, uid: "uid-7", name: "Desk Mic")
+        audioDeviceService.availableDevices = [device]
+        viewModel.selectedDevice = device
+        recordingService.startThrowSequence = [.failedToStart("explicit route")]
+
+        await viewModel.startRecording(title: "Session", context: context)
+
+        #expect(recordingService.startCalls.map(\.micDeviceID) == [7, nil])
+        #expect(recordingService.startCalls.map(\.preferredMicDeviceUID) == ["uid-7", "uid-7"])
+        #expect(menuBarSettings.lastUsedMicUID == "uid-7")
     }
 
     @Test
@@ -1740,19 +1808,17 @@ struct NewSessionViewModelTests {
         let keys = AudioSyncConfig.FlagDefinitions.shipped
 
         fixture.audioSyncStore.set(false, forKey: keys.timelineMixdown.key)
-        fixture.audioSyncStore.set(true, forKey: keys.unifiedCapture.key)
         fixture.audioSyncStore.set(false, forKey: keys.captureHealthRecovery.key)
         _ = await fixture.viewModel.startRecording(title: "first", context: fixture.context)
         _ = await fixture.viewModel.stopRecording(context: fixture.context)
 
         fixture.audioSyncStore.set(true, forKey: keys.timelineMixdown.key)
-        fixture.audioSyncStore.set(false, forKey: keys.unifiedCapture.key)
         fixture.audioSyncStore.set(true, forKey: keys.captureHealthRecovery.key)
         _ = await fixture.viewModel.startRecording(title: "second", context: fixture.context)
 
         #expect(fixture.recordingService.startCalls.map(\.audioSyncFlags) == [
-            AudioSyncFlags(isTimelineMixdownEnabled: false, isUnifiedCaptureEnabled: true, isCaptureHealthRecoveryEnabled: false),
-            AudioSyncFlags(isTimelineMixdownEnabled: true, isUnifiedCaptureEnabled: false, isCaptureHealthRecoveryEnabled: true)
+            AudioSyncFlags(isTimelineMixdownEnabled: false, isCaptureHealthRecoveryEnabled: false),
+            AudioSyncFlags(isTimelineMixdownEnabled: true, isCaptureHealthRecoveryEnabled: true)
         ])
     }
 
@@ -1858,6 +1924,58 @@ struct NewSessionViewModelTests {
         await waitUntil { presentations.contains(true) }
 
         #expect(presentations.contains(true))
+    }
+
+    /// The failure log of a recording stopped by capture health says so, with that recording's own
+    /// write-failure counts.
+    @Test
+    @MainActor
+    func testExhaustedRestartsWriteARestartsExhaustedFailureLogWithRealCounts() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        enableRecovery(fixture, consecutiveRestartLimit: 1)
+        var snapshot = CaptureHealthMonitor.Snapshot(micFrames: 512, appFrames: 7_495_680)
+        snapshot.micWriteFailures = 4
+        snapshot.appWriteFailures = 2
+        fixture.recordingService.captureHealthSnapshotQueue = [snapshot]
+        var written: [SessionFailureLogWriter.Failure] = []
+        fixture.viewModel.writeSessionFailureLog = { failure, _ in written.append(failure) }
+
+        _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
+        await waitUntil { fixture.viewModel.didFailToStartRecording }
+
+        #expect(written.count == 1)
+        let failure = written.first
+        #expect(failure?.kind == .restartsExhausted)
+        #expect(failure?.micFrames == 512)
+        #expect(failure?.appFrames == 7_495_680)
+        #expect(failure?.micWriteFailures == 4)
+        #expect(failure?.appWriteFailures == 2)
+        #expect(failure?.restartAttempted == true)
+    }
+
+    @Test
+    @MainActor
+    func testFailedStartWritesAStartVerificationFailureLogWithRealCounts() async {
+        let fixture = makeFixture()
+        defer { fixture.cleanup() }
+        fixture.viewModel.startVerificationDelay = .milliseconds(1)
+        fixture.recordingService.frameCountQueue = [(mic: 0, app: nil)]
+        fixture.recordingService.writeFailureCounts = (mic: 3, app: 1)
+        var written: [SessionFailureLogWriter.Failure] = []
+        fixture.viewModel.writeSessionFailureLog = { failure, _ in written.append(failure) }
+
+        _ = await fixture.viewModel.startRecording(title: "t", context: fixture.context)
+        await waitUntil { fixture.viewModel.didFailToStartRecording }
+
+        #expect(written.count == 1)
+        let failure = written.first
+        #expect(failure?.kind == .startVerification)
+        #expect(failure?.micFrames == 0)
+        #expect(failure?.appFrames == nil)
+        #expect(failure?.micWriteFailures == 3)
+        #expect(failure?.appWriteFailures == 1)
+        #expect(failure?.restartAttempted == true)
     }
 
     /// A restart that will not start is not a recovery: the budget keeps counting and the

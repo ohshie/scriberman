@@ -123,7 +123,6 @@ struct LiveTranscriptionPipelineSettingsTests {
         vm.vadMinSpeechDuration = 1.0
         vm.asrConfidenceGate = 0.5
         vm.asrAmplitudeGate = 0.03
-        audioSettings.voiceProcessingEnabled = true
 
         vm.resetAllPipelineSettingsToDefaults()
 
@@ -132,11 +131,9 @@ struct LiveTranscriptionPipelineSettingsTests {
         #expect(vm.vadMinSpeechDuration == d.vadMinSpeechDuration)
         #expect(vm.asrConfidenceGate == d.asrConfidenceGate)
         #expect(vm.asrAmplitudeGate == d.asrAmplitudeGate)
-        #expect(audioSettings.voiceProcessingEnabled == false)
 
         #expect(userDefaults.double(forKey: "vadThreshold") == d.vadThreshold)
         #expect(userDefaults.double(forKey: "vadMinSpeechDuration") == d.vadMinSpeechDuration)
-        #expect(audioUD.bool(forKey: "audio.voiceProcessingEnabled") == false)
     }
 
     /// Each per-row reset is offered only while its value differs from the default.
@@ -159,7 +156,6 @@ struct LiveTranscriptionPipelineSettingsTests {
         }
         #expect(vm.canResetAllPipelineSettings == false)
 
-        audioSettings.voiceProcessingEnabled = true
         vm.vadThreshold = 0.60
         vm.vadMinSpeechDuration = 1.0
         vm.asrConfidenceGate = 0.5
@@ -169,9 +165,7 @@ struct LiveTranscriptionPipelineSettingsTests {
         }
         #expect(vm.canResetAllPipelineSettings)
 
-        audioSettings.voiceProcessingEnabled = false
         vm.vadThreshold = d.vadThreshold
-        #expect(vm.canReset(.voiceProcessing) == false)
         #expect(vm.canReset(.vadThreshold) == false)
         #expect(vm.canReset(.vadMinSpeechDuration))
         #expect(vm.canResetAllPipelineSettings)

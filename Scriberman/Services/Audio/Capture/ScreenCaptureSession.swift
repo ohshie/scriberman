@@ -29,12 +29,15 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
         DispatchQueue
     ) throws -> any ScreenCaptureStreaming
 
-    struct CapturableDisplay {
+    struct CapturableDisplay: @unchecked Sendable {
         let displayID: CGDirectDisplayID
         let width: Int
         let height: Int
         let makeFilter: () -> SCContentFilter
     }
+
+    private struct DisplayList: @unchecked Sendable { let displays: [CapturableDisplay] }
+    private struct StreamReference: @unchecked Sendable { let stream: any ScreenCaptureStreaming }
 
     /// The newest complete frame captured during a pause, and where it goes if the display does
     /// not change after the pause.
@@ -61,6 +64,7 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
     // Owned by `sampleQueue`.
     private var stream: (any ScreenCaptureStreaming)?
     private var streamOutput: StreamOutput?
+    private var streamDelegate: GenerationDelegate?
     private var assetWriter: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
     private var lastFramePresentationTime: CMTime?
@@ -109,7 +113,17 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
     }
 
     func start(displayID: CGDirectDisplayID, videoURL: URL, pauseClock: RecordingPauseClock) async throws {
-        let displays = try await displayProvider()
+        let deadline = ContinuousClock.now + BoundedCaptureCall.startLimit
+        let startedGeneration = sampleQueue.sync { generation += 1; return generation }
+        let displays: [CapturableDisplay]
+        do {
+            displays = try await BoundedCaptureCall.run(
+                call: "shareableContent(video)", device: "display:\(displayID)", until: deadline
+            ) { [self] in DisplayList(displays: try await displayProvider()) }.displays
+        } catch is BoundedCaptureCall.TimedOut {
+            throw RecordingError.noAudioAtStart
+        }
+        guard sampleQueue.sync(execute: { generation == startedGeneration }) else { throw CancellationError() }
         guard let display = displays.first(where: { $0.displayID == displayID }) else {
             throw RecordingError.failedToStart("Selected display is not available for screen capture.")
         }
@@ -145,8 +159,8 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
 
         // The writer is in place before capture starts, so a frame delivered the moment the stream
         // comes up has somewhere to go.
-        let startedGeneration: Int = sampleQueue.sync {
-            generation += 1
+        try sampleQueue.sync {
+            guard generation == startedGeneration else { throw CancellationError() }
             assetWriter = writer
             videoInput = input
             self.videoURL = videoURL
@@ -158,31 +172,75 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
             heldFrame = nil
             hasStartedWriting = false
             frameCount = 0
-            return generation
         }
 
         let output = StreamOutput(session: self, generation: startedGeneration)
+        let delegate = GenerationDelegate(session: self, generation: startedGeneration)
+        let streamConfiguration = CaptureConfigurationReference(configuration: configuration)
         let stream: any ScreenCaptureStreaming
         do {
-            stream = try streamFactory(display, configuration, self, output, sampleQueue)
-            try await stream.startCapture()
+            let reference: StreamReference = try await BoundedCaptureCall.run(
+                call: "startCapture(video)", device: "display:\(displayID)", until: deadline,
+                onAbandon: { [self] in
+                    sampleQueue.sync {
+                        if generation == startedGeneration { generation += 1 }
+                    }
+                },
+                lateResult: { [self] result in
+                    if case .success(let reference) = result { await stopStream(reference, displayID: displayID) }
+                }
+            ) { [self] in
+                let stream = try streamFactory(display, streamConfiguration.configuration, delegate, output, sampleQueue)
+                do { try await stream.startCapture() }
+                catch {
+                    await stopStream(StreamReference(stream: stream), displayID: displayID)
+                    throw error
+                }
+                return StreamReference(stream: stream)
+            }
+            stream = reference.stream
         } catch {
             sampleQueue.sync {
-                guard generation == startedGeneration else { return }
+                // The timeout retires this generation before resuming the caller.
+                guard assetWriter === writer else { return }
                 clearWriterState()
             }
             writer.cancelWriting()
             try? FileManager.default.removeItem(at: videoURL)
+            if error is BoundedCaptureCall.TimedOut {
+                throw RecordingError.noAudioAtStart
+            }
             throw error
         }
 
-        sampleQueue.sync {
+        let adopted = sampleQueue.sync {
+            guard generation == startedGeneration else { return false }
             self.stream = stream
             streamOutput = output
+            streamDelegate = delegate
             if generation == startedGeneration, !pauseClock.isPaused {
                 armFrameDeliveryTimeout()
             }
+            return true
         }
+        if !adopted {
+            await stopStream(StreamReference(stream: stream), displayID: displayID)
+            throw CancellationError()
+        }
+    }
+
+    private func stopStream(
+        _ reference: StreamReference, displayID: CGDirectDisplayID, retiringGeneration: Int? = nil
+    ) async {
+        _ = try? await BoundedCaptureCall.run(
+            call: "stopCapture(video)", device: "display:\(displayID)",
+            until: ContinuousClock.now + BoundedCaptureCall.stopLimit,
+            onAbandon: { [self] in
+                sampleQueue.sync {
+                    if let retiringGeneration, generation == retiringGeneration { generation += 1 }
+                }
+            }
+        ) { try await reference.stream.stopCapture() }
     }
 
     /// The no-frames timeout does not run during a pause.
@@ -234,23 +292,25 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
     }
 
     func stop() async {
-        let stream: (any ScreenCaptureStreaming)? = sampleQueue.sync {
+        let stopping: (stream: (any ScreenCaptureStreaming)?, generation: Int) = sampleQueue.sync {
             frameDeliveryTimeoutTask?.cancel()
             frameDeliveryTimeoutTask = nil
             let current = self.stream
             self.stream = nil
-            return current
+            return (current, generation)
         }
 
-        if let stream {
-            try? await stream.stopCapture()
+        if let stream = stopping.stream {
+            await stopStream(StreamReference(stream: stream), displayID: displayID,
+                             retiringGeneration: stopping.generation)
         }
 
         // Frames already queued on `sampleQueue` run before this block, so an append in progress
         // finishes before the input is marked finished. Anything delivered later is ignored.
         let writerToFinish: AVAssetWriter? = sampleQueue.sync {
-            generation += 1
+            if generation == stopping.generation { generation += 1 }
             streamOutput = nil
+            streamDelegate = nil
             logger.info(
                 "Screen capture stopping: hasStartedWriting=\(self.hasStartedWriting, privacy: .public) frameCount=\(self.frameCount, privacy: .public)"
             )
@@ -286,9 +346,14 @@ final class ScreenCaptureSession: NSObject, SCStreamDelegate, @unchecked Sendabl
         handleStreamStop(error)
     }
 
-    func handleStreamStop(_ error: Error) {
+    func handleStreamStop(_ error: Error, generation callbackGeneration: Int? = nil) {
+        let callback = sampleQueue.sync {
+            guard callbackGeneration == nil || callbackGeneration == generation else { return nil as (@Sendable (Error) -> Void)? }
+            return storedOnError
+        }
+        guard let callback else { return }
         logger.error("Screen capture stream stopped with error: \(error.localizedDescription, privacy: .public)")
-        onError?(error)
+        callback(error)
     }
 
     /// Runs on `sampleQueue`.
@@ -578,5 +643,18 @@ private final class StreamOutput: NSObject, SCStreamOutput, @unchecked Sendable 
             return
         }
         session?.process(sampleBuffer, generation: generation)
+    }
+}
+
+/// The delegate is retained with its stream generation, like its frame output.
+private final class GenerationDelegate: NSObject, SCStreamDelegate, @unchecked Sendable {
+    private weak var session: ScreenCaptureSession?
+    private let generation: Int
+    init(session: ScreenCaptureSession, generation: Int) {
+        self.session = session
+        self.generation = generation
+    }
+    func stream(_ stream: SCStream, didStopWithError error: any Error) {
+        session?.handleStreamStop(error, generation: generation)
     }
 }

@@ -15,6 +15,9 @@ struct CaptureChoice {
     /// `nil` records no screen.
     var displayID: CGDirectDisplayID?
     var tagIDs: [UUID] = []
+    /// The microphone the recording prefers, when it differs from `microphone` because that is a
+    /// fallback for an absent device. `nil` prefers `microphone`.
+    var preferredMicrophoneUID: String?
 }
 
 /// What a started recording actually captures, after any fallback.
@@ -133,6 +136,11 @@ final class CaptureCoordinator {
         return viewModel.isPaused ? .paused : .recording
     }
 
+    /// The microphone the current recording is capturing. Nil outside a recording.
+    var capturedMicrophone: CapturedMicrophone? {
+        viewModel.capturedMicrophone
+    }
+
     /// True while a recording runs or is paused, with no start or stop under way.
     private var isRecordingOrPaused: Bool {
         transition == nil && !viewModel.isIdle
@@ -168,30 +176,30 @@ final class CaptureCoordinator {
         let app = viewModel.runningApps.first { $0.bundleID == menuBarSettings.lastUsedAppBundleID }
 
         return await run(origin: origin, context: context) { [viewModel] in
-            viewModel.applySelections(micDeviceUID: micDeviceUID, app: app)
-            return viewModel.windowChoice(title: Self.quickStartTitle)
+            viewModel.quickStartChoice(micDeviceUID: micDeviceUID, app: app, title: Self.quickStartTitle)
         }
     }
 
     /// Stops the recording under way, paused or not, and returns its session. A stop while
-    /// stopping joins that stop; a stop while starting waits for the start first. A stop cancels a
+    /// stopping joins that stop; a stop while starting cancels the start. A stop cancels a
     /// pause waiting for microphone audio, and waits for a resume.
     func stop(context: ModelContext) async -> RecordingSession? {
-        if let startTask {
-            await startTask.value
-        }
         if let stopTask {
             return session(await stopTask.value, in: context)
         }
 
         transition = .stopping
+        let starting = startTask
+        starting?.cancel()
         let pausing = pauseTask
         pausing?.cancel()
         let resuming = resumeTask
         let task = Task { [viewModel] in
             _ = await pausing?.value
             _ = await resuming?.value
-            return await viewModel.stopRecording(context: context)?.id
+            let id = await viewModel.stopRecording(context: context)?.id
+            await starting?.value
+            return id
         }
         stopTask = task
         let id = await task.value
@@ -275,7 +283,7 @@ final class CaptureCoordinator {
         let result = startResult ?? .failure(.notStarted)
         startResult = nil
         startTask = nil
-        transition = nil
+        if transition == .starting { transition = nil }
         return result
     }
 

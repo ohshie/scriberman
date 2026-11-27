@@ -61,6 +61,20 @@ final class NewSessionViewModel {
     /// Set when a resume fails, which leaves the recording paused. Cleared by the next resume and
     /// when the recording ends.
     private(set) var resumeFailureMessage: String?
+
+    // MARK: - Captured microphone
+
+    /// The microphone the recording is capturing, from the recording monitor. Nil outside a
+    /// recording.
+    var capturedMicrophone: CapturedMicrophone? {
+        state == .recording ? monitoredCapturedMicrophone : nil
+    }
+    private var monitoredCapturedMicrophone: CapturedMicrophone?
+    /// True once the recording has captured microphone audio from a known device.
+    var hasCapturedMicrophone: Bool {
+        state == .recording && monitoredHasCapturedMicrophone
+    }
+    private var monitoredHasCapturedMicrophone = false
     nonisolated static let resumeFailedMessage = "Recording could not be resumed."
     /// How often a pause checks for the first microphone audio while it waits for it.
     var pauseWaitPollInterval: Duration = .milliseconds(20)
@@ -109,7 +123,10 @@ final class NewSessionViewModel {
     private var unsavedSegmentIDs: Set<UUID> = []
     private let saveContext: @MainActor (ModelContext) throws -> Void
     private var startVerificationTask: Task<Void, Never>?
-    private let sessionFailureLogWriter = SessionFailureLogWriter()
+    /// Writes a session's failure log. Replaceable so tests can see what each failure path passes.
+    var writeSessionFailureLog: (SessionFailureLogWriter.Failure, Workspace) -> Void = { failure, workspace in
+        SessionFailureLogWriter().write(failure, in: workspace)
+    }
     private let logger = Logger(subsystem: "Scriberman", category: "NewSessionViewModel")
     var availableDevices: [AudioInputDevice] {
         audioDeviceService.availableDevices
@@ -461,7 +478,8 @@ final class NewSessionViewModel {
             title: title,
             microphone: selectedDevice,
             app: recordAppAudio ? selectedApp : nil,
-            displayID: effectiveCaptureDisplayID
+            displayID: effectiveCaptureDisplayID,
+            preferredMicrophoneUID: audioDeviceService.preferredDeviceUID
         )
     }
 
@@ -493,6 +511,7 @@ final class NewSessionViewModel {
             let captureDisplayID = choice.displayID
             let selectedApp = resolvedApp(for: choice.app, windowSelectionBeforeRefresh: windowSelectionBeforeRefresh)
             let selectedDevice = choice.microphone
+            let preferredMicUID = choice.preferredMicrophoneUID ?? selectedDevice?.uid
 
             if let selectedApp {
                 selectedCapturedAppName = selectedApp.name
@@ -510,22 +529,29 @@ final class NewSessionViewModel {
                 recordingSessionID = try await startRecordingAttempt(
                     in: workspace,
                     micDeviceID: selectedMicDeviceID,
+                    preferredMicDeviceUID: preferredMicUID,
                     captureDisplayID: captureDisplayID,
                     capturedAppName: selectedCapturedAppName,
                     appProcessID: selectedAppProcessID,
                     title: choice.title
                 )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch RecordingError.noAudioAtStart {
+                throw RecordingError.noAudioAtStart
             } catch {
                 startError = error
             }
 
-            if startError != nil, selectedAppProcessID != nil {
+            if let error = startError, selectedAppProcessID != nil {
+                logger.warning("App audio start failed; retrying as microphone-only. error=\(error.localizedDescription, privacy: .public)")
                 fallbackMessage = "App audio capture unavailable. Enable Scriberman in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch app. Falling back to microphone-only recording."
 
                 do {
                     recordingSessionID = try await startRecordingAttempt(
                         in: workspace,
                         micDeviceID: selectedMicDeviceID,
+                        preferredMicDeviceUID: preferredMicUID,
                         captureDisplayID: captureDisplayID,
                         capturedAppName: nil,
                         appProcessID: nil,
@@ -533,16 +559,22 @@ final class NewSessionViewModel {
                     )
                     startError = nil
                     capturedApp = nil
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch RecordingError.noAudioAtStart {
+                    throw RecordingError.noAudioAtStart
                 } catch {
                     startError = error
                 }
             }
 
-            if startError != nil, selectedMicDeviceID != nil {
+            if let error = startError, selectedMicDeviceID != nil {
+                logger.warning("Selected microphone start failed; retrying on system default. error=\(error.localizedDescription, privacy: .public)")
                 do {
                     recordingSessionID = try await startRecordingAttempt(
                         in: workspace,
                         micDeviceID: nil,
+                        preferredMicDeviceUID: preferredMicUID,
                         captureDisplayID: captureDisplayID,
                         capturedAppName: nil,
                         appProcessID: nil,
@@ -554,6 +586,10 @@ final class NewSessionViewModel {
                     if fallbackMessage == nil {
                         fallbackMessage = "Selected microphone unavailable. Falling back to system default microphone."
                     }
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch RecordingError.noAudioAtStart {
+                    throw RecordingError.noAudioAtStart
                 } catch {
                     startError = error
                 }
@@ -574,7 +610,7 @@ final class NewSessionViewModel {
                 appAudioService.incrementUsage(for: selectedApp.bundleID)
             }
 
-            menuBarSettings?.lastUsedMicUID = selectedDevice?.uid
+            menuBarSettings?.lastUsedMicUID = preferredMicUID
             menuBarSettings?.lastUsedAppBundleID = selectedApp?.bundleID
 
             if let fallbackMessage {
@@ -626,6 +662,9 @@ final class NewSessionViewModel {
                     displayID: isScreenCaptured ? captureDisplayID : nil
                 )
             )
+        } catch is CancellationError {
+            state = .idle
+            return nil
         } catch {
             errorMessage = error.localizedDescription
             state = .idle
@@ -640,8 +679,20 @@ final class NewSessionViewModel {
         app: CapturedApp?,
         context: ModelContext
     ) async -> RecordingSession? {
+        await startRecording(quickStartChoice(micDeviceUID: micDeviceUID, app: app, title: title), context: context)?.session
+    }
+
+    /// Applies `micDeviceUID` and `app` as the window's selections and returns the choice to record.
+    /// A `micDeviceUID` that is absent is not picked, so the saved preference stays; the recording
+    /// starts on the system default and carries it as its preferred microphone.
+    func quickStartChoice(micDeviceUID: String?, app: CapturedApp?, title: String) -> CaptureChoice {
         applySelections(micDeviceUID: micDeviceUID, app: app)
-        return await startRecording(title: title, context: context)
+        var choice = windowChoice(title: title)
+        if let micDeviceUID, choice.microphone?.uid != micDeviceUID {
+            choice.microphone = nil
+            choice.preferredMicrophoneUID = micDeviceUID
+        }
+        return choice
     }
 
     /// Sets the window's selections to `micDeviceUID` and `app`, with no screen, as the menu-bar
@@ -651,7 +702,9 @@ final class NewSessionViewModel {
         appAudioService.refreshRunningApps()
 
         if let micDeviceUID {
-            selectedDevice = availableDevices.first(where: { $0.uid == micDeviceUID })
+            if let device = availableDevices.first(where: { $0.uid == micDeviceUID }) {
+                selectedDevice = device
+            }
         } else {
             selectedDevice = nil
         }
@@ -920,8 +973,9 @@ final class NewSessionViewModel {
         let startedAt = recordingStartedAt ?? Date()
         let lastError = await recordingService.consumePendingError()?.localizedDescription
 
-        sessionFailureLogWriter.write(
+        writeSessionFailureLog(
             SessionFailureLogWriter.Failure(
+                kind: .startVerification,
                 sessionID: sessionID,
                 startedAt: startedAt,
                 micFrames: counts.mic,
@@ -931,7 +985,7 @@ final class NewSessionViewModel {
                 restartAttempted: restartAttempted,
                 lastError: lastError
             ),
-            in: workspace
+            workspace
         )
 
         _ = await recordingService.stopRecording()
@@ -974,6 +1028,8 @@ final class NewSessionViewModel {
 
     private func startRecordingMonitor(workspace: Workspace, context: ModelContext) {
         recordingMonitorTask?.cancel()
+        monitoredCapturedMicrophone = nil
+        monitoredHasCapturedMicrophone = false
         recordingMonitorTask = Task { [weak self] in
             while let self, !Task.isCancelled {
                 let isRecording = await recordingService.isRecording()
@@ -993,6 +1049,12 @@ final class NewSessionViewModel {
                 let levels = isPaused ? (mic: Float(0), app: Float(0)) : await recordingService.audioLevels()
                 meterLevels.mic = levels.mic
                 meterLevels.app = levels.app
+                let captured = await recordingService.capturedMicrophone()
+                if captured != monitoredCapturedMicrophone {
+                    CaptureTrace.log("uiCapturedMic", "state=\(String(describing: captured))")
+                    monitoredCapturedMicrophone = captured
+                    if case .capturing = captured { monitoredHasCapturedMicrophone = true }
+                }
                 let now = clock()
                 let startedAt = recordingStartedAt ?? now
                 let wholeSeconds = recordedSeconds(since: startedAt, now: now).rounded(.down)
@@ -1065,6 +1127,7 @@ final class NewSessionViewModel {
         }
         let effect = captureHealthMonitor.update(now: now, snapshot: snapshot, isRecording: true)
         lastCaptureHealthEffect = effect
+        logCaptureHealthGraceEvent(snapshot: snapshot)
 
         guard effect != .none else { return }
         let mic = snapshot.micFrames.map(String.init) ?? "unavailable"
@@ -1108,6 +1171,26 @@ final class NewSessionViewModel {
         }
     }
 
+    private func logCaptureHealthGraceEvent(snapshot: CaptureHealthMonitor.Snapshot) {
+        guard let event = captureHealthMonitor.lastGraceEvent else { return }
+        let mic = snapshot.micFrames.map(String.init) ?? "unavailable"
+        let transition = snapshot.lastMicTransition.map { String($0.number) } ?? "none"
+        switch event {
+        case .started:
+            logger.notice(
+                "Capture health grace period started: mic stalled after a mic transition. transition=\(transition, privacy: .public) seconds=\(CaptureHealthMonitor.gracePeriod, privacy: .public) micFrames=\(mic, privacy: .public)"
+            )
+        case .recovered:
+            logger.notice(
+                "Capture health grace period outcome: recovered, mic buffers arrived. transition=\(transition, privacy: .public) micFrames=\(mic, privacy: .public)"
+            )
+        case .expired:
+            logger.warning(
+                "Capture health grace period outcome: expired without mic buffers; handling as dead capture. transition=\(transition, privacy: .public) micFrames=\(mic, privacy: .public)"
+            )
+        }
+    }
+
     /// Ends a recording whose capture could not be recovered.
     ///
     /// Unlike a failed *start*, this recording captured audio, so it is finalized through the normal
@@ -1124,18 +1207,19 @@ final class NewSessionViewModel {
 
         let startedAt = recordingStartedAt ?? Date()
         let lastError = await recordingService.consumePendingError()
-        sessionFailureLogWriter.write(
+        writeSessionFailureLog(
             SessionFailureLogWriter.Failure(
+                kind: .restartsExhausted,
                 sessionID: sessionID,
                 startedAt: startedAt,
                 micFrames: snapshot.micFrames,
                 appFrames: snapshot.appFrames,
-                micWriteFailures: 0,
-                appWriteFailures: 0,
+                micWriteFailures: snapshot.micWriteFailures,
+                appWriteFailures: snapshot.appWriteFailures,
                 restartAttempted: captureHealthMonitor.restartsIssued > 0,
                 lastError: lastError?.diagnosticDetail ?? lastError?.localizedDescription
             ),
-            in: workspace
+            workspace
         )
 
         _ = await stopRecording(context: context)
@@ -1213,17 +1297,20 @@ final class NewSessionViewModel {
     private func startRecordingAttempt(
         in workspace: Workspace,
         micDeviceID: AudioDeviceID?,
+        preferredMicDeviceUID: String?,
         captureDisplayID: CGDirectDisplayID?,
         capturedAppName: String?,
         appProcessID: pid_t?,
         title: String?
     ) async throws -> UUID {
+        try Task.checkCancellation()
         let liveSession = LiveRecordingSession()
         let audioSyncFlags = audioSyncConfig.snapshot()
         do {
             let id = try await recordingService.startRecording(
                 in: workspace,
                 micDeviceID: micDeviceID,
+                preferredMicDeviceUID: preferredMicDeviceUID,
                 captureDisplayID: captureDisplayID,
                 capturedAppName: capturedAppName,
                 appProcessID: appProcessID,

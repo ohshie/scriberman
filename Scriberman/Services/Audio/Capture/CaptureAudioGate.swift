@@ -1,5 +1,6 @@
 @preconcurrency import AVFoundation
 import Foundation
+import OSLog
 
 /// One source's view of the recording's pause clock. It belongs to the recording, so every handler
 /// the source gets during that recording uses the same one.
@@ -16,6 +17,7 @@ final class CaptureAudioGate: @unchecked Sendable {
     private let lock = NSLock()
     private var _arrivalCount: Int64 = 0
     private var _lastArrivalHostTime: HostNanoseconds?
+    private var nextArrivalObserver: (@Sendable (HostNanoseconds) -> Void)?
     /// Held while a handler hands out a buffer's audio and markers, and while markers are sent on
     /// request, so a marker never lands between audio it must follow.
     private let deliveryLock = NSLock()
@@ -39,10 +41,20 @@ final class CaptureAudioGate: @unchecked Sendable {
 
     func recordArrival() {
         let now = hostNow()
-        lock.withLock {
+        let observer = lock.withLock {
             _arrivalCount += 1
             _lastArrivalHostTime = now
+            let observer = nextArrivalObserver
+            nextArrivalObserver = nil
+            return observer
         }
+        observer?(now)
+    }
+
+    /// Calls `observer` once, with its arrival time, for the next raw buffer delivered. Replaces an
+    /// observer that has not been called yet.
+    func observeNextArrival(_ observer: @escaping @Sendable (HostNanoseconds) -> Void) {
+        lock.withLock { nextArrivalObserver = observer }
     }
 
     /// Sends the marker of every pause that has started, up to pause number `limit`, and is not yet
@@ -378,5 +390,130 @@ private extension HostNanoseconds {
 
     func removing(_ nanos: UInt64) -> HostNanoseconds {
         HostNanoseconds(nanoseconds: nanoseconds >= nanos ? nanoseconds - nanos : 0)
+    }
+}
+
+
+/// Capture instrumentation ported from mic-disconnect ticket 10. Every line carries the recording's trace id and the host clock in seconds
+/// (`t=`, the clock buffer timestamps use), so latencies are computed from the log alone:
+/// request, detection, operation start and end, first valid buffer after conversion, first
+/// successful write, and the captured-mic state the recording view reads. The mic writer also
+/// logs one level line per second of written audio, so zero-valued input shows in the log.
+enum CaptureTrace {
+    private static let logger = Logger(subsystem: "Scriberman", category: "CaptureTrace")
+
+    private struct State {
+        var id = "none"
+        var counter = 0
+        /// The target whose first converted buffer and first write are still to be logged.
+        var awaitingConverted: String?
+        var awaitingWrite: String?
+        var windowStart: UInt64?
+        var windowFrames = 0
+        var windowPeak: Float = 0
+        var windowSumSquares: Double = 0
+    }
+
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var state = State()
+
+    static func nowNanoseconds() -> UInt64 {
+        HostNanoseconds(machTicks: mach_absolute_time()).nanoseconds
+    }
+
+    static func seconds(_ nanoseconds: UInt64) -> String {
+        String(format: "%.3f", Double(nanoseconds) / 1_000_000_000)
+    }
+
+    /// Starts a new trace id for a recording and logs the start request.
+    static func beginRecording(_ detail: String) {
+        let id: String = lock.withLock {
+            state.counter += 1
+            state.id = "R\(state.counter)-\(String(UInt16.random(in: 0...UInt16.max), radix: 16))"
+            state.awaitingConverted = nil
+            state.awaitingWrite = nil
+            state.windowStart = nil
+            return state.id
+        }
+        logger.notice("trace id=\(id, privacy: .public) t=\(seconds(nowNanoseconds()), privacy: .public) event=startRequested \(detail, privacy: .public)")
+    }
+
+    static func log(_ event: String, _ detail: String = "") {
+        let id = lock.withLock { state.id }
+        logger.notice("trace id=\(id, privacy: .public) t=\(seconds(nowNanoseconds()), privacy: .public) event=\(event, privacy: .public) \(detail, privacy: .public)")
+    }
+
+    /// Times one operation: logs `opBegin` now and returns a closure that logs `opEnd`.
+    static func begin(_ operation: String, _ detail: String = "") -> @Sendable (String) -> Void {
+        let started = nowNanoseconds()
+        log("opBegin", "op=\(operation) \(detail)")
+        return { result in
+            let ms = Double(nowNanoseconds() - started) / 1_000_000
+            log("opEnd", "op=\(operation) result=\(result) ms=\(String(format: "%.1f", ms)) \(detail)")
+        }
+    }
+
+    /// Capture was aimed at `target`: its first converted buffer and first write are logged.
+    static func armFirstBuffer(target: String) {
+        lock.withLock {
+            state.awaitingConverted = target
+            state.awaitingWrite = target
+        }
+    }
+
+    /// A buffer came out of conversion (48 kHz mono, not paused).
+    static func noteConverted(_ buffer: AVAudioPCMBuffer, hostTime: HostNanoseconds?) {
+        guard let target = lock.withLock({ () -> String? in
+            defer { state.awaitingConverted = nil }
+            return state.awaitingConverted
+        }) else { return }
+        let (peak, _) = levels(buffer)
+        log("firstValidBuffer", "target=\(target) bufferT=\(hostTime.map { seconds($0.nanoseconds) } ?? "none") frames=\(buffer.frameLength) peak=\(String(format: "%.5f", peak))")
+    }
+
+    /// A mic buffer reached the file.
+    static func noteMicWritten(_ buffer: AVAudioPCMBuffer, hostTimeNanos: UInt64) {
+        let (peak, sumSquares) = levels(buffer)
+        var firstWriteTarget: String?
+        var window: (start: UInt64, frames: Int, peak: Float, rms: Double)?
+        lock.withLock {
+            firstWriteTarget = state.awaitingWrite
+            state.awaitingWrite = nil
+            if let start = state.windowStart,
+               Double(hostTimeNanos) - Double(start) >= 1_000_000_000 || hostTimeNanos < start {
+                let rms = state.windowFrames > 0 ? (state.windowSumSquares / Double(state.windowFrames)).squareRoot() : 0
+                window = (start, state.windowFrames, state.windowPeak, rms)
+                state.windowStart = nil
+            }
+            if state.windowStart == nil {
+                state.windowStart = hostTimeNanos
+                state.windowFrames = 0
+                state.windowPeak = 0
+                state.windowSumSquares = 0
+            }
+            state.windowFrames += Int(buffer.frameLength)
+            state.windowPeak = max(state.windowPeak, peak)
+            state.windowSumSquares += sumSquares
+        }
+        if let firstWriteTarget {
+            log("firstWrite", "target=\(firstWriteTarget) bufferT=\(seconds(hostTimeNanos)) frames=\(buffer.frameLength) peak=\(String(format: "%.5f", peak))")
+        }
+        if let window {
+            let db = window.rms > 0 ? 20 * log10(window.rms) : -200
+            log("micSecond", "bufferT=\(seconds(window.start)) frames=\(window.frames) peak=\(String(format: "%.5f", window.peak)) rmsDb=\(String(format: "%.1f", db))")
+        }
+    }
+
+    private static func levels(_ buffer: AVAudioPCMBuffer) -> (peak: Float, sumSquares: Double) {
+        guard let data = buffer.floatChannelData, buffer.frameLength > 0 else { return (0, 0) }
+        var peak: Float = 0
+        var sum: Double = 0
+        let samples = data[0]
+        for index in 0..<Int(buffer.frameLength) {
+            let value = samples[index]
+            peak = max(peak, abs(value))
+            sum += Double(value * value)
+        }
+        return (peak, sum)
     }
 }

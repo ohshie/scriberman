@@ -34,6 +34,79 @@ final class ScreenCaptureSessionTests {
         #expect((receivedError.value as NSError?)?.code == error.code)
     }
 
+    @Test(arguments: [ScreenHang.discovery, .start, .stop])
+    func screenFrameworkHangDoesNotBlockCompletion(call: ScreenHang) async throws {
+        let stream = BlockedCaptureStream(call == .stop ? .stop : .start)
+        defer { stream.release() }
+        let made = CallCompletion()
+        let session = ScreenCaptureSession(displayProvider: {
+            if call == .discovery { try await stream.startCapture() }
+            return [ScreenCaptureSession.CapturableDisplay(displayID: Self.displayID,
+                width: 64, height: 64, makeFilter: { SCContentFilter() })]
+        }, streamFactory: { _, _, _, _, _ in
+            made.finish()
+            return stream
+        })
+        let url = temporaryMovieURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let completed = CallCompletion()
+        let task: Task<Void, Never>
+        if call == .stop {
+            try await session.start(displayID: Self.displayID, videoURL: url, pauseClock: RecordingPauseClock())
+            session.processSampleBufferForTesting(try makeVideoSampleBuffer(hostTimeNanos: 1_000_000_000, status: .complete))
+            task = Task { await session.stop(); completed.finish() }
+        } else {
+            task = Task {
+                do {
+                    try await session.start(displayID: Self.displayID, videoURL: url, pauseClock: RecordingPauseClock())
+                    Issue.record("Hung screen start succeeded")
+                } catch { }
+                completed.finish()
+            }
+        }
+        try await Task.sleep(for: .seconds(2))
+        if call != .stop { try await Task.sleep(for: .seconds(1)) }
+        #expect(completed.completed)
+        stream.release()
+        await task.value
+        if call == .discovery { #expect(!made.completed) }
+        else { #expect(await captureCallEventually { stream.stopCount > 0 }) }
+        await session.stop()
+        #expect(await captureCallEventually { stream.blockedCallCount == 0 })
+        if call == .stop { #expect(FileManager.default.fileExists(atPath: url.path)) }
+    }
+
+    enum ScreenHang: Sendable { case discovery, start, stop }
+
+    @Test
+    func retiredScreenGenerationCannotReportFailure() async throws {
+        let session = makeSession(stream: FakeScreenStream())
+        let error = ErrorBox()
+        session.onError = { error.value = $0 }
+        let url = temporaryMovieURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try await session.start(displayID: Self.displayID, videoURL: url, pauseClock: RecordingPauseClock())
+        let oldGeneration = session.generationForTesting
+        await session.stop()
+        session.handleStreamStop(NSError(domain: "late", code: 1), generation: oldGeneration)
+        #expect(error.value == nil)
+    }
+
+    @Test
+    func preStopVideoFrameDeliveredDuringTeardownIsSaved() async throws {
+        let stream = FakeScreenStream()
+        let session = makeSession(stream: stream)
+        let url = temporaryMovieURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try await session.start(displayID: Self.displayID, videoURL: url, pauseClock: RecordingPauseClock())
+        let generation = session.generationForTesting
+        let frame = try makeVideoSampleBuffer(hostTimeNanos: 1_000_000_000, status: .complete)
+        stream.onStop = { session.processSampleBufferForTesting(frame, generation: generation) }
+        await session.stop()
+        #expect(session.videoStartHostTime == HostNanoseconds(nanoseconds: 1_000_000_000))
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
     // MARK: - Writer and frames
 
     @Test
@@ -485,7 +558,7 @@ final class ScreenCaptureSessionTests {
 
     private static let displayID: CGDirectDisplayID = 1
 
-    private func makeSession(stream: FakeScreenStream, frameDeliveryTimeout: Duration = .seconds(5)) -> ScreenCaptureSession {
+    private func makeSession(stream: any ScreenCaptureStreaming, frameDeliveryTimeout: Duration = .seconds(5)) -> ScreenCaptureSession {
         ScreenCaptureSession(
             displayProvider: {
                 [ScreenCaptureSession.CapturableDisplay(displayID: Self.displayID, width: 64, height: 64, makeFilter: { SCContentFilter() })]
@@ -685,6 +758,7 @@ private final class FakeScreenStream: ScreenCaptureStreaming, @unchecked Sendabl
     private let lock = NSLock()
     private var storedStopCount = 0
     var onStart: (() -> Void)?
+    var onStop: (() -> Void)?
 
     var stopCount: Int {
         lock.lock()
@@ -697,6 +771,7 @@ private final class FakeScreenStream: ScreenCaptureStreaming, @unchecked Sendabl
     }
 
     func stopCapture() async throws {
+        onStop?()
         lock.withLock { storedStopCount += 1 }
     }
 }
@@ -733,3 +808,5 @@ private final class AppendGate: @unchecked Sendable {
         }
     }
 }
+
+extension BlockedCaptureStream: ScreenCaptureStreaming {}

@@ -147,6 +147,35 @@ struct RecordingPauseMixdownTests {
         #expect(Set(mix.indices.filter { abs(mix[$0]) > 0.01 }.map { mix[$0] }).count == 1)
     }
 
+    /// A mic-only recording whose mic delivers nothing for 1 s while it switches devices (a removal,
+    /// then the default). The gap stays at its real length in the mixdown, so later audio is not
+    /// pulled earlier against screen video or the transcript.
+    @Test
+    func aMicOnlySwitchGapKeepsItsRealLengthInTheMixdown() async throws {
+        let recording = try Recording()
+        let markers = [100.0, 1_300]
+        for time in stride(from: 0, to: 1_400, by: 20) where time < 200 || time >= 1_200 {
+            let values = (0..<960).map { index -> Float in
+                markers.contains { abs(Double(time) + Double(index) / 48 - $0) < 1e-6 } ? 0.25 : 0
+            }
+            recording.mic.processSampleBufferForTesting(
+                try CaptureAudioGateTests.makeSampleBuffer(values, sampleRate: 48_000, hostTime: Self.host(ms: time))
+            )
+        }
+        recording.close()
+        #expect(recording.micAnchor == Self.host(ms: 0))
+
+        let output = recording.root.appendingPathComponent("mix.caf")
+        try await AudioMixdownService(outputFormat: .linearPCMCaf).mix(
+            micURL: recording.micURL, appURL: nil,
+            micStartHostTime: try #require(recording.micAnchor), appStartHostTime: nil,
+            into: output, deleteSourceFiles: false, timelineMixdown: true
+        )
+        let mix = try CaptureAudioGateTests.readSamples(output)
+        #expect(mix.count == 67_200)
+        #expect(mix.indices.filter { abs(mix[$0]) > 0.01 } == [4_800, 62_400])
+    }
+
     /// What distinguishes "both sources in one frame" above from one source alone.
     @Test
     func aMarkerInOneSourceAloneMixesLower() async throws {

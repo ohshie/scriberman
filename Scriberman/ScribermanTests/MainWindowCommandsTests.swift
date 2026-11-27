@@ -362,3 +362,37 @@ struct RecordingViewPauseButtonTests {
         #expect(button.innerShape == .circle)
     }
 }
+
+struct RecordingViewMicrophoneFieldTests {
+    private let usb = CapturedMicDevice(uid: "usb", name: "USB Microphone", isSystemDefault: false)
+    private let builtIn = CapturedMicDevice(uid: "built-in", name: "MacBook Pro Microphone", isSystemDefault: true)
+
+    @Test
+    func aChosenMicShowsItsName() {
+        #expect(ActiveRecordingDetailView.microphoneValue(.capturing(usb), hasCaptured: true) == "USB Microphone")
+    }
+
+    @Test
+    func theSystemDefaultIsMarkedAsTheDefault() {
+        #expect(
+            ActiveRecordingDetailView.microphoneValue(.capturing(builtIn), hasCaptured: true)
+                == "MacBook Pro Microphone (default)"
+        )
+    }
+
+    @Test
+    func beforeTheFirstMicAudioItShowsStarting() {
+        #expect(ActiveRecordingDetailView.microphoneValue(.switching, hasCaptured: false) == "Starting…")
+        #expect(ActiveRecordingDetailView.microphoneValue(nil, hasCaptured: false) == "Starting…")
+    }
+
+    @Test
+    func aSwitchAfterMicAudioShowsSwitching() {
+        #expect(ActiveRecordingDetailView.microphoneValue(.switching, hasCaptured: true) == "Switching…")
+    }
+
+    @Test
+    func theRecorderFallbackShowsSystemInput() {
+        #expect(ActiveRecordingDetailView.microphoneValue(.unknown, hasCaptured: false) == "System input")
+    }
+}

@@ -401,6 +401,27 @@ struct CaptureCoordinatorTests {
         #expect(started.capture == CaptureSources(microphoneUID: "mic-last", appBundleID: "com.example.last", displayID: nil))
     }
 
+    /// The last-used mic is absent: the recording starts on the system default as before, carries
+    /// the absent mic as its preference, and the saved choice is not overwritten by the fallback.
+    @Test
+    func quickStartWhileTheLastUsedMicIsAbsentKeepsAndCarriesThePreference() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let builtIn = AudioInputDevice(id: 1, uid: "builtin", name: "Built-in Mic")
+        fixture.audioDeviceService.availableDevices = [builtIn]
+        fixture.audioDeviceService.selectedDevice = builtIn
+        fixture.audioDeviceService.preferredDeviceUID = "airpods"
+        fixture.menuBarSettings.lastUsedMicUID = "airpods"
+
+        _ = try await fixture.coordinator.quickStart(origin: .menuBar, context: fixture.context).get()
+
+        let call = try #require(fixture.recordingService.startCalls.first)
+        #expect(call.micDeviceID == nil)
+        #expect(call.preferredMicDeviceUID == "airpods")
+        #expect(fixture.audioDeviceService.preferredDeviceUID == "airpods")
+        #expect(fixture.menuBarSettings.lastUsedMicUID == "airpods")
+    }
+
     @Test
     func quickStartWithNoLastUsedSelectionsRecordsTheDefaultMicrophoneAlone() async throws {
         let fixture = try makeFixture()
