@@ -26,8 +26,8 @@ enum RecordingError: LocalizedError {
             return "Workspace is not currently writable."
         case .captureInterrupted:
             return "Recording stopped because audio capture was interrupted."
-        case .failedToStart:
-            return "Recording failed to start: no audio."
+        case .failedToStart(let reason):
+            return "Failed to start recording: \(reason)"
         }
     }
 

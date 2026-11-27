@@ -347,7 +347,7 @@ struct RecordingServicePauseTests {
     enum StartFailure: CaseIterable, Sendable { case streamRefused, screenPermissionDenied, microphonePermissionDenied, noUsableMic }
 
     @Test(arguments: StartFailure.allCases)
-    func micOnlyStartFailureHasApprovedMessageAndCreatesNoSession(kind: StartFailure) async throws {
+    func micOnlyStartFailureKeepsItsReasonAndCreatesNoSession(kind: StartFailure) async throws {
         let permission: RecordingError? = switch kind {
         case .screenPermissionDenied: .failedToStart("Screen recording permission denied")
         case .microphonePermissionDenied: .microphoneDenied
@@ -361,7 +361,11 @@ struct RecordingServicePauseTests {
             _ = try await fixture.start()
             Issue.record("Expected recording start to fail")
         } catch {
-            #expect(error.localizedDescription == "Recording failed to start: no audio.")
+            guard case .failedToStart(let reason) = error else {
+                Issue.record("Expected failedToStart")
+                return
+            }
+            #expect(error.localizedDescription == "Failed to start recording: \(reason)")
         }
         #expect(await fixture.service.isRecording() == false)
         #expect(try ModelContext(fixture.container).fetch(FetchDescriptor<RecordingSession>()).isEmpty)

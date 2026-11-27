@@ -276,7 +276,7 @@ struct RecordingPermissionTests {
             )
             Issue.record("Expected permission failure")
         } catch {
-            #expect(error.localizedDescription == "Recording failed to start: no audio.")
+            #expect(error.localizedDescription == "Failed to start recording: Screen recording permission denied")
         }
     }
 
